@@ -2,7 +2,7 @@
 title: Engine CLI Compatibility
 description: Which engine CLI versions the current code was verified against, and the invocation/output contract each integration assumes.
 category: reference
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Engine CLI Compatibility
@@ -25,7 +25,7 @@ CLI is bumped you know exactly what to re-check.
 | claude   | 2.1.207          | 2026-07-12 | npm `@anthropic-ai/claude-code`   |
 | codex    | 0.144.1          | 2026-07-12 | brew `codex`                      |
 | copilot  | 1.0.69           | 2026-07-12 | brew `copilot` (GitHub Copilot CLI) |
-| opencode | 1.17.18          | 2026-07-12 | brew `anomalyco/tap/opencode`     |
+| opencode | 1.18.22          | 2026-08-27 | brew `anomalyco/tap/opencode`     |
 | agy      | 1.1.4            | 2026-07-19 | `%LOCALAPPDATA%\\agy\\bin\\agy.exe` |
 | bun      | 1.4.0            | 2026-08-26 | (runtime)                         |
 
@@ -58,23 +58,23 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
 ### copilot
 
 - **Fresh invocation:** `copilot -p <prompt> --allow-all` (prompt is an argv value, not stdin; argv is ~32K-capped so large prompts are written to `.vibeflow/dispatch/<unit>.md` and a short pointer `Read <abs path> and follow it` is passed instead)
-- **Resume:** NOT SUPPORTED by id. The CLI only offers `--continue` (most-recent session), so VibeFlow never captures a copilot session id and a `--resume` run of a copilot unit always re-runs fresh.
+- **Resume:** exact by-id resume is not supported by VibeFlow. Latest-session shortcuts are not accepted as exact authority; a turn without a valid exact binding uses bounded structured own-history replay instead of silently omitting context.
 - **Version guard:** the CLI has a history of silent breaking auto-updates (github/copilot-cli#1606 removed `--headless --stdio`); when `copilot --version` can't be read, dispatch proceeds with a warning.
 
 ### antigravity
 
 - **Fresh invocation:** `agy -p <prompt>`; prompt is one argv value and output is plain text. VibeFlow parses a fenced JSON block when present; other prose has no structured summary.
 - **Prompt limit:** VibeFlow rejects a UTF-8 prompt at or above 30 KiB before spawn. `agy` has no supported prompt-file/stdin replacement for print mode.
-- **Resume:** `agy --continue -p <prompt>` resumes latest workspace conversation. `agy --conversation <id> -p <prompt>` resumes an explicit known ID. VibeFlow does not scrape or persist undocumented conversation IDs.
+- **Resume:** unavailable in VibeFlow's exact-session authority. The adapter has no primary evidence for a safely captured and validated exact binding, so an exact claim fails closed. Fresh turn delivery uses bounded structured own-history replay; VibeFlow does not use latest-workspace shortcuts as exact authority.
 - **Workspace files:** `AGENTS.md`, `.agents/agents/<name>/agent.md`, `.agents/skills/`, `.agents/mcp_config.json`.
 - **Hooks (unproven):** `.agents/hooks.json` uses `PreToolUse` / `PostToolUse` in the emitted config, but the `agy 1.1.4` PreToolUse deny canary did not fire in headless test. VibeFlow classifies antigravity as **post-hoc-only** until native enforcement is proven. Hook config generation is preserved (forward-compatible if agy later honors it), but no native guardrail is advertised.
-- **Auth / reliability:** Google OAuth/keyring is required; `vf doctor --probe` is the live readiness check. Authenticated `agy 1.1.4` print, continue, and workspace-agent canaries passed on 2026-07-19. Explicit-ID resume had no safe captured ID.
+- **Auth / reliability:** Google OAuth/keyring is required; `vf doctor --probe` is the live readiness check. Authenticated `agy 1.1.4` fresh print and workspace-agent canaries passed on 2026-07-19. No safe exact-session binding is evidenced.
 
 ### opencode
 
-- **Fresh invocation:** `opencode run --format json -` (prompt on stdin via `-`)
-- **Resume:** `opencode run --continue --format json -` (most recent session)
-- **Auto perms:** `--auto`, auto-approves permissions not explicitly denied
+- **Fresh work-unit invocation:** `opencode run --format json --auto` (prompt on stdin; no positional prompt sentinel)
+- **Exact conversation resume:** `opencode run --session <validated ses_...> --format json` with the prompt on stdin. The opaque id must pass VibeFlow's native-session validator; latest-session `--continue` is not exact authority.
+- **Auto perms:** work-unit dispatch may use `--auto`; the conversation session adapter removes it and rejects tool/sandbox claims it cannot enforce.
 - **Output shape:** JSONL — one JSON event per line. Key events:
   - `{"type":"step_start","sessionID":"ses_..."}` — carries the session id.
   - `{"type":"text","part":{"type":"text","text":"..."}}` — the model's text response; VibeFlow summary is the fenced json block inside `text`.
@@ -89,8 +89,9 @@ canonical JSON envelope for the selected participant. When exact resume authorit
 the same participant and interaction cursor, the runtime uses `delivery_mode: "exact-delta"` and
 only re-sends newly applicable public user messages plus concise peer deltas. When that proof is
 missing or stale, it falls back to `delivery_mode: "full-history"` and re-sends the full public
-context. Native session histories remain inside the selected CLI; VibeFlow only changes which
-public material is re-delivered.
+context. Exact by-id authority is limited to Claude, Codex, and OpenCode. Copilot and
+Antigravity never silently claim exact resume. Native session histories remain inside the
+selected CLI; VibeFlow only changes which public material is re-delivered.
 
 Private file-range context is staged separately from the public turn envelope and is cleared after
 use so the next turn does not inherit it accidentally. Its wire form is canonical JSON prefixed by
@@ -98,8 +99,10 @@ use so the next turn does not inherit it accidentally. Its wire form is canonica
 
 For an exact native resume, the recipient's own prior response is not repeated: it already
 exists in that CLI's session. The envelope contains only newly applicable user messages and
-peer-agent responses/reactions. A fresh or unproved turn uses the full applicable public
-context and may include the content-addressed `VF-HANDOFF/1` shared handoff.
+peer-agent responses/reactions. Without valid exact authority, a full turn also includes a
+bounded replay of the recipient's last eight public responses. Each summary is at most 2 KiB
+UTF-8 and carries source digest, provenance, source/replayed counts, and truncation counts.
+The turn may also include the content-addressed `VF-HANDOFF/1` shared handoff.
 
 Prompt transport is not conversation memory. Claude, Codex, and OpenCode read stdin;
 Copilot and Antigravity use native prompt argv. Copilot's large work-unit fallback writes
@@ -121,14 +124,15 @@ exact process-start identity. Terminal release waits for exit/quiescence plus th
 
 The POSIX proof is intentionally weaker because descendants can leave the process group.
 `vf doctor --fix` repairs only exact proved orphans; live or identity-unprovable owners fail
-closed. Injected platform tests cover the Windows Job Object and identity contracts, but the
-current evidence set does not include or claim a live Windows canary.
+closed. Injected platform tests cover the Windows Job Object and identity contracts. A real
+`windows-latest` smoke job is configured in CI, but live Windows evidence remains pending
+until it is green; local macOS/Linux evidence is not a Windows canary.
 
 ## Crash-resume (`vf orchestrate --resume`)
 
-- Capture: dispatch persists the engine session id into `DispatchMarker.engineSessionId` (claude `session_id`, codex `thread_id`). copilot persists none.
-- Resume policy: `src/orchestrator/resume-policy.ts` `resolveResumeId` — resumes only when `--resume` is set, the marker is in a non-terminal state (`running`/`blocked`/`failed`, never `done`/`pending`), and it carries an `engineSessionId`. Engine-agnostic: claude + codex resume; copilot falls through to fresh.
-- History: PR1 (#619) captured claude id; PR2a (#620) added the dispatch-layer resume flag; PR2b-1 (#621) wired `--resume` into orchestrate; PR2b-2 added codex.
+- Capture: dispatch persists a validated engine session id into `DispatchMarker.engineSessionId` for Claude (`session_id`), Codex (`thread_id`), and OpenCode (`sessionID`). Copilot and Antigravity persist no exact binding.
+- Resume policy: `src/orchestrator/resume-policy.ts` `resolveResumeId` resumes only when `--resume` is set, the marker is non-terminal (`running`/`blocked`/`failed`, never `done`/`pending`), and it carries a valid id for an exact-resume engine. Unsupported engines never claim exact continuation.
+- Conversation delivery separately guarantees bounded own-history replay whenever exact native proof is absent.
 
 ## How to re-verify after a CLI bump
 
@@ -146,18 +150,18 @@ current evidence set does not include or claim a live Windows canary.
    ```
    Confirm `thread.started`/`thread_id` (first line) and `item.completed`/`item.type=="agent_message"` still hold. If the event names changed, update `parseSessionId` + `parseEngineSummary` + `test/fixtures/codex-json-stream.txt` together. Also confirm `codex exec resume --help` still accepts a `[SESSION_ID]` positional and `--json`.
 
-3. **copilot** — confirm `-p` + `--allow-all` still exist and no by-id resume appeared:
+3. **copilot** — confirm `-p` + `--allow-all` still exist; do not adopt a resume path without a captured by-id contract and tests:
    ```bash
    copilot --help | grep -E "allow-all|continue|resume|-p"
    ```
 
-4. **opencode** — confirm `--format json` + `--continue` still work:
+4. **opencode** — confirm `--format json` plus exact `--session <ses_...>` work:
    ```bash
-   echo 'Reply with exactly READY' | opencode run --format json -
+   echo 'Reply with exactly READY' | opencode run --format json
    ```
-   Confirm the first event has `type: "step_start"` with `sessionID`, and the response text appears in a `type: "text"` event with `part.text`. Also confirm `opencode run --continue --help` still works.
+   Capture the first event's `sessionID`, validate its `ses_...` shape, then pipe a second prompt to `opencode run --session <captured-id> --format json`. Confirm the response text appears in a `type: "text"` event with `part.text` and belongs to that exact session.
 
-5. **agy** — run authenticated scratch-directory canaries: `agy -p`, `agy --continue -p`, `agy --conversation <id> -p` when a safe known ID exists, `--agent <name>` with `.agents/agents/<name>/agent.md`, and a `PreToolUse` deny hook. Confirm plain output, native deny behavior, and no scratch files remain.
+5. **agy** — run authenticated scratch-directory canaries for fresh `agy -p`, `--agent <name>` with `.agents/agents/<name>/agent.md`, and a `PreToolUse` deny hook. Do not advertise exact resume unless a safe captured by-id binding and primary evidence are added together. Confirm plain output, native deny behavior, and no scratch files remain.
 
 6. Run `bun run check`. The dispatch tests + codex fixture assert the shapes above; a red suite after a bump means the CLI changed its contract.
 

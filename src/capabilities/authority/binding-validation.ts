@@ -1,4 +1,7 @@
+import { CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENTS } from "../../actions/capability-manifest-vocabulary-contract.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { validatePermissionKindScope } from "../permissions/scope.js";
 import type { GrantedPermissionBindingV1 } from "../permissions/types.js";
 import { grantedPermissionBindingDigest } from "../permissions/witness.js";
@@ -12,21 +15,14 @@ import {
   text,
 } from "../wire/primitives.js";
 
-const ENFORCEMENTS = [
-  "brokered",
-  "sandboxed",
-  "engine-enforced",
-  "disclosed-not-enforced",
-] as const;
-
 export function assertAuthorityLocatorScope(
   locator: PrivateActionRootLocatorV1,
-  scope: "project" | "user",
+  scope: CapabilityScope,
   scopeIdentityDigest: string,
   path: string,
 ): void {
   if (
-    locator.kind === "capability" &&
+    locator.kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY &&
     (locator.scope !== scope || locator.scope_identity_digest !== scopeIdentityDigest)
   )
     throw new CapabilityValidationError(
@@ -65,7 +61,7 @@ export function validateGrantedPermissionBinding(
     text(value, `${path}.target_ids[${index}]`, { min: 1, max: 512, ascii: true }),
   );
   assertSortedUnique(binding.target_ids, bytewise, `${path}.target_ids`);
-  enumeration(binding.enforcement, ENFORCEMENTS, `${path}.enforcement`);
+  enumeration(binding.enforcement, CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENTS, `${path}.enforcement`);
   validatePermissionKindScope({ kind: binding.kind, scope: binding.scope }, path);
   digest(binding.binding_digest, `${path}.binding_digest`);
   if (binding.binding_digest !== grantedPermissionBindingDigest(binding))

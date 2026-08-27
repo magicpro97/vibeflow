@@ -6,8 +6,25 @@ import { fileURLToPath } from "node:url";
 import { productionCapabilityRuntimeV1 } from "./capabilities/runtime-factory.js";
 import type { CapabilityRuntimeFactoryOptionsV1 } from "./capabilities/runtime-factory.js";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
-import { type LogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
+import { HOOK_DECISION } from "./core/hook-contract.js";
+import {
+  UI_HOOK_APPROVAL,
+  UI_HOOK_ROUTE,
+  UI_LAN_EVENT_SOURCE_TOKEN_QUERY,
+  UI_LAN_EXPOSURE_WARNING,
+  UI_LAN_TOKEN_HEADER,
+} from "./core/ui-cli-contract.js";
+import { type LogEvent, decodeLogEvent, getLogbus, matchesUnitFilter } from "./logbus.js";
+import {
+  LEGACY_WORKFLOW_SSE_EVENT,
+  LOG_SSE_EVENT,
+  SSE_COMMENT,
+  serializeSseComment,
+  serializeSseJsonData,
+  serializeSseJsonEvent,
+} from "./orchestrator/conversation/conversation-sse-contract.js";
 import { scanRepo } from "./scanner.js";
+import { BoundedRequestBodyError, readBoundedUtf8Body } from "./server/bounded-request-body.js";
 import { handleCapabilityRoute } from "./server/capability-route.js";
 import { handleConversationAskCompatibilityStream } from "./server/conversation-ask-compatibility-route.js";
 import { conversationUrlHost, isConversationLoopbackHost } from "./server/conversation-host.js";
@@ -26,6 +43,7 @@ import {
   toolViews,
 } from "./server/handlers.js";
 import { handleHomePrivateFileRangeRoute } from "./server/home-private-file-range-route.js";
+import { startHookApprovalBridge } from "./server/hook-approval-bridge.js";
 import {
   clearPending,
   getPending,
@@ -42,6 +60,7 @@ import {
 import { handleRegistryView } from "./server/registry-route.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { handleSkillAcquisitionPending } from "./server/skill-acquisition-route.js";
+import { UI_LAN_PAGE_ACCESS, UiLanPageAuthority } from "./server/ui-lan-authority.js";
 import { toSafeSkills } from "./skills/api-types.js";
 import { sharedCatalogDir } from "./skills/catalog.js";
 import { curatorView } from "./skills/curator-view.js";
@@ -67,7 +86,7 @@ const CSP =
   // style-src 'unsafe-inline': UnoCSS injects atomic utility styles at runtime.
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'";
 
-export function startServer(
+export async function startServer(
   port = 0,
   _opts: {
     uiHtmlPath?: URL;
@@ -81,12 +100,13 @@ export function startServer(
 ): Promise<{
   server: { stop: (closeActiveConnections?: boolean) => Promise<void> };
   url: string;
+  hookOrigin: string;
 }> {
-  const token = randomUUID();
-
   const host = _opts.host ?? "127.0.0.1";
-  const bindAll = host === "0.0.0.0";
   const conversationLoopback = isConversationLoopbackHost(host);
+  const lanExposed = !conversationLoopback;
+  const lanAuthority = lanExposed ? new UiLanPageAuthority() : null;
+  const token = lanAuthority?.pageTokenForHtml() ?? randomUUID();
   const conversation = _opts.conversation;
   if (conversation && conversation.sessions.loopback !== conversationLoopback) {
     throw new Error("conversation authority host mismatch");
@@ -114,9 +134,9 @@ export function startServer(
   clearPendingSkillAcquisitions(); // #682 — reject outstanding acquisition waits on startup
 
   const guarded = (req: Request): boolean => {
-    // #561: when bindAll, AUTHENTICATE BY TOKEN, not Host header.
+    // #561: on every non-loopback bind, authenticate by CSRF token, not Host header.
     // Host is attacker-controlled. Drop the host-match theater.
-    if (bindAll) return req.headers.get("x-vibeflow-token") === token;
+    if (lanAuthority) return lanAuthority.authorizeTransport(req.headers.get(UI_LAN_TOKEN_HEADER));
     // Loopback mode: Host check + CSRF origin guard.
     const reqHost = req.headers.get("host") ?? "";
     if (!isConversationLoopbackHost(reqHost)) return false;
@@ -128,7 +148,13 @@ export function startServer(
         return false;
       }
     }
-    return req.headers.get("x-vibeflow-token") === token;
+    return req.headers.get(UI_LAN_TOKEN_HEADER) === token;
+  };
+  const eventSourceGuarded = (req: Request, url: URL): boolean => {
+    if (guarded(req)) return true;
+    const values = url.searchParams.getAll(UI_LAN_EVENT_SOURCE_TOKEN_QUERY);
+    const candidate = values.length === 1 ? (values[0] ?? null) : null;
+    return lanAuthority ? lanAuthority.authorizeTransport(candidate) : candidate === token;
   };
 
   const server = Bun.serve({
@@ -203,6 +229,24 @@ export function startServer(
             status: 403,
             headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
           });
+        if (lanAuthority) {
+          const decision = lanAuthority.pageDecision(req, url);
+          if (decision.kind === UI_LAN_PAGE_ACCESS.BOOTSTRAP_REDIRECT)
+            return new Response(null, {
+              status: 303,
+              headers: {
+                "cache-control": "no-store",
+                location: "/",
+                "set-cookie": decision.setCookie,
+                "x-content-type-options": "nosniff",
+              },
+            });
+          if (decision.kind === UI_LAN_PAGE_ACCESS.DENIED)
+            return new Response("LAN browser authority required", {
+              status: 401,
+              headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+            });
+        }
         const headers = new Headers({
           "content-type": "text/html; charset=utf-8",
           // no-cache: revalidate on every navigation so new asset hashes are picked up
@@ -222,13 +266,15 @@ export function startServer(
 
       // --- GET /state (#561: guarded) ---
       if (method === "GET" && path === "/state") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json(readState(activeRepo));
       }
 
       // --- GET /api/markers (#561: guarded) ---
       if (method === "GET" && path === "/api/markers") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const m = await import("./orchestrator/marker.js");
         return Response.json({ markers: m.listMarkers() });
       }
@@ -253,20 +299,23 @@ export function startServer(
 
       // --- GET /api/phases (#561: guarded) ---
       if (method === "GET" && path === "/api/phases") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const pm = await import("./orchestrator/marker.js");
         return Response.json({ markers: pm.listMarkers() });
       }
 
       // --- GET /api/attachments (#561: guarded) ---
       if (method === "GET" && path === "/api/attachments") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json({ ok: true, attachments: listAttachments(activeRepo) });
       }
 
       // --- GET /api/skills (#561: guarded) ---
       if (method === "GET" && path === "/api/skills") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const state = readState(activeRepo);
         const needs = resolveSkillNeeds({
           repo: activeRepo,
@@ -288,23 +337,27 @@ export function startServer(
 
       // --- GET /api/skills/acquisitions/pending (#682: guarded, read-only) ---
       if (method === "GET" && path === "/api/skills/acquisitions/pending") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return handleSkillAcquisitionPending();
       }
 
       // --- GET /api/skills/registries (#688: guarded, read-only) ---
       if (method === "GET" && path === "/api/skills/registries") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return handleRegistryView(activeRepo);
       }
 
       // --- GET /api/skills/registries/releases[/<id>] (#759: guarded, read-only) ---
       if (method === "GET" && path === "/api/skills/registries/releases") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return handleReleaseProposalsView(activeRepo);
       }
       if (method === "GET" && path.startsWith("/api/skills/registries/releases/")) {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         let id: string;
         try {
           id = decodeURIComponent(path.slice("/api/skills/registries/releases/".length));
@@ -317,25 +370,29 @@ export function startServer(
 
       // --- GET /api/domains (#691: guarded, read-only) ---
       if (method === "GET" && path === "/api/domains") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return handleDomainsView(activeRepo);
       }
 
       // --- GET /api/domains/impact (#691: guarded, read-only) ---
       if (method === "GET" && path === "/api/domains/impact") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return handleDomainImpact(activeRepo, url.searchParams.get("q"));
       }
 
       // --- GET /api/settings (#561: guarded) ---
       if (method === "GET" && path === "/api/settings") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json({ ok: true, ...settingsView(activeRepo) });
       }
 
       // --- GET /api/skills/curator (#689: guarded) — recent curator findings ---
       if (method === "GET" && path === "/api/skills/curator") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const view = curatorView(activeRepo);
         if ("ok" in view && view.ok === false) {
           return Response.json({ error: view.error }, { status: 500 });
@@ -350,21 +407,27 @@ export function startServer(
       }
 
       // --- GET /api/projects* and /api/hook/pending (#561: guarded) ---
-      if (method === "GET" && (path.startsWith("/api/projects") || path === "/api/hook/pending")) {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+      if (
+        method === "GET" &&
+        (path.startsWith("/api/projects") || path === UI_HOOK_ROUTE.PENDING)
+      ) {
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const r = handleProjectsRoute(path, url);
         if (r) return r;
       }
 
       // --- GET /api/hook/response/:id — long-poll, blocks until approve ---
-      if (method === "GET" && path.startsWith("/api/hook/response/")) {
-        const id = path.slice("/api/hook/response/".length);
+      if (method === "GET" && path.startsWith(UI_HOOK_ROUTE.RESPONSE_PREFIX)) {
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        const id = path.slice(UI_HOOK_ROUTE.RESPONSE_PREFIX.length);
         return new Response(
           new ReadableStream({
             start(controller) {
               const enc = new TextEncoder();
               if (!getPending(id)) {
-                controller.enqueue(enc.encode(JSON.stringify({ decision: "block" })));
+                controller.enqueue(enc.encode(JSON.stringify({ decision: HOOK_DECISION.BLOCK })));
                 controller.close();
                 return;
               }
@@ -380,6 +443,9 @@ export function startServer(
 
       // --- SSE: /api/logs/stream ---
       if (method === "GET" && path === "/api/logs/stream") {
+        if (lanExposed && !eventSourceGuarded(req, url)) {
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        }
         const bus = getLogbus();
         // #525: scope this stream to one unit; empty `?unit=` means no filter.
         const unitFilter = url.searchParams.get("unit") || undefined;
@@ -387,11 +453,15 @@ export function startServer(
         return new Response(
           new ReadableStream({
             start(controller) {
-              controller.enqueue(new TextEncoder().encode(": vibeflow-logs-1\n\n"));
+              controller.enqueue(
+                new TextEncoder().encode(serializeSseComment(SSE_COMMENT.LOGS_OPEN)),
+              );
               if (!bus) {
                 controller.enqueue(
                   new TextEncoder().encode(
-                    ": no logbus instance found — log events will appear when the CLI starts\\n\\n",
+                    serializeSseComment(
+                      "no logbus instance found — log events will appear when the CLI starts",
+                    ),
                   ),
                 );
               } else {
@@ -408,7 +478,7 @@ export function startServer(
                   for (const ev of caught) {
                     if (!matchesUnitFilter(ev, unitFilter)) continue;
                     controller.enqueue(
-                      new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
+                      new TextEncoder().encode(serializeSseJsonEvent(LOG_SSE_EVENT.LOG, ev)),
                     );
                   }
                 } catch {
@@ -425,15 +495,14 @@ export function startServer(
                 }
               };
               const heartbeat = setInterval(
-                () => safeEnqueue(new TextEncoder().encode(": keepalive\n\n")),
+                () =>
+                  safeEnqueue(new TextEncoder().encode(serializeSseComment(SSE_COMMENT.KEEPALIVE))),
                 25_000,
               );
 
               const unsub = bus?.subscribe((ev: LogEvent) => {
                 if (!matchesUnitFilter(ev, unitFilter)) return;
-                safeEnqueue(
-                  new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
-                );
+                safeEnqueue(new TextEncoder().encode(serializeSseJsonEvent(LOG_SSE_EVENT.LOG, ev)));
               });
 
               cleanup = () => {
@@ -459,7 +528,7 @@ export function startServer(
 
       // --- SSE: /api/ask/stream (#580) — token-by-token engine answer streaming ---
       if (method === "GET" && path === "/api/ask/stream") {
-        if (!guarded(req) && url.searchParams.get("token") !== token)
+        if (!eventSourceGuarded(req, url))
           return Response.json({ error: "forbidden" }, { status: 403 });
         const resume = url.searchParams.get("resume") === "true";
         const body = resume
@@ -481,7 +550,7 @@ export function startServer(
             ? {
                 ...conversation.askCompatibility,
                 sessions: conversation.sessions,
-                csrf: (request) => guarded(request) || url.searchParams.get("token") === token,
+                csrf: (request) => eventSourceGuarded(request, url),
               }
             : undefined,
           req,
@@ -494,6 +563,8 @@ export function startServer(
       // --- GET /api/logs/session --- returns session start seq (to skip stale logs)
       // cli.ts writes session-start-seq to activeRepo/.vibeflow/logs/ on startup
       if (method === "GET" && path === "/api/logs/session") {
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         try {
           const seqFile = join(activeRepo, CTX_DIR, "logs", "session-start-seq");
           const seq = Number(readFileSync(seqFile, "utf8").trim()) || 0;
@@ -505,6 +576,8 @@ export function startServer(
 
       // --- GET /api/logs/recent ---
       if (method === "GET" && path === "/api/logs/recent") {
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const bus = getLogbus();
         if (!bus) return Response.json({ error: "no logbus instance" }, { status: 404 });
         const since = Math.max(0, Number(url.searchParams.get("since") ?? "0"));
@@ -514,7 +587,8 @@ export function startServer(
 
       // --- GET /api/dashboard/diff ---
       if (method === "GET" && path === "/api/dashboard/diff") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const { buildDashboardItems, buildDiffResponse } = await import("./server/dashboard.js");
         const { readRegistry } = await import("./registry.js");
         const entries = readRegistry();
@@ -531,7 +605,8 @@ export function startServer(
 
       // --- GET /api/dashboard/workflows ---
       if (method === "GET" && path === "/api/dashboard/workflows") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const { buildDashboardItems } = await import("./server/dashboard.js");
         const { readRegistry } = await import("./registry.js");
         const entries = readRegistry();
@@ -540,19 +615,22 @@ export function startServer(
 
       // --- GET /api/plan-review (#PR1: guarded) ---
       if (method === "GET" && path === "/api/plan-review") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return handlePlanReviewGet(activeRepo, url);
       }
 
       // --- GET /api/plan-review/comments (#PR2: guarded) ---
       if (method === "GET" && path === "/api/plan-review/comments") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         return handlePlanReviewCommentsGet(activeRepo, url);
       }
 
       // --- GET /api/dashboard/logs ---
       if (method === "GET" && path === "/api/dashboard/logs") {
-        if (bindAll && !guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         const { buildDashboardItems, matchesDashboardEvent, resolveDashboardSelection } =
           await import("./server/dashboard.js");
         const { readRegistry } = await import("./registry.js");
@@ -579,8 +657,8 @@ export function startServer(
       // --- SSE: /api/dashboard/logs/stream ---
       if (method === "GET" && path === "/api/dashboard/logs/stream") {
         // EventSource cannot send custom headers. Permit its token query only on
-        // explicit LAN binds; normal API calls still use the header guard.
-        if (bindAll && !guarded(req) && url.searchParams.get("token") !== token) {
+        // non-loopback binds; normal API calls still use the header guard.
+        if (lanExposed && !eventSourceGuarded(req, url)) {
           return Response.json({ error: "forbidden" }, { status: 403 });
         }
         const { buildDashboardItems, matchesDashboardEvent, resolveDashboardSelection } =
@@ -617,7 +695,9 @@ export function startServer(
           new ReadableStream({
             start(controller) {
               const encoder = new TextEncoder();
-              controller.enqueue(encoder.encode(": vibeflow-dashboard-logs-1\n\n"));
+              controller.enqueue(
+                encoder.encode(serializeSseComment(SSE_COMMENT.DASHBOARD_LOGS_OPEN)),
+              );
               const safeEnqueue = (chunk: Uint8Array) => {
                 try {
                   controller.enqueue(chunk);
@@ -631,7 +711,7 @@ export function startServer(
                   const caught = replayFromLog(logFile, since, 1000, runId);
                   for (const ev of caught) {
                     if (matchesDashboardEvent(ev, sel, true)) {
-                      safeEnqueue(encoder.encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`));
+                      safeEnqueue(encoder.encode(serializeSseJsonEvent(LOG_SSE_EVENT.LOG, ev)));
                     }
                   }
                 } catch {
@@ -647,7 +727,7 @@ export function startServer(
                 /* */
               }
               const heartbeat = setInterval(
-                () => safeEnqueue(encoder.encode(": keepalive\n\n")),
+                () => safeEnqueue(encoder.encode(serializeSseComment(SSE_COMMENT.KEEPALIVE))),
                 25_000,
               );
               const readChunk = () => {
@@ -676,10 +756,10 @@ export function startServer(
                   for (const line of lines) {
                     if (!line) continue;
                     try {
-                      const ev = JSON.parse(line) as LogEvent;
-                      if (matchesDashboardEvent(ev, sel, true)) {
+                      const ev = decodeLogEvent(JSON.parse(line));
+                      if (ev && matchesDashboardEvent(ev, sel, true)) {
                         controller.enqueue(
-                          encoder.encode(`event: log\ndata: ${JSON.stringify(ev)}\n\n`),
+                          encoder.encode(serializeSseJsonEvent(LOG_SSE_EVENT.LOG, ev)),
                         );
                       }
                     } catch {
@@ -721,6 +801,8 @@ export function startServer(
 
       // --- GET /events (deprecated SSE) ---
       if (method === "GET" && path === "/events") {
+        if (lanExposed && !eventSourceGuarded(req, url))
+          return Response.json({ error: "forbidden" }, { status: 403 });
         let last = "";
         const streamPositions = new Map<string, number>();
         return new Response(
@@ -731,7 +813,7 @@ export function startServer(
                 const json = JSON.stringify(state);
                 if (json !== last) {
                   last = json;
-                  controller.enqueue(new TextEncoder().encode(`data: ${json}\n\n`));
+                  controller.enqueue(new TextEncoder().encode(serializeSseJsonData(state)));
                 }
                 if (state) {
                   for (const u of state.work_units ?? []) {
@@ -748,7 +830,10 @@ export function startServer(
                         if (!slice.trim()) continue;
                         controller.enqueue(
                           new TextEncoder().encode(
-                            `event: stream\ndata: ${JSON.stringify({ unit: u.name, lines: slice.split("\n").filter(Boolean) })}\n\n`,
+                            serializeSseJsonEvent(LEGACY_WORKFLOW_SSE_EVENT.STREAM, {
+                              unit: u.name,
+                              lines: slice.split("\n").filter(Boolean),
+                            }),
                           ),
                         );
                       }
@@ -773,11 +858,29 @@ export function startServer(
         );
       }
 
-      // --- POST /api/hook/pending — loopback or token when bindAll (#561) ---
-      if (method === "POST" && path === "/api/hook/pending") {
-        if (bindAll ? !guarded(req) : !isConversationLoopbackHost(req.headers.get("host") ?? ""))
+      // --- POST /api/hook/pending — loopback or token on non-loopback binds (#561) ---
+      if (method === "POST" && path === UI_HOOK_ROUTE.PENDING) {
+        const localHookClient =
+          isConversationLoopbackHost(req.headers.get("host") ?? "") &&
+          !req.headers.has("origin") &&
+          !req.headers.has("referer");
+        if (lanExposed ? !guarded(req) : !localHookClient)
           return Response.json({ error: "forbidden" }, { status: 403 });
-        const body = (await req.json()) as { id?: string; input?: unknown; result?: unknown };
+        if (req.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json")
+          return Response.json({ error: "JSON required" }, { status: 415 });
+        let body: { id?: string; input?: unknown; result?: unknown };
+        try {
+          const parsed = JSON.parse(
+            await readBoundedUtf8Body(req, UI_HOOK_APPROVAL.BODY_BYTES),
+          ) as unknown;
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+            return Response.json({ error: "invalid request" }, { status: 400 });
+          body = parsed as typeof body;
+        } catch (error) {
+          if (error instanceof BoundedRequestBodyError)
+            return Response.json({ error: "request too large" }, { status: 413 });
+          return Response.json({ error: "invalid request" }, { status: 400 });
+        }
         if (typeof body.id !== "string" || !body.id)
           return Response.json({ error: "id required" }, { status: 400 });
         registerPending(
@@ -805,7 +908,7 @@ export function startServer(
             path === "/api/curator/setup/preview" ||
             path === "/api/curator/setup/apply" ||
             path === "/api/verify" ||
-            path === "/api/hook/approve" ||
+            path === UI_HOOK_ROUTE.APPROVE ||
             path === "/api/skills/acquisitions/decision" ||
             path.startsWith("/api/guidance/") ||
             path === "/api/upload" ||
@@ -904,23 +1007,34 @@ export function startServer(
     },
   });
 
-  const displayHost = conversationUrlHost(host);
-  if (bindAll) {
-    console.error(
-      c.red(
-        "WARNING: server exposed to LAN — anyone on the network can access; token required in URL",
-      ),
-    );
+  const nodeReady = (server as typeof server & { readonly ready?: Promise<void> }).ready;
+  if (nodeReady) await nodeReady;
+  const boundPort = server.port;
+  if (typeof boundPort !== "number" || !Number.isInteger(boundPort) || boundPort <= 0) {
+    await server.stop(true);
+    throw new Error("UI server did not publish its bound port");
   }
-  console.log(
-    `${c.cyan("VibeFlow UI")} → ${c.bold(`http://${displayHost}:${server.port}`)}  ${c.dim("(Ctrl+C to stop)")}`,
-  );
-  return Promise.resolve({
+  const displayHost = conversationUrlHost(host);
+  const baseUrl = `http://${displayHost}:${boundPort}`;
+  let hookBridge: Awaited<ReturnType<typeof startHookApprovalBridge>> | null = null;
+  try {
+    hookBridge = lanExposed ? await startHookApprovalBridge() : null;
+  } catch (error) {
+    await server.stop(true);
+    throw error;
+  }
+  const hookOrigin = hookBridge?.origin ?? baseUrl;
+  if (lanExposed) {
+    console.error(c.red(UI_LAN_EXPOSURE_WARNING));
+  }
+  console.log(`${c.cyan("VibeFlow UI")} → ${c.bold(baseUrl)}  ${c.dim("(Ctrl+C to stop)")}`);
+  return {
     server: {
       stop: async (closeActiveConnections) => {
-        await server.stop(closeActiveConnections);
+        await Promise.all([server.stop(closeActiveConnections), hookBridge?.stop()]);
       },
     },
-    url: `http://${displayHost}:${server.port}`,
-  });
+    url: lanAuthority ? lanAuthority.ownerUrl(baseUrl) : baseUrl,
+    hookOrigin,
+  };
 }

@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Engine } from "../core.js";
+import { isAgentEngine } from "../core/agent-contract.js";
 import {
   acquireProcessLock,
   canonicalJsonBytes,
@@ -10,6 +11,11 @@ import {
   privateFileBytes,
   sha256Digest,
 } from "../durability/index.js";
+import {
+  ENGINE_ATTEMPT_START_OUTCOME,
+  ENGINE_SESSION_SCHEMA_VERSION,
+  isEngineAttemptStartOutcome,
+} from "./session-contract.js";
 import type {
   AttemptStartAuthorityRecordV1,
   DurableAttemptStartAuthorityReaderV1,
@@ -44,10 +50,10 @@ function assertRecord(value: unknown): asserts value is AttemptStartAuthorityRec
       ]
         .sort()
         .join(",") ||
-    row.schema_version !== "1.0" ||
+    row.schema_version !== ENGINE_SESSION_SCHEMA_VERSION ||
     !ATTEMPT_ID.test(row.attempt_id) ||
-    !["claude", "codex", "copilot", "opencode", "antigravity"].includes(row.engine) ||
-    !["accepted", "proved-absent", "unknown"].includes(row.outcome) ||
+    !isAgentEngine(row.engine) ||
+    !isEngineAttemptStartOutcome(row.outcome) ||
     (row.native_session_id !== null &&
       (typeof row.native_session_id !== "string" || row.native_session_id.length === 0)) ||
     typeof row.evidence_ref !== "string" ||
@@ -55,7 +61,7 @@ function assertRecord(value: unknown): asserts value is AttemptStartAuthorityRec
     row.process_quiescent !== true ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.recorded_at) ||
     !DIGEST.test(row.record_digest) ||
-    (row.outcome === "accepted") !== (row.native_session_id !== null)
+    (row.outcome === ENGINE_ATTEMPT_START_OUTCOME.ACCEPTED) !== (row.native_session_id !== null)
   )
     throw new Error("invalid attempt start authority record");
   const { record_digest: _digest, ...preimage } = row;
@@ -117,7 +123,7 @@ export class AttemptStartAuthorityStore {
     )
       throw new Error("attempt authority evidence identity changed");
     const preimage = {
-      schema_version: "1.0" as const,
+      schema_version: ENGINE_SESSION_SCHEMA_VERSION,
       attempt_id: input.attempt_id,
       engine: input.engine,
       outcome: input.outcome,

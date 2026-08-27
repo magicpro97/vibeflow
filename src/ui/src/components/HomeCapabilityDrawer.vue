@@ -11,8 +11,8 @@
       <p class="home-drawer-copy">Skills, tools, MCP servers, hooks, roles, and settings are installed through one reviewed Fabric.</p>
 
       <div class="home-scope-switch" aria-label="Capability scope">
-        <button type="button" :aria-pressed="store.capabilityScope === 'project'" @click="setScope('project')">This project</button>
-        <button type="button" :aria-pressed="store.capabilityScope === 'user'" @click="setScope('user')">All projects</button>
+        <button type="button" :aria-pressed="store.capabilityScope === CAPABILITY_SCOPE.PROJECT" @click="setScope(CAPABILITY_SCOPE.PROJECT)">This project</button>
+        <button type="button" :aria-pressed="store.capabilityScope === CAPABILITY_SCOPE.USER" @click="setScope(CAPABILITY_SCOPE.USER)">All projects</button>
       </div>
       <form class="home-capability-search" @submit.prevent="store.searchCapabilities()">
         <label>
@@ -71,12 +71,12 @@
             <span v-if="item.source_trust">{{ item.source_trust }}</span>
             <span>{{ item.cache_status }}</span>
           </div>
-          <div v-if="item.status === 'manual' || item.status === 'unsupported' || item.status === 'needs-recovery'" class="home-capability-warning">
+          <div v-if="item.status === CAPABILITY_STATUS.MANUAL || item.status === CAPABILITY_STATUS.UNSUPPORTED || item.status === CAPABILITY_STATUS.NEEDS_RECOVERY" class="home-capability-warning">
             {{ stateHelp(item.status) }}
           </div>
           <footer>
             <button type="button" @click="useCapability(item)">
-              {{ item.status === 'ready' ? 'Manage in chat' : item.status === 'needs-recovery' ? 'Prepare repair' : 'Prepare install' }}
+              {{ item.status === CAPABILITY_STATUS.READY ? 'Manage in chat' : item.status === CAPABILITY_STATUS.NEEDS_RECOVERY ? 'Prepare repair' : 'Prepare install' }}
               <span aria-hidden="true">→</span>
             </button>
           </footer>
@@ -95,6 +95,11 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import {
+  CAPABILITY_SCOPE,
+  CAPABILITY_STATUS,
+  type CapabilityScope,
+} from "../../../core/capability-contract.js";
 import { describeHomeCapabilityLoading } from "../conversation-home-loading.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import type { CapabilityStatus, HomeCapabilityItem } from "../conversation-home-types.js";
@@ -113,26 +118,26 @@ const capabilityLoading = computed(() =>
 
 const statusLabel = (status: CapabilityStatus) => status.replaceAll("-", " ");
 const stateHelp = (status: CapabilityStatus) =>
-  status === "manual"
+  status === CAPABILITY_STATUS.MANUAL
     ? "This target needs a documented manual step. VibeFlow will keep it visible."
-    : status === "unsupported"
+    : status === CAPABILITY_STATUS.UNSUPPORTED
       ? "No honest adapter exists for this target yet. Nothing will be simulated."
       : "The current scope needs durable recovery before another mutation.";
 
-function setScope(scope: "project" | "user") {
+function setScope(scope: CapabilityScope) {
   store.capabilityScope = scope;
   void store.searchCapabilities();
 }
 
 async function useCapability(item: HomeCapabilityItem) {
-  if (item.status === "needs-recovery") {
+  if (item.status === CAPABILITY_STATUS.NEEDS_RECOVERY) {
     if (await store.proposeCapabilityRepair(item)) emit("close");
     return;
   }
-  if (item.status === "ready")
+  if (item.status === CAPABILITY_STATUS.READY)
     store.draft = `Review the current ${item.package_id} capability and help me change it.`;
   else
-    store.draft = `/install ${item.package_id}${store.capabilityScope === "user" ? " --user" : ""}`;
+    store.draft = `/install ${item.package_id}${store.capabilityScope === CAPABILITY_SCOPE.USER ? " --user" : ""}`;
   emit("close");
   nextTick(() => document.querySelector<HTMLTextAreaElement>("#home-composer")?.focus());
 }

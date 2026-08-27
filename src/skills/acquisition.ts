@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
+import { SKILL_STATUS, type SkillStatus } from "../core/skill-contract.js";
 import { parseMarketplace, parseRegistryLock, registryCacheDir } from "./registry-channel.js";
 import type { RegistryEntry } from "./registry-types.js";
 import type { SkillNeed } from "./resolver.js";
@@ -133,7 +134,7 @@ export function findAcquisitionCandidates(
     const candidates: Array<{
       entry: RegistryEntry;
       cacheDir: string;
-      mpSkills: Array<{ name: string; version: string; status?: string; path?: string }>;
+      mpSkills: Array<{ name: string; version: string; status: SkillStatus; path?: string }>;
     }> = [];
 
     for (const entry of lock.registries) {
@@ -144,7 +145,9 @@ export function findAcquisitionCandidates(
         readFileSync: _read,
       });
       if (errors.length > 0) continue;
-      const matched = skills.filter((s) => s.name === need.need && s.status === "verified");
+      const matched = skills.filter(
+        (s) => s.name === need.need && s.status === SKILL_STATUS.VERIFIED,
+      );
       if (matched.length > 0) {
         candidates.push({ entry, cacheDir, mpSkills: matched });
       }

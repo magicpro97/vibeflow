@@ -1,4 +1,11 @@
 import { toRaw } from "vue";
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+import {
+  CONVERSATION_HUMAN_REACTION_REQUEST_MODE,
+  CONVERSATION_INTERACTION_SCHEMA_VERSION,
+} from "../../orchestrator/conversation/conversation-interaction-contract.js";
+import { CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
+import { CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION } from "../../orchestrator/conversation/conversation-private-context-broker-wire.js";
 import { type BrowserActionCandidate, conversationHomeApi } from "./conversation-home-api.js";
 import {
   moveHomeQuoteReference,
@@ -9,6 +16,7 @@ import {
 } from "./conversation-home-authoring.js";
 import { createHomeCapabilityTargetRuntime } from "./conversation-home-capability-target-runtime.js";
 import type { HomeCommandRuntimeInput } from "./conversation-home-command-input.js";
+import { createHomeUnavailableInteractionReporter } from "./conversation-home-interaction-feedback.js";
 import type { HomePrivateContextCapture } from "./conversation-home-private-context-types.js";
 import { createHomeProposalRuntime } from "./conversation-home-proposal-runtime.js";
 import { capabilityRepairCandidate } from "./conversation-home-recovery.js";
@@ -18,7 +26,7 @@ import {
   matchesHomeCommandToken,
   readableHomeError,
 } from "./conversation-home-runtime.js";
-import { parseComposerIntent } from "./conversation-home-state.js";
+import { HOME_COMPOSER_INTENT_KIND, parseComposerIntent } from "./conversation-home-state.js";
 import { applyHomeReactionFold } from "./conversation-home-stream.js";
 import type {
   HomeCapabilityItem,
@@ -114,6 +122,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     publishCandidate,
     refreshActiveSelection: input.refreshActiveSelection,
   });
+  const reportUnavailableInteraction = createHomeUnavailableInteractionReporter(input);
 
   async function submitDraft(): Promise<void> {
     if (!input.online.value) return;
@@ -123,17 +132,17 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     }
     const intent = parseComposerIntent(input.draft.value);
     capabilityTargets.reconcileCapabilityTargetDraft();
-    if (intent.kind === "empty") return;
-    if (intent.kind === "invalid") {
+    if (intent.kind === HOME_COMPOSER_INTENT_KIND.EMPTY) return;
+    if (intent.kind === HOME_COMPOSER_INTENT_KIND.INVALID) {
       input.composerError.value = intent.message;
       return;
     }
-    if (input.quoteRefs.value.length && intent.kind !== "message") {
+    if (input.quoteRefs.value.length && intent.kind !== HOME_COMPOSER_INTENT_KIND.MESSAGE) {
       input.composerError.value =
         "Quoted sources only attach to natural-language replies. Remove them before sending a typed action.";
       return;
     }
-    if (input.privateContext.present() && intent.kind !== "message") {
+    if (input.privateContext.present() && intent.kind !== HOME_COMPOSER_INTENT_KIND.MESSAGE) {
       input.composerError.value =
         "Private file ranges only attach to natural-language goals or replies. Remove the selected range before sending a typed action.";
       return;
@@ -141,7 +150,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     const submittedDraft = input.draft.value;
     const activeRevision = input.activeRevision.value;
     const submittedQuotes = structuredClone(toRaw(input.quoteRefs.value));
-    if (intent.kind === "message" && input.activeRootId.value) {
+    if (intent.kind === HOME_COMPOSER_INTENT_KIND.MESSAGE && input.activeRootId.value) {
       try {
         if (!activeRevision)
           throw new Error("Refresh this conversation before sending so its head can be verified.");
@@ -178,7 +187,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
       return;
     }
     if (input.submitting.value) return;
-    if (intent.kind === "install-capability") {
+    if (intent.kind === HOME_COMPOSER_INTENT_KIND.INSTALL_CAPABILITY) {
       try {
         if (!input.activeRootId.value || !activeRevision)
           throw new Error("Open a conversation before installing a capability.");
@@ -203,7 +212,10 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     input.composerError.value = "";
     try {
       if (!input.activeRootId.value) {
-        if (intent.kind !== "message" || intent.targets !== "all")
+        if (
+          intent.kind !== HOME_COMPOSER_INTENT_KIND.MESSAGE ||
+          intent.targets !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
+        )
           throw new Error("Start with a natural-language goal, then add agents or capabilities.");
         const privateContext = input.privateContext.captureForCreate();
         if (input.privateContext.present() && !privateContext)
@@ -211,7 +223,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
             "Refresh this private context selection before creating the conversation.",
           );
         const createRequest = {
-          schema_version: "1.0" as const,
+          schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
           idempotency_key:
             privateContext?.idempotency_key ?? `home-create.${createHomeActionKey()}`.slice(0, 128),
           topic: intent.content,
@@ -240,12 +252,12 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
       }
       if (!activeRevision)
         throw new Error("Refresh this conversation before sending so its head can be verified.");
-      if (intent.kind === "message")
+      if (intent.kind === HOME_COMPOSER_INTENT_KIND.MESSAGE)
         throw new Error("Open the current root session before sending this message.");
       const candidate: BrowserActionCandidate =
-        intent.kind === "add-participant"
+        intent.kind === HOME_COMPOSER_INTENT_KIND.ADD_PARTICIPANT
           ? {
-              type: "conversation.add_participant",
+              type: HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT,
               participant: {
                 role_ref: intent.roleRef,
                 engine: intent.engine,
@@ -253,10 +265,13 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
                 skill_refs: [],
               },
             }
-          : intent.kind === "remove-participant"
-            ? { type: "conversation.remove_participant", participant_id: intent.participantId }
+          : intent.kind === HOME_COMPOSER_INTENT_KIND.REMOVE_PARTICIPANT
+            ? {
+                type: HOST_ACTION_KIND.CONVERSATION_REMOVE_PARTICIPANT,
+                participant_id: intent.participantId,
+              }
             : {
-                type: "capability.remove" as const,
+                type: HOST_ACTION_KIND.CAPABILITY_REMOVE,
                 package_id: intent.packageId,
                 scope: intent.scope,
                 cascade: false,
@@ -279,7 +294,10 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     baseline_enabled?: boolean;
   }): Promise<boolean> {
     try {
-      return await proposeCandidate({ type: "conversation.update_settings", changes });
+      return await proposeCandidate({
+        type: HOST_ACTION_KIND.CONVERSATION_UPDATE_SETTINGS,
+        changes,
+      });
     } catch (error) {
       input.activationError.value = readableHomeError(error);
       return false;
@@ -323,9 +341,9 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     input.activationError.value = "";
     try {
       const response = await conversationHomeApi.reaction({
-        schema_version: "1.0",
+        schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
         idempotency_key: `home-reaction.${createHomeActionKey()}`.slice(0, 128),
-        mode: "toggle-self",
+        mode: CONVERSATION_HUMAN_REACTION_REQUEST_MODE.TOGGLE_SELF,
         emoji,
         message_ref: messageRef,
       });
@@ -340,18 +358,6 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     } finally {
       finishReactionBusy(busyKey, command);
     }
-  }
-
-  function reportUnavailableInteraction(
-    kind: "quote" | "reaction",
-    diagnosticCode: string | null,
-  ): void {
-    const noun = kind === "quote" ? "Quotes" : "Reactions";
-    const reason = diagnosticCode
-      ? ` The backend reported ${diagnosticCode}.`
-      : " This message has not reached an immutable public locator yet.";
-    const target = kind === "quote" ? input.composerError : input.activationError;
-    target.value = `${noun} are unavailable for this message right now.${reason}`;
   }
 
   function toggleQuoteReference(reference: HomeQuoteReference): void {

@@ -1,10 +1,26 @@
+import { isAgentEngine } from "../core/agent-contract.js";
+import { isCapabilityScope } from "../core/capability-contract.js";
 import { digestHex, digestV1 } from "../durability/index.js";
+import {
+  CONVERSATION_PUBLIC_PROFILE,
+  CONVERSATION_PUBLIC_SCHEMA_VERSION,
+} from "../orchestrator/conversation/conversation-public-wire-contract.js";
+import { isLegacySource } from "./capability-manifest-vocabulary-contract.js";
 import type {
   LegacyAdoptCandidateV1,
   OversizedHandoffCandidateV1,
 } from "./internal-action-types.js";
 import { validateLegacyManifestClosure } from "./legacy-manifest-validation.js";
 import { validatePackagePin } from "./package-pin-validation.js";
+import {
+  ACTION_PACKAGE_PIN_SOURCE_KIND,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
+import {
+  PUBLIC_ACTION_TARGET_APPLY_FAILURE,
+  PUBLIC_ACTION_TARGET_HEALTH_FAILURE,
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+} from "./public-operation-contract.js";
 import { assertPublicProjectionSafe } from "./public-safety.js";
 import {
   assertDigest,
@@ -15,14 +31,6 @@ import {
   bytewise,
 } from "./record-primitives.js";
 import { ActionValidationError, boundedString, exactObject, safeInteger } from "./strict-json.js";
-
-const LEGACY_SOURCES = new Set([
-  "skill-lock",
-  "tool-managed-evidence",
-  "mcp-managed-sidecar",
-  "hook-sentinel",
-  "role-marker",
-]);
 
 export function validateCompactionInput(value: unknown, path: string): void {
   const row = exactObject(
@@ -38,7 +46,10 @@ export function validateCompactionInput(value: unknown, path: string): void {
     [],
     path,
   );
-  if (row.schema_version !== "1.0" || row.profile !== "vf-public-compaction/1")
+  if (
+    row.schema_version !== CONVERSATION_PUBLIC_SCHEMA_VERSION ||
+    row.profile !== CONVERSATION_PUBLIC_PROFILE.COMPACTION
+  )
     invalid("invalid compaction profile", path);
   const summary = boundedString(row.public_summary, `${path}.public_summary`, { max: 64 * 1024 });
   if (!summary || summary !== summary.normalize("NFC")) invalid("invalid compaction summary", path);
@@ -78,7 +89,8 @@ export function validateOversizedCandidate(value: unknown, path: string): void {
     [],
     path,
   );
-  if (row.schema_version !== "1.0") invalid("invalid oversized candidate version", path);
+  if (row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION)
+    invalid("invalid oversized candidate version", path);
   const source = exactObject(
     row.source,
     ["conversation_id", "revision_id", "last_seq", "lock_digest"],
@@ -149,18 +161,17 @@ export function validateLegacyCandidate(value: unknown, outerScope: unknown, pat
     path,
   ) as unknown as LegacyAdoptCandidateV1;
   if (
-    row.schema_version !== "1.0" ||
+    row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION ||
     row.scope !== outerScope ||
-    !["project", "user"].includes(row.scope)
+    !isCapabilityScope(row.scope)
   )
     invalid("legacy candidate version or scope mismatch", path);
-  if (!LEGACY_SOURCES.has(row.legacy_source))
-    invalid("invalid legacy source", `${path}.legacy_source`);
+  if (!isLegacySource(row.legacy_source)) invalid("invalid legacy source", `${path}.legacy_source`);
   assertDigest(row.scope_identity_digest, `${path}.scope_identity_digest`);
   assertDigest(row.inspection_evidence_digest, `${path}.inspection_evidence_digest`);
   validatePackagePin(row.synthetic_pin, `${path}.synthetic_pin`);
   if (
-    row.synthetic_pin.source.kind !== "legacy-adopt" ||
+    row.synthetic_pin.source.kind !== ACTION_PACKAGE_PIN_SOURCE_KIND.LEGACY_ADOPT ||
     row.synthetic_pin.source.legacy_source !== row.legacy_source ||
     row.synthetic_pin.source.inspection_evidence_digest !== row.inspection_evidence_digest ||
     !/^0\.0\.0-legacy\.[a-f0-9]{12}$/.test(row.synthetic_pin.version)
@@ -201,24 +212,23 @@ function validateCandidateTargets(
       [],
       `${path}[${index}].target`,
     );
-    if (!["project", "user"].includes(target.scope as string))
+    if (!isCapabilityScope(target.scope))
       invalid("invalid legacy target scope", `${path}[${index}].target.scope`);
-    if (
-      target.engine !== null &&
-      !["claude", "codex", "copilot", "opencode", "antigravity"].includes(target.engine as string)
-    )
+    if (target.engine !== null && !isAgentEngine(target.engine))
       invalid("invalid legacy target engine", `${path}[${index}].target.engine`);
     if (target.participant_id !== null)
       assertOpaqueId(target.participant_id, `${path}[${index}].target.participant_id`);
     if (
       target.required === true &&
-      (target.on_apply_failure !== "abort-scope" || target.on_health_failure !== "abort-scope")
+      (target.on_apply_failure !== PUBLIC_ACTION_TARGET_APPLY_FAILURE.ABORT_SCOPE ||
+        target.on_health_failure !== PUBLIC_ACTION_TARGET_HEALTH_FAILURE.ABORT_SCOPE)
     )
       invalid("required legacy target policy mismatch", `${path}[${index}].target`);
     if (
       target.required === false &&
-      (target.on_apply_failure !== "omit-after-rollback" ||
-        !["omit-after-rollback", "commit-degraded"].includes(target.on_health_failure as string))
+      (target.on_apply_failure !== PUBLIC_ACTION_TARGET_APPLY_FAILURE.OMIT_AFTER_ROLLBACK ||
+        (target.on_health_failure !== PUBLIC_ACTION_TARGET_HEALTH_FAILURE.OMIT_AFTER_ROLLBACK &&
+          target.on_health_failure !== PUBLIC_ACTION_TARGET_HEALTH_FAILURE.COMMIT_DEGRADED))
     )
       invalid("optional legacy target policy mismatch", `${path}[${index}].target`);
     if (typeof target.required !== "boolean")
@@ -229,10 +239,19 @@ function validateCandidateTargets(
       [],
       `${path}[${index}].subject`,
     );
-    if (subject.kind !== "capability" || subject.package_id !== packageId)
+    if (
+      subject.kind !== PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY ||
+      subject.package_id !== packageId
+    )
       invalid("legacy target subject mismatch", `${path}[${index}].subject`);
     assertOpaqueId(subject.component_id, `${path}[${index}].subject.component_id`);
-    const expected = `vf-target-${digestHex(digestV1("VF-ACTION-TARGET-ID\0v1\0", { schema_version: "1.0", target: row.target, subject: row.subject }))}`;
+    const expected = `vf-target-${digestHex(
+      digestV1("VF-ACTION-TARGET-ID\0v1\0", {
+        schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
+        target: row.target,
+        subject: row.subject,
+      }),
+    )}`;
     if (row.target_id !== expected)
       invalid("legacy target ID mismatch", `${path}[${index}].target_id`);
     return row.target_id as string;

@@ -1,4 +1,9 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type { ActionProposalV1 } from "../../actions/index.js";
+import {
+  CAPABILITY_PLAN_STATUS,
+  CAPABILITY_RUNTIME_ERROR_CODE,
+} from "../../core/capability-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import type { CapabilityActionPlanBindingV1 } from "../action-domain/types.js";
 import { privateEffectBinding } from "../adapters/private-descriptors.js";
@@ -26,7 +31,7 @@ export interface CapabilityExecutionPackageReaderV1 {
 }
 
 function fail(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function objectsOf<T extends CapabilityExecutionJsonObjectValueV1>(
@@ -49,27 +54,27 @@ function oneObject<T extends CapabilityExecutionJsonObjectValueV1>(
 
 function lifecycleIntent(action: CapabilityHostActionV1): CapabilityFabricPlanV1["intent"] {
   switch (action.type) {
-    case "capability.install":
+    case HOST_ACTION_KIND.CAPABILITY_INSTALL:
       return { kind: "install" };
-    case "capability.update":
+    case HOST_ACTION_KIND.CAPABILITY_UPDATE:
       return { kind: "update", package_id: action.package_id };
-    case "capability.configure":
+    case HOST_ACTION_KIND.CAPABILITY_CONFIGURE:
       return { kind: "configure", package_id: action.package_id };
-    case "capability.retarget":
+    case HOST_ACTION_KIND.CAPABILITY_RETARGET:
       return { kind: "retarget", package_id: action.package_id };
-    case "capability.remove":
+    case HOST_ACTION_KIND.CAPABILITY_REMOVE:
       return { kind: "remove", package_id: action.package_id, cascade: action.cascade };
-    case "capability.rollback_scope":
+    case HOST_ACTION_KIND.CAPABILITY_ROLLBACK_SCOPE:
       return { kind: "rollback", generation_id: action.generation_id };
-    case "capability.restore_package":
+    case HOST_ACTION_KIND.CAPABILITY_RESTORE_PACKAGE:
       return {
         kind: "restore",
         package_id: action.package_id,
         generation_id: action.generation_id,
       };
-    case "capability.repair":
+    case HOST_ACTION_KIND.CAPABILITY_REPAIR:
       return { kind: "repair", package_id: action.package_id };
-    case "capability.adopt":
+    case HOST_ACTION_KIND.CAPABILITY_ADOPT:
       return { kind: "adopt", candidate_digest: action.candidate.candidate_digest };
   }
 }
@@ -238,7 +243,7 @@ export function rehydrateCapabilityPlanningGraph(input: {
   };
   const draft = {
     schema_version: "1.0" as const,
-    status: "planned" as const,
+    status: CAPABILITY_PLAN_STATUS.PLANNED,
     intent: lifecycleIntent(action),
     action_binding: {
       schema_version: "1.0" as const,

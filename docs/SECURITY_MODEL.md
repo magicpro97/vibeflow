@@ -2,7 +2,7 @@
 title: Security Model
 description: Security model — default safety posture, permission classes, protected paths, secrets handling, and audit log.
 category: explanation
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Security Model
@@ -385,18 +385,42 @@ web verify API, orchestrate per-unit gates, or arbitrary acceptance commands.
 ## Local web server
 
 The `vf` / `vf ui` server is the interactive console. Its default surface is AI-first
-Home (session rail + central conversation pane), with the intake wizard reserved for
-`vf init --interactive`. Because it exposes write actions, it is hardened as follows
+Home (session rail + central conversation pane). Repository intake is the TTY questionnaire
+in `vf init`, not a `vf ui` mode. Because Home exposes write actions, it is hardened as follows
 (implemented in `src/server.ts`):
 
 ```text
-- binds 127.0.0.1 only — never 0.0.0.0, never a public interface
-- GET /, /state, /events are read-only (dashboard + live ledger)
-- writes only via POST /api/init, /api/dispatch, /api/detect, /api/units, and POST/DELETE
-  /api/upload (binary attachments); GET /, /state, /events, /api/attachments are read-only
-- per-process CSRF token: embedded in the page, required in the x-vibeflow-token header
-- exact-match Host allowlist (127.0.0.1 / localhost / ::1) — mitigates DNS rebinding
-- Origin/Referer, when present, must be loopback
+- defaults to 127.0.0.1; every non-loopback `--host` intentionally exposes the server
+- on a non-loopback bind, the returned owner URL contains a single-use bootstrap capability.
+  The first exact request consumes it, installs a process-local `HttpOnly`, `SameSite=Strict`
+  LAN page-session cookie, and redirects to `/` so the capability leaves the address bar.
+  Unauthenticated root loads return `401`; the bootstrap cannot be replayed and is never
+  persisted or included in the normal server banner, logs, or errors. `--no-open` deliberately
+  prints the owner-only bootstrap URL once so a human can open it without browser automation
+- only a page with that LAN page-session cookie receives the per-process CSRF token.
+  Legacy `fetch`/API requests require it in the `x-vibeflow-token` header; Host headers are
+  not treated as authentication, and the CSRF token is not a Conversation Home credential
+- browser `EventSource` cannot set custom headers, so it supplies that same page token
+  in the canonical `token` query parameter for protected non-conversation SSE;
+  header-capable API clients continue to use the header
+- conversation sessions are auto-issued only on loopback. A normal LAN page receives no
+  vf_conversation_session cookie, so conversation JSON, artifact, and stream-token routes
+  fail closed with 401; the page CSRF token is not a conversation credential
+- static assets are network-reachable; GET `/` and `/index.html` require LAN page authority,
+  and sensitive read routes remain CSRF-guarded
+- mutations are admitted only by the server's explicit method/path allowlist. It covers workflow,
+  settings, attachment, plan-review, skill, hook-approval, and conversation/action namespaces;
+  an unlisted write path is rejected rather than falling through to a generic handler
+- per-process CSRF token: embedded only in an authorized page; protected `fetch`/API requests
+  use the `x-vibeflow-token` header, while protected non-conversation `EventSource` streams
+  (including deprecated `/events`) use the narrow `token` query exception described above
+- loopback mode uses the exact Host allowlist (127.0.0.1 / localhost / ::1) and requires any
+  Origin/Referer to be loopback. LAN mode does not treat Host as authority: protected routes
+  require the page CSRF capability regardless of Host
+- hook CLI approval on a LAN bind uses a second OS-selected listener bound only to 127.0.0.1.
+  `.vibeflow/.ui-port` stores its credential-free `hook_origin` plus process/port metadata—never
+  the LAN page token or bootstrap. The hook client accepts only exact loopback HTTP origins; the
+  bridge rejects browser Origin/Referer requests, requires JSON, and caps pending bodies at 64 KiB
 - JSON body capped (64 KB); uploads streamed to disk and capped (50 MB/file), partial files
   removed on overflow; malformed or oversized bodies are rejected
 - attachment filenames are reduced to a single safe path segment (basename; no separators,
@@ -420,10 +444,14 @@ carry over into an unrelated conversation. Its transport is canonical JSON prefi
 `VF-PRIVATE-FILE-RANGES/1`, separate from the public `VF-TURN/1` envelope. It never becomes
 public trace/browser persistence.
 
-On exact native resume, the selected CLI keeps its own private session history. VibeFlow
-delivers only new applicable user messages and peer-agent responses/reactions; it does not
-replay the recipient's own prior output. Missing or stale cursor proof falls back to the full
-applicable public handoff. A large Copilot `.vibeflow/dispatch/<unit>.md` prompt file is only
+Exact by-id resume is limited to Claude, Codex, and OpenCode. On valid exact resume, the
+selected CLI keeps its own private session history. VibeFlow delivers only new applicable
+user messages and peer-agent responses/reactions; it does not replay the recipient's own
+prior output. Without valid exact authority, turn delivery includes applicable public context
+plus up to eight of the recipient's own public responses, each capped at 2 KiB UTF-8 with
+source digest, provenance, and count/truncation metadata. Copilot and Antigravity therefore
+cannot silently claim exact resume or omit own context. A large Copilot
+`.vibeflow/dispatch/<unit>.md` prompt file is only
 a transport fallback addressed by a short argv pointer, not session memory.
 
 ## Owned Process Identity and Containment
@@ -442,8 +470,9 @@ stderr. Recovery follows the same fail-closed identity contract:
 The POSIX boundary is cooperative because a descendant can deliberately leave its process
 group. `vf doctor --fix` may recover only an exact proved dead or identity-mismatched owner;
 live and identity-unprovable owners remain quarantined for manual inspection. The Windows
-contract has injected platform regression coverage, but the current evidence does not include
-or claim a live Windows canary.
+contract has injected platform regression coverage and a real `windows-latest` CI smoke job.
+Live Windows evidence remains pending until that job is green; a local macOS/Linux run is
+not a Windows canary.
 
 ## Audit log
 

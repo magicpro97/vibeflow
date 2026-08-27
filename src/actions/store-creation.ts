@@ -8,8 +8,11 @@ import {
   canonicalActionRequestDigest,
   oversizedHandoffIssuanceFileKey,
 } from "./idempotency.js";
+import { ACTION_IDEMPOTENCY_BINDING_STATE } from "./persistence-contract.js";
 import type { ActionFilePersistence } from "./persistence.js";
 import { assertProposalPublicationProof } from "./proposal-publication-proof.js";
+import { PUBLIC_ACTION_SCHEMA_VERSION } from "./public-action-contract.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import {
   completePrepared,
   equalCanonical,
@@ -51,7 +54,7 @@ export function createActionProposal(
       )
     )
       throw new ActionConflictError(
-        "idempotency_conflict",
+        PUBLIC_ERROR_CODE.IDEMPOTENCY_CONFLICT,
         "Idempotency key was used for an oversized handoff candidate.",
         input.proposal.proposal_id,
       );
@@ -67,7 +70,7 @@ export function createActionProposal(
         prepared.proposal_digest !== input.proposal.proposal_digest
       )
         throw new ActionConflictError(
-          "idempotency_conflict",
+          PUBLIC_ERROR_CODE.IDEMPOTENCY_CONFLICT,
           "Idempotency key was used for another request.",
           input.proposal.proposal_id,
         );
@@ -87,10 +90,10 @@ export function createActionProposal(
     assertPublicationClosure(resolver, input.proposal, requestDigest, sampledNow);
     files.writeProposal(lock, input.proposal);
     const preparedWithoutDigest = {
-      schema_version: "1.0" as const,
+      schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
       sequence: 0 as const,
       previous_frame_digest: null,
-      state: "prepared" as const,
+      state: ACTION_IDEMPOTENCY_BINDING_STATE.PREPARED,
       principal_digest: input.authority.principal_digest,
       authority_scope_digest: authorityScopeDigest,
       idempotency_key_digest: keyDigest,

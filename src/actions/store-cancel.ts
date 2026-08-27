@@ -1,5 +1,11 @@
 import { ActionConflictError } from "./errors.js";
 import type { ActionFilePersistence } from "./persistence.js";
+import {
+  ACTION_AUTHORITY_EVENT_KIND,
+  ACTION_OPERATION_STATE,
+  isActionOperationProposalOpenState,
+} from "./protocol-contract.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import { materializeAuthorityEvent } from "./records.js";
 import { foldActionAuthority } from "./state.js";
 import {
@@ -49,14 +55,14 @@ export function cancelAction(
       !isAgentProposalBrowserController(snapshot.proposal, input.authority)
     )
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Cancellation actor does not control this proposal.",
         input.proposal_id,
       );
-    if (snapshot.state === "canceled") return snapshot;
-    if (snapshot.state !== "pending_review" && snapshot.state !== "approved")
+    if (snapshot.state === ACTION_OPERATION_STATE.CANCELED) return snapshot;
+    if (!isActionOperationProposalOpenState(snapshot.state))
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal can no longer be canceled.",
         input.proposal_id,
       );
@@ -65,9 +71,9 @@ export function cancelAction(
       snapshot.events.length,
       snapshot.events.at(-1)?.event_digest ?? null,
       {
-        kind: "state-transition",
+        kind: ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION,
         from: snapshot.state,
-        to: "canceled",
+        to: ACTION_OPERATION_STATE.CANCELED,
         operation_id: null,
         dispatch_record_digest: null,
         domain_terminal_digest: null,

@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
+import {
+  type FilesystemLegacySource,
+  LEGACY_SOURCE,
+  LEGACY_SOURCE_RECORD_KIND,
+  isFilesystemLegacySource,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
 import type { EngineName } from "../../actions/types.js";
+import { AGENT_ENGINE } from "../../core/agent-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
 import { boundedProjectionPath, readProjectionFile } from "../adapters/filesystem-io.js";
 import { privateEffectPayloadDigest } from "../adapters/private-descriptors.js";
@@ -18,33 +26,31 @@ import type {
 
 const MCP_SURFACES = [
   {
-    engine: "claude",
+    engine: AGENT_ENGINE.CLAUDE,
     sidecar: ".vibeflow/.mcp-managed.json",
     config: ".mcp.json",
     namespace: "mcpServers",
   },
   {
-    engine: "opencode",
+    engine: AGENT_ENGINE.OPENCODE,
     sidecar: ".vibeflow/.opencode-mcp-managed.json",
     config: "opencode.json",
     namespace: "mcp",
   },
   {
-    engine: "antigravity",
+    engine: AGENT_ENGINE.ANTIGRAVITY,
     sidecar: ".vibeflow/.antigravity-mcp-managed.json",
     config: ".agents/mcp_config.json",
     namespace: "mcpServers",
   },
 ] as const;
-
 const SKILL_SURFACES = [
-  { engine: "claude", root: ".claude/skills" },
-  { engine: "copilot", root: ".github/skills" },
-  { engine: "opencode", root: ".opencode/skills" },
+  { engine: AGENT_ENGINE.CLAUDE, root: ".claude/skills" },
+  { engine: AGENT_ENGINE.COPILOT, root: ".github/skills" },
+  { engine: AGENT_ENGINE.OPENCODE, root: ".opencode/skills" },
 ] as const;
-
 const FILESYSTEM_MARKERS = new WeakSet<object>();
-export type FilesystemLegacySourceV1 = "skill-lock" | "mcp-managed-sidecar" | "hook-sentinel";
+export type FilesystemLegacySourceV1 = FilesystemLegacySource;
 export type FilesystemLegacyOwnedMarkerV1 = Omit<
   LegacyOwnedMarkerV1,
   "source" | "owned_resources"
@@ -60,18 +66,16 @@ type FilesystemLegacyProjectionV1 =
       key_path: string[];
       preimage: CapabilityPrivateJsonV1;
     };
-
 const FILESYSTEM_MARKER_PROJECTIONS = new WeakMap<
   object,
-  { root: "project" | "user"; projection: FilesystemLegacyProjectionV1 }
+  { root: CapabilityScope; projection: FilesystemLegacyProjectionV1 }
 >();
-
 export function assertFilesystemLegacyOwnedMarkerV1(
   marker: LegacyOwnedMarkerV1,
 ): FilesystemLegacyOwnedMarkerV1 {
   if (
     !FILESYSTEM_MARKERS.has(marker) ||
-    !["skill-lock", "mcp-managed-sidecar", "hook-sentinel"].includes(marker.source) ||
+    !isFilesystemLegacySource(marker.source) ||
     marker.owned_resources.length !== 1
   )
     throw new CapabilityValidationError(
@@ -104,11 +108,7 @@ export function filesystemLegacyClaimPayload(
       resource.ownership_key,
       "integrity_failure",
     );
-  const recordKind = {
-    "skill-lock": "lock",
-    "mcp-managed-sidecar": "managed-sidecar",
-    "hook-sentinel": "sentinel",
-  }[marker.source];
+  const recordKind = LEGACY_SOURCE_RECORD_KIND[marker.source];
   const proof = marker.ownership_proof;
   if (!proof)
     throw new CapabilityValidationError(
@@ -165,7 +165,7 @@ function object(value: unknown, field: string): Record<string, unknown> {
 }
 
 function ownershipKey(
-  scope: "project" | "user",
+  scope: CapabilityScope,
   source: string,
   engine: EngineName,
   logicalId: string,
@@ -174,7 +174,7 @@ function ownershipKey(
 }
 
 function marker(input: {
-  scope: "project" | "user";
+  scope: CapabilityScope;
   source: FilesystemLegacySourceV1;
   engine: EngineName;
   rawIdentifier: string;
@@ -214,7 +214,7 @@ function marker(input: {
   return value;
 }
 
-function scanMcp(root: string, scope: "project" | "user"): FilesystemLegacyOwnedMarkerV1[] {
+function scanMcp(root: string, scope: CapabilityScope): FilesystemLegacyOwnedMarkerV1[] {
   const output: FilesystemLegacyOwnedMarkerV1[] = [];
   for (const surface of MCP_SURFACES) {
     const rawNames = readJson(root, surface.sidecar);
@@ -236,7 +236,7 @@ function scanMcp(root: string, scope: "project" | "user"): FilesystemLegacyOwned
       output.push(
         marker({
           scope,
-          source: "mcp-managed-sidecar",
+          source: LEGACY_SOURCE.MCP_MANAGED_SIDECAR,
           engine: surface.engine,
           rawIdentifier: name,
           logicalId: `${surface.engine}:${name}`,
@@ -260,7 +260,10 @@ function installedSkillNames(lock: unknown): string[] {
   if (lock === null) return [];
   const record = object(lock, ".vibeflow/SKILL_REGISTRY.lock.json");
   if (record.schemaVersion !== 1 || !Array.isArray(record.registries))
-    throw new CapabilityValidationError("legacy skill lock schema is invalid", "skill-lock");
+    throw new CapabilityValidationError(
+      "legacy skill lock schema is invalid",
+      LEGACY_SOURCE.SKILL_LOCK,
+    );
   const names: string[] = [];
   for (const [registryIndex, rawRegistry] of record.registries.entries()) {
     const registry = object(rawRegistry, `skill-lock.registries[${registryIndex}]`);
@@ -282,7 +285,7 @@ function installedSkillNames(lock: unknown): string[] {
 function scanSkills(
   scopeRoot: string,
   userRoot: string,
-  scope: "project" | "user",
+  scope: CapabilityScope,
 ): FilesystemLegacyOwnedMarkerV1[] {
   const lock = readJson(scopeRoot, ".vibeflow/SKILL_REGISTRY.lock.json");
   const output: FilesystemLegacyOwnedMarkerV1[] = [];
@@ -304,7 +307,7 @@ function scanSkills(
       output.push(
         marker({
           scope,
-          source: "skill-lock",
+          source: LEGACY_SOURCE.SKILL_LOCK,
           engine: surface.engine,
           rawIdentifier: name,
           logicalId: `${surface.engine}:${name}`,
@@ -323,7 +326,7 @@ function scanSkills(
   return output;
 }
 
-function scanHooks(root: string, scope: "project" | "user"): FilesystemLegacyOwnedMarkerV1[] {
+function scanHooks(root: string, scope: CapabilityScope): FilesystemLegacyOwnedMarkerV1[] {
   const output: FilesystemLegacyOwnedMarkerV1[] = [];
   const opencodePath = ".opencode/plugins/vf-guard.ts";
   const opencode = readProjectionFile(boundedProjectionPath(root, opencodePath));
@@ -331,8 +334,8 @@ function scanHooks(root: string, scope: "project" | "user"): FilesystemLegacyOwn
     output.push(
       marker({
         scope,
-        source: "hook-sentinel",
-        engine: "opencode",
+        source: LEGACY_SOURCE.HOOK_SENTINEL,
+        engine: AGENT_ENGINE.OPENCODE,
         rawIdentifier: "vf-guardrail",
         logicalId: "opencode:vf-guardrail",
         publicTarget: opencodePath,
@@ -354,8 +357,8 @@ function scanHooks(root: string, scope: "project" | "user"): FilesystemLegacyOwn
       output.push(
         marker({
           scope,
-          source: "hook-sentinel",
-          engine: "antigravity",
+          source: LEGACY_SOURCE.HOOK_SENTINEL,
+          engine: AGENT_ENGINE.ANTIGRAVITY,
           rawIdentifier: "vf-guardrail",
           logicalId: "antigravity:vf-guardrail",
           publicTarget: `${antigravityPath}#vibeflow-guardrail`,
@@ -380,9 +383,10 @@ export class FilesystemLegacyMarkerReaderV1 implements LegacyMarkerReaderV1 {
   scan(request: LegacyAdoptScanRequestV1): LegacyOwnedMarkerV1[] {
     const root = this.roots[request.scope];
     const markers = request.sources.flatMap((source) => {
-      if (source === "skill-lock") return scanSkills(root, this.roots.user, request.scope);
-      if (source === "mcp-managed-sidecar") return scanMcp(root, request.scope);
-      if (source === "hook-sentinel") return scanHooks(root, request.scope);
+      if (source === LEGACY_SOURCE.SKILL_LOCK)
+        return scanSkills(root, this.roots.user, request.scope);
+      if (source === LEGACY_SOURCE.MCP_MANAGED_SIDECAR) return scanMcp(root, request.scope);
+      if (source === LEGACY_SOURCE.HOOK_SENTINEL) return scanHooks(root, request.scope);
       // Tool presence is not ownership evidence, and legacy role writers emitted no marker.
       return [];
     });

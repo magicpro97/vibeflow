@@ -1,8 +1,10 @@
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import { CAPABILITY_SCOPES } from "../../core/capability-contract.js";
 import { CapabilityValidationError, digest, integer, text, timestamp } from "../wire/primitives.js";
 import { validateActionRootLocator } from "./shapes.js";
 
-export const AUTHORITY_SCOPES = ["project", "user"] as const;
+export const AUTHORITY_SCOPES = CAPABILITY_SCOPES;
 
 export function nullableAuthorityDigest(value: unknown, path: string): void {
   if (value !== null) digest(value, path);
@@ -28,7 +30,7 @@ export function validateCommonAuthorityFrame(value: {
   digest(value.plan_digest, "plan_digest");
   digest(value.operation_header_digest, "operation_header_digest");
   validateActionRootLocator(value.action_root_locator, "action_root_locator");
-  if (value.action_root_locator.kind === "capability")
+  if (value.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY)
     digest(
       value.action_root_locator.scope_identity_digest,
       "action_root_locator.scope_identity_digest",

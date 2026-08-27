@@ -823,6 +823,20 @@ describe("probeInvocation (test seam)", () => {
     expect(inv.args).toContain("doctor");
   });
 
+  test("probeInvocation: opencode sends the prompt once on stdin without a dash positional", () => {
+    const { probeInvocation } = require("../src/preflight.js");
+    const inv = probeInvocation("opencode", "ONE PROMPT");
+    expect(inv).toEqual({
+      cmd: "opencode",
+      args: ["run", "--format", "json"],
+      input: "ONE PROMPT",
+    });
+    expect(inv.args).not.toContain("-");
+    expect([...inv.args, inv.input].filter((value) => value.includes("ONE PROMPT"))).toHaveLength(
+      1,
+    );
+  });
+
   test("preflight: result with code=ENOENT → no-binary (line 150)", () => {
     const { checkEngine } = require("../src/preflight.js");
     const r = checkEngine("claude", {

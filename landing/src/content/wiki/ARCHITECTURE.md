@@ -2,7 +2,7 @@
 title: Architecture
 description: High-level architecture of VibeFlow — AI-first Home, conversation runtime, owned async dispatch, and typed capability fabric.
 category: explanation
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Architecture
@@ -14,6 +14,7 @@ last_updated: 2026-08-26
 - [Stuck Detection](#stuck-detection)
 - [Crash Recovery](#crash-recovery)
 - [Conversation Turn Delivery](#conversation-turn-delivery)
+- [Protocol Authority Standard](#protocol-authority-standard)
 - [Tool Adapters](#tool-adapters)
 - [Source Modules](#source-modules)
 - [Core Data Flow](#core-data-flow)
@@ -72,14 +73,14 @@ Responsibilities:
 - Keep add/remove-agent actions, queue editing, quotes, reactions, and approval/capability
   actions inside the conversation instead of opening a separate workspace.
 - Surface details, capabilities, and trace drawers without leaving the current conversation.
-- Fall back to the intake wizard for first-run repo setup and context capture.
+- Keep repository intake outside Home; `vf init` asks its questionnaire in a TTY.
 
 ### 3. Conversation / Dispatch Orchestrator Core
 
 Responsibilities:
 
 - Keep the durable FIFO message queue, private file context, and turn envelope (`VF-TURN/1`).
-- Preserve each CLI's native session history when exact resume proof exists; fall back to full public context when it does not.
+- Preserve native history for exact Claude, Codex, and OpenCode resumes. Otherwise attach bounded structured recipient history to canonical public context.
 - Dispatch Claude Code, Codex, Copilot, OpenCode, or Antigravity CLI through the canonical owned async route.
 - Verify output, trace evidence, and completion state.
 - Propose skill updates and owned-process recovery when evidence is incomplete.
@@ -90,7 +91,7 @@ Responsibilities:
 
 - Translate canonical workflow context into each engine's expected format.
 - Maintain typed capability manifests and adapters for skills, MCP, tools, hooks, roles, and engine settings.
-- Extend the selected CLI with approved capabilities without loading arbitrary browser plugin code.
+- Extend the selected CLI with approved capabilities without turning VibeFlow into another coding engine or loading arbitrary browser plugin code.
 - Expose `quota()` and `probe()` capabilities used by the preflight gate.
 
 ## Stuck Detection
@@ -135,22 +136,41 @@ the process is quiescent and stdout/stderr have crossed the `streams-drained` ba
 Linux uses boot id plus `/proc` start ticks; macOS uses exact Darwin `libproc`
 seconds/microseconds. `vf doctor --fix` takes over only after exact proof that an owner is no
 longer the recorded process. Live or unprovable owners fail closed. Windows behavior has
-injected cross-platform regression coverage in this tree; this evidence does not claim a live
-Windows canary. See `docs/ENGINE-COMPAT.md` for adapter-specific resume contracts.
+injected regression coverage and a real `windows-latest` CI smoke job. Treat live Windows
+evidence as pending until that job is green; a local macOS/Linux run is not a Windows canary.
+See `docs/ENGINE-COMPAT.md` for adapter-specific resume contracts.
 
 ## Conversation Turn Delivery
 
-Public participant input is a canonical JSON envelope prefixed by `VF-TURN/1`. A proved
-exact native resume reuses the selected CLI's session and sends only new applicable user
+Public participant input is a canonical JSON envelope prefixed by `VF-TURN/1`. Claude,
+Codex, and OpenCode are the only engines with proved exact by-id authority. A proved exact
+native resume reuses the selected CLI's session and sends only new applicable user
 messages plus peer-agent responses/reactions. The recipient's own prior output stays in that
-native history and is not echoed back. Missing or stale cursor proof switches to the
-full applicable public handoff, optionally combined with content-addressed `VF-HANDOFF/1`.
+native history and is not echoed back. Without valid exact authority, the full turn adds a
+bounded replay of the recipient's last eight public responses to applicable user/peer context.
+Each replay summary is capped at 2 KiB UTF-8 and carries source digest, provenance, and
+count/truncation metadata. Copilot and Antigravity therefore never claim exact resume or
+silently omit the recipient's own context. A full turn may also include content-addressed
+`VF-HANDOFF/1`.
 
 Private file ranges are materialized separately as one-shot canonical JSON prefixed by
 `VF-PRIVATE-FILE-RANGES/1`; they never enter public trace/browser persistence and are cleared
 after use. Prompt transport remains adapter-specific. A large Copilot work-unit prompt can use
 `.vibeflow/dispatch/<unit>.md` plus a short absolute read pointer, but that file is transport,
 not memory or native session state.
+
+## Protocol Authority Standard
+
+Persisted, API, and configuration closed vocabularies have one dependency-light source of
+truth. Production contracts declare an `Object.freeze({ ... } as const)` authority, infer
+their TypeScript union and frozen value list from it, and expose prototype-safe guards for
+untrusted boundaries. Backend, CLI, and browser consumers import or alias that same authority.
+
+TypeScript `enum`/`const enum`, duplicate UI wire unions, mutable vocabulary `Set`s, blind
+casts, and raw producer/comparison literals are rejected by dynamic source gates. Exhaustive
+maps and intentional subsets must also be frozen and typed from the authority. This rule is
+for cross-layer protocol vocabulary; ordinary prose and genuinely local one-off strings stay
+ordinary strings.
 
 ## Wave Handoff
 
@@ -227,7 +247,7 @@ src/plan-review/            # immutable revision store, blocks parser, types
 ```text
 User input
   ↓
-AI-first Home / intake wizard
+AI-first Home or the separate `vf init` TTY questionnaire
   ↓
 Source resolver
   ↓

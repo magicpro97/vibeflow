@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { computed, ref } from "vue";
+import { HOST_ACTION_KIND } from "../src/actions/host-action-contract.js";
+import {
+  ACTION_OPERATION_SSE_EVENT,
+  ACTION_OPERATION_STATE,
+} from "../src/actions/protocol-contract.js";
+import {
+  PUBLIC_OPERATION_FIXED_PHASE,
+  PUBLIC_OPERATION_PREFIXED_PHASE,
+  PUBLIC_OPERATION_PROGRESS_STATUS,
+} from "../src/actions/public-operation-contract.js";
 import { createHomeActionMutationRuntime } from "../src/ui/src/conversation-home-action-runtime.js";
 import { conversationHomeApi } from "../src/ui/src/conversation-home-api.js";
 import { createHomeCommandRuntime } from "../src/ui/src/conversation-home-command-runtime.js";
@@ -78,6 +89,11 @@ function actionApproval(proposalId: string): HomeActionApproval {
     proposal_digest: `digest-${proposalId}`,
     decision: "approved",
     challenge_class: "fresh-user-scope",
+    decided_by: {
+      kind: "human-browser",
+      public_actor_id: "reviewer",
+      credential_class: "loopback-session",
+    },
     decided_at: "2026-08-25T00:00:00.000Z",
     expires_at: "2026-08-25T01:00:00.000Z",
   };
@@ -89,6 +105,7 @@ function actionView(
   overrides: Partial<HomeActionView> = {},
 ): HomeActionView {
   return {
+    schema_version: "1.0",
     proposal: {
       schema_version: "1.0",
       proposal_id: proposalId,
@@ -97,17 +114,36 @@ function actionView(
       action_type: "conversation.update_settings",
       domain: "conversation",
       scope: "conversation",
+      authority_binding_mode: "current",
       risk: "low",
       effect_classes: [],
       targets: [],
       package_pins: [],
+      adapter_set_digest: `adapter-${proposalId}`,
+      plan_digest: `plan-${proposalId}`,
+      policy_digest: `policy-${proposalId}`,
+      permission_digest: `permission-${proposalId}`,
       reversibility: "reversible",
       preview: {
         title,
         summary: title,
+        action_type: "conversation.update_settings",
+        planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+        review_fields: [],
+        targets: [],
+        package_pins: [],
         permission_delta: [],
         target_dispositions: [],
+        dependency_delta: [],
+        config_diffs: [],
+        effect_classes: [],
+        enforcement: [],
+        reversibility: "reversible",
+        health_plan: [],
         recovery_actions: [],
+        projector_version: "1.0",
+        rules_digest: `rules-${proposalId}`,
+        redaction_manifest_digest: `redaction-${proposalId}`,
       },
       created_at: "2026-08-25T00:00:00.000Z",
       expires_at: "2026-08-25T01:00:00.000Z",
@@ -127,7 +163,7 @@ function actionView(
       latest_event_cursor: null,
       progress: [],
       targets: [],
-      delivery: "inline",
+      delivery: "not-applicable",
       result_ref: null,
       error: null,
       recovery_actions: [],
@@ -303,6 +339,7 @@ function actionHarness(initialRoot = "root-a") {
   const challenges = ref<Record<string, HomePendingChallenge>>({});
   const actionBusy = ref<Record<string, boolean>>({});
   const actionBusyTokens = ref<Record<string, string>>({});
+  const reconciledActions: HomeActionView[] = [];
   const runtime = createHomeActionMutationRuntime({
     activation,
     activeRootId,
@@ -313,6 +350,7 @@ function actionHarness(initialRoot = "root-a") {
     challenges,
     actionBusy,
     actionBusyTokens,
+    reconcileOperation: (view) => reconciledActions.push(view),
   });
 
   return {
@@ -325,6 +363,7 @@ function actionHarness(initialRoot = "root-a") {
     challenges,
     actionBusy,
     actionBusyTokens,
+    reconciledActions,
     runtime,
   };
 }
@@ -610,8 +649,20 @@ describe("conversation Home command races", () => {
 
   test("requestChallenge keeps the second activation busy slot intact when proposal ids are reused", async () => {
     const originalChallenge = conversationHomeApi.challenge;
-    const first = deferred<{ challenge_id: string; display_phrase: string; expires_at: string }>();
-    const second = deferred<{ challenge_id: string; display_phrase: string; expires_at: string }>();
+    const first = deferred<{
+      schema_version: "1.0";
+      challenge_id: string;
+      challenge_class: "public-literal";
+      display_phrase: string;
+      expires_at: string;
+    }>();
+    const second = deferred<{
+      schema_version: "1.0";
+      challenge_id: string;
+      challenge_class: "public-literal";
+      display_phrase: string;
+      expires_at: string;
+    }>();
     let calls = 0;
     conversationHomeApi.challenge = (() => {
       calls += 1;
@@ -641,7 +692,9 @@ describe("conversation Home command races", () => {
       const runningB = harness.runtime.requestChallenge(viewB);
 
       first.resolve({
+        schema_version: "1.0",
         challenge_id: "challenge-a",
+        challenge_class: "public-literal",
         display_phrase: "A",
         expires_at: "2099-08-25T00:10:00.000Z",
       });
@@ -650,7 +703,9 @@ describe("conversation Home command races", () => {
       expect(harness.challenges.value[proposalId]).toBeUndefined();
 
       second.resolve({
+        schema_version: "1.0",
         challenge_id: "challenge-b",
+        challenge_class: "public-literal",
         display_phrase: "B",
         expires_at: "2099-08-25T00:10:00.000Z",
       });
@@ -726,7 +781,9 @@ describe("conversation Home command races", () => {
 
       seed();
       conversationHomeApi.challenge = (async () => ({
+        schema_version: "1.0",
         challenge_id: "malformed-challenge",
+        challenge_class: "fresh-user-scope",
         display_phrase: "new phrase",
         expires_at: "August 25, 2099 00:10:00 UTC",
       })) as typeof conversationHomeApi.challenge;
@@ -756,6 +813,7 @@ describe("conversation Home command races", () => {
     ) => {
       approveCalls.push({ conversationId, proposalId, digest, decision, challenge });
       return {
+        schema_version: "1.0",
         approval: actionApproval(proposalId),
         operation: { ...actionView(proposalId, "Project critical").operation, state: "approved" },
       };
@@ -786,6 +844,7 @@ describe("conversation Home command races", () => {
   test("deny clears an existing typed challenge after the rejection is recorded", async () => {
     const originalApprove = conversationHomeApi.approve;
     conversationHomeApi.approve = (async () => ({
+      schema_version: "1.0",
       approval: { ...actionApproval("proposal-deny"), decision: "denied" as const },
       operation: { ...actionView("proposal-deny", "Denied").operation, state: "denied" },
     })) as typeof conversationHomeApi.approve;
@@ -809,6 +868,28 @@ describe("conversation Home command races", () => {
       expect(harness.pendingActions.value[0]?.operation.state).toBe("denied");
     } finally {
       conversationHomeApi.approve = originalApprove;
+    }
+  });
+
+  test("does not bind an operation stream after the proposal leaves the current review list", async () => {
+    const originalCancel = conversationHomeApi.cancel;
+    const response = deferred<unknown>();
+    conversationHomeApi.cancel = (() => response.promise) as typeof conversationHomeApi.cancel;
+    try {
+      const harness = actionHarness("root-a");
+      const view = actionView("proposal-removed", "Removed action");
+      harness.pendingActions.value = [view];
+      const running = harness.runtime.mutateAction(view, "cancel");
+      harness.pendingActions.value = [];
+      response.resolve({
+        schema_version: "1.0",
+        operation: { ...view.operation, state: ACTION_OPERATION_STATE.CANCELED },
+      });
+      await running;
+      expect(view.operation.state).toBe(ACTION_OPERATION_STATE.CANCELED);
+      expect(harness.reconciledActions).toEqual([]);
+    } finally {
+      conversationHomeApi.cancel = originalCancel;
     }
   });
 
@@ -893,6 +974,7 @@ describe("conversation Home command races", () => {
         await runningB;
         expect(harness.actionBusy.value[proposalId]).toBeUndefined();
         expect(harness.pendingActions.value[0]?.operation.state).toBe(nextState);
+        expect(harness.reconciledActions).toEqual([viewB]);
       } finally {
         conversationHomeApi.approve = originalApprove;
         conversationHomeApi.commit = originalCommit;
@@ -1109,18 +1191,44 @@ describe("conversation Home command races", () => {
     class FakeEventSource {
       static readonly instances: FakeEventSource[] = [];
       closed = false;
-      private listener: ((event: { data: string }) => void) | null = null;
+      private readonly listeners = new Map<
+        string,
+        (event: { data: string; lastEventId: string }) => void
+      >();
 
       constructor(readonly url: string) {
         FakeEventSource.instances.push(this);
       }
 
-      addEventListener(type: string, listener: (event: { data: string }) => void): void {
-        if (type === "operation") this.listener = listener;
+      addEventListener(
+        type: string,
+        listener: (event: { data: string; lastEventId: string }) => void,
+      ): void {
+        this.listeners.set(type, listener);
       }
 
       emit(update: unknown): void {
-        this.listener?.({ data: JSON.stringify(update) });
+        this.listeners.get(ACTION_OPERATION_SSE_EVENT.OPERATION)?.({
+          data: JSON.stringify(update),
+          lastEventId:
+            typeof update === "object" && update !== null && "event_cursor" in update
+              ? String(update.event_cursor)
+              : "",
+        });
+      }
+
+      emitError(error: unknown): void {
+        this.listeners.get(ACTION_OPERATION_SSE_EVENT.ERROR)?.({
+          data: JSON.stringify(error),
+          lastEventId: "",
+        });
+      }
+
+      emitTransportError(): void {
+        this.listeners.get(ACTION_OPERATION_SSE_EVENT.ERROR)?.({
+          data: undefined as unknown as string,
+          lastEventId: "",
+        });
       }
 
       close(): void {
@@ -1134,10 +1242,37 @@ describe("conversation Home command races", () => {
     const token = activation.begin("root-a");
     const streams = new ActivationResourceRegistry<EventSource>();
     const view = actionView("proposal-stream", "Stream operation");
+    view.proposal.action_type = HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT;
+    view.proposal.domain = "conversation";
+    view.operation.domain = "conversation";
     const cursor = (digit: string) => `vf-operation-event-${digit.repeat(64)}`;
-    view.operation.state = "approved";
+    view.operation.state = "committing";
     view.operation.phase_sequence = 2;
     view.operation.latest_event_cursor = cursor("2");
+    view.operation.progress = [
+      {
+        sequence: 0,
+        phase: PUBLIC_OPERATION_FIXED_PHASE.DISPATCH,
+        status: PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+        message_code: `operation.${PUBLIC_OPERATION_FIXED_PHASE.DISPATCH}`,
+        at: "2026-08-25T00:00:00.000Z",
+      },
+      {
+        sequence: 1,
+        phase: PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.STARTING,
+        status: PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+        message_code: `operation.${PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.STARTING}`,
+        at: "2026-08-25T00:00:01.000Z",
+      },
+      {
+        sequence: 2,
+        phase: PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.PREPARING,
+        status: PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+        message_code: `operation.${PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.PREPARING}`,
+        at: "2026-08-25T00:00:02.000Z",
+      },
+    ];
+    view.operation.updated_at = "2026-08-25T00:00:02.000Z";
     const currentOperationState = (): HomeActionView["operation"]["state"] => view.operation.state;
     let invalidUpdates = 0;
     let reloads = 0;
@@ -1155,19 +1290,42 @@ describe("conversation Home command races", () => {
           invalidUpdates += 1;
         },
       });
-    const update = (sequence: number, state: string, digit: string) => ({
-      state,
-      phase_sequence: sequence,
-      progress: null,
-      target: null,
-      event_cursor: cursor(digit),
-    });
+    const update = (sequence: number, state: "committing" | "succeeded", digit: string) => {
+      const terminal = state === "succeeded";
+      const phase = terminal
+        ? PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.STARTED
+        : PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.PREPARING;
+      return {
+        schema_version: "1.0",
+        operation_id: view.operation.operation_id,
+        state,
+        phase_sequence: sequence,
+        progress: {
+          sequence,
+          phase,
+          status: terminal
+            ? PUBLIC_OPERATION_PROGRESS_STATUS.SUCCEEDED
+            : PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+          message_code: `operation.${phase}`,
+          at: `2026-08-25T00:00:0${sequence}.000Z`,
+        },
+        target: null,
+        error: null,
+        occurred_at: `2026-08-25T00:00:0${sequence}.000Z`,
+        event_cursor: cursor(digit),
+      };
+    };
 
     try {
       watch();
       const first = FakeEventSource.instances[0];
       if (!first) throw new Error("first operation stream was not opened");
-      first.emit(update(2, "approved", "2"));
+      first.emit(update(2, "committing", "2"));
+      expect(first.closed).toBeFalse();
+      expect(invalidUpdates).toBe(0);
+      expect(reloads).toBe(0);
+
+      first.emitTransportError();
       expect(first.closed).toBeFalse();
       expect(invalidUpdates).toBe(0);
       expect(reloads).toBe(0);
@@ -1175,14 +1333,24 @@ describe("conversation Home command races", () => {
       first.emit(update(1, "committing", "1"));
       expect(first.closed).toBeTrue();
       expect(view.operation.phase_sequence).toBe(2);
-      expect(view.operation.state).toBe("approved");
+      expect(view.operation.state).toBe("committing");
       expect(invalidUpdates).toBe(1);
       expect(reloads).toBe(1);
 
       watch();
       const second = FakeEventSource.instances[1];
       if (!second) throw new Error("second operation stream was not opened");
-      second.emit(update(2, "approved", "f"));
+      second.emit({
+        ...update(2, "committing", "2"),
+        progress: {
+          sequence: 2,
+          phase: PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.PREPARING,
+          status: PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+          message_code: `operation.${PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.PREPARING}`,
+          at: "2026-08-25T00:00:09.000Z",
+        },
+        occurred_at: "2026-08-25T00:00:09.000Z",
+      });
       expect(second.closed).toBeTrue();
       expect(invalidUpdates).toBe(2);
       expect(reloads).toBe(2);
@@ -1190,12 +1358,35 @@ describe("conversation Home command races", () => {
       watch();
       const third = FakeEventSource.instances[2];
       if (!third) throw new Error("third operation stream was not opened");
-      third.emit(update(3, "denied", "3"));
+      third.emit(update(2, "committing", "f"));
       expect(third.closed).toBeTrue();
-      expect(view.operation.phase_sequence).toBe(3);
-      expect(currentOperationState()).toBe("denied");
-      expect(invalidUpdates).toBe(2);
+      expect(invalidUpdates).toBe(3);
       expect(reloads).toBe(3);
+
+      watch();
+      const fourth = FakeEventSource.instances[3];
+      if (!fourth) throw new Error("fourth operation stream was not opened");
+      fourth.emitError({
+        code: "service_unavailable",
+        message: "The operation event stream is unavailable.",
+        correlation_id: "vf-operation-stream-test",
+        retryable: true,
+        recovery_action: "retry",
+        details: null,
+      });
+      expect(fourth.closed).toBeTrue();
+      expect(invalidUpdates).toBe(4);
+      expect(reloads).toBe(4);
+
+      watch();
+      const fifth = FakeEventSource.instances[4];
+      if (!fifth) throw new Error("fifth operation stream was not opened");
+      fifth.emit(update(3, "succeeded", "3"));
+      expect(fifth.closed).toBeTrue();
+      expect(view.operation.phase_sequence).toBe(3);
+      expect(currentOperationState()).toBe("succeeded");
+      expect(invalidUpdates).toBe(4);
+      expect(reloads).toBe(5);
     } finally {
       activation.close();
       globalThis.EventSource = originalEventSource;
@@ -1214,7 +1405,7 @@ describe("conversation Home command races", () => {
   });
 
   test("Home production files stay under 400 lines", () => {
-    const root = join(process.cwd(), "src/ui/src");
+    const root = fileURLToPath(new URL("../src/ui/src/", import.meta.url));
     const walk = (directory: string): string[] =>
       readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
         const next = join(directory, entry.name);

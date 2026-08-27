@@ -4,6 +4,7 @@
 // mark transitive dependents as needs-review, run evals, report pass/fail.
 
 import { c } from "../core.js";
+import { SKILL_DOMAIN_ROLE } from "../core/skill-contract.js";
 import type { Skill } from "../core/types.js";
 import { out } from "../logbus.js";
 import {
@@ -36,7 +37,7 @@ export function skillsUpdateDependentCmd(repo: string, rest: string[]): number {
     out("vf", c.red(`Canonical skill "${canonicalName}" not found.`), { level: "error" });
     return 1;
   }
-  if (canonical.domain?.role !== "canonical") {
+  if (canonical.domain?.role !== SKILL_DOMAIN_ROLE.CANONICAL) {
     out(
       "vf",
       c.yellow(

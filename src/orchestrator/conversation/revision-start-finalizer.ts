@@ -1,3 +1,7 @@
+import {
+  ACTION_OPERATION_STATE as ACTION,
+  PUBLIC_OPERATION_REVISION_PHASE as REVISION,
+} from "../../actions/protocol-contract.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import type { RevisionReservationRecordV1 } from "./lineage-reservation.js";
@@ -6,6 +10,7 @@ import type {
   RevisionPreparationPlanV1,
 } from "./lineage-revision-operation.js";
 import { foldRevisionOperation } from "./revision-fold.js";
+import { REVISION_OPERATION_EVENT_PAYLOAD_KIND as EVENT } from "./revision-operation-event-contract.js";
 import type { PreparedConversationRevisionV1 } from "./revision-operation-executor.js";
 import { type RevisionOperationEventV1, materializeRevisionEvent } from "./revision-planner.js";
 import { reconcilePublishedRevisionReservation } from "./revision-reservation-reconciliation.js";
@@ -16,10 +21,14 @@ import type {
 import type { ConversationRuntime } from "./runtime.js";
 import type { ConversationOrchestrationResult } from "./types.js";
 
+type StartOutcome = (typeof ACTION)["SUCCEEDED" | "FAILED" | "NEEDS_RECOVERY"];
+type StartDestination = (typeof REVISION)["STARTED" | "START_FAILED" | "NEEDS_RECOVERY"];
+type StartSource = (typeof REVISION)["PUBLISHED" | "STARTING"];
+
 type DurableStartTerminalV1 = {
   event: RevisionOperationEventV1;
-  outcome: "succeeded" | "failed" | "needs_recovery";
-  destination: "started" | "start_failed" | "needs_recovery";
+  outcome: StartOutcome;
+  destination: StartDestination;
 };
 
 function durableStartTerminal(
@@ -28,10 +37,13 @@ function durableStartTerminal(
 ): DurableStartTerminalV1 | null {
   const matches = events.filter(
     (event) =>
-      event.payload.kind === "state-transition" &&
-      ((event.payload.from === "starting" &&
-        ["started", "start_failed", "needs_recovery"].includes(event.payload.to)) ||
-        (event.payload.from === "published" && event.payload.to === "needs_recovery")) &&
+      event.payload.kind === EVENT.STATE_TRANSITION &&
+      ((event.payload.from === REVISION.STARTING &&
+        (event.payload.to === REVISION.STARTED ||
+          event.payload.to === REVISION.START_FAILED ||
+          event.payload.to === REVISION.NEEDS_RECOVERY)) ||
+        (event.payload.from === REVISION.PUBLISHED &&
+          event.payload.to === REVISION.NEEDS_RECOVERY)) &&
       event.payload.authorized_by_action_operation_id === operationId &&
       event.payload.effect_action_operation_id === operationId &&
       event.payload.action_terminals.some(
@@ -40,7 +52,7 @@ function durableStartTerminal(
   );
   if (matches.length > 1) throw new Error("revision start terminal authority is duplicated");
   const event = matches[0];
-  if (!event || event.payload.kind !== "state-transition") return null;
+  if (!event || event.payload.kind !== EVENT.STATE_TRANSITION) return null;
   const terminal = event.payload.action_terminals.find(
     (candidate) => candidate.action_operation_id === operationId,
   );
@@ -87,9 +99,10 @@ export function reconcilePublishedRevisionStartTerminal(input: {
 
 function appendOriginalActionTerminal(input: {
   operation: RevisionOperationV1;
+  revisionPlan: RevisionPreparationPlanV1;
   events: RevisionOperationEventV1[];
-  from: "published" | "starting";
-  destination: "started" | "start_failed" | "needs_recovery";
+  from: StartSource;
+  destination: StartDestination;
   outcome: DurableStartTerminalV1["outcome"];
   reason: string | null;
   proposalId: string;
@@ -102,7 +115,7 @@ function appendOriginalActionTerminal(input: {
       input.operation,
       input.events,
       {
-        kind: "state-transition",
+        kind: EVENT.STATE_TRANSITION,
         from: input.from,
         to: input.destination,
         authorized_by_action_operation_id: input.operation.operation_id,
@@ -128,7 +141,11 @@ function appendOriginalActionTerminal(input: {
     });
   } catch (error) {
     const currentEvents = input.home.revisions.readEvents(input.operation.operation_id);
-    if (foldRevisionOperation(input.operation, currentEvents).state !== input.destination)
+    if (
+      foldRevisionOperation(input.operation, currentEvents, {
+        preparationPlan: input.revisionPlan,
+      }).state !== input.destination
+    )
       throw error;
     const terminal = durableStartTerminal(input.operation.operation_id, currentEvents);
     if (!terminal) throw error;
@@ -154,7 +171,9 @@ function finalizePublishedRevisionStartAuthority(input: {
   if (operation.proposal_id !== input.proposalId)
     throw new Error("published revision proposal binding changed");
   let events = input.home.revisions.readEvents(operation.operation_id);
-  const state = foldRevisionOperation(operation, events).state;
+  const state = foldRevisionOperation(operation, events, {
+    preparationPlan: input.revisionPlan,
+  }).state;
   const durableTerminal = durableStartTerminal(operation.operation_id, events);
   if (durableTerminal) {
     mirrorActionTerminal({
@@ -165,7 +184,7 @@ function finalizePublishedRevisionStartAuthority(input: {
     });
     return durableTerminal.destination;
   }
-  if (state !== "starting") return null;
+  if (state !== REVISION.STARTING) return null;
   input.owner.assertHeld();
   const destination = input.home.revisionLanes.finalize(
     operation,
@@ -175,21 +194,22 @@ function finalizePublishedRevisionStartAuthority(input: {
   );
   events = input.home.revisions.readEvents(operation.operation_id);
   const outcome =
-    destination === "started"
-      ? "succeeded"
-      : destination === "start_failed"
-        ? "failed"
-        : "needs_recovery";
+    destination === REVISION.STARTED
+      ? ACTION.SUCCEEDED
+      : destination === REVISION.START_FAILED
+        ? ACTION.FAILED
+        : ACTION.NEEDS_RECOVERY;
   const reason =
-    destination === "started"
+    destination === REVISION.STARTED
       ? null
-      : destination === "start_failed"
+      : destination === REVISION.START_FAILED
         ? "child_start_failed"
         : "child_start_uncertain";
   appendOriginalActionTerminal({
     operation,
+    revisionPlan: input.revisionPlan,
     events,
-    from: "starting",
+    from: REVISION.STARTING,
     destination,
     outcome,
     reason,
@@ -226,15 +246,18 @@ export function interruptPublishedRevisionStart(input: {
 }): boolean {
   const operation = input.prepared.operation;
   const events = input.home.revisions.readEvents(operation.operation_id);
-  const state = foldRevisionOperation(operation, events).state;
-  if (state !== "published" && state !== "starting")
+  const state = foldRevisionOperation(operation, events, {
+    preparationPlan: input.prepared.revisionPlan,
+  }).state;
+  if (state !== REVISION.PUBLISHED && state !== REVISION.STARTING)
     return durableStartTerminal(operation.operation_id, events) !== null;
   appendOriginalActionTerminal({
     operation,
+    revisionPlan: input.prepared.revisionPlan,
     events,
     from: state,
-    destination: "needs_recovery",
-    outcome: "needs_recovery",
+    destination: REVISION.NEEDS_RECOVERY,
+    outcome: ACTION.NEEDS_RECOVERY,
     reason: "child_start_uncertain",
     proposalId: input.prepared.proposal.proposal_id,
     home: input.home,
@@ -267,8 +290,10 @@ export async function recoverInterruptedPublishedRevisionStart(input: {
   )
     return true;
   const events = input.home.revisions.readEvents(input.operation.operation_id);
-  const state = foldRevisionOperation(input.operation, events).state;
-  if (state !== "published" && state !== "starting") return false;
+  const state = foldRevisionOperation(input.operation, events, {
+    preparationPlan: input.revisionPlan,
+  }).state;
+  if (state !== REVISION.PUBLISHED && state !== REVISION.STARTING) return false;
   if (
     input.revisionPlan.root_session_id !== input.operation.root_session_id ||
     input.revisionPlan.parent.conversation_id !== input.operation.parent.conversation_id ||
@@ -299,8 +324,10 @@ export async function recoverInterruptedPublishedRevisionStart(input: {
       consumedAt: input.operation.created_at,
     });
     const latestEvents = input.home.revisions.readEvents(input.operation.operation_id);
-    const latestState = foldRevisionOperation(input.operation, latestEvents).state;
-    if (latestState !== "published" && latestState !== "starting") {
+    const latestState = foldRevisionOperation(input.operation, latestEvents, {
+      preparationPlan: input.revisionPlan,
+    }).state;
+    if (latestState !== REVISION.PUBLISHED && latestState !== REVISION.STARTING) {
       terminal = reconcilePublishedRevisionStartTerminal({
         operation: input.operation,
         proposalId: input.proposalId,
@@ -310,10 +337,11 @@ export async function recoverInterruptedPublishedRevisionStart(input: {
     }
     appendOriginalActionTerminal({
       operation: input.operation,
+      revisionPlan: input.revisionPlan,
       events: latestEvents,
       from: latestState,
-      destination: "needs_recovery",
-      outcome: "needs_recovery",
+      destination: REVISION.NEEDS_RECOVERY,
+      outcome: ACTION.NEEDS_RECOVERY,
       reason: "child_start_uncertain",
       proposalId: input.proposalId,
       home: input.home,
@@ -324,12 +352,15 @@ export async function recoverInterruptedPublishedRevisionStart(input: {
   } finally {
     if (!terminal)
       try {
-        terminal = ["started", "start_failed", "needs_recovery"].includes(
-          foldRevisionOperation(
-            input.operation,
-            input.home.revisions.readEvents(input.operation.operation_id),
-          ).state,
-        );
+        const finalState = foldRevisionOperation(
+          input.operation,
+          input.home.revisions.readEvents(input.operation.operation_id),
+          { preparationPlan: input.revisionPlan },
+        ).state;
+        terminal =
+          finalState === REVISION.STARTED ||
+          finalState === REVISION.START_FAILED ||
+          finalState === REVISION.NEEDS_RECOVERY;
       } catch {
         // An unverifiable terminal must retain the owner proof until process death.
       }
@@ -357,7 +388,7 @@ export async function retryPublishedRevisionStart(
       artifactStore: options.artifactStore,
       owner: options.owner,
     });
-    if (destination !== "started") return destination === "needs_recovery";
+    if (destination !== REVISION.STARTED) return destination === REVISION.NEEDS_RECOVERY;
     options.owner.assertHeld();
     await options.executeConfigured(prepared.manifest, prepared.runtimeOperationId);
     return true;

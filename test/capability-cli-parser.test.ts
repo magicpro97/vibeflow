@@ -116,6 +116,28 @@ describe("capability CLI raw argv parser", () => {
     ).toThrow(/idempotency-key/i);
   });
 
+  test("documented private-input bind shape accepts explicit non-tty authority", () => {
+    const parsed = parseCapabilityCliArgv(
+      [
+        "private-input",
+        "bind",
+        "acme.reviewer",
+        "--scope",
+        "project",
+        "--input",
+        "api_key",
+        "--values-stdin",
+        "--idempotency-key",
+        "private-input-1",
+      ],
+      { stdinIsTTY: false, stdinHasData: true },
+    );
+    expect(parsed.kind).toBe("private-input");
+    if (parsed.kind !== "private-input") throw new Error("unreachable");
+    expect(parsed.idempotencyKey).toBe("private-input-1");
+    expect(parsed.inputIds).toEqual(["api_key"]);
+  });
+
   test("non-interactive direct capability mutations require an outer idempotency key", () => {
     expect(() =>
       parseCapabilityCliArgv(["remove", "acme.demo", "--scope", "project"], {

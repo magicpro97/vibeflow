@@ -1,8 +1,11 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_OPERATION_STATE,
   type ActionProposalRequestV1,
   type ActionRequestAuthorityV1,
   type BrowserHostActionRequestV1,
   type HostActionV1,
+  PUBLIC_OPERATION_REVISION_PHASE,
   deriveOperationId,
 } from "../../actions/index.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
@@ -24,6 +27,10 @@ import {
 import { executeRevisionRetry } from "./revision-control-retry.js";
 import { foldRevisionOperation } from "./revision-fold.js";
 import type { RevisionLaneRetryRuntime } from "./revision-lane-retry-runtime.js";
+import {
+  REVISION_OPERATION_EVENT_PAYLOAD_KIND,
+  REVISION_OPERATION_INITIAL_PHASE,
+} from "./revision-operation-event-contract.js";
 import {
   type RevisionActionTerminalBindingV1,
   type RevisionOperationEventV1,
@@ -102,7 +109,11 @@ export class ConversationRevisionControlAuthority {
         expected_effect_action_operation_id: string | null;
         control_effect_plan_digest: string;
       };
-      const folded = foldRevisionOperation(operation, events);
+      const preparation = this.options.home.revisions.readPlan(operation.operation_id);
+      if (!preparation) throw new Error("revision control preparation plan disappeared");
+      const folded = foldRevisionOperation(operation, events, {
+        preparationPlan: preparation,
+      });
       let resolved: ReturnType<ConversationLineageService["resolve"]>;
       try {
         resolved = this.options.lineages.resolve(stored.native_plan.root_session_id);
@@ -119,13 +130,11 @@ export class ConversationRevisionControlAuthority {
         expected.expected_operation_state_digest !== folded.state_digest ||
         expected.expected_lineage_head_digest !== head.content_digest ||
         expected.expected_effect_action_operation_id !==
-          (action.type === "conversation.reconcile_revision_operation"
+          (action.type === HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION
             ? folded.effect_action_operation_id
             : null)
       )
         throw new Error("revision control authority changed before dispatch");
-      const preparation = this.options.home.revisions.readPlan(operation.operation_id);
-      if (!preparation) throw new Error("revision control preparation plan disappeared");
       const rematerialized = materializeRevisionControlEffectClosure({
         action_type: action.type,
         operation,
@@ -146,7 +155,7 @@ export class ConversationRevisionControlAuthority {
         digest: stored.record_digest,
         recorded_at: approval.decided_at,
       });
-      if (action.type === "conversation.abandon_revision_operation") {
+      if (action.type === HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION) {
         if (
           !revisionAbandonIsProved({
             home: this.options.home,
@@ -160,25 +169,30 @@ export class ConversationRevisionControlAuthority {
           })
         )
           throw new Error("revision abandon no longer proves absent and quiescent effects");
-        if (folded.state === "created") throw new Error("revision operation was never prepared");
+        if (folded.state === REVISION_OPERATION_INITIAL_PHASE.CREATED)
+          throw new Error("revision operation was never prepared");
         events = this.appendTransition(
           operation,
           events,
           folded.state,
-          "abandoned",
+          PUBLIC_OPERATION_REVISION_PHASE.ABANDONED,
           dispatch.operation_id,
           folded.effect_action_operation_id,
           [
-            ...(folded.state === "needs_recovery"
+            ...(folded.state === PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY
               ? []
               : [
                   {
                     action_operation_id: folded.effect_action_operation_id,
-                    outcome: "failed" as const,
+                    outcome: ACTION_OPERATION_STATE.FAILED,
                     reason_code: "abandoned_by_review",
                   },
                 ]),
-            { action_operation_id: dispatch.operation_id, outcome: "succeeded", reason_code: null },
+            {
+              action_operation_id: dispatch.operation_id,
+              outcome: ACTION_OPERATION_STATE.SUCCEEDED,
+              reason_code: null,
+            },
           ],
           "abandoned_by_review",
         );
@@ -188,7 +202,7 @@ export class ConversationRevisionControlAuthority {
             reservation,
             materializeReleasedRevisionReservation(reservation, events.at(-1)?.recorded_at),
           );
-      } else if (action.type === "conversation.reconcile_revision_operation") {
+      } else if (action.type === HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION) {
         const inspection = inspectRevisionRecovery({
           home: this.options.home,
           lineages: this.options.lineages,
@@ -204,15 +218,15 @@ export class ConversationRevisionControlAuthority {
             operation,
             events,
             {
-              kind: "reconciliation-result",
+              kind: REVISION_OPERATION_EVENT_PAYLOAD_KIND.RECONCILIATION_RESULT,
               authorized_by_action_operation_id: dispatch.operation_id,
               effect_action_operation_id: folded.effect_action_operation_id,
               observed_state_digest: folded.state_digest,
-              outcome: "failed",
+              outcome: ACTION_OPERATION_STATE.FAILED,
               action_terminals: [
                 {
                   action_operation_id: dispatch.operation_id,
-                  outcome: "failed",
+                  outcome: ACTION_OPERATION_STATE.FAILED,
                   reason_code: inspection.reason_code,
                 },
               ],
@@ -226,19 +240,21 @@ export class ConversationRevisionControlAuthority {
           const terminals: RevisionActionTerminalBindingV1[] = [
             {
               action_operation_id: dispatch.operation_id,
-              outcome: "succeeded" as const,
+              outcome: ACTION_OPERATION_STATE.SUCCEEDED,
               reason_code: null,
             },
           ];
           events = this.appendTransition(
             operation,
             events,
-            "needs_recovery",
+            PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
             inspection.state,
             dispatch.operation_id,
             folded.effect_action_operation_id,
             terminals,
-            inspection.state === "start_failed" ? "reconciled_start_failure" : null,
+            inspection.state === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED
+              ? "reconciled_start_failure"
+              : null,
           );
         }
       } else {
@@ -260,8 +276,8 @@ export class ConversationRevisionControlAuthority {
         events = this.appendTransition(
           operation,
           events,
-          "start_failed",
-          "starting",
+          PUBLIC_OPERATION_REVISION_PHASE.START_FAILED,
+          PUBLIC_OPERATION_REVISION_PHASE.STARTING,
           dispatch.operation_id,
           dispatch.operation_id,
           [],
@@ -280,7 +296,7 @@ export class ConversationRevisionControlAuthority {
               retryPlan,
               "completed",
               this.options.artifactStore,
-            ) === "started",
+            ) === PUBLIC_OPERATION_REVISION_PHASE.STARTED,
         });
       }
       const terminal = this.terminalEvent(events, dispatch.operation_id);
@@ -298,18 +314,15 @@ export class ConversationRevisionControlAuthority {
     to: RevisionOperationStateV1,
     authorizer: string,
     effect: string,
-    terminals: Array<{
-      action_operation_id: string;
-      outcome: "succeeded" | "failed" | "needs_recovery";
-      reason_code: string | null;
-    }>,
-    reason = terminals.find((row) => row.outcome === "failed")?.reason_code ?? null,
+    terminals: RevisionActionTerminalBindingV1[],
+    reason = terminals.find((row) => row.outcome === ACTION_OPERATION_STATE.FAILED)?.reason_code ??
+      null,
   ): RevisionOperationEventV1[] {
     const event = materializeRevisionEvent(
       operation,
       events,
       {
-        kind: "state-transition",
+        kind: REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION,
         from,
         to,
         authorized_by_action_operation_id: authorizer,

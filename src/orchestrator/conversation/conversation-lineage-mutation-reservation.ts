@@ -1,11 +1,15 @@
 import { join, resolve } from "node:path";
 import {
+  ACTION_AUTHORITY_EVENT_KIND,
+  ACTION_OPERATION_STATE,
   type ActionApprovalV1,
   type ActionAuthoritySnapshotV1,
   ActionAuthorityStaleError,
   type ActionProposalV1,
   deriveOperationId,
 } from "../../actions/index.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import { ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import {
   type ProcessLock,
   acquireProcessLock,
@@ -176,7 +180,7 @@ export class ConversationLineageMutationReservationStoreV1 {
   releaseCanceled(
     snapshot: ActionAuthoritySnapshotV1,
   ): ConversationLineageMutationReservationV1 | null {
-    if (snapshot.state !== "canceled" || !snapshot.approval) return null;
+    if (snapshot.state !== ACTION_OPERATION_STATE.CANCELED || !snapshot.approval) return null;
     const kind =
       snapshot.proposal.action.type === LINEAGE_MUTATION_ACTION_TYPE.PUBLIC_LITERAL
         ? LINEAGE_MUTATION_KIND.PUBLIC_LITERAL
@@ -187,9 +191,9 @@ export class ConversationLineageMutationReservationStoreV1 {
     const cancellation = snapshot.events.at(-1);
     if (
       !cancellation ||
-      cancellation.payload.kind !== "state-transition" ||
-      cancellation.payload.from !== "approved" ||
-      cancellation.payload.to !== "canceled"
+      cancellation.payload.kind !== ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION ||
+      cancellation.payload.from !== ACTION_OPERATION_STATE.APPROVED ||
+      cancellation.payload.to !== ACTION_OPERATION_STATE.CANCELED
     )
       throw new Error("canceled lineage mutation has no exact cancellation authority");
     const root = snapshot.proposal.base.root_session_id;
@@ -226,8 +230,8 @@ export class ConversationLineageMutationReservationStoreV1 {
         proposal.action.type === LINEAGE_MUTATION_ACTION_TYPE.CONTEXT_COMPACTION);
     if (
       !actionMatches ||
-      proposal.domain !== "conversation" ||
-      proposal.action_root_locator.kind !== "conversation" ||
+      proposal.domain !== ACTION_DOMAIN.CONVERSATION ||
+      proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
       proposal.action_root_locator.root_session_id !== source.root_session_id ||
       proposal.base.root_session_id !== source.root_session_id ||
       proposal.base.conversation_id !== source.conversation_id ||

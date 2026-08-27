@@ -1,3 +1,4 @@
+import { CAPABILITY_TRUST_TRANSITION } from "../../actions/capability-security-contract.js";
 import { CapabilityValidationError, bytewise } from "../wire/primitives.js";
 import type { RegistryTrustKeyFrameV1 } from "./types.js";
 import { validateTrustFrame } from "./validation.js";
@@ -27,7 +28,11 @@ export function foldTrustFrames(
         `frames[${index}].authority_epoch`,
       );
     const prior = latest.get(frame.key_id);
-    if (frame.transition === "added" ? prior !== undefined : prior === undefined)
+    if (
+      frame.transition === CAPABILITY_TRUST_TRANSITION.ADDED
+        ? prior !== undefined
+        : prior === undefined
+    )
       throw new CapabilityValidationError(
         "trust transition has invalid predecessor",
         `frames[${index}]`,
@@ -43,18 +48,21 @@ export function foldTrustFrames(
           "trust transition changed immutable key bytes/validity",
           `frames[${index}]`,
         );
-      if (prior.transition === "revoked")
+      if (prior.transition === CAPABILITY_TRUST_TRANSITION.REVOKED)
         throw new CapabilityValidationError(
           "revoked trust authority is terminal",
           `frames[${index}]`,
         );
-      if (prior.transition === "deprecated" && frame.transition !== "revoked")
+      if (
+        prior.transition === CAPABILITY_TRUST_TRANSITION.DEPRECATED &&
+        frame.transition !== CAPABILITY_TRUST_TRANSITION.REVOKED
+      )
         throw new CapabilityValidationError(
           "deprecated trust may only narrow to revoked",
           `frames[${index}]`,
         );
       if (
-        frame.transition !== "rescoped" &&
+        frame.transition !== CAPABILITY_TRUST_TRANSITION.RESCOPED &&
         (prior.registry_origin !== frame.registry_origin ||
           prior.publisher_id !== frame.publisher_id)
       )
@@ -63,7 +71,7 @@ export function foldTrustFrames(
           `frames[${index}]`,
         );
       if (
-        frame.transition === "rescoped" &&
+        frame.transition === CAPABILITY_TRUST_TRANSITION.RESCOPED &&
         prior.registry_origin === frame.registry_origin &&
         prior.publisher_id === frame.publisher_id
       )

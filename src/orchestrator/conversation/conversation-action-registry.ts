@@ -1,3 +1,4 @@
+import { isConversationHostActionKind } from "../../actions/host-action-contract.js";
 import type {
   ActionApprovalChallengeRequestV1,
   ActionApprovalRequestV1,
@@ -15,9 +16,7 @@ import {
 function actionDomain(
   candidate: BrowserHostActionRequestV1,
 ): ConversationActionDomainPlannerExecutorV1["domain"] {
-  return candidate.type.startsWith("conversation.") || candidate.type === "context.compact"
-    ? "conversation"
-    : "capability";
+  return isConversationHostActionKind(candidate.type) ? "conversation" : "capability";
 }
 
 export class ConversationActionDomainRegistryV1 {

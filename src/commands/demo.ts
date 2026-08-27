@@ -7,6 +7,7 @@
 // PR4: the #186 corpus as a deterministic demo workload.
 
 import { basename } from "node:path";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import type { WorkUnit, WorkflowState } from "./_shared.js";
 import { cwd, normalizeUnit, readState, recomputeTotals, writeState } from "./_shared.js";
 
@@ -51,7 +52,7 @@ export async function demo(
   const units: WorkUnit[] = DEMO_FILES.map((f) =>
     normalizeUnit({
       name: `split-${basename(f, ".ts")}`,
-      status: "pending",
+      status: WORK_UNIT_STATUS.PENDING,
       confidence: 0,
       scope: [f],
       spec: `Split ${f} under 400 LOC`,

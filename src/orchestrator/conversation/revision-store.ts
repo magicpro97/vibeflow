@@ -24,7 +24,12 @@ import {
   assertRevisionPreparationPlanV1,
 } from "./lineage-revision-operation.js";
 import { foldRevisionOperation } from "./revision-fold.js";
-import type { RevisionOperationEventV1 } from "./revision-planner.js";
+import {
+  REVISION_OPERATION_EVENT_STORAGE,
+  type RevisionOperationEventV1,
+  assertRevisionOperationEventV1,
+} from "./revision-operation-event-contract.js";
+import { assertRevisionOperationPlanBinding } from "./revision-participant-plan-binding.js";
 
 const MAX_RECORD_BYTES = 2 * 1024 * 1024;
 const MAX_EVENTS_BYTES = 256 * 1024 * 1024;
@@ -42,21 +47,18 @@ export interface RevisionRequestClaimV1 {
 
 function operationCodec(operationId: string) {
   return {
-    domain: "revision-operation" as const,
+    domain: REVISION_OPERATION_EVENT_STORAGE.DOMAIN,
     maxFrames: 100_000,
     maxPayloadBytes: MAX_RECORD_BYTES,
     maxAggregateBytes: MAX_EVENTS_BYTES,
     validatePayload: (payload: Record<string, unknown>) => {
-      const event = payload as unknown as RevisionOperationEventV1;
-      const { event_digest: _digest, ...preimage } = event;
-      if (
-        event.operation_id !== operationId ||
-        digestV1("VF-REVISION-OPERATION-EVENT\0v1\0", preimage) !== event.event_digest
-      )
-        throw new Error("invalid revision operation event");
+      assertRevisionOperationEventV1(payload);
+      if (payload.operation_id !== operationId) throw new Error("invalid revision operation event");
     },
-    computePayloadDigest: (payload: Record<string, unknown>) =>
-      (payload as unknown as RevisionOperationEventV1).event_digest,
+    computePayloadDigest: (payload: Record<string, unknown>) => {
+      assertRevisionOperationEventV1(payload);
+      return payload.event_digest;
+    },
     validateJournalIdentity: (payload: Record<string, unknown>) =>
       payload.operation_id === operationId,
   };
@@ -176,6 +178,7 @@ export class ConversationRevisionStore {
   writeHeader(operation: RevisionOperationV1, plan: RevisionPreparationPlanV1): void {
     assertRevisionOperationV1(operation);
     assertRevisionPreparationPlanV1(plan);
+    assertRevisionOperationPlanBinding(operation, plan);
     this.withLock(`revision-header:${operation.operation_id}`, (lock) => {
       createOrVerifyPrivateFile(
         this.operationPath("headers", operation.operation_id),
@@ -190,18 +193,36 @@ export class ConversationRevisionStore {
     });
   }
 
+  readAuthority(operationId: string): {
+    operation: RevisionOperationV1;
+    plan: RevisionPreparationPlanV1;
+  } | null {
+    const operationBytes = privateFileBytes(
+      this.operationPath("headers", operationId),
+      MAX_RECORD_BYTES,
+    );
+    const planBytes = privateFileBytes(this.operationPath("plans", operationId), MAX_RECORD_BYTES);
+    if (operationBytes === null && planBytes === null) return null;
+    if (operationBytes === null || planBytes === null)
+      throw new Error("revision operation fold authority is incomplete");
+    const operation = decodeCanonical<RevisionOperationV1>(
+      operationBytes,
+      assertRevisionOperationV1,
+    );
+    const plan = decodeCanonical<RevisionPreparationPlanV1>(
+      planBytes,
+      assertRevisionPreparationPlanV1,
+    );
+    assertRevisionOperationPlanBinding(operation, plan);
+    return { operation, plan };
+  }
+
   readOperation(operationId: string): RevisionOperationV1 | null {
-    const bytes = privateFileBytes(this.operationPath("headers", operationId), MAX_RECORD_BYTES);
-    return bytes === null
-      ? null
-      : decodeCanonical<RevisionOperationV1>(bytes, assertRevisionOperationV1);
+    return this.readAuthority(operationId)?.operation ?? null;
   }
 
   readPlan(operationId: string): RevisionPreparationPlanV1 | null {
-    const bytes = privateFileBytes(this.operationPath("plans", operationId), MAX_RECORD_BYTES);
-    return bytes === null
-      ? null
-      : decodeCanonical<RevisionPreparationPlanV1>(bytes, assertRevisionPreparationPlanV1);
+    return this.readAuthority(operationId)?.plan ?? null;
   }
 
   readPreparedTransition(operationId: string): PublishedRevisionTransitionInputV1 | null {
@@ -215,6 +236,12 @@ export class ConversationRevisionStore {
 
   appendEvent(operation: RevisionOperationV1, event: RevisionOperationEventV1): void {
     this.withLock(`revision-event:${operation.operation_id}`, (lock) => {
+      const authority = this.readAuthority(operation.operation_id);
+      if (!authority) throw new Error("revision operation fold authority is absent");
+      const { operation: storedOperation, plan: storedPlan } = authority;
+      if (storedOperation.header_digest !== operation.header_digest)
+        throw new Error("revision operation header authority changed");
+      assertRevisionOperationPlanBinding(storedOperation, storedPlan);
       const existing = this.readEvents(operation.operation_id);
       const atSequence = existing[event.sequence];
       if (atSequence) {
@@ -226,12 +253,13 @@ export class ConversationRevisionStore {
         throw new Error(
           `revision operation event sequence gap: expected ${existing.length}, received ${event.sequence}`,
         );
-      foldRevisionOperation(operation, [...existing, event], {
+      foldRevisionOperation(storedOperation, [...existing, event], {
         actionAuthority: this.actionAuthority,
+        preparationPlan: storedPlan,
       });
       appendVffrFrame(
         this.eventsPath(operation.operation_id),
-        "revision-operation",
+        REVISION_OPERATION_EVENT_STORAGE.DOMAIN,
         event as unknown as JsonValue,
         { ...operationCodec(operation.operation_id), lock },
       );
@@ -250,13 +278,20 @@ export class ConversationRevisionStore {
   }
 
   readEvents(operationId: string): RevisionOperationEventV1[] {
-    if (privateFileBytes(this.eventsPath(operationId), MAX_EVENTS_BYTES) === null) return [];
+    if (privateFileBytes(this.eventsPath(operationId), MAX_EVENTS_BYTES) === null) {
+      this.readAuthority(operationId);
+      return [];
+    }
+    const authority = this.readAuthority(operationId);
+    if (!authority) throw new Error("revision operation fold authority is absent");
+    const { operation, plan } = authority;
     const events = readVffrFile(this.eventsPath(operationId), operationCodec(operationId)).map(
       (frame) => structuredClone(frame.payload as unknown as RevisionOperationEventV1),
     );
-    const operation = this.readOperation(operationId);
-    if (!operation) throw new Error("revision operation header is absent");
-    foldRevisionOperation(operation, events, { actionAuthority: this.actionAuthority });
+    foldRevisionOperation(operation, events, {
+      actionAuthority: this.actionAuthority,
+      preparationPlan: plan,
+    });
     return events;
   }
 

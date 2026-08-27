@@ -2,10 +2,11 @@ import { closeSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { arch } from "node:os";
 import { linuxLibcCandidatesFromMaps } from "../../durability/native-runtime.js";
+import { RUNTIME_PLATFORM } from "../../durability/process-identity-contract.js";
 
 const require = createRequire(import.meta.url);
 const IS_BUN = typeof (process.versions as Record<string, string | undefined>).bun === "string";
-const NAME_OFFSET = process.platform === "darwin" ? 21 : 19;
+const NAME_OFFSET = process.platform === RUNTIME_PLATFORM.DARWIN ? 21 : 19;
 const RECLEN_OFFSET = 16;
 
 export interface DirectoryApiV1 {
@@ -54,7 +55,7 @@ export function loadBunDirectoryApi(
     closedir: { args: [FFIType.ptr], returns: FFIType.i32 },
   } as const;
   let maps = "";
-  if (runtime.platform === "linux") {
+  if (runtime.platform === RUNTIME_PLATFORM.LINUX) {
     try {
       maps = runtime.readMaps();
     } catch {
@@ -62,7 +63,7 @@ export function loadBunDirectoryApi(
     }
   }
   const candidates =
-    runtime.platform === "darwin"
+    runtime.platform === RUNTIME_PLATFORM.DARWIN
       ? ["/usr/lib/libSystem.B.dylib"]
       : linuxLibcCandidatesFromMaps(maps, runtime.architecture);
   let library: ReturnType<typeof ffi.dlopen> | null = null;
@@ -105,7 +106,9 @@ export function loadNodeDirectoryApi(
   },
 ): DirectoryApiV1 {
   const { koffi } = runtime;
-  const library = koffi.load(runtime.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : null);
+  const library = koffi.load(
+    runtime.platform === RUNTIME_PLATFORM.DARWIN ? "/usr/lib/libSystem.B.dylib" : null,
+  );
   const duplicate = library.func("int dup(int)");
   const open = library.func("void *fdopendir(int)");
   const next = library.func("void *readdir(void *)");

@@ -1,4 +1,5 @@
 import { parseStrictJson } from "../../actions/strict-json.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import {
   canonicalJson,
   canonicalJsonBytes,
@@ -9,14 +10,20 @@ import type { CapabilityHealthEvidenceV1 } from "../adapters/types.js";
 import { capabilityObjectPath } from "../storage/paths.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
-import type { CapabilityWalEventV1 } from "../wire/operation.js";
+import {
+  CAPABILITY_OUTBOX_TRANSITION,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityHealthOutcomeV1,
+  type CapabilityWalEventV1,
+  isCapabilityHealthOutcome,
+} from "../wire/operation.js";
 import { bytewise } from "../wire/primitives.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 
 export interface AdapterHealthObservationResultV1 {
   target_id: string;
   probe_id: string;
-  outcome: "ready" | "degraded" | "failed" | "unknown" | "stale";
+  outcome: CapabilityHealthOutcomeV1;
   evidence_digest: string;
   checked_at: string;
   expires_at: string;
@@ -31,7 +38,7 @@ export interface AdapterHealthObservationV1 {
 
 export interface CapabilityHealthBindingV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   generation_id: string;
   capability_lock_digest: string;
@@ -43,7 +50,7 @@ export interface CapabilityHealthBindingV1 {
 }
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function resultKey(row: Pick<AdapterHealthObservationResultV1, "target_id" | "probe_id">): string {
@@ -51,7 +58,10 @@ function resultKey(row: Pick<AdapterHealthObservationResultV1, "target_id" | "pr
 }
 
 function payloadResult(
-  payload: Extract<CapabilityWalEventV1["payload"], { kind: "health" }>,
+  payload: Extract<
+    CapabilityWalEventV1["payload"],
+    { kind: typeof CAPABILITY_WAL_PAYLOAD_KIND.HEALTH }
+  >,
 ): AdapterHealthObservationResultV1 {
   return {
     target_id: payload.target_id,
@@ -165,7 +175,7 @@ export function readAdapterHealthObservation(
         typeof result !== "object" ||
         typeof result.target_id !== "string" ||
         typeof result.probe_id !== "string" ||
-        !["ready", "degraded", "failed", "unknown", "stale"].includes(result.outcome) ||
+        !isCapabilityHealthOutcome(result.outcome) ||
         typeof result.evidence_digest !== "string" ||
         typeof result.checked_at !== "string" ||
         typeof result.expires_at !== "string",
@@ -222,7 +232,10 @@ export interface ResolvedHealthObservationBatchV1 {
 }
 
 type HealthWalEventV1 = Omit<CapabilityWalEventV1, "payload"> & {
-  payload: Extract<CapabilityWalEventV1["payload"], { kind: "health" }>;
+  payload: Extract<
+    CapabilityWalEventV1["payload"],
+    { kind: typeof CAPABILITY_WAL_PAYLOAD_KIND.HEALTH }
+  >;
 };
 
 /**
@@ -237,9 +250,10 @@ export function resolveHealthObservationBatches(
   const selected = new Set<string>();
   let open: ResolvedHealthObservationBatchV1 | null = null;
   for (const event of events) {
-    if (event.payload.kind !== "health") {
+    if (event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH) {
       const isDeliveryOnly =
-        event.payload.kind === "outbox" && event.payload.transition !== "created";
+        event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.OUTBOX &&
+        event.payload.transition !== CAPABILITY_OUTBOX_TRANSITION.CREATED;
       if (open && !open.complete && !isDeliveryOnly)
         invalid("a retained health observation has a forbidden interleaved WAL payload");
       continue;

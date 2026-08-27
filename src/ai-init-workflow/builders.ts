@@ -8,6 +8,7 @@
 
 import { ROLE_NAMES, type RoleName } from "../agents/role-templates.js";
 import type { Engine } from "../core.js";
+import { PENDING_REQUIRED_WORK_UNIT_GATES, WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import type { ProjectProfile } from "../scanner.js";
 import {
   ADAPTER_DESCRIPTION,
@@ -118,7 +119,7 @@ export function buildPhaseUnits(
     }
     return {
       name: unitName,
-      status: "pending",
+      status: WORK_UNIT_STATUS.PENDING,
       confidence: 0,
       owner_agent: owner,
       spec,
@@ -127,7 +128,7 @@ export function buildPhaseUnits(
       skills_injected: [...injectedSet],
       skills_required: [...requiredSet],
       depends_on: [],
-      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      gates: { ...PENDING_REQUIRED_WORK_UNIT_GATES },
       resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       evidence: [],
     };
@@ -236,7 +237,7 @@ export function buildPhaseSkillEnrichmentUnits(
   return [
     {
       name: unitName,
-      status: "pending",
+      status: WORK_UNIT_STATUS.PENDING,
       confidence: 0,
       owner_agent: "skill-author",
       spec,
@@ -245,7 +246,7 @@ export function buildPhaseSkillEnrichmentUnits(
       skills_injected: ["vf-skills", "skill-creator"],
       skills_required: ["ctx7:skill-authoring"],
       depends_on: ["ai-init-analyzer"],
-      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      gates: { ...PENDING_REQUIRED_WORK_UNIT_GATES },
       resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       evidence: [],
     },
@@ -304,7 +305,7 @@ export function buildFinisherBatchUnit(
 
   return {
     name: unitName,
-    status: "pending",
+    status: WORK_UNIT_STATUS.PENDING,
     confidence: 0,
     owner_agent: "dispatch-runner",
     spec,
@@ -313,7 +314,7 @@ export function buildFinisherBatchUnit(
     skills_injected: ["vf-skills"],
     skills_required: [],
     depends_on: ["ai-init-analyzer", "ai-init-context-updater"],
-    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+    gates: { ...PENDING_REQUIRED_WORK_UNIT_GATES },
     resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
     evidence: [],
   };

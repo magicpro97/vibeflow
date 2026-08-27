@@ -6,6 +6,8 @@ import {
   navigationPolicy,
 } from "../adapters/context-builders.js";
 import { type Engine, VERSION } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
+import { HOOK_ENFORCEMENT_MODE } from "../core/hook-contract.js";
 import type { OwnedAiRouteRunner } from "../dispatch/owned-ai-route.js";
 import { engineEnforcement } from "../hooks/adapters.js";
 
@@ -22,10 +24,10 @@ function engineBody(engine: Engine, ctx: ProjectContext): string {
   const nav = navigationPolicy(ctx.settings);
   const navLine = nav ? `- ${nav}\n` : "";
   const goal = (ctx.goal ?? "").trim();
-  const title = engine === "claude" ? "# CLAUDE.md" : "# AGENTS.md";
+  const title = engine === AGENT_ENGINE.CLAUDE ? "# CLAUDE.md" : "# AGENTS.md";
   const enforcement = engineEnforcement(engine).preActionBlocking;
   const guardrailNote =
-    enforcement === "native-bash-only"
+    enforcement === HOOK_ENFORCEMENT_MODE.NATIVE_BASH_ONLY
       ? "> ⚠ Codex native blocking covers Bash/shell only. Edit/Write/apply_patch/MCP calls remain unguarded by this hook; rely on `vf verify` and the git pre-commit gate. Codex hook config is global at `~/.codex/`.\n"
       : "";
   return `${title}
@@ -50,21 +52,21 @@ export async function engineFiles(
   const prompt = `Compose the ${engine} instruction file for project "${ctx.name}" from this context:\n${JSON.stringify(ctx)}\nKeep the VibeFlow-managed block SLIM (≤ ~13 lines): banner, the 5 core commands, the confidence gate, and a pointer to the \`vf\` skill — do not expand the full workflow narrative inline.`;
   const body = await compose(prompt, () => engineBody(engine, ctx));
   switch (engine) {
-    case "claude":
+    case AGENT_ENGINE.CLAUDE:
       return { "CLAUDE.md": body };
-    case "codex":
+    case AGENT_ENGINE.CODEX:
       return { "AGENTS.md": body };
-    case "copilot":
+    case AGENT_ENGINE.COPILOT:
       return {
         "AGENTS.md": body,
         ".github/copilot-instructions.md": await compose(
           `Compose .github/copilot-instructions.md for "${ctx.name}".`,
-          () => `# Copilot Instructions\n\n${engineBody("copilot", ctx)}\n`,
+          () => `# Copilot Instructions\n\n${engineBody(AGENT_ENGINE.COPILOT, ctx)}\n`,
         ),
       };
-    case "opencode":
+    case AGENT_ENGINE.OPENCODE:
       return { "AGENTS.md": body };
-    case "antigravity":
+    case AGENT_ENGINE.ANTIGRAVITY:
       return { "AGENTS.md": body };
   }
 }

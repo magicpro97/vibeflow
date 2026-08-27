@@ -1,10 +1,26 @@
+import { httpStatusForPublicError, publicActionError } from "../actions/errors.js";
 import {
-  type PublicErrorCode,
-  httpStatusForPublicError,
-  publicActionError,
-} from "../actions/errors.js";
+  PUBLIC_API_ERROR_SCHEMA_VERSION,
+  PUBLIC_ERROR_CODE,
+  PUBLIC_RECOVERY_ACTION,
+} from "../actions/public-error-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../durability/index.js";
-import type { PublicConversationMessageQueueInvalidationV1 } from "../orchestrator/conversation/conversation-message-queue-records.js";
+import {
+  CONVERSATION_CURSOR_ERROR_CODE,
+  type ConversationCursorErrorCode,
+} from "../orchestrator/conversation/conversation-catalog-contract.js";
+import {
+  type PublicConversationMessageQueueInvalidationV1,
+  isPublicConversationMessageQueueInvalidationWireV1,
+} from "../orchestrator/conversation/conversation-message-queue-wire.js";
+import {
+  CONVERSATION_SSE_ERROR_CODE,
+  CONVERSATION_SSE_EVENT,
+  CONVERSATION_SSE_HTTP_ERROR_CODE,
+  type ConversationSseErrorCode,
+  type ConversationSseHttpErrorCode,
+  serializeSseDataEvent,
+} from "../orchestrator/conversation/conversation-sse-contract.js";
 import type {
   ConversationListener,
   ConversationService,
@@ -13,9 +29,6 @@ import type {
   Unsubscribe,
 } from "../orchestrator/conversation/types.js";
 import type { PublicStoredTraceEvent } from "../orchestrator/trace/types.js";
-
-const QUEUE_ITEM_ID = /^vf-queued-message-[0-9a-f]{64}$/;
-const SHA256 = /^sha256:[0-9a-f]{64}$/;
 
 export interface ConversationStreamAuthorizer {
   authorize(conversationId: string, token: string): boolean;
@@ -36,7 +49,14 @@ export interface ConversationSseAuthority {
 
 export type ConversationCursorResult =
   | { ok: true; cursor: number }
-  | { ok: false; code: "invalid_cursor" | "conflicting_cursor" };
+  | {
+      ok: false;
+      code: Extract<
+        ConversationCursorErrorCode,
+        | typeof CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR
+        | typeof CONVERSATION_CURSOR_ERROR_CODE.CONFLICTING_CURSOR
+      >;
+    };
 
 function cursorValue(value: string | null): number | null | undefined {
   if (value === null) return null;
@@ -48,48 +68,43 @@ function cursorValue(value: string | null): number | null | undefined {
 
 export function parseConversationCursor(request: Request, url: URL): ConversationCursorResult {
   const query = url.searchParams.getAll("since");
-  if (query.length > 1) return { ok: false, code: "invalid_cursor" };
+  if (query.length > 1) return { ok: false, code: CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR };
   const headerRaw = request.headers.get("last-event-id");
-  if (headerRaw?.includes(",")) return { ok: false, code: "invalid_cursor" };
+  if (headerRaw?.includes(","))
+    return { ok: false, code: CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR };
   const header = cursorValue(headerRaw);
   const since = cursorValue(query[0] ?? null);
-  if (header === undefined || since === undefined) return { ok: false, code: "invalid_cursor" };
+  if (header === undefined || since === undefined)
+    return { ok: false, code: CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR };
   if (header !== null && since !== null && header !== since)
-    return { ok: false, code: "conflicting_cursor" };
+    return { ok: false, code: CONVERSATION_CURSOR_ERROR_CODE.CONFLICTING_CURSOR };
   return { ok: true, cursor: header ?? since ?? 0 };
 }
 
 export function serializeConversationSseFrame(frame: ConversationSseFrame): string {
-  const id = "id" in frame ? `id: ${frame.id}\n` : "";
   const data = frame.data === "" ? "" : canonicalJsonBytes(frame.data).toString("utf8");
-  return `${id}event: ${frame.event}\ndata: ${data}\n\n`;
+  return serializeSseDataEvent(frame.event, data, "id" in frame ? { id: frame.id } : undefined);
 }
 
-function httpError(
-  conversationId: string,
-  code: Extract<
-    PublicErrorCode,
-    "unauthenticated" | "invalid_request" | "not_found" | "service_unavailable"
-  >,
-): Response {
-  const unavailable = code === "service_unavailable";
+function httpError(conversationId: string, code: ConversationSseHttpErrorCode): Response {
+  const unavailable = code === CONVERSATION_SSE_HTTP_ERROR_CODE.SERVICE_UNAVAILABLE;
   const body = publicActionError({
     code,
     message:
-      code === "unauthenticated"
+      code === CONVERSATION_SSE_HTTP_ERROR_CODE.UNAUTHENTICATED
         ? "Authentication is required."
-        : code === "invalid_request"
+        : code === CONVERSATION_SSE_HTTP_ERROR_CODE.INVALID_REQUEST
           ? "The event cursor is invalid."
-          : code === "not_found"
+          : code === CONVERSATION_SSE_HTTP_ERROR_CODE.NOT_FOUND
             ? "The conversation was not found."
             : "The stream is unavailable.",
     correlation_id: `vf-stream-${digestV1("VF-CONVERSATION-STREAM-HTTP-ERROR\0v1\0", {
-      schema_version: "1.0",
+      schema_version: PUBLIC_API_ERROR_SCHEMA_VERSION,
       conversation_id: conversationId,
       code,
     }).slice(7)}`,
     retryable: unavailable,
-    recovery_action: unavailable ? "retry" : null,
+    recovery_action: unavailable ? PUBLIC_RECOVERY_ACTION.RETRY : null,
     details: null,
   });
   return Response.json(body, {
@@ -106,38 +121,30 @@ function validQueueInvalidation(
   event: PublicConversationMessageQueueInvalidationV1,
   rootSessionId: string,
 ): boolean {
-  return (
-    Object.keys(event).sort().join("\0") ===
-      ["item_digest", "queue_item_id", "root_session_id", "schema_version", "state"]
-        .sort()
-        .join("\0") &&
-    event.schema_version === "1.0" &&
-    event.root_session_id === rootSessionId &&
-    QUEUE_ITEM_ID.test(event.queue_item_id) &&
-    ["queued", "claimed", "delivered", "stale"].includes(event.state) &&
-    SHA256.test(event.item_digest)
-  );
+  return isPublicConversationMessageQueueInvalidationWireV1(event, rootSessionId);
 }
 
 function snapshotFrame(value: ConversationSnapshot): ConversationSseFrame {
-  return { id: String(value.last_seq), event: "snapshot", data: value };
+  return { id: String(value.last_seq), event: CONVERSATION_SSE_EVENT.SNAPSHOT, data: value };
 }
 
-function streamPublicError(
-  conversationId: string,
-  code: Extract<PublicErrorCode, "not_found" | "service_unavailable">,
-) {
+function streamPublicError(conversationId: string, code: ConversationSseErrorCode) {
   return publicActionError({
     code,
     message:
-      code === "not_found" ? "The conversation was not found." : "The stream is unavailable.",
+      code === CONVERSATION_SSE_ERROR_CODE.NOT_FOUND
+        ? "The conversation was not found."
+        : "The stream is unavailable.",
     correlation_id: `vf-stream-${digestV1("VF-CONVERSATION-STREAM-ERROR\0v1\0", {
-      schema_version: "1.0",
+      schema_version: PUBLIC_API_ERROR_SCHEMA_VERSION,
       conversation_id: conversationId,
       code,
     }).slice(7)}`,
-    retryable: code === "service_unavailable",
-    recovery_action: code === "service_unavailable" ? "retry" : null,
+    retryable: code === CONVERSATION_SSE_ERROR_CODE.SERVICE_UNAVAILABLE,
+    recovery_action:
+      code === CONVERSATION_SSE_ERROR_CODE.SERVICE_UNAVAILABLE
+        ? PUBLIC_RECOVERY_ACTION.RETRY
+        : null,
     details: null,
   }).error;
 }
@@ -161,24 +168,25 @@ export async function handleConversationSse(
     !credentials[0] ||
     !authority.tokens.authorize(conversationId, credentials[0])
   )
-    return httpError(conversationId, "unauthenticated");
+    return httpError(conversationId, CONVERSATION_SSE_HTTP_ERROR_CODE.UNAUTHENTICATED);
   const parsed = parseConversationCursor(request, url);
-  if (!parsed.ok) return httpError(conversationId, "invalid_request");
+  if (!parsed.ok)
+    return httpError(conversationId, CONVERSATION_SSE_HTTP_ERROR_CODE.INVALID_REQUEST);
   let snapshot: ConversationSnapshot | null;
   try {
     snapshot = await authority.service.snapshot(conversationId);
   } catch {
-    return httpError(conversationId, "service_unavailable");
+    return httpError(conversationId, CONVERSATION_SSE_HTTP_ERROR_CODE.SERVICE_UNAVAILABLE);
   }
-  if (!snapshot) return httpError(conversationId, "not_found");
+  if (!snapshot) return httpError(conversationId, CONVERSATION_SSE_HTTP_ERROR_CODE.NOT_FOUND);
   if (parsed.cursor > snapshot.last_seq)
     return Response.json(
       publicActionError({
-        code: "future_event_cursor",
+        code: PUBLIC_ERROR_CODE.FUTURE_EVENT_CURSOR,
         message: "The event cursor is ahead of the current conversation.",
         correlation_id: `vf-stream-${conversationId}`,
         retryable: false,
-        recovery_action: "restart-pagination",
+        recovery_action: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
         details: { current_last_seq: snapshot.last_seq },
       }),
       { status: 409, headers: { "cache-control": "no-store" } },
@@ -236,7 +244,7 @@ export async function handleConversationSse(
       const enqueueTrace = (event: PublicStoredTraceEvent): void => {
         if (!active || event.seq <= lastSeq) return;
         lastSeq = event.seq;
-        enqueue({ id: String(event.seq), event: "trace", data: event });
+        enqueue({ id: String(event.seq), event: CONVERSATION_SSE_EVENT.TRACE, data: event });
       };
       const boundary = (snapshot as ConversationSnapshot).last_seq;
       let replayReady = false;
@@ -260,21 +268,24 @@ export async function handleConversationSse(
           unsubscribeQueue =
             authority.messageQueue?.subscribe(rootSessionId, (event) => {
               if (!active || !validQueueInvalidation(event, rootSessionId)) return;
-              enqueue({ event: "message-queue-invalidated", data: structuredClone(event) });
+              enqueue({
+                event: CONVERSATION_SSE_EVENT.MESSAGE_QUEUE_INVALIDATED,
+                data: structuredClone(event),
+              });
             }) ?? null;
         }
       } catch {
         enqueue({
-          event: "error",
-          data: streamPublicError(conversationId, "service_unavailable"),
+          event: CONVERSATION_SSE_EVENT.ERROR,
+          data: streamPublicError(conversationId, CONVERSATION_SSE_ERROR_CODE.SERVICE_UNAVAILABLE),
         });
         cleanup();
         return;
       }
       if (!unsubscribe) {
         enqueue({
-          event: "error",
-          data: streamPublicError(conversationId, "not_found"),
+          event: CONVERSATION_SSE_EVENT.ERROR,
+          data: streamPublicError(conversationId, CONVERSATION_SSE_ERROR_CODE.NOT_FOUND),
         });
         cleanup();
         return;
@@ -288,8 +299,8 @@ export async function handleConversationSse(
       const completion = replayCompletion(unsubscribe);
       if (!completion) {
         enqueue({
-          event: "error",
-          data: streamPublicError(conversationId, "service_unavailable"),
+          event: CONVERSATION_SSE_EVENT.ERROR,
+          data: streamPublicError(conversationId, CONVERSATION_SSE_ERROR_CODE.SERVICE_UNAVAILABLE),
         });
         cleanup();
         return;
@@ -307,13 +318,19 @@ export async function handleConversationSse(
           lastSeq = Math.max(lastSeq, boundary, parsed.cursor);
           for (const event of buffered) if (event.seq > boundary) enqueueTrace(event);
           if (heartbeatMs > 0 && active) {
-            timer = setInterval(() => enqueue({ event: "heartbeat", data: "" }), heartbeatMs);
+            timer = setInterval(
+              () => enqueue({ event: CONVERSATION_SSE_EVENT.HEARTBEAT, data: "" }),
+              heartbeatMs,
+            );
           }
         },
         () => {
           enqueue({
-            event: "error",
-            data: streamPublicError(conversationId, "service_unavailable"),
+            event: CONVERSATION_SSE_EVENT.ERROR,
+            data: streamPublicError(
+              conversationId,
+              CONVERSATION_SSE_ERROR_CODE.SERVICE_UNAVAILABLE,
+            ),
           });
           cleanup();
         },

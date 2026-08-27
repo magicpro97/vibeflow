@@ -1,13 +1,16 @@
 import { resolveQueuedMessageEffectiveAuthorityV1 } from "./conversation-message-queue-authority.js";
 import {
   CONVERSATION_MESSAGE_QUEUE_AUTHORITY_STATUS,
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
   CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
   CONVERSATION_MESSAGE_QUEUE_EVENT_KIND,
   CONVERSATION_MESSAGE_QUEUE_LIMITS,
   CONVERSATION_MESSAGE_QUEUE_MUTATION_KIND,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   CONVERSATION_MESSAGE_QUEUE_STATE,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
   type ConversationMessageQueueMutationKindV1,
+  type ConversationMessageQueueTargetParticipantsV1,
 } from "./conversation-message-queue-contract.js";
 import type { FoldedConversationMessageQueueV1 } from "./conversation-message-queue-fold.js";
 import type { ConversationMessageQueueJournalV1 } from "./conversation-message-queue-journal.js";
@@ -55,7 +58,7 @@ export interface ConversationMessageQueueEnqueueInputV1 {
     queue_item_id: string;
     queue_sequence: number;
     admitted_authority: ConversationMessageQueueAuthorityV1;
-    target_participants: "all" | string[];
+    target_participants: ConversationMessageQueueTargetParticipantsV1;
     private_context_present: boolean;
   }) => {
     binding: PrivateConversationMessageQueueContextBindingV1 | null;
@@ -64,7 +67,7 @@ export interface ConversationMessageQueueEnqueueInputV1 {
   resolve_authority: () => ConversationMessageQueueAuthorityV1;
   validate_targets?: (
     authority: ConversationMessageQueueAuthorityV1,
-    targets: "all" | string[],
+    targets: ConversationMessageQueueTargetParticipantsV1,
   ) => void;
 }
 
@@ -110,7 +113,6 @@ function bindingDraft(input: {
     winning_event_digest: input.eventDigest,
   };
 }
-
 function findBound(
   journal: ConversationMessageQueueJournalV1,
   input: {
@@ -141,7 +143,7 @@ function assertPrivateBinding(
 }
 
 function assertResolvedTargets(
-  requestTargets: "all" | string[],
+  requestTargets: ConversationMessageQueueTargetParticipantsV1,
   resolvedTargets: string[],
   binding: PrivateConversationMessageQueueContextBindingV1 | null,
 ): void {
@@ -151,7 +153,7 @@ function assertResolvedTargets(
     resolvedTargets.length > CONVERSATION_MESSAGE_QUEUE_LIMITS.maxTargets ||
     resolvedTargets.some((target) => !isQueueReference(target)) ||
     new Set(resolvedTargets).size !== resolvedTargets.length ||
-    (requestTargets !== "all" &&
+    (requestTargets !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL &&
       JSON.stringify(requestTargets) !== JSON.stringify(resolvedTargets)) ||
     (binding && JSON.stringify(binding.target_participant_ids) !== JSON.stringify(resolvedTargets))
   )
@@ -189,6 +191,7 @@ export function enqueueConversationUserMessageV1(
       throw new ConversationMessageQueueConflictError(
         CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
         "conversation message queue is full",
+        { root_session_id: journal.rootSessionId },
       );
     const authority = input.resolve_authority();
     assertConversationMessageQueueAuthorityV1(authority);
@@ -252,7 +255,7 @@ export function enqueueConversationUserMessageV1(
       queue_item_id: itemId,
       queue_sequence: queueSequence,
       root_session_id: journal.rootSessionId,
-      author_public_id: "human" as const,
+      author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
       ...contentInput,
       content_digest: queuedMessageContentDigest(contentInput),
       predecessor_queue_item_id: tail?.item.queue_item_id ?? null,

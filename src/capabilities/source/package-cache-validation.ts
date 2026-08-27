@@ -1,3 +1,5 @@
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
+import { isCapabilityScope } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import { CapabilityValidationError, digest, exactKeys, integer } from "../wire/primitives.js";
 import type { CapabilityPackageCacheRecordV1 } from "./package-cache-types.js";
@@ -30,7 +32,7 @@ export function validateCapabilityPackageCacheRecord(
     [],
     "package_cache_record",
   );
-  if (value.schema_version !== "1.0" || !["project", "user"].includes(value.scope))
+  if (value.schema_version !== "1.0" || !isCapabilityScope(value.scope))
     throw new CapabilityValidationError(
       "invalid package cache record schema/scope",
       "package_cache_record",
@@ -48,8 +50,8 @@ export function validateCapabilityPackageCacheRecord(
     1,
     64 * 1024 * 1024,
   );
-  const registry = value.package_pin.source.kind === "registry";
-  const legacy = value.package_pin.source.kind === "legacy-adopt";
+  const registry = value.package_pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY;
+  const legacy = value.package_pin.source.kind === CAPABILITY_SOURCE_KIND.LEGACY_ADOPT;
   if (
     registry !== (value.registry_envelope_digest !== null) ||
     legacy !== (value.legacy_inspection_evidence_digest !== null)

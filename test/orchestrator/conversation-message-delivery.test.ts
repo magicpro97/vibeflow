@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentBinding, MaterializedAgentBinding } from "../../src/agents/binding.js";
 import { classifyConversationResult } from "../../src/commands/conversation-args.js";
+import { AGENT_ENGINE, type Engine } from "../../src/core/agent-contract.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
 import {
   type EngineSessionAdapter,
@@ -18,6 +19,7 @@ import {
 } from "../../src/dispatch/start-authority.js";
 import { ConversationArtifactStore } from "../../src/orchestrator/conversation/artifact-store.js";
 import { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
 import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
 import { DirectConversationPolicy } from "../../src/orchestrator/conversation/direct-policy.js";
 import { validatePublishedRevisionTransition } from "../../src/orchestrator/conversation/lineage-published-transition.js";
@@ -59,8 +61,8 @@ function turnEnvelope(prompt: string): {
   }
 }
 
-function binding(roleName: string): MaterializedAgentBinding {
-  const envPolicy = conversationEnvPolicy("codex");
+function binding(roleName: string, engine: Engine = AGENT_ENGINE.CODEX): MaterializedAgentBinding {
+  const envPolicy = conversationEnvPolicy(engine);
   const provenance = { roleSource: "builtin" as const, roleHash, skillHashes: [] };
   const traceMetadata = { role_resolved_hash: roleHash, skill_resolved_hashes: [] };
   return {
@@ -79,7 +81,7 @@ function binding(roleName: string): MaterializedAgentBinding {
         },
       },
       skills: [],
-      engine: "codex",
+      engine,
       model: "gpt-5.4",
       sessionMode: "fresh",
       tool_intents: ["read"],
@@ -90,7 +92,7 @@ function binding(roleName: string): MaterializedAgentBinding {
       trace_metadata: traceMetadata,
     },
     spawn: createSpawnOptionsProjection({
-      engine: "codex",
+      engine,
       model: "gpt-5.4",
       sessionMode: "fresh",
       rendered_prompt: `Canonical ${roleName}\n\n## Assigned Topic\n\nChoose\n`,
@@ -117,6 +119,8 @@ class ControlledAdapter implements EngineSessionAdapter {
   private nativeCounter = 0;
   startAuthority?: EngineSessionAdapter["startAuthority"];
 
+  constructor(private readonly engine: Engine = AGENT_ENGINE.CODEX) {}
+
   bindAuthority(root: string): void {
     this.authorityRoot = join(root, "adapter-evidence");
     this.authorityStore = new AttemptStartAuthorityStore(this.authorityRoot);
@@ -137,7 +141,7 @@ class ControlledAdapter implements EngineSessionAdapter {
     });
     this.authorityStore.record({
       attempt_id: request.attemptId,
-      engine: "codex",
+      engine: this.engine,
       outcome: "accepted",
       native_session_id: nativeSessionId,
       evidence_ref: evidenceRef,
@@ -169,7 +173,7 @@ class ControlledAdapter implements EngineSessionAdapter {
       },
       readResumeBinding: () => ({
         attemptId: request.attemptId,
-        engine: "codex" as const,
+        engine: this.engine,
         nativeSessionId,
       }),
       readEvidenceBinding: () => ({ attemptId: request.attemptId, internalRef: evidenceRef }),
@@ -182,12 +186,18 @@ class ControlledAdapter implements EngineSessionAdapter {
     session.settle(this.result(index, output, true));
   }
 
+  emit(index: number, content: string): void {
+    const session = this.sessions[index];
+    if (!session) throw new Error(`session ${index} has not started`);
+    session.request.onChunk?.({ stream: "stdout", content });
+  }
+
   private result(index: number, output: string, ok: boolean, reason?: string): EngineSessionResult {
     const request = this.sessions[index]?.request;
     if (!request) throw new Error(`session ${index} has not started`);
     return {
       attemptId: request.attemptId,
-      engine: "codex",
+      engine: this.engine,
       ok,
       state: ok ? "completed" : "ambiguous",
       lifecycle: ok
@@ -243,13 +253,17 @@ async function settleStartedConversation(
   if (failure) throw failure;
 }
 
-async function setup(policy: ConversationPolicy, roles: string[]) {
+async function setup(
+  policy: ConversationPolicy,
+  roles: string[],
+  engine: Engine = AGENT_ENGINE.CODEX,
+) {
   const root = await mkdtemp(join(tmpdir(), "vf-message-delivery-"));
   const opaque = new DurableArtifactRegistry({ dir: join(root, "opaque") });
   let event = 0;
-  const adapter = new ControlledAdapter();
+  const adapter = new ControlledAdapter(engine);
   adapter.bindAuthority(root);
-  const materialized = roles.map(binding);
+  const materialized = roles.map((role) => binding(role, engine));
   const artifactRoot = join(root, "manifests");
   const homeAuthorities = new ConversationHomeAuthorities({
     artifactRoot,
@@ -291,7 +305,7 @@ async function setup(policy: ConversationPolicy, roles: string[]) {
       participantId: `p${index + 1}`,
       input: {
         roleRef: roles[index] as string,
-        engine: "codex",
+        engine,
         sessionMode: "fresh",
       } satisfies AgentBinding,
       materialized: item,
@@ -329,6 +343,38 @@ test("ACTIVE direct message launches a same-conversation continuation with the i
     const completed = await started.completion;
     expect(continuationPrompt).toContain("Use the durable cache");
     expect(completed).toMatchObject({ result: { status: "completed" } });
+  } finally {
+    await rm(run.root, { recursive: true, force: true });
+  }
+});
+
+test("direct Claude transport publishes only its normalized human answer", async () => {
+  const run = await setup(new DirectConversationPolicy(), ["direct"], AGENT_ENGINE.CLAUDE);
+  const nativeSessionId = "00000000-0000-4000-8000-000000000099";
+  const transport = `${JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    session_id: nativeSessionId,
+    result: "READY",
+  })}\n`;
+  try {
+    const started = await run.service.start(run.request);
+    await waitFor(() => run.adapter.sessions.length === 1);
+    run.adapter.emit(0, transport.slice(0, 23));
+    run.adapter.emit(0, transport.slice(23));
+    run.adapter.complete(0, transport);
+    await started.completion;
+
+    const events = (await run.service.events(started.conversation_id, 0)) ?? [];
+    const answer = events
+      .filter((event) => event.event.type === CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA)
+      .map((event) => (event.event.payload as { content_delta?: unknown }).content_delta)
+      .filter((content): content is string => typeof content === "string")
+      .join("");
+    expect(answer).toBe("READY");
+    expect(JSON.stringify(events)).not.toContain(nativeSessionId);
+    expect(JSON.stringify(events)).not.toContain('"type":"result"');
   } finally {
     await rm(run.root, { recursive: true, force: true });
   }

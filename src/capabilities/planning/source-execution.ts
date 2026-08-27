@@ -1,6 +1,8 @@
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
+import { ACTION_EFFECT_CLASS } from "../../actions/public-action-contract.js";
 import type { ActionRequestAuthorityV1, EngineName } from "../../actions/types.js";
 import { digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { FilesystemCapabilityPackageCacheV1 } from "../source/package-cache-reader.js";
 import { bytewise } from "../wire/primitives.js";
 import type {
@@ -51,7 +53,7 @@ export function materializeCachedPackageSourceExecution(input: {
   )
     throw new CapabilityRuntimeError(
       "package source proof changed during intent materialization",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
   const credentialDraft = {
     schema_version: "1.0" as const,
@@ -66,26 +68,33 @@ export function materializeCachedPackageSourceExecution(input: {
   };
   const source = proof.record.package_pin.source;
   const locator: CapabilitySourceAccessDescriptorV1["source"] =
-    source.kind === "registry"
+    source.kind === CAPABILITY_SOURCE_KIND.REGISTRY
       ? {
-          kind: "registry",
+          kind: CAPABILITY_SOURCE_KIND.REGISTRY,
           registry_origin: source.registry_origin,
           package_url: source.source_url,
         }
-      : source.kind === "git"
-        ? { kind: "git", canonical_url: source.canonical_url, commit_oid: source.commit_oid }
-        : source.kind === "local-dev"
-          ? { kind: "local-dev", repo_relative_alias: source.repo_relative_alias }
+      : source.kind === CAPABILITY_SOURCE_KIND.GIT
+        ? {
+            kind: CAPABILITY_SOURCE_KIND.GIT,
+            canonical_url: source.canonical_url,
+            commit_oid: source.commit_oid,
+          }
+        : source.kind === CAPABILITY_SOURCE_KIND.LOCAL_DEV
+          ? {
+              kind: CAPABILITY_SOURCE_KIND.LOCAL_DEV,
+              repo_relative_alias: source.repo_relative_alias,
+            }
           : input.legacyCandidateDigest
             ? {
-                kind: "legacy-adopt",
+                kind: CAPABILITY_SOURCE_KIND.LEGACY_ADOPT,
                 phase: "candidate",
                 candidate_digest: input.legacyCandidateDigest,
               }
             : (() => {
                 throw new CapabilityRuntimeError(
                   "legacy package cache lacks retained candidate source authority",
-                  "service-unavailable",
+                  CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
                 );
               })();
   const descriptorDraft = {
@@ -111,8 +120,11 @@ export function materializeCachedPackageSourceExecution(input: {
     scope: proof.record.scope,
     scope_identity_digest: proof.record.scope_identity_digest,
     source_descriptor_digest: descriptor.descriptor_digest,
-    effect_classes: ["pure-local-read" as const],
-    authorization: { kind: "confirmation-free" as const, reason: "pure-local-read" as const },
+    effect_classes: [ACTION_EFFECT_CLASS.PURE_LOCAL_READ],
+    authorization: {
+      kind: "confirmation-free" as const,
+      reason: ACTION_EFFECT_CLASS.PURE_LOCAL_READ,
+    },
     policy_digest: input.policyDigest,
   };
   const authority: CapabilitySourceAccessAuthorityBindingV1 = {

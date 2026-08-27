@@ -1,12 +1,16 @@
 import { canonicalJsonBytes } from "../../durability/index.js";
 import type { TraceRequestedEventAppendV1, TraceStore } from "../trace/store.js";
-import { CONVERSATION_MESSAGE_QUEUE_STATE } from "./conversation-message-queue-contract.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_STATE,
+  type ConversationMessageQueueTargetParticipantsV1,
+} from "./conversation-message-queue-contract.js";
 import {
   queuedMessageDurableOperationId,
   queuedMessagePublicEventId,
 } from "./conversation-message-queue-records.js";
 import type { PrivateConversationMessageQueueClaimV1 } from "./conversation-message-queue-store.js";
 import { assertPublicQueuedUserMessageV1 } from "./conversation-message-queue-validation.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { MessageRequest } from "./types.js";
 
 const same = (left: unknown, right: unknown): boolean =>
@@ -52,7 +56,9 @@ export class ConversationQueuedMessageDeliveryAuthorityV1 {
   }
 
   assertRequest(
-    request: MessageRequest & { target_participants: "all" | string[] },
+    request: MessageRequest & {
+      target_participants: ConversationMessageQueueTargetParticipantsV1;
+    },
     messageKey: string,
   ): void {
     if (
@@ -133,7 +139,7 @@ export class ConversationMessageQueueTraceAuthorityV1 {
       input.requested_event_id !== token.publicEventId ||
       input.correlation.conversation_id !== selected.conversation_id ||
       input.input.idempotency_key !== token.messageKey ||
-      input.input.event.type !== "user_message" ||
+      input.input.event.type !== CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE ||
       input.input.event.payload.content !== item.content ||
       !same(input.input.event.payload.target_participants, item.target_participants) ||
       !same(input.input.event.payload.quote_refs ?? [], item.quote_refs)

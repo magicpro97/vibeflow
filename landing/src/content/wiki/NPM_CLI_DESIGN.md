@@ -2,7 +2,7 @@
 title: npm CLI Design
 description: Reference for the npm CLI design — startup flow, commands, package layout, dependency policy, and local server rules.
 category: reference
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # npm CLI Design
@@ -42,16 +42,17 @@ vf
 4. Ask before installing missing optional tools
 5. Start local web server on 127.0.0.1
 6. Open browser automatically
-7. Load workflow UI
+7. Load AI-first Home
 ```
 
 ## Commands
 
 ```bash
-vf                       # open the local web UI (alias: vf ui)
+vf                       # open AI-first Home on 127.0.0.1:7799
+vf ui                    # same stable default; --port 0 selects a free port
 vf doctor                # presence/auth check (--probe for a live engine round-trip)
-vf init                  # scan repo + generate context (--engine, --interactive, --dry-run)
-vf run claude            # dispatch claude | codex | copilot (--yes to launch)
+vf init                  # TTY questionnaire + context (--engine, --no-ask, --dry-run)
+vf run claude            # dispatch claude | codex | copilot | opencode | antigravity
 vf orchestrate           # plan + dispatch work units (--engine, --yes, --concurrency)
 vf units status          # ledger: status | show <name> | resources | evidence <name>
 vf skills list           # skills: list | search <term> | resolve
@@ -64,8 +65,9 @@ vf verify                # typecheck/lint/test + confidence/evidence/scope gates
 
 ## Package layout
 
-The implementation is a flat `src/*.ts` tree (no `bin/`, `adapters/`, or `server/routes/`
-sub-trees). The single binary entry is `src/cli.ts`, bundled to `dist/cli.js`.
+The implementation is modular under `src/commands/`, `src/core/`, `src/dispatch/`,
+`src/orchestrator/`, `src/capabilities/`, `src/server/`, and `src/ui/`. The single binary
+entry is `src/cli.ts`, bundled to `dist/cli.js`.
 
 ```text
 /
@@ -151,7 +153,7 @@ Project dependencies
 
 ```text
 - bind to 127.0.0.1 by default
-- random available port
+- stable port 7799 for `vf` and `vf ui`; explicit `--port 0` asks the OS for a free port
 - no public tunnel by default
 - no remote telemetry by default
 - no source upload by default

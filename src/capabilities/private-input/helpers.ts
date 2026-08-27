@@ -1,6 +1,6 @@
 import { DIGEST, PACKAGE_ID } from "../../actions/record-primitives.js";
 import { digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { PublicPrivateInputBindingV1 } from "../wire/cli.js";
 import { bytewise } from "../wire/primitives.js";
 import type {
@@ -68,7 +68,7 @@ export function parseInputId(value: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(value))
     throw new CapabilityRuntimeError(
       `invalid input identifier ${JSON.stringify(value)}`,
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   return value;
 }
@@ -76,7 +76,10 @@ export function parseInputId(value: string): string {
 export function uniqueSortedInputIds(values: readonly string[]): string[] {
   const parsed = values.map((value) => parseInputId(value)).sort(bytewise);
   if (new Set(parsed).size !== parsed.length)
-    throw new CapabilityRuntimeError("duplicate private input identifier", "invalid-plan");
+    throw new CapabilityRuntimeError(
+      "duplicate private input identifier",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+    );
   return parsed;
 }
 
@@ -86,9 +89,15 @@ export function assertPackageIdentity(
   manifestDigest: string,
 ): void {
   if (!PACKAGE_ID.test(packageId))
-    throw new CapabilityRuntimeError("invalid capability package identifier", "invalid-plan");
+    throw new CapabilityRuntimeError(
+      "invalid capability package identifier",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+    );
   if (!DIGEST.test(packagePinDigest) || !DIGEST.test(manifestDigest))
-    throw new CapabilityRuntimeError("invalid capability package digest identity", "invalid-plan");
+    throw new CapabilityRuntimeError(
+      "invalid capability package digest identity",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+    );
 }
 
 export function emptyBindingDigest(identity: {
@@ -112,7 +121,10 @@ export function minimumTimestamp(values: readonly string[]): string {
   const sorted = [...values].sort((left, right) => Date.parse(left) - Date.parse(right));
   const first = sorted[0];
   if (!first)
-    throw new CapabilityRuntimeError("missing timestamp for private-input binding", "fault");
+    throw new CapabilityRuntimeError(
+      "missing timestamp for private-input binding",
+      CAPABILITY_RUNTIME_ERROR_CODE.FAULT,
+    );
   return first;
 }
 

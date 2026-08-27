@@ -1,4 +1,5 @@
 import { ENGINES, type Engine, hasCommand, resolveCommand, resolveEngineBinary } from "./core.js";
+import { AGENT_ENGINE } from "./core/agent-contract.js";
 import { checkEngineAsync, runAttempts } from "./preflight/check-async.js";
 import {
   checkCopilotAuth,
@@ -171,7 +172,7 @@ export function checkEngine(engine: Engine, opts: PreflightOpts = {}): EngineRea
     return r;
   }
 
-  if (engine === "copilot") {
+  if (engine === AGENT_ENGINE.COPILOT) {
     try {
       const auth = checkCopilotAuth(has, spawner, usesDefaultHas);
       const r = stamp(auth.level, auth.detail);

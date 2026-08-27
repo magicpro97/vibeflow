@@ -1,10 +1,11 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import { digestHex } from "../../durability/index.js";
 import { CapabilityValidationError, DIGEST_PATTERN } from "../wire/primitives.js";
 
 export interface CapabilityStorePathsV1 {
-  scope: "project" | "user";
+  scope: CapabilityScope;
   privateRoot: string;
   currentLock: string;
   identity: string;
@@ -16,7 +17,7 @@ export function projectCapabilityPaths(projectRoot: string): CapabilityStorePath
   const root = resolve(projectRoot);
   const privateRoot = join(root, ".vibeflow", "private", "capabilities");
   return {
-    scope: "project",
+    scope: CAPABILITY_SCOPE.PROJECT,
     privateRoot,
     currentLock: join(root, ".vibeflow", "CAPABILITIES.lock.json"),
     identity: join(root, ".vibeflow", "PROJECT_ID.json"),
@@ -30,7 +31,7 @@ export function userCapabilityPaths(
 ): CapabilityStorePathsV1 {
   const privateRoot = join(resolve(userVibeflowRoot), "capabilities");
   return {
-    scope: "user",
+    scope: CAPABILITY_SCOPE.USER,
     privateRoot,
     currentLock: join(privateRoot, "CAPABILITIES.lock.json"),
     identity: join(privateRoot, "authority", "USER_IDENTITY.json"),

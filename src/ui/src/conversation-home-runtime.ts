@@ -1,35 +1,23 @@
+import {
+  ACTION_OPERATION_STATES,
+  ACTION_OPERATION_TERMINAL_STATES,
+  isActionOperationState,
+  isActionOperationTerminalState,
+} from "../../actions/protocol-contract.js";
 import { ConversationHomeApiError } from "./conversation-home-api.js";
 import type { ActivationEpoch } from "./conversation-home-state.js";
 import type { HomeActionOperationState, HomePendingChallenge } from "./conversation-home-types.js";
 
-export const HOME_ACTION_OPERATION_STATES: ReadonlySet<string> = new Set([
-  "pending_review",
-  "approved",
-  "committing",
-  "succeeded",
-  "failed",
-  "denied",
-  "needs_recovery",
-  "canceled",
-  "expired",
-  "stale",
-]);
+export const HOME_ACTION_OPERATION_STATES = ACTION_OPERATION_STATES;
 
-export const HOME_TERMINAL_OPERATION_STATES: ReadonlySet<string> = new Set([
-  "succeeded",
-  "failed",
-  "denied",
-  "needs_recovery",
-  "canceled",
-  "expired",
-  "stale",
-]);
+export const HOME_TERMINAL_OPERATION_STATES = ACTION_OPERATION_TERMINAL_STATES;
 
-export const isHomeActionOperationState = (state: unknown): state is HomeActionOperationState =>
-  typeof state === "string" && HOME_ACTION_OPERATION_STATES.has(state);
+export function isHomeActionOperationState(state: unknown): state is HomeActionOperationState {
+  return isActionOperationState(state);
+}
 
 export const terminalHomeOperation = (state: unknown): state is HomeActionOperationState =>
-  typeof state === "string" && HOME_TERMINAL_OPERATION_STATES.has(state);
+  isActionOperationTerminalState(state);
 
 export function readableHomeError(error: unknown): string {
   if (error instanceof DOMException && error.name === "AbortError") return "";

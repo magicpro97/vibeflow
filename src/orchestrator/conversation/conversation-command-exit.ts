@@ -1,4 +1,12 @@
 import type { PublicStoredTraceEvent } from "../trace/types.js";
+import {
+  CONVERSATION_COMMAND_RESULT_STATUS,
+  CONVERSATION_COMMAND_SUCCESS_STATUS,
+  type ConversationCommandResultStatus,
+} from "./conversation-command-result-contract.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
+
+export type { ConversationCommandResultStatus } from "./conversation-command-result-contract.js";
 
 export const CONVERSATION_EXIT = Object.freeze({
   ok: 0,
@@ -21,14 +29,6 @@ const JSON_ERROR_CODES: Readonly<Record<number, string>> = Object.freeze({
   [CONVERSATION_EXIT.aborted]: "conversation_aborted",
 });
 
-export type ConversationCommandResultStatus =
-  | "completed"
-  | "aborted"
-  | "failed"
-  | "awaiting_approval"
-  | "accepted"
-  | "stopped";
-
 export function classifyConversationError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
@@ -43,15 +43,15 @@ export function classifyConversationResult(
   events: readonly PublicStoredTraceEvent[],
 ): number {
   if (
-    status === "completed" ||
-    status === "accepted" ||
-    status === "awaiting_approval" ||
-    status === "stopped"
+    status === CONVERSATION_COMMAND_SUCCESS_STATUS.COMPLETED ||
+    status === CONVERSATION_COMMAND_SUCCESS_STATUS.ACCEPTED ||
+    status === CONVERSATION_COMMAND_SUCCESS_STATUS.AWAITING_APPROVAL ||
+    status === CONVERSATION_COMMAND_SUCCESS_STATUS.STOPPED
   )
     return CONVERSATION_EXIT.ok;
-  if (status === "aborted") return CONVERSATION_EXIT.aborted;
+  if (status === CONVERSATION_COMMAND_RESULT_STATUS.ABORTED) return CONVERSATION_EXIT.aborted;
   const errorCodes = events.flatMap((event) =>
-    event.event.type === "error" && "code" in event.event.payload
+    event.event.type === CONVERSATION_TRACE_EVENT_KIND.ERROR && "code" in event.event.payload
       ? [String(event.event.payload.code).toLowerCase()]
       : [],
   );

@@ -69,7 +69,7 @@ function record(
   return {
     event_id: `event-${seq}`,
     seq,
-    ts: `2026-08-22T00:00:${String(seq).padStart(2, "0")}Z`,
+    ts: `2026-08-22T00:00:${String(seq).padStart(2, "0")}.000Z`,
     workflow_id: "workflow-1",
     conversation_id: "conversation-1",
     revision_id: "revision-1",
@@ -328,7 +328,7 @@ function record(
         round_id: "round-1",
         participant_id: "participant-1",
         content_delta: "Answer 1",
-        final_claim: "Use Bun test",
+        final_claim: "use bun test",
         final_evidence: ["test/ui-conversation-contract.test.ts:1"],
         completes_response: true,
       },
@@ -344,7 +344,9 @@ function record(
         completes_response: true,
       },
     }),
-    record(4, {
+    // biome-ignore format: compact duplicate/case-fold fixture keeps this file below the source cap
+    record(4, { type: "agent_response_delta", payload: { round_id: "round-1", participant_id: "participant-3", content_delta: "Answer 3", final_claim: "Use Bun test", final_evidence: [], completes_response: true } }),
+    record(5, {
       type: "evaluator_assessment",
       payload: {
         round_id: "round-1",
@@ -357,12 +359,12 @@ function record(
         },
       },
     }),
-    record(5, {
+    record(6, {
       type: "consensus_update",
       payload: { round_id: "round-1", decision: { outcome: "consensus", score: 0.95 } },
     }),
-    record(6, { type: "round_boundary", payload: { round_id: "round-1", phase: "end" } }),
-    record(7, {
+    record(7, { type: "round_boundary", payload: { round_id: "round-1", phase: "end" } }),
+    record(8, {
       type: "baseline_result",
       payload: { status: "success", answer: "Use Bun test", confidence: 0.8, skip_reason: null },
     }),
@@ -377,7 +379,7 @@ function record(
   );
   assert(
     "decision matrix timestamps the end of the completed round",
-    matrix?.generated_at === "2026-08-22T00:00:06Z",
+    matrix?.generated_at === "2026-08-22T00:00:07.000Z",
   );
   assertDeep("baseline uses public debate output only", baseline, {
     status: "success",

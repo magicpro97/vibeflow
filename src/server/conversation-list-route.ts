@@ -4,6 +4,7 @@ import {
   httpStatusForPublicError,
   publicActionError,
 } from "../actions/errors.js";
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import type { RecoveryAction } from "../actions/types.js";
 import {
   CatalogCursorError,
@@ -15,20 +16,13 @@ import {
   type ConversationCatalogService,
 } from "../orchestrator/conversation/catalog-service.js";
 import { CatalogProjectionCorruptError } from "../orchestrator/conversation/catalog-storage.js";
+import { CONVERSATION_LIFECYCLES } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import { LineageAuthorityCorruptError } from "../orchestrator/conversation/lineage-store.js";
 import type { ConversationLifecycle } from "../orchestrator/trace/types.js";
 import type { ConversationSessionAuthority } from "./conversation-auth.js";
 
 const ALLOWED_QUERY = new Set(["q", "lifecycle", "policy", "cursor", "limit"]);
-const LIFECYCLES = new Set<ConversationLifecycle>([
-  "INIT",
-  "ACTIVE",
-  "PAUSED",
-  "COMPLETED",
-  "STOPPED",
-  "FAILED",
-  "ABORTED",
-]);
+const LIFECYCLES = new Set<ConversationLifecycle>(CONVERSATION_LIFECYCLES);
 
 export interface ConversationListRouteAuthority {
   sessions: Pick<ConversationSessionAuthority, "authorize">;
@@ -103,9 +97,9 @@ function parseListQuery(url: URL): ConversationCatalogListInputV1 {
 
 function mapListError(error: unknown): Response {
   if (error instanceof StaleCatalogCursorError)
-    return conversationReadError("stale_catalog_cursor", {
+    return conversationReadError(PUBLIC_ERROR_CODE.STALE_CATALOG_CURSOR, {
       message: "The conversation catalog changed during pagination.",
-      recoveryAction: "restart-pagination",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
       details: {
         restart_cursor: error.restart_cursor,
         catalog_generation: error.catalog_generation,
@@ -113,30 +107,32 @@ function mapListError(error: unknown): Response {
     });
   if (error instanceof CatalogCursorError)
     return conversationReadError(
-      error.code === "unsupported_schema_version"
-        ? "unsupported_schema_version"
-        : "invalid_request",
+      error.code === PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION
+        ? PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION
+        : PUBLIC_ERROR_CODE.INVALID_REQUEST,
       { message: "The conversation catalog cursor is invalid." },
     );
   if (error instanceof CatalogDegradedError)
-    return conversationReadError("catalog_degraded", {
+    return conversationReadError(PUBLIC_ERROR_CODE.CATALOG_DEGRADED, {
       message: "The conversation catalog is temporarily degraded.",
       retryable: true,
-      recoveryAction: error.recoverableById ? "resume-by-id" : "rebuild-catalog",
+      recoveryAction: error.recoverableById
+        ? PUBLIC_RECOVERY_ACTION.RESUME_BY_ID
+        : PUBLIC_RECOVERY_ACTION.REBUILD_CATALOG,
       details: { recoverable_by_id: error.recoverableById },
     });
   if (
     error instanceof CatalogProjectionCorruptError ||
     error instanceof LineageAuthorityCorruptError
   )
-    return conversationReadError("authority_corrupt", {
+    return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
       message: "Conversation catalog authority is corrupt.",
-      recoveryAction: "repair-authority",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
     });
-  return conversationReadError("service_unavailable", {
+  return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
     message: "The conversation catalog is unavailable.",
     retryable: true,
-    recoveryAction: "retry",
+    recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
   });
 }
 
@@ -146,14 +142,18 @@ export async function handleConversationListRoute(
   url: URL,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "GET")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   let input: ConversationCatalogListInputV1;
   try {
     input = parseListQuery(url);
   } catch {
-    return conversationReadError("invalid_request", {
+    return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
       message: "The conversation list query is invalid.",
     });
   }

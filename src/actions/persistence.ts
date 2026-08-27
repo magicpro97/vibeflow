@@ -13,6 +13,10 @@ import {
   readVffrFile,
 } from "../durability/index.js";
 import {
+  ACTION_APPROVAL_CHALLENGE_STATE,
+  type ActionIdempotencyBindingState,
+} from "./persistence-contract.js";
+import {
   validateAuthorityEvent,
   validateChallengeChain,
   validateChallengeFrame,
@@ -34,7 +38,7 @@ export interface ActionIdempotencyBindingV1 {
   schema_version: "1.0";
   sequence: 0 | 1;
   previous_frame_digest: string | null;
-  state: "prepared" | "visible";
+  state: ActionIdempotencyBindingState;
   principal_digest: string;
   authority_scope_digest: string;
   idempotency_key_digest: string;
@@ -277,7 +281,11 @@ export class ActionFilePersistence {
     for (const name of this.namespaceFiles(this.challenges, /^[A-Za-z0-9_-]{43}\.frames$/)) {
       try {
         const frame = this.readChallenge(name.slice(0, -".frames".length)).at(-1);
-        if (frame?.state === "consumed" && frame.frame_digest === frameDigest) matches.push(frame);
+        if (
+          frame?.state === ACTION_APPROVAL_CHALLENGE_STATE.CONSUMED &&
+          frame.frame_digest === frameDigest
+        )
+          matches.push(frame);
       } catch {
         // An unrelated corrupt challenge cannot substitute for the exact digest.
       }

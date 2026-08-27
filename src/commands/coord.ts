@@ -29,6 +29,7 @@
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { AGENT_ENGINE, type Engine as AgentEngine, isAgentEngine } from "../core/agent-contract.js";
 import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { readSettings } from "../settings.js";
 import {
@@ -45,7 +46,7 @@ import {
 
 /** Engine binary name. The shim records it for the audit trail; the
  *  spawner is responsible for the actual exec. */
-export type Engine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
+export type Engine = AgentEngine;
 
 /** A denied tool call — recorded in the audit log when a wrapped engine
  *  tries to invoke a tool the shim refuses. */
@@ -169,13 +170,7 @@ export async function coord(
   // stale brief). Exit code 2 is RESERVED for the A0 spec's "fresh
   // brief but §2 Non-negotiables violated" case (not yet implemented
   // — see issue #200). Per the A1 cross-review.
-  if (
-    engine !== "claude" &&
-    engine !== "codex" &&
-    engine !== "copilot" &&
-    engine !== "opencode" &&
-    engine !== "antigravity"
-  ) {
+  if (!isAgentEngine(engine)) {
     out(
       "vf",
       c.red(
@@ -219,7 +214,7 @@ export async function coord(
   });
   // ponytail: single-entry binary-name map; expand when another engine
   // needs a different executable name than its engine ID.
-  const engineBinary = engine === "antigravity" ? "agy" : engine;
+  const engineBinary = engine === AGENT_ENGINE.ANTIGRAVITY ? "agy" : engine;
   const code = await spawner(engine, engineBinary, engineArgs, spawnEnv);
 
   // The deny-list is enforced by the engine's PreToolUse hook in

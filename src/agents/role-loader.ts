@@ -10,6 +10,14 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import {
+  ROLE_FRONTMATTER_FIELD,
+  type RoleFrontmatterField,
+  type ToolIntent,
+  isRoleModel,
+  isRoleSandbox,
+  isRoleToolIntent,
+} from "../core/role-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import type { RoleSpec } from "./role.js";
 
@@ -23,6 +31,9 @@ export interface ParsedAgentRole {
 
 const ROLE_REF_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+const ownRoleField = (data: Record<string, unknown>, field: RoleFrontmatterField): unknown =>
+  Object.hasOwn(data, field) ? data[field] : undefined;
+
 export function isRoleRef(value: string): boolean {
   return ROLE_REF_RE.test(value);
 }
@@ -31,52 +42,33 @@ export function isRoleRef(value: string): boolean {
  *  Exported as a test seam: `parseAgentRole` always passes a string `body`, so
  *  the non-string-body branch is only reachable via a direct call. */
 export function toRoleSpec(data: Record<string, unknown>): RoleSpec | null {
-  const name = data.name;
-  const description = data.description;
-  const body = data.body;
-  const tools = data.tools;
-  const model = data.model;
+  const name = ownRoleField(data, ROLE_FRONTMATTER_FIELD.NAME);
+  const description = ownRoleField(data, ROLE_FRONTMATTER_FIELD.DESCRIPTION);
+  const body = Object.hasOwn(data, "body") ? data.body : undefined;
+  const tools = ownRoleField(data, ROLE_FRONTMATTER_FIELD.TOOLS);
+  const model = ownRoleField(data, ROLE_FRONTMATTER_FIELD.MODEL);
+  const sandbox = ownRoleField(data, ROLE_FRONTMATTER_FIELD.SANDBOX);
 
   if (typeof name !== "string" || !name) return null;
   if (typeof description !== "string" || !description) return null;
   if (typeof body !== "string" && typeof data.body !== "undefined") return null;
 
-  const roleTools: Array<"read" | "write" | "edit" | "bash" | "grep" | "glob" | "web"> = [];
+  const roleTools: ToolIntent[] = [];
   if (Array.isArray(tools)) {
     for (const t of tools) {
-      if (
-        typeof t === "string" &&
-        ["read", "write", "edit", "bash", "grep", "glob", "web"].includes(t)
-      ) {
-        roleTools.push(t as "read" | "write" | "edit" | "bash" | "grep" | "glob" | "web");
-      }
+      if (isRoleToolIntent(t)) roleTools.push(t);
     }
   }
   if (roleTools.length === 0) return null;
-
-  const validModels = [
-    "haiku",
-    "sonnet",
-    "opus",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex-spark",
-    "gpt-5.4-codex",
-  ];
-  if (typeof model !== "string" || !validModels.includes(model)) return null;
+  if (!isRoleModel(model)) return null;
 
   return {
     name,
     description,
     body: typeof body === "string" ? body : "",
     tools: roleTools,
-    model: model as RoleSpec["model"],
-    sandbox:
-      data.sandbox === "read-only" ||
-      data.sandbox === "workspace-write" ||
-      data.sandbox === "danger-full-access"
-        ? (data.sandbox as RoleSpec["sandbox"])
-        : undefined,
+    model,
+    sandbox: isRoleSandbox(sandbox) ? sandbox : undefined,
   };
 }
 
@@ -88,11 +80,11 @@ export function parseAgentRole(text: string): ParsedAgentRole {
   const errors: string[] = [];
   const { data, body } = parseFrontmatter(text);
 
-  if (!data.name) {
+  if (!ownRoleField(data, ROLE_FRONTMATTER_FIELD.NAME)) {
     errors.push("missing 'name' in frontmatter");
     return { role: null, errors };
   }
-  if (!data.description) {
+  if (!ownRoleField(data, ROLE_FRONTMATTER_FIELD.DESCRIPTION)) {
     errors.push("missing 'description' in frontmatter");
     return { role: null, errors };
   }

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 import { computed, reactive, ref, shallowRef } from "vue";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_LIMITS,
+  CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+} from "../src/orchestrator/conversation/conversation-message-queue-contract.js";
 import { conversationApi } from "../src/ui/src/conversation-api.js";
 import {
   type BrowserActionCandidate,
@@ -29,6 +35,7 @@ import type {
   HomeOptimisticQueuedMessage,
   HomeQueuedMessage,
   HomeQueuedMessageEditBinding,
+  HomeRetryableQueuedMessage,
 } from "../src/ui/src/conversation-home-message-queue-types.js";
 import { createHomePrivateContextRuntime } from "../src/ui/src/conversation-home-private-context-runtime.js";
 import type {
@@ -104,6 +111,7 @@ function revision(
 
 function actionView(proposalId = "proposal-a"): HomeActionView {
   return {
+    schema_version: "1.0",
     proposal: {
       schema_version: "1.0",
       proposal_id: proposalId,
@@ -142,7 +150,7 @@ function actionView(proposalId = "proposal-a"): HomeActionView {
       latest_event_cursor: null,
       progress: [],
       targets: [],
-      delivery: "inline",
+      delivery: "not-applicable",
       result_ref: null,
       error: null,
       recovery_actions: [],
@@ -158,7 +166,7 @@ function canonicalQuote(): HomeCanonicalQuoteReference {
     conversation_id: "conversation-a",
     revision_id: "revision-a",
     target_event_id: "event-a",
-    target_kind: "completed-agent-response",
+    target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
     content_digest: digest("c"),
     author_public_id: "agent-a",
   };
@@ -187,10 +195,10 @@ function queuedItem(
     queue_item_id: queueId(seed),
     queue_sequence: sequence,
     root_session_id: "root-a",
-    author_public_id: "human",
+    author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
     content,
     content_digest: digest(seed),
-    target_participants: "all",
+    target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     quote_refs: [],
     private_context_present: false,
     predecessor_queue_item_id: sequence === 1 ? null : queueId((sequence - 1).toString(16)),
@@ -601,6 +609,7 @@ function queueHarness() {
   const composerError = ref("");
   const snapshot = shallowRef<HomeMessageQueueSnapshot | null>(null);
   const optimistic = ref<HomeOptimisticQueuedMessage[]>([]);
+  const retryable = ref<HomeRetryableQueuedMessage[]>([]);
   const edit = shallowRef<HomeQueuedMessageEditBinding | null>(null);
   const editSaving = ref(false);
   const sendAsNew = ref(false);
@@ -615,6 +624,7 @@ function queueHarness() {
     composerError,
     snapshot,
     optimistic,
+    retryable,
     edit,
     editSaving,
     sendAsNew,
@@ -634,6 +644,7 @@ function queueHarness() {
     composerError,
     snapshot,
     optimistic,
+    retryable,
     edit,
     editSaving,
     sendAsNew,
@@ -649,6 +660,13 @@ describe("final Home queue authority and runtime coverage", () => {
     const quoted = queuedItem(1, "quoted", { quote_refs: [canonicalQuote()] });
     expect(isHomeQueuedMessage(quoted)).toBeTrue();
     assertHomeMessageQueueSnapshot(queueSnapshot([quoted]), "root-a");
+    expect(isHomeQueuedMessage({ ...quoted, unexpected_field: true })).toBeFalse();
+    expect(() =>
+      assertHomeMessageQueueSnapshot(
+        { ...queueSnapshot([quoted]), unexpected_field: true },
+        "root-a",
+      ),
+    ).toThrow("The message queue projection did not match this session.");
 
     expect(
       isHomeQueuedMessage({
@@ -657,6 +675,43 @@ describe("final Home queue authority and runtime coverage", () => {
       }),
     ).toBeFalse();
     expect(isHomeQueuedMessage({ ...quoted, quote_refs: [{}] })).toBeFalse();
+    expect(
+      isHomeQueuedMessage({
+        ...quoted,
+        root_session_id: "r".repeat(CONVERSATION_MESSAGE_QUEUE_LIMITS.maxReferenceBytes + 1),
+      }),
+    ).toBeFalse();
+    expect(isHomeQueuedMessage({ ...quoted, target_participants: ["agent\nprivate"] })).toBeFalse();
+    expect(
+      isHomeQueuedMessage({
+        ...quoted,
+        quote_refs: [{ ...canonicalQuote(), target_event_id: "event\0private" }],
+      }),
+    ).toBeFalse();
+    expect(
+      isHomeQueuedMessage({
+        ...quoted,
+        quote_refs: [{ ...canonicalQuote(), root_session_id: "different-root" }],
+      }),
+    ).toBeFalse();
+    expect(
+      isHomeQueuedMessage({
+        ...quoted,
+        admitted_at: "2026-08-26T00:00:01.000Z",
+        updated_at: "2026-08-26T00:00:00.999Z",
+      }),
+    ).toBeFalse();
+    expect(() =>
+      assertHomeMessageQueueSnapshot(
+        queueSnapshot(
+          Array.from(
+            { length: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems + 1 },
+            (_, index) => queuedItem(index + 1),
+          ),
+        ),
+        "root-a",
+      ),
+    ).toThrow("The message queue projection did not match this session.");
     expect(
       latestHomeEditableQueueItem(
         queueSnapshot([
@@ -673,7 +728,7 @@ describe("final Home queue authority and runtime coverage", () => {
       queue_item_id: queueId("1"),
       item_digest: digest("f"),
       queue_sequence: 1,
-      target_participants: "all",
+      target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
       quote_refs: [],
       private_context_present: false,
     };
@@ -712,6 +767,7 @@ describe("final Home queue authority and runtime coverage", () => {
     const composerError = ref("");
     const snapshot = shallowRef<HomeMessageQueueSnapshot | null>(null);
     const optimistic = ref<HomeOptimisticQueuedMessage[]>([]);
+    const retryable = ref<HomeRetryableQueuedMessage[]>([]);
     const announcement = ref("");
     let refreshes = 0;
     const runtime = createHomeMessageQueueAdmissionRuntime({
@@ -721,6 +777,7 @@ describe("final Home queue authority and runtime coverage", () => {
       composerError,
       snapshot,
       optimistic,
+      retryable,
       announcement,
       refreshQueue: async () => {
         refreshes += 1;
@@ -729,16 +786,16 @@ describe("final Home queue authority and runtime coverage", () => {
       clearSendAsNew() {},
     });
     const restored: string[] = [];
-    const admission = (content: string, idempotencyKey: string) => ({
+    const admission = (content: string, idempotencyKey: string, restores = true) => ({
       idempotency_key: idempotencyKey,
       content,
-      target_participants: "all" as const,
+      target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
       quote_refs: [],
       private_context_present: false,
       clearIfCurrent() {},
       restoreIfVacant() {
-        restored.push(content);
-        return true;
+        if (restores) restored.push(content);
+        return restores;
       },
     });
     try {
@@ -750,12 +807,14 @@ describe("final Home queue authority and runtime coverage", () => {
       const initialA = deferred<HomeQueuedMessage>();
       const initialB = deferred<HomeQueuedMessage>();
       const replayA = deferred<HomeQueuedMessage>();
+      const disconnected = deferred<HomeQueuedMessage>();
       let calls = 0;
       conversationHomeApi.enqueueMessage = (() => {
         calls += 1;
         if (calls === 1) return initialA.promise;
         if (calls === 2) return initialB.promise;
         if (calls === 3) return replayA.promise;
+        if (calls === 5) return disconnected.promise;
         return Promise.resolve(queuedItem(2, "B"));
       }) as typeof conversationHomeApi.enqueueMessage;
       const first = runtime.enqueue(admission("A", "admission-a"));
@@ -781,6 +840,17 @@ describe("final Home queue authority and runtime coverage", () => {
       expect(snapshot.value?.items.map((item) => item.content)).toEqual(["A", "B"]);
       expect(restored).toEqual([]);
       expect(refreshes).toBe(0);
+
+      const disconnectedEnqueue = runtime.enqueue(admission("offline", "admission-offline", false));
+      await flush();
+      expect(runtime.goOffline("root-a")).toBeTrue();
+      online.value = false;
+      const projectionKey = retryable.value[0]?.projection_key;
+      expect(projectionKey).toBeDefined();
+      expect(await runtime.retry(projectionKey ?? "missing")).toBeFalse();
+      expect(announcement.value).toBe("Reconnect before retrying this queued message.");
+      disconnected.resolve(queuedItem(3, "offline"));
+      expect(await disconnectedEnqueue).toBeFalse();
     } finally {
       runtime.dispose();
       activation.close();
@@ -1089,7 +1159,7 @@ describe("final Home command runtime coverage", () => {
         queue_item_id: queueId("1"),
         item_digest: digest("f"),
         queue_sequence: 1,
-        target_participants: "all",
+        target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
         quote_refs: [],
         private_context_present: false,
       }),
@@ -1291,8 +1361,9 @@ describe("final Home query and store coverage", () => {
       next_cursor: null,
       authority_watermark: digest("e"),
     })) as typeof conversationHomeApi.pending;
-    conversationHomeApi.messageQueue = (async () =>
-      queueSnapshot()) as typeof conversationHomeApi.messageQueue;
+    let messageQueueDelegate: typeof conversationHomeApi.messageQueue = async () => queueSnapshot();
+    conversationHomeApi.messageQueue = ((rootSessionId, signal) =>
+      messageQueueDelegate(rootSessionId, signal)) as typeof conversationHomeApi.messageQueue;
     conversationHomeApi.capabilities = (async () => ({
       schema_version: "1.0",
       items: [],
@@ -1363,7 +1434,7 @@ describe("final Home query and store coverage", () => {
       const firstQueue = deferred<HomeMessageQueueSnapshot>();
       const trailingQueue = deferred<HomeMessageQueueSnapshot>();
       let queueCalls = 0;
-      conversationHomeApi.messageQueue = (() => {
+      messageQueueDelegate = (() => {
         queueCalls += 1;
         return queueCalls === 1 ? firstQueue.promise : trailingQueue.promise;
       }) as typeof conversationHomeApi.messageQueue;
@@ -1378,7 +1449,7 @@ describe("final Home query and store coverage", () => {
       expect(await Promise.all([firstRefresh, coalescedRefresh])).toEqual([true, true]);
 
       let invalidationRefreshes = 0;
-      conversationHomeApi.messageQueue = (async () => {
+      messageQueueDelegate = (async () => {
         invalidationRefreshes += 1;
         return queueSnapshot();
       }) as typeof conversationHomeApi.messageQueue;

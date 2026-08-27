@@ -2,22 +2,29 @@ import {
   type ConversationCatalogSourceInventoryEntryV1,
   assertConversationCatalogSourceInventoryEntryV1,
 } from "./catalog-types.js";
+import {
+  CONVERSATION_CATALOG_SOURCE_KIND,
+  CONVERSATION_SOURCE_INVENTORY_STATE,
+} from "./conversation-catalog-contract.js";
 import { buildValidatedLineage } from "./lineage-build.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
 import {
-  type PreparedRevisionRecoveryLinkInputV1,
   type PreparedRevisionRecoveryLinkV1,
   preparedRevisionRecoveryLinkMap,
 } from "./lineage-prepared-revision.js";
 import {
-  type PublishedRevisionTransitionInputV1,
   type PublishedRevisionTransitionV1,
   publishedRevisionTransitionMap,
 } from "./lineage-published-transition.js";
+import type {
+  ConversationLineageDerivationV1,
+  ConversationLineageReadV1,
+  DeriveConversationLineagesOptionsV1,
+  ValidatedLineageNodeV1,
+} from "./lineage-reader-contract.js";
 import {
   type ConversationSourceDiagnosticV1,
   type LineageHeadRecordV1,
-  type LineageNodeIdentityV1,
   compareConversationDiagnostics,
   diagnostic,
 } from "./lineage-types.js";
@@ -25,40 +32,12 @@ import type {
   ConversationSourceInventoryV1,
   ValidatedConversationSourceV1,
 } from "./source-inventory.js";
-
-export interface ValidatedLineageNodeV1 {
-  node: LineageNodeIdentityV1;
-  root_session_id: string;
-  parent: LineageNodeIdentityV1 | null;
-  manifest_digest: string;
-  ancestry_digest: string;
-  source: ValidatedConversationSourceV1;
-}
-
-export interface ConversationLineageReadV1 {
-  schema_version: "1.0";
-  root_session_id: string;
-  nodes: ValidatedLineageNodeV1[];
-  eligible_leaves: ValidatedLineageNodeV1[];
-  validated_leaf_set_digest: string;
-  initial_head_candidate: LineageHeadRecordV1 | null;
-}
-
-export interface ConversationLineageDerivationV1 {
-  schema_version: "1.0";
-  state: "empty" | "ready" | "degraded";
-  authoritative: boolean;
-  lineages: ConversationLineageReadV1[];
-  excluded_conversation_ids: string[];
-  diagnostics: ConversationSourceDiagnosticV1[];
-  root_by_conversation: ReadonlyMap<string, string>;
-}
-
-export interface DeriveConversationLineagesOptionsV1 {
-  publishedRevisionTransitions?: readonly PublishedRevisionTransitionInputV1[];
-  /** Exact prepared links admitted only for private revision recovery; never head candidates. */
-  recoveryPreparedRevisionLinks?: readonly PreparedRevisionRecoveryLinkInputV1[];
-}
+export type {
+  ConversationLineageDerivationV1,
+  ConversationLineageReadV1,
+  DeriveConversationLineagesOptionsV1,
+  ValidatedLineageNodeV1,
+} from "./lineage-reader-contract.js";
 
 const compareBytes = (left: string, right: string): number =>
   Buffer.compare(Buffer.from(left), Buffer.from(right));
@@ -330,7 +309,11 @@ export function deriveConversationLineages(
     for (const node of lineage.nodes)
       rootByConversation.set(node.node.conversation_id, lineage.root_session_id);
   diagnostics.sort(compareConversationDiagnostics);
-  const state = diagnostics.length ? "degraded" : lineages.length ? "ready" : "empty";
+  const state = diagnostics.length
+    ? CONVERSATION_SOURCE_INVENTORY_STATE.DEGRADED
+    : lineages.length
+      ? CONVERSATION_SOURCE_INVENTORY_STATE.READY
+      : CONVERSATION_SOURCE_INVENTORY_STATE.EMPTY;
   return {
     schema_version: "1.0",
     state,
@@ -354,13 +337,13 @@ export function buildLineageSourceInventoryEntries(
     if (!root) continue;
     entries.push(
       {
-        source_kind: "conversation-manifest",
+        source_kind: CONVERSATION_CATALOG_SOURCE_KIND.CONVERSATION_MANIFEST,
         root_session_id: root,
         record_id: source.manifest.conversation_id,
         record_digest: source.manifest_digest,
       },
       {
-        source_kind: "conversation-journal-head",
+        source_kind: CONVERSATION_CATALOG_SOURCE_KIND.CONVERSATION_JOURNAL_HEAD,
         root_session_id: root,
         record_id: source.journal_head.record_id,
         record_digest: source.journal_head.record_digest,
@@ -369,7 +352,7 @@ export function buildLineageSourceInventoryEntries(
   }
   for (const head of heads)
     entries.push({
-      source_kind: "lineage-head",
+      source_kind: CONVERSATION_CATALOG_SOURCE_KIND.LINEAGE_HEAD,
       root_session_id: head.root_session_id,
       record_id: head.root_session_id,
       record_digest: head.content_digest,

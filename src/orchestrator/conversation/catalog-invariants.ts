@@ -4,6 +4,10 @@ import type {
   ConversationRevisionSummaryV1,
   ConversationSessionSummaryV1,
 } from "./catalog-types.js";
+import {
+  CONVERSATION_HEAD_STATUS,
+  CONVERSATION_LINEAGE_STATUS,
+} from "./conversation-catalog-contract.js";
 
 const compareBytes = (left: string, right: string): number =>
   Buffer.compare(Buffer.from(left), Buffer.from(right));
@@ -26,12 +30,12 @@ export function assertSessionSummaryInvariants(value: ConversationSessionSummary
     value.root.revision_ordinal !== 0 ||
     value.root.parent_conversation_id !== null ||
     value.root.parent_revision_id !== null ||
-    value.root.lineage_status !== "verified"
+    value.root.lineage_status !== CONVERSATION_LINEAGE_STATUS.VERIFIED
   )
     throw new Error("invalid conversation session root projection");
   if (
     value.active &&
-    (value.active.lineage_status !== "verified" ||
+    (value.active.lineage_status !== CONVERSATION_LINEAGE_STATUS.VERIFIED ||
       value.active.revision_ordinal >= value.revision_count)
   )
     throw new Error("invalid conversation session active projection");
@@ -41,7 +45,7 @@ export function assertSessionSummaryInvariants(value: ConversationSessionSummary
   )
     throw new Error("ordinal-zero active revision must equal the root projection");
   if (
-    value.head_status === "committed" &&
+    value.head_status === CONVERSATION_HEAD_STATUS.COMMITTED &&
     value.active !== null &&
     value.sort_updated_at !== value.active.updated_at
   )

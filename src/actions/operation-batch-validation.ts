@@ -1,24 +1,65 @@
 import { canonicalJsonBytes } from "../durability/index.js";
+import { HOST_ACTION_KIND, type HostActionKind } from "./host-action-contract.js";
+import {
+  validateAuthorityChangeProgression,
+  validateRepairProgression,
+} from "./operation-authority-batch-validation.js";
 import { terminalStateForPhase } from "./operation-phase-rules.js";
-import type { ActionOperationEventV1, PublicTargetResultV1 } from "./public-types.js";
-import type { ActionAuthoritySnapshotV1, ActionOperationState } from "./types.js";
+import {
+  ACTION_OPERATION_STATE,
+  type ActionOperationState,
+  isActionOperationDomainTerminalState,
+  isActionOperationResolvedDomainState,
+} from "./protocol-contract.js";
+import {
+  PUBLIC_OPERATION_FIXED_PHASE,
+  PUBLIC_OPERATION_PHASE_PREFIX,
+  PUBLIC_TARGET_RESULT_OUTCOME,
+  type PublicOperationPhaseV1,
+  isPublicOperationParticipantTargetPhase,
+  isPublicOperationPhase,
+  isPublicOperationStateDependentStatusPhase,
+  publicOperationTargetOutcomes,
+} from "./public-operation-contract.js";
+import { isPublicOperationPhaseStateValid } from "./public-operation-semantics.js";
+import type { ActionOperationEventV1 } from "./public-types.js";
+import type { ActionAuthoritySnapshotV1 } from "./types.js";
 
-const TERMINAL = new Set<ActionOperationState>(["succeeded", "failed", "needs_recovery"]);
-const AUTHORITY_ACTIONS = new Set([
-  "grant.create",
-  "grant.renew",
-  "grant.revoke",
-  "policy.update_authority",
-  "secret.revoke",
-  "registry.trust_key",
+const AUTHORITY_ACTIONS = new Set<HostActionKind>([
+  HOST_ACTION_KIND.GRANT_CREATE,
+  HOST_ACTION_KIND.GRANT_RENEW,
+  HOST_ACTION_KIND.GRANT_REVOKE,
+  HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY,
+  HOST_ACTION_KIND.SECRET_REVOKE,
+  HOST_ACTION_KIND.REGISTRY_TRUST_KEY,
 ]);
+
+const RECEIPT_ACTIONS = new Set<HostActionKind>([
+  HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD,
+  HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES,
+  HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
+  HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION,
+  HOST_ACTION_KIND.CONTEXT_COMPACT,
+]);
+
+const CAPABILITY_OPERATION_BOUNDARY_PHASES = Object.freeze([
+  PUBLIC_OPERATION_FIXED_PHASE.OPERATION_SUCCEEDED,
+  PUBLIC_OPERATION_FIXED_PHASE.OPERATION_FAILED,
+  PUBLIC_OPERATION_FIXED_PHASE.OPERATION_NEEDS_RECOVERY,
+] as const);
+
+const CAPABILITY_FINAL_BOUNDARY_PHASES = Object.freeze([
+  PUBLIC_OPERATION_FIXED_PHASE.OPERATION_SUCCEEDED,
+  PUBLIC_OPERATION_FIXED_PHASE.OPERATION_FAILED,
+] as const);
 
 export function validateOperationBatches(
   snapshot: ActionAuthoritySnapshotV1,
   events: readonly ActionOperationEventV1[],
 ): void {
   if (!events.length) return;
-  if (snapshot.proposal.action.type === "authority.repair") validateRepairProgression(events);
+  if (snapshot.proposal.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR)
+    validateRepairProgression(events);
   else validateStateProgression(snapshot, events);
   const capability = snapshot.proposal.action.type.startsWith("capability.");
   if (capability) validateCapabilityBatches(snapshot, events);
@@ -33,87 +74,39 @@ function validateStateProgression(
   snapshot: ActionAuthoritySnapshotV1,
   events: readonly ActionOperationEventV1[],
 ): void {
-  let state: ActionOperationState = "committing";
-  let terminalBoundary: ActionOperationEventV1 | null = null;
+  let state: ActionOperationState = ACTION_OPERATION_STATE.COMMITTING;
+  let boundary: ActionOperationEventV1 | null = null;
   for (const [index, event] of events.entries()) {
     assertPhaseStateClass(snapshot, event, index);
     if (index === 0) {
-      if (event.state !== "committing") invalid("operation phase zero is not committing");
+      if (event.state !== ACTION_OPERATION_STATE.COMMITTING)
+        invalid("operation phase zero is not committing");
       continue;
     }
     if (event.state !== state) {
       const valid =
-        (state === "committing" && TERMINAL.has(event.state)) ||
-        (state === "needs_recovery" && ["succeeded", "failed"].includes(event.state));
+        (state === ACTION_OPERATION_STATE.COMMITTING &&
+          isActionOperationDomainTerminalState(event.state)) ||
+        (state === ACTION_OPERATION_STATE.NEEDS_RECOVERY &&
+          isActionOperationResolvedDomainState(event.state));
       if (!valid) invalid(`illegal operation state transition ${state} to ${event.state}`);
-      if (!isDomainTerminalBoundary(event) && !event.progress?.phase.startsWith("target-"))
+      if (!isDomainTerminalBoundary(event) && !isCapabilityTargetPhase(event.progress?.phase))
         invalid("operation state changes outside a terminal batch");
       state = event.state;
     }
     if (isDomainTerminalBoundary(event)) {
-      if (terminalBoundary && terminalBoundary.state !== "needs_recovery")
+      if (boundary && boundary.state !== ACTION_OPERATION_STATE.NEEDS_RECOVERY)
         invalid("terminal phase has a successor");
-      if (terminalBoundary?.state === "needs_recovery" && event.state === "needs_recovery")
+      if (
+        boundary?.state === ACTION_OPERATION_STATE.NEEDS_RECOVERY &&
+        event.state === ACTION_OPERATION_STATE.NEEDS_RECOVERY
+      )
         invalid("needs-recovery boundary is duplicated");
-      terminalBoundary = event;
-    } else if (terminalBoundary && terminalBoundary.state !== "needs_recovery") {
+      boundary = event;
+    } else if (boundary && boundary.state !== ACTION_OPERATION_STATE.NEEDS_RECOVERY) {
       invalid("terminal phase has a successor");
     }
   }
-}
-
-const REPAIR_STATE = {
-  prepared: "committing",
-  preimage_fsynced: "committing",
-  restore_in_progress: "committing",
-  restored: "committing",
-  verified: "succeeded",
-  failed: "failed",
-  needs_recovery: "needs_recovery",
-} as const;
-type RepairPhase = keyof typeof REPAIR_STATE;
-function validateRepairProgression(events: readonly ActionOperationEventV1[]): void {
-  let prior: RepairPhase | null = null;
-  let anchor: Exclude<RepairPhase, "needs_recovery"> | null = null;
-  for (const [index, event] of events.entries()) {
-    if (index === 0) {
-      if (event.state !== "committing" || event.progress?.phase !== "dispatch")
-        invalid("repair phase zero is not its committing dispatch");
-      continue;
-    }
-    const prefix = "authority-repair:";
-    const phaseText = event.progress?.phase ?? "";
-    if (!phaseText.startsWith(prefix)) invalid("repair operation contains a foreign phase");
-    const phase = phaseText.slice(prefix.length) as RepairPhase;
-    if (!(phase in REPAIR_STATE) || event.state !== REPAIR_STATE[phase])
-      invalid("nonterminal phase must remain committing or match its repair terminal state");
-    if (prior === null) {
-      if (phase !== "prepared") invalid("repair event chain does not begin at prepared");
-    } else if (prior === "needs_recovery") {
-      if (
-        phase !== "needs_recovery" &&
-        phase !== "failed" &&
-        (!anchor || !isRepairEdge(anchor, phase))
-      )
-        invalid("repair reconciliation does not resume the nearest anchor edge");
-    } else if (!isRepairEdge(prior, phase)) {
-      invalid(`illegal repair phase transition ${prior} to ${phase}`);
-    }
-    if (phase !== "needs_recovery") anchor = phase;
-    prior = phase;
-  }
-}
-
-function isRepairEdge(from: Exclude<RepairPhase, "needs_recovery">, to: RepairPhase): boolean {
-  const edges: Record<Exclude<RepairPhase, "needs_recovery">, readonly RepairPhase[]> = {
-    prepared: ["preimage_fsynced", "failed", "needs_recovery"],
-    preimage_fsynced: ["restore_in_progress", "failed", "needs_recovery"],
-    restore_in_progress: ["restored", "failed", "needs_recovery"],
-    restored: ["verified", "needs_recovery"],
-    verified: [],
-    failed: [],
-  };
-  return edges[from].some((candidate) => candidate === to);
 }
 
 function assertPhaseStateClass(
@@ -122,57 +115,38 @@ function assertPhaseStateClass(
   index: number,
 ): void {
   const phase = event.progress?.phase ?? "";
+  if (isPublicOperationPhase(phase)) {
+    if (
+      isPublicOperationPhaseStateValid({
+        actionType: snapshot.proposal.action.type,
+        phase,
+        phaseSequence: index,
+        state: event.state,
+      })
+    )
+      return;
+    if (isPublicOperationStateDependentStatusPhase(phase))
+      invalid("terminal-bound phase has an invalid operation state");
+  }
   if (index === 0) {
-    if (event.state !== "committing") invalid("operation phase zero is not committing");
+    if (event.state !== ACTION_OPERATION_STATE.COMMITTING)
+      invalid("operation phase zero is not committing");
     return;
   }
-  const exactTerminal = terminalStateForPhase(phase as never);
+  const exactTerminal = terminalStateForPhase(phase);
   if (exactTerminal !== null) {
     if (event.state !== exactTerminal) invalid("terminal phase has an invalid operation state");
     return;
   }
   const boundTerminal =
-    phase.startsWith("target-") ||
-    /^revision:(?:started|start_failed|needs_recovery|abandoned)$/.test(phase) ||
-    /^participant-start:(?:accepted|failed|canceled|uncertain)$/.test(phase);
+    isCapabilityTargetPhase(phase) ||
+    isPublicOperationStateDependentStatusPhase(phase) ||
+    isPublicOperationParticipantTargetPhase(phase);
   if (boundTerminal) {
-    if (!TERMINAL.has(event.state)) invalid("terminal-bound phase has a nonterminal state");
-  } else if (
-    snapshot.proposal.action.type === "conversation.reconcile_revision_operation" &&
-    phase.startsWith("revision:") &&
-    event.state === "succeeded"
-  ) {
-    // A proved transition out of revision recovery terminalizes its reconcile authorizer.
-  } else if (event.state !== "committing") {
+    if (!isActionOperationDomainTerminalState(event.state))
+      invalid("terminal-bound phase has a nonterminal state");
+  } else if (event.state !== ACTION_OPERATION_STATE.COMMITTING) {
     invalid("nonterminal phase must remain committing");
-  }
-}
-
-function validateAuthorityChangeProgression(
-  snapshot: ActionAuthoritySnapshotV1,
-  events: readonly ActionOperationEventV1[],
-): void {
-  const expected =
-    snapshot.proposal.action.type === "policy.update_authority"
-      ? [
-          "authority-change:prepared",
-          "authority-change:effect_in_progress",
-          "authority-change:observed",
-        ]
-      : ["authority-change:observed"];
-  let position = 0;
-  for (const event of events.slice(1)) {
-    const phase = event.progress?.phase ?? "";
-    if (/^authority-change:(?:prepared|effect_in_progress|observed)$/.test(phase)) {
-      if (phase !== expected[position])
-        invalid("authority change nonterminal phases are not in their exact durable order");
-      position += 1;
-      continue;
-    }
-    if (phase === "authority-change:epoch-committed" && position !== expected.length)
-      invalid("authority epoch committed before its exact staged phase closure");
-    if (!/^authority-change:(?:epoch-committed|failed|needs-recovery)$/.test(phase))
-      invalid("authority change operation contains a foreign phase");
   }
 }
 
@@ -189,7 +163,7 @@ function validateCapabilityBatches(
   assertUniformBatch(initialTargetRows, "initial capability batch");
   if (initialBoundaryIndex < 0) {
     if (
-      TERMINAL.has(snapshot.state) &&
+      isActionOperationDomainTerminalState(snapshot.state) &&
       initialTargetRows.some((row) => row.state !== snapshot.state)
     )
       invalid("partial capability batch does not match its durable transition");
@@ -200,18 +174,17 @@ function validateCapabilityBatches(
   }
   if (initialTargetRows.length !== proposalTargets.length)
     invalid("capability target coverage is incomplete at its state boundary");
-  const initialBoundary = rows[initialBoundaryIndex] as ActionOperationEventV1;
+  const initialBoundary = rows[initialBoundaryIndex];
+  if (!initialBoundary) invalid("capability batch is missing its operation boundary");
   assertUniformBatch([...initialTargetRows, initialBoundary], "initial capability batch");
-  if (
-    !/^operation-(?:succeeded|failed|needs-recovery)$/.test(initialBoundary.progress?.phase ?? "")
-  )
+  if (!includesPhase(CAPABILITY_OPERATION_BOUNDARY_PHASES, initialBoundary.progress?.phase))
     invalid("capability batch has an invalid operation boundary");
   for (const row of initialTargetRows)
     if (row.state !== initialBoundary.state)
       invalid("capability target batch state differs from its boundary");
 
   const successors = rows.slice(initialBoundaryIndex + 1);
-  if (initialBoundary.state !== "needs_recovery") {
+  if (initialBoundary.state !== ACTION_OPERATION_STATE.NEEDS_RECOVERY) {
     if (successors.length) invalid("terminal phase has a successor");
     if (snapshot.state !== initialBoundary.state)
       invalid("completed capability batch does not match action authority");
@@ -229,8 +202,9 @@ function validateCapabilityBatches(
   assertUniformBatch(corrections, "capability correction batch");
   assertChangedCorrections(initialTargetRows, corrections);
   if (finalBoundaryIndex >= 0) {
-    const finalBoundary = successors[finalBoundaryIndex] as ActionOperationEventV1;
-    if (!/^operation-(?:succeeded|failed)$/.test(finalBoundary.progress?.phase ?? ""))
+    const finalBoundary = successors[finalBoundaryIndex];
+    if (!finalBoundary) invalid("capability correction is missing its final boundary");
+    if (!includesPhase(CAPABILITY_FINAL_BOUNDARY_PHASES, finalBoundary.progress?.phase))
       invalid("capability correction has an invalid final boundary");
     if (successors.length !== finalBoundaryIndex + 1) invalid("terminal phase has a successor");
     assertUniformBatch([...corrections, finalBoundary], "capability correction batch");
@@ -251,17 +225,15 @@ function validateNonCapabilityClosure(
   events: readonly ActionOperationEventV1[],
 ): void {
   const action = snapshot.proposal.action.type;
-  const receipt = new Set([
-    "conversation.select_lineage_head",
-    "conversation.associate_lineages",
-    "conversation.publish_suspected_literal",
-    "conversation.stop_operation",
-    "context.compact",
-  ]).has(action);
+  const receipt = RECEIPT_ACTIONS.has(action);
   if (receipt && events.length > 2)
     invalid("conversation receipt operation has more than one receipt phase");
   const last = events.at(-1);
-  if (last && TERMINAL.has(snapshot.state) && !isDomainTerminalBoundary(last))
+  if (
+    last &&
+    isActionOperationDomainTerminalState(snapshot.state) &&
+    !isDomainTerminalBoundary(last)
+  )
     invalid("terminal action is missing its domain terminal boundary");
 }
 
@@ -291,7 +263,7 @@ function assertCorrectionOrder(
 }
 
 function assertOnlyTargets(rows: readonly ActionOperationEventV1[], label: string): void {
-  if (rows.some((row) => row.target === null || !row.progress?.phase.startsWith("target-")))
+  if (rows.some((row) => row.target === null || !isCapabilityTargetPhase(row.progress?.phase)))
     invalid(`${label} contains a non-target phase`);
 }
 
@@ -302,21 +274,29 @@ function assertFinalTargetOutcomes(
 ): void {
   const outcomes = rows.map((row) => row.target?.outcome);
   if (
-    state === "succeeded" &&
-    outcomes.some((outcome) => ["failed", "blocked", "needs-recovery"].includes(outcome ?? ""))
+    state === ACTION_OPERATION_STATE.SUCCEEDED &&
+    outcomes.some(
+      (outcome) =>
+        outcome === PUBLIC_TARGET_RESULT_OUTCOME.FAILED ||
+        outcome === PUBLIC_TARGET_RESULT_OUTCOME.BLOCKED ||
+        outcome === PUBLIC_TARGET_RESULT_OUTCOME.NEEDS_RECOVERY,
+    )
   )
     invalid("succeeded operation retains a failed target outcome");
   if (
-    state === "succeeded" &&
+    state === ACTION_OPERATION_STATE.SUCCEEDED &&
     rows.some(
       (row) =>
-        row.target?.outcome === "omitted" &&
+        row.target?.outcome === PUBLIC_TARGET_RESULT_OUTCOME.OMITTED &&
         proposalTargets.find((target) => target.target_id === row.target?.target_id)?.target
           .required === true,
     )
   )
     invalid("succeeded operation has an omitted required target");
-  if (state === "failed" && outcomes.includes("needs-recovery"))
+  if (
+    state === ACTION_OPERATION_STATE.FAILED &&
+    outcomes.includes(PUBLIC_TARGET_RESULT_OUTCOME.NEEDS_RECOVERY)
+  )
     invalid("failed operation retains a needs-recovery target outcome");
 }
 
@@ -351,23 +331,42 @@ function foldTargets(
 }
 
 function targetId(event: ActionOperationEventV1): string {
-  const target = event.target as PublicTargetResultV1 | null;
+  const target = event.target;
   if (!target) invalid("target batch row has a null target");
   return target.target_id;
 }
 
 function isOperationBoundary(event: ActionOperationEventV1): boolean {
-  return /^operation-(?:succeeded|failed|needs-recovery)$/.test(event.progress?.phase ?? "");
+  return includesPhase(CAPABILITY_OPERATION_BOUNDARY_PHASES, event.progress?.phase);
 }
 
 function isDomainTerminalBoundary(event: ActionOperationEventV1): boolean {
   const phase = event.progress?.phase ?? "";
   return (
-    terminalStateForPhase(phase as never) !== null ||
-    (TERMINAL.has(event.state) &&
-      (/^revision:/.test(phase) ||
-        /^participant-start:(?:accepted|failed|canceled|uncertain)$/.test(phase)))
+    terminalStateForPhase(phase) !== null ||
+    (isActionOperationDomainTerminalState(event.state) &&
+      (isPhaseFamily(phase, PUBLIC_OPERATION_PHASE_PREFIX.REVISION) ||
+        isPublicOperationParticipantTargetPhase(phase)))
   );
+}
+
+function isCapabilityTargetPhase(value: unknown): value is PublicOperationPhaseV1 {
+  return (
+    isPublicOperationPhase(value) &&
+    publicOperationTargetOutcomes(value) !== null &&
+    !isPublicOperationParticipantTargetPhase(value)
+  );
+}
+
+function isPhaseFamily(value: unknown, prefix: string): value is PublicOperationPhaseV1 {
+  return isPublicOperationPhase(value) && value.startsWith(`${prefix}:`);
+}
+
+function includesPhase(
+  phases: readonly PublicOperationPhaseV1[],
+  value: unknown,
+): value is PublicOperationPhaseV1 {
+  return isPublicOperationPhase(value) && phases.some((phase) => phase === value);
 }
 
 function invalid(message: string): never {

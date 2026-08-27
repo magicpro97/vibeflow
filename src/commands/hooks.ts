@@ -24,11 +24,12 @@
 // size-waiver: #462 — web UI approval path adds ~60 lines waiver: #462 owner:magicpro97 expires:2027-12-31
 
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HookInput } from "../core.js";
+import { HOOK_DECISION, RISK_LEVEL } from "../core/hook-contract.js";
+import { LOG_CHANNEL, LOG_LEVEL } from "../core/log-contract.js";
 import { readLocalSpec, specStaleSignals } from "../spec-freshness.js";
 import {
   CTX_DIR,
@@ -45,6 +46,7 @@ import {
   presentAntigravityDecision,
   presentDecision,
   readSettings,
+  requestUiHookApproval,
   resolveHookPolicy,
   runSelftest,
   writeFileSafe,
@@ -182,8 +184,8 @@ export async function hook(
     out(
       "vf",
       JSON.stringify({
-        decision: "allow",
-        risk: "none",
+        decision: HOOK_DECISION.ALLOW,
+        risk: RISK_LEVEL.NONE,
         reasons: ["no hook input — allowing (fallback session)"],
       }),
     );
@@ -194,8 +196,8 @@ export async function hook(
     out(
       "vf",
       JSON.stringify({
-        decision: "block",
-        risk: "high",
+        decision: HOOK_DECISION.BLOCK,
+        risk: RISK_LEVEL.HIGH,
         reasons: ["unrecognized hook input — blocking (fail-closed on live tool gate)"],
       }),
     );
@@ -221,8 +223,8 @@ export async function hook(
   // defined-but-unused channel). Keeps the existing hook-audit.log; adds the ordered
   // stream so a run's hook decisions interleave with dispatch/verdict events.
   try {
-    out("hook", `${input.event}: ${result.decision} (${result.risk})`, {
-      level: "info",
+    out(LOG_CHANNEL.HOOK, `${input.event}: ${result.decision} (${result.risk})`, {
+      level: LOG_LEVEL.INFO,
       unit: input.taskId,
       meta: { kind: "hook", decision: result.decision, risk: result.risk },
     });
@@ -231,70 +233,44 @@ export async function hook(
   }
 
   // Web UI approval path (issue #462): when require_approval and UI is running
-  if (result.decision === "require_approval") {
+  if (result.decision === HOOK_DECISION.REQUIRE_APPROVAL) {
     const base = cwd();
     const uiPortFile = join(base, CTX_DIR, ".ui-port");
     if (existsSync(uiPortFile)) {
-      let uiPort: number | null = null;
-      try {
-        const data = JSON.parse(readFileSync(uiPortFile, "utf8")) as { port?: unknown };
-        uiPort = typeof data.port === "number" ? data.port : null;
-      } catch {
-        /* ignore */
-      }
-      if (uiPort) {
-        const hookMode = process.env.VF_HOOK_MODE ?? "default"; // yolo | auto-pilot | default
+      const hookMode = process.env.VF_HOOK_MODE ?? "default"; // yolo | auto-pilot | default
+      if (hookMode === "yolo" || hookMode === "allow-all") {
         const auditPath = join(base, CTX_DIR, "knowledge", "hook-audit.log");
-        const appendAudit = (entry: object) => {
-          try {
-            appendFileSync(auditPath, `${JSON.stringify(entry)}\n`);
-          } catch {
-            /* best-effort */
-          }
-        };
-        if (hookMode === "yolo" || hookMode === "allow-all") {
-          appendAudit({
-            mode: hookMode,
-            decision: "allow",
-            input,
-            result,
-            at: new Date().toISOString(),
-          });
-          out(
-            "vf",
-            JSON.stringify({
-              decision: "allow",
-              risk: result.risk,
-              reasons: ["auto-allowed: yolo mode"],
-            }),
-          );
-          return 0;
-        }
-        // default: POST pending, long-poll for user click
-        const id = randomUUID();
-        const serverBase = `http://127.0.0.1:${uiPort}`;
         try {
-          // Register this hook with the server so UI can poll it
-          await fetch(`${serverBase}/api/hook/pending`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ id, input, result }),
-          });
-        } catch {
-          /* server may not be up */
-        }
-        // Long-poll — no timeout, waits for user click
-        try {
-          const res = await fetch(`${serverBase}/api/hook/response/${id}`);
-          const { decision: userDecision } = (await res.json()) as { decision: string };
-          out(
-            "vf",
-            JSON.stringify({ decision: userDecision, risk: result.risk, reasons: result.reasons }),
+          appendFileSync(
+            auditPath,
+            `${JSON.stringify({
+              mode: hookMode,
+              decision: HOOK_DECISION.ALLOW,
+              input,
+              result,
+              at: new Date().toISOString(),
+            })}\n`,
           );
-          return userDecision === "allow" ? 0 : 2;
         } catch {
-          /* fall through to original exitCode */
+          /* best-effort */
         }
+        out(
+          "vf",
+          JSON.stringify({
+            decision: HOOK_DECISION.ALLOW,
+            risk: result.risk,
+            reasons: ["auto-allowed: yolo mode"],
+          }),
+        );
+        return 0;
+      }
+      const userDecision = await requestUiHookApproval(uiPortFile, input, result);
+      if (userDecision) {
+        out(
+          "vf",
+          JSON.stringify({ decision: userDecision, risk: result.risk, reasons: result.reasons }),
+        );
+        return userDecision === HOOK_DECISION.ALLOW ? 0 : 2;
       }
     }
   }
@@ -332,7 +308,7 @@ export function hookSelftest(
   if (report.failed > 0) {
     out("vf");
     out("vf", c.red(`${report.failed}/${report.cases.length} self-test case(s) regressed.`), {
-      level: "error",
+      level: LOG_LEVEL.ERROR,
     });
     return 1;
   }
@@ -436,7 +412,7 @@ export function installHooks(base?: string): number {
         c.yellow(
           "! pre-push review gate NOT installed — a user-owned .githooks/pre-push exists. Integrate `vf review check --base <sha>` manually, or move your hook and re-run `vf hooks install`.",
         ),
-        { level: "error" },
+        { level: LOG_LEVEL.ERROR },
       );
       return 1;
     }
@@ -452,7 +428,7 @@ export function installHooks(base?: string): number {
     c.red(
       `git config core.hooksPath failed (status ${status}). ${stderr ? `git said: ${stderr}. ` : ""}Are you inside a git repo with write access to .git/config?`,
     ),
-    { level: "error" },
+    { level: LOG_LEVEL.ERROR },
   );
   return status;
 }
@@ -596,7 +572,7 @@ export function emitHookFiles(base: string, engines?: Engine[], codexHome?: stri
       const merged = mergeCodexHooks(dest, content);
       if (merged === null) {
         out("vf", c.yellow(`! ${rel} is not valid JSON — left untouched. Fix it, then re-run.`), {
-          level: "error",
+          level: LOG_LEVEL.ERROR,
         });
         continue;
       }
@@ -613,7 +589,7 @@ export function emitHookFiles(base: string, engines?: Engine[], codexHome?: stri
           : mergeAntigravityHooks(dest, content);
       if (merged === null) {
         out("vf", c.yellow(`! ${rel} is not valid JSON — left untouched. Fix it, then re-run.`), {
-          level: "error",
+          level: LOG_LEVEL.ERROR,
         });
         continue;
       }
@@ -714,7 +690,7 @@ export function hooks(
     }
     default:
       out("vf", c.red(`Unknown: vf hooks ${sub}`), {
-        level: "error",
+        level: LOG_LEVEL.ERROR,
       });
       return 2;
   }

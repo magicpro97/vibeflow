@@ -1,4 +1,4 @@
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import type {
   CapabilityOperationActionAuthorityV1,
   CapabilityOperationExecutorOptionsV1,
@@ -10,7 +10,7 @@ export function requireCapabilityActionAuthority(
   if (!options.actionAuthority)
     throw new CapabilityRuntimeError(
       "capability action authority is unavailable",
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     );
   return options.actionAuthority;
 }

@@ -1,9 +1,13 @@
 import { canonicalJsonBytes } from "../../durability/index.js";
+import {
+  CONVERSATION_PRIVATE_FILE_RANGE_PROMPT,
+  type ConversationTurnPrivateContextKind,
+} from "./turn-delivery-contract.js";
 
-export const PRIVATE_FILE_RANGE_PROMPT_PREFIX = "VF-PRIVATE-FILE-RANGES/1\n";
+export const PRIVATE_FILE_RANGE_PROMPT_PREFIX = CONVERSATION_PRIVATE_FILE_RANGE_PROMPT.PREFIX;
 
 export interface PrivateFileRangePromptEntryV1 {
-  delivery_kind: "conversation-create" | "user-message";
+  delivery_kind: ConversationTurnPrivateContextKind;
   message_public_seq: number | null;
   repo_relative_path: string;
   start_line: number;
@@ -18,8 +22,8 @@ export function privateFileRangeTurnContextPrompt(
 ): string | null {
   if (!entries.length) return null;
   const envelope = {
-    schema_version: "1.0" as const,
-    kind: "repo-file-ranges" as const,
+    schema_version: CONVERSATION_PRIVATE_FILE_RANGE_PROMPT.SCHEMA_VERSION,
+    kind: CONVERSATION_PRIVATE_FILE_RANGE_PROMPT.KIND,
     entries: entries.map((entry) => structuredClone(entry)),
   };
   const body = canonicalJsonBytes(envelope, {

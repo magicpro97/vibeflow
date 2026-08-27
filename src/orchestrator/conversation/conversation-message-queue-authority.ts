@@ -2,12 +2,14 @@ import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import type { ProcessLockOwnerV1 } from "../../durability/index.js";
 import {
   CONVERSATION_MESSAGE_QUEUE_AUTHORITY_STATUS,
+  type CONVERSATION_MESSAGE_QUEUE_FIELD,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   CONVERSATION_MESSAGE_QUEUE_STALE_REASON,
   CONVERSATION_MESSAGE_QUEUE_STATE,
 } from "./conversation-message-queue-contract.js";
 import type { FoldedConversationMessageQueueItemV1 } from "./conversation-message-queue-fold.js";
 import {
+  assertQueueClaimOwnerV1,
   assertQueueContextBindingV1,
   assertQueueContextDispositionV1,
   assertQueueDeliveryProofV1,
@@ -31,6 +33,7 @@ import {
   queuedMessagePublicEventId,
 } from "./conversation-message-queue-records.js";
 import { assertConversationMessageQueueAuthorityV1 } from "./conversation-message-queue-validation.js";
+import type { CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION } from "./conversation-private-context-broker-wire.js";
 
 export function conversationParticipantBindingSetDigest(bindings: unknown[]): string {
   return digestV1("VF-CONVERSATION-PARTICIPANT-BINDING-SET\0v1\0", bindings);
@@ -48,7 +51,11 @@ export function ordinaryConversationOperationHeaderDigest(
 }
 
 export function materializeConversationMessageQueueAuthorityV1(
-  input: Omit<ConversationMessageQueueAuthorityV1, "schema_version" | "authority_digest">,
+  input: Omit<
+    ConversationMessageQueueAuthorityV1,
+    | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.SCHEMA_VERSION
+    | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.AUTHORITY_DIGEST
+  >,
 ): ConversationMessageQueueAuthorityV1 {
   const preimage = {
     schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
@@ -67,13 +74,16 @@ export function materializeConversationMessageQueueClaimOwnerV1(
     ...structuredClone(owner),
     durable_operation_id: durableOperationId,
   };
-  return { ...preimage, owner_digest: queueClaimOwnerDigest(preimage) };
+  const claimOwner = { ...preimage, owner_digest: queueClaimOwnerDigest(preimage) };
+  assertQueueClaimOwnerV1(claimOwner);
+  return claimOwner;
 }
 
 export function materializeConversationMessageQueueContextBindingV1(
   input: Omit<
     PrivateConversationMessageQueueContextBindingV1,
-    "schema_version" | "private_context_binding_digest"
+    | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.SCHEMA_VERSION
+    | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.PRIVATE_CONTEXT_BINDING_DIGEST
   >,
 ): PrivateConversationMessageQueueContextBindingV1 {
   const preimage = {
@@ -223,7 +233,7 @@ export function materializeQueuePrivateContextDispositionV1(
         private_context_binding_digest: string;
         recorded_at: string;
         queue_outcome: typeof CONVERSATION_MESSAGE_QUEUE_STATE.DELIVERED;
-        disposition: "consumed";
+        disposition: typeof CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION.CONSUMED;
         public_event_id: string;
       }
     | {
@@ -232,7 +242,7 @@ export function materializeQueuePrivateContextDispositionV1(
         private_context_binding_digest: string;
         recorded_at: string;
         queue_outcome: typeof CONVERSATION_MESSAGE_QUEUE_STATE.STALE;
-        disposition: "released";
+        disposition: typeof CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION.RELEASED;
         public_event_id: null;
       },
 ): PrivateConversationMessageQueueContextDispositionV1 {

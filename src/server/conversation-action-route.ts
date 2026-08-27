@@ -3,12 +3,14 @@ import {
   type ActionRequestAuthorityV1,
   ActionValidationError,
   httpStatusForPublicError,
+  isActionOperationDomainTerminalState,
   parseActionApprovalChallengeRequestJson,
   parseActionApprovalRequestJson,
   parseActionCancelRequestJson,
   parseActionCommitRequestJson,
   parseActionProposalRequestJson,
 } from "../actions/index.js";
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import { CapabilityConversationSourceStaleError } from "../orchestrator/conversation/capability-proposal-base.js";
 import type { ConversationActionCursorCodec } from "../orchestrator/conversation/conversation-action-cursor.js";
 import {
@@ -71,37 +73,39 @@ function actionError(error: unknown): Response {
   if (error instanceof ActionValidationError)
     return conversationReadError(error.code, { message: "The action request is invalid." });
   if (error instanceof ConversationActionCursorError)
-    return conversationReadError("invalid_request", {
+    return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
       message: "The action cursor is invalid.",
     });
   if (error instanceof StaleConversationActionCursorError)
     return conversationReadError(error.code, {
       message: "The action proposal set changed during pagination.",
-      recoveryAction: "restart-pagination",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
       details:
-        error.code === "stale_pending_proposal_cursor"
+        error.code === PUBLIC_ERROR_CODE.STALE_PENDING_PROPOSAL_CURSOR
           ? { restart_cursor: error.restart_cursor, authority_watermark: error.watermark }
           : { restart_cursor: error.restart_cursor, proposal_set_watermark: error.watermark },
     });
   if (error instanceof ConversationActionTargetUnsupportedError)
-    return conversationReadError("target_unsupported", {
+    return conversationReadError(PUBLIC_ERROR_CODE.TARGET_UNSUPPORTED, {
       message: error.message,
       details: error.action_type === null ? null : { action_type: error.action_type },
     });
   if (error instanceof ConversationNotFoundError)
-    return conversationReadError("not_found", { message: "The conversation was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The conversation was not found.",
+    });
   if (
     error instanceof ConversationControlConflictError ||
     error instanceof CapabilityConversationSourceStaleError
   )
-    return conversationReadError("stale_conversation", {
+    return conversationReadError(PUBLIC_ERROR_CODE.STALE_CONVERSATION, {
       message: "The writable conversation revision changed.",
-      recoveryAction: "refresh-proposal",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.REFRESH_PROPOSAL,
     });
-  return conversationReadError("service_unavailable", {
+  return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
     message: "The action authority is unavailable.",
     retryable: true,
-    recoveryAction: "retry",
+    recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
   });
 }
 
@@ -132,7 +136,7 @@ async function commitActionMutation(
     ...context,
     request: parseActionCommitRequestJson(source),
   });
-  const terminal = ["succeeded", "failed", "needs_recovery"].includes(result.operation.state);
+  const terminal = isActionOperationDomainTerminalState(result.operation.state);
   return noStore(result, terminal ? 200 : 202);
 }
 
@@ -147,9 +151,13 @@ export async function handleConversationActionRoute(
   const [resource, proposalId, mutation] = path;
   if (resource !== "action-proposals" && resource !== "action-operations") return null;
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method === "POST" && authority.csrf && !authority.csrf(request))
-    return conversationReadError("forbidden", { message: "CSRF validation failed." });
+    return conversationReadError(PUBLIC_ERROR_CODE.FORBIDDEN, {
+      message: "CSRF validation failed.",
+    });
   try {
     if (resource === "action-operations" && path.length === 1 && request.method === "GET")
       return await anchoredActionList(authority, url, conversationId);
@@ -171,7 +179,9 @@ export async function handleConversationActionRoute(
       const view = await authority.actions.get(conversationId, proposalId);
       return view
         ? noStore(view)
-        : conversationReadError("not_found", { message: "The proposal was not found." });
+        : conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+            message: "The proposal was not found.",
+          });
     }
     if (path.length === 3 && mutation === "events" && request.method === "GET")
       return await operationActionEvents(authority, request, url, conversationId, proposalId);

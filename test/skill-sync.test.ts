@@ -81,6 +81,39 @@ describe("syncSkillMirrors pointer mode (default)", () => {
     expect(existsSync(join(repo, ".github", "skills", "picked-engine-skill"))).toBe(false);
   });
 
+  test("syncs only the requested canonical skill into the codex mirror", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-codex-target-"));
+    dirs.push(repo);
+    const selected = join(repo, ".vibeflow", "skills", "typed-protocol-contracts");
+    mkdirSync(selected, { recursive: true });
+    writeFileSync(
+      join(selected, "SKILL.md"),
+      "---\nname: typed-protocol-contracts\ndescription: The targeted canonical skill.\n---\n\n# Typed Protocol Contracts\n\nActionable body content for validation. This is more than fifty characters long.\n",
+    );
+    const untouched = join(repo, ".vibeflow", "skills", "other-skill");
+    mkdirSync(untouched, { recursive: true });
+    writeFileSync(
+      join(untouched, "SKILL.md"),
+      "---\nname: other-skill\ndescription: Another canonical skill.\n---\n\n# Other Skill\n\nActionable body content for validation. This is more than fifty characters long.\n",
+    );
+
+    const catalogDir = join(repo, ".vibeflow", "skills");
+    const result = syncSkillMirrors(repo, {
+      mode: "pointer",
+      engines: ["codex"],
+      skills: ["typed-protocol-contracts"],
+      catalogDir,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.synced).toEqual([join(".agents", "skills", "typed-protocol-contracts")]);
+    expect(
+      existsSync(join(repo, ".agents", "skills", "typed-protocol-contracts", "SKILL.md")),
+    ).toBe(true);
+    expect(existsSync(join(repo, ".agents", "skills", "other-skill"))).toBe(false);
+    expect(existsSync(join(repo, ".github", "skills", "typed-protocol-contracts"))).toBe(false);
+  });
+
   test("ignores unknown engine names in the engines= array", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-skill-bad-engine-"));
     dirs.push(repo);

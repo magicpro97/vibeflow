@@ -1,10 +1,16 @@
+import { CAPABILITY_MANIFEST_DEPENDENCY_SCOPE } from "../../actions/capability-manifest-vocabulary-contract.js";
+import {
+  CAPABILITY_PACKAGE_PIN_TRUST_VALUES,
+  CAPABILITY_SOURCE_KIND,
+} from "../../actions/capability-security-contract.js";
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type { StrictLegacyAdoptCandidateV1 } from "../../actions/legacy-adopt-types.js";
 import type { PackageSelectorV1 } from "../../actions/request-types.js";
 import type {
   CapabilityIntentMaterializerV1 as CapabilityIntentMaterializerContractV1,
   CapabilityIntentPreparationRequestV1,
 } from "../controller.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { resolveDependencies } from "../source/resolver.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
 import { bytewise } from "../wire/primitives.js";
@@ -40,19 +46,20 @@ export type {
   CapabilityIntentMaterializerOptionsV1,
 } from "./intent-materializer-types.js";
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "invalid-plan");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN);
 }
-
 export class DefaultCapabilityIntentMaterializerV1
   implements CapabilityIntentMaterializerContractV1
 {
   constructor(readonly options: CapabilityIntentMaterializerOptionsV1) {}
-
   materialize(request: CapabilityIntentPreparationRequestV1): CapabilityPlanningRequestV1 {
     const action = request.action;
     const base = this.options.storage.readStatus();
     if (base.state === "corrupt" || base.state === "unsupported")
-      throw new CapabilityRuntimeError("capability scope requires repair", "scope-needs-recovery");
+      throw new CapabilityRuntimeError(
+        "capability scope requires repair",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+      );
     const lock = base.lock;
     const authority = this.options.authority.read(action.scope);
     if (
@@ -61,7 +68,7 @@ export class DefaultCapabilityIntentMaterializerV1
     )
       throw new CapabilityRuntimeError(
         "capability authority is bound to another scope",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     const current = loadInstalledPackages(this.options, lock);
     const built = this.materializeLifecycle(action, lock, current, request.action_root_locator);
@@ -102,7 +109,6 @@ export class DefaultCapabilityIntentMaterializerV1
       source_request_context: bound.sourceRequestContext,
     };
   }
-
   private materializeLifecycle(
     action: CapabilityHostActionV1,
     lock: CapabilityLockV1 | null,
@@ -115,17 +121,24 @@ export class DefaultCapabilityIntentMaterializerV1
     targets?: NonNullable<CapabilityPlanningRequestV1["selected_targets"]>;
     adopt?: StrictLegacyAdoptCandidateV1;
   } {
-    if (action.type === "capability.install" || action.type === "capability.update") {
-      const selector = action.type === "capability.install" ? action.package : action.selector;
-      if (action.type === "capability.install" && current.some((pkg) => pkg.pin.id === selector.id))
+    if (
+      action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL ||
+      action.type === HOST_ACTION_KIND.CAPABILITY_UPDATE
+    ) {
+      const selector =
+        action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL ? action.package : action.selector;
+      if (
+        action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL &&
+        current.some((pkg) => pkg.pin.id === selector.id)
+      )
         invalid("install cannot replace an already installed package; use update");
-      if (action.type === "capability.update") {
+      if (action.type === HOST_ACTION_KIND.CAPABILITY_UPDATE) {
         requiredInstalledPackage(current, action.package_id);
         if (selector.id !== action.package_id)
           invalid("update selector must name the installed package being updated");
       }
       const requestedTargets =
-        action.type === "capability.install"
+        action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL
           ? action.requested_targets
           : (action.requested_targets ?? this.lockTargets(lock, action.package_id));
       const resolved = this.resolveSelector(
@@ -135,7 +148,7 @@ export class DefaultCapabilityIntentMaterializerV1
       const root = resolved.find(
         (pkg) => pkg.pin.id === selector.id,
       ) as ResolvedCapabilityPackageV1;
-      const values = action.type === "capability.install" ? action.inputs : action.inputs;
+      const values = action.inputs;
       const currentEntry = lock?.packages.find((entry) => entry.package_id === selector.id);
       const configured =
         values === null
@@ -189,7 +202,7 @@ export class DefaultCapabilityIntentMaterializerV1
       });
       return {
         intent:
-          action.type === "capability.install"
+          action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL
             ? { kind: "install" }
             : { kind: "update", package_id: action.package_id },
         desired,
@@ -201,7 +214,7 @@ export class DefaultCapabilityIntentMaterializerV1
         ),
       };
     }
-    if (action.type === "capability.configure") {
+    if (action.type === HOST_ACTION_KIND.CAPABILITY_CONFIGURE) {
       const pkg = requiredInstalledPackage(current, action.package_id);
       const configured = materializePatchedPackageInputs({
         pkg,
@@ -218,7 +231,7 @@ export class DefaultCapabilityIntentMaterializerV1
         targets: this.lockTargets(lock),
       };
     }
-    if (action.type === "capability.retarget") {
+    if (action.type === HOST_ACTION_KIND.CAPABILITY_RETARGET) {
       const pkg = requiredInstalledPackage(current, action.package_id);
       return {
         intent: { kind: "retarget", package_id: action.package_id },
@@ -231,7 +244,7 @@ export class DefaultCapabilityIntentMaterializerV1
         ),
       };
     }
-    if (action.type === "capability.remove") {
+    if (action.type === HOST_ACTION_KIND.CAPABILITY_REMOVE) {
       const removed = capabilityRemovalClosure(current, action.package_id, action.cascade);
       const removedIds = new Set(removed.map((pkg) => pkg.pin.id));
       const desired = current.filter((pkg) => !removedIds.has(pkg.pin.id));
@@ -242,7 +255,7 @@ export class DefaultCapabilityIntentMaterializerV1
         targets: this.lockTargets(lock).filter((target) => !removedIds.has(target.package_id)),
       };
     }
-    if (action.type === "capability.rollback_scope") {
+    if (action.type === HOST_ACTION_KIND.CAPABILITY_ROLLBACK_SCOPE) {
       const targetLock = readCapabilityHistory(this.options.storage, action.generation_id);
       const desired = loadInstalledPackages(this.options, targetLock);
       return {
@@ -252,7 +265,7 @@ export class DefaultCapabilityIntentMaterializerV1
         targets: this.lockTargets(targetLock),
       };
     }
-    if (action.type === "capability.restore_package") {
+    if (action.type === HOST_ACTION_KIND.CAPABILITY_RESTORE_PACKAGE) {
       const targetLock = readCapabilityHistory(this.options.storage, action.generation_id);
       const restored = requiredInstalledPackage(
         loadInstalledPackages(this.options, targetLock),
@@ -274,7 +287,7 @@ export class DefaultCapabilityIntentMaterializerV1
         ),
       };
     }
-    if (action.type === "capability.repair") {
+    if (action.type === HOST_ACTION_KIND.CAPABILITY_REPAIR) {
       if (action.package_id !== null) requiredInstalledPackage(current, action.package_id);
       return {
         intent: { kind: "repair", package_id: action.package_id },
@@ -290,18 +303,18 @@ export class DefaultCapabilityIntentMaterializerV1
     if (!candidate || candidate.candidate_digest !== action.candidate.candidate_digest)
       throw new CapabilityRuntimeError(
         "legacy adoption candidate authority is unavailable",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     if (Date.parse(candidate.expires_at) <= Date.parse(this.options.now()))
       throw new CapabilityRuntimeError(
         "legacy adoption candidate expired",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     const pkg = this.options.packages.readByPin(candidate.synthetic_pin.pin_digest);
     if (!pkg)
       throw new CapabilityRuntimeError(
         "legacy adoption package cache is missing",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     const desired = mergeReplacingPackages(current, [pkg]);
     return {
@@ -324,7 +337,6 @@ export class DefaultCapabilityIntentMaterializerV1
       adopt: candidate,
     };
   }
-
   private resolveSelector(
     selector: PackageSelectorV1,
     engines: import("../../actions/types.js").EngineName[],
@@ -345,18 +357,18 @@ export class DefaultCapabilityIntentMaterializerV1
       ],
       candidates: candidateRows.map((row) => row.candidate),
       allowed_trust:
-        selector.source_kind === "local-dev"
-          ? ["verified", "source-pinned", "legacy-verified", "dev-unverified"]
+        selector.source_kind === CAPABILITY_SOURCE_KIND.LOCAL_DEV
+          ? CAPABILITY_PACKAGE_PIN_TRUST_VALUES
           : undefined,
     });
-    if (
-      resolution.dependency_bindings.some(
-        (binding) => binding.required_scope === "user-prerequisite",
-      )
-    )
+    const requiresUserScope = resolution.dependency_bindings.some(
+      (binding) =>
+        binding.required_scope === CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.USER_PREREQUISITE,
+    );
+    if (requiresUserScope)
       throw new CapabilityRuntimeError(
         "cross-scope prerequisites require a separately approved user operation",
-        "action-required",
+        CAPABILITY_RUNTIME_ERROR_CODE.ACTION_REQUIRED,
       );
     return resolution.packages.map((candidate) => {
       const resolved = candidateRows.find(
@@ -367,14 +379,18 @@ export class DefaultCapabilityIntentMaterializerV1
         ...resolved,
         dependencies: resolution.dependency_bindings
           .filter(
-            (binding): binding is typeof binding & { required_scope: "same" } =>
-              binding.from_package_id === resolved.pin.id && binding.required_scope === "same",
+            (
+              binding,
+            ): binding is typeof binding & {
+              required_scope: typeof CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.SAME;
+            } =>
+              binding.from_package_id === resolved.pin.id &&
+              binding.required_scope === CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.SAME,
           )
           .map(({ from_package_id: _, ...binding }) => binding),
       };
     });
   }
-
   private lockTargets(
     lock: CapabilityLockV1 | null,
     packageId?: string,

@@ -1,14 +1,29 @@
+import type { Engine } from "../core/agent-contract.js";
+import type { CapabilityScope } from "../core/capability-contract.js";
+import type {
+  CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_DEPENDENCY_SCOPE,
+  CAPABILITY_MANIFEST_SCHEMA_VERSION,
+  CapabilityManifestDependencyScope,
+  CapabilityManifestHealthProbeKind,
+  CapabilityManifestHealthRetry,
+  CapabilityManifestHookEvent,
+  CapabilityManifestInstallerKind,
+  CapabilityManifestInstallerLifecycleScripts,
+  CapabilityManifestMcpTransport,
+  CapabilityManifestPlatformArch,
+  CapabilityManifestPlatformLibc,
+  CapabilityManifestPlatformOs,
+  CapabilityManifestRuntimeEnforcement,
+  LegacySource,
+} from "./capability-manifest-vocabulary-contract.js";
 import type { ActionTargetBindingV1, PackagePinV1 } from "./preview-types.js";
 import type { CapabilityPermissionKindScopeV1 } from "./request-types.js";
 
-export type LegacySourceV1 =
-  | "skill-lock"
-  | "tool-managed-evidence"
-  | "mcp-managed-sidecar"
-  | "hook-sentinel"
-  | "role-marker";
+export type LegacySourceV1 = LegacySource;
 
-export type LegacyEngineV1 = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
+/** Compatibility alias for persisted legacy-adoption records. */
+export type LegacyEngineV1 = Engine;
 
 interface LegacyComponentBaseV1 {
   component_id: string;
@@ -18,13 +33,13 @@ interface LegacyComponentBaseV1 {
 
 export type LegacySyntheticComponentV1 =
   | (LegacyComponentBaseV1 & {
-      type: "skill";
+      type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL;
       bundle_path: string;
       bundle_sha256: string;
     })
   | (LegacyComponentBaseV1 & {
-      type: "mcp";
-      transport: "stdio" | "http" | "sse";
+      type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP;
+      transport: CapabilityManifestMcpTransport;
       executable?: {
         component_id: string;
         relative_path: string;
@@ -35,24 +50,24 @@ export type LegacySyntheticComponentV1 =
       secret_slots?: string[];
     })
   | (LegacyComponentBaseV1 & {
-      type: "tool";
+      type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.TOOL;
       installer: {
-        kind: "npm" | "bun" | "pipx" | "uv" | "go" | "cargo" | "download";
+        kind: CapabilityManifestInstallerKind;
         coordinate: string;
         version: string;
         artifact_sha256: string;
-        lifecycle_scripts: "disabled";
+        lifecycle_scripts: CapabilityManifestInstallerLifecycleScripts;
       };
       expected_binary: string;
       version_constraint: string;
     })
   | (LegacyComponentBaseV1 & {
-      type: "hook";
-      event: "pre-tool" | "post-tool" | "pre-commit" | "pre-push";
+      type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK;
+      event: CapabilityManifestHookEvent;
       vf_handler_id: string;
     })
   | (LegacyComponentBaseV1 & {
-      type: "role";
+      type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE;
       role_spec_path: string;
       role_spec_sha256: string;
     });
@@ -60,18 +75,18 @@ export type LegacySyntheticComponentV1 =
 export interface LegacyManifestDependencyV1 {
   package_id: string;
   version_range: string;
-  required_scope: "same" | "user-prerequisite";
+  required_scope: CapabilityManifestDependencyScope;
 }
 
 export type LegacyDependencyBindingV1 =
   | {
-      required_scope: "same";
+      required_scope: typeof CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.SAME;
       package_id: string;
       version: string;
       content_sha256: string;
     }
   | {
-      required_scope: "user-prerequisite";
+      required_scope: typeof CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.USER_PREREQUISITE;
       package_id: string;
       version: string;
       content_sha256: string;
@@ -80,11 +95,11 @@ export type LegacyDependencyBindingV1 =
 
 export type LegacyManifestPermissionV1 = CapabilityPermissionKindScopeV1 & {
   permission_id: string;
-  required_enforcement: "brokered" | "sandboxed" | "engine-enforced" | "disclosed-not-enforced";
+  required_enforcement: CapabilityManifestRuntimeEnforcement;
 };
 
 export interface LegacySyntheticManifestV1 {
-  schema_version: "1.0";
+  schema_version: typeof CAPABILITY_MANIFEST_SCHEMA_VERSION;
   id: string;
   version: string;
   metadata: {
@@ -98,9 +113,9 @@ export interface LegacySyntheticManifestV1 {
     vf: string;
     engines: Partial<Record<LegacyEngineV1, string>>;
     platforms?: Array<{
-      os: "darwin" | "linux" | "win32";
-      arch: "arm64" | "x64";
-      libc: "glibc" | "musl" | null;
+      os: CapabilityManifestPlatformOs;
+      arch: CapabilityManifestPlatformArch;
+      libc: CapabilityManifestPlatformLibc | null;
     }>;
   };
   components: LegacySyntheticComponentV1[];
@@ -111,23 +126,17 @@ export interface LegacySyntheticManifestV1 {
   health: Array<{
     probe_id: string;
     component_ids: string[];
-    kind:
-      | "binary-version"
-      | "file-hash"
-      | "mcp-handshake"
-      | "hook-selftest"
-      | "role-parse"
-      | "engine-config";
+    kind: CapabilityManifestHealthProbeKind;
     required: boolean;
     timeout_ms: number;
-    retries: 0 | 1 | 2;
+    retries: CapabilityManifestHealthRetry;
   }>;
 }
 
 export interface StrictLegacyAdoptCandidateV1 {
-  schema_version: "1.0";
+  schema_version: typeof CAPABILITY_MANIFEST_SCHEMA_VERSION;
   candidate_id: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   legacy_source: LegacySourceV1;
   synthetic_manifest: LegacySyntheticManifestV1;

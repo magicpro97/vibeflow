@@ -1,13 +1,17 @@
 import type {
-  HostActionKind,
-  PrivateActionRootLocatorV1,
-  PublicActor,
-} from "../../actions/types.js";
+  CAPABILITY_SIGNATURE_ALGORITHM,
+  CapabilityAuthorityChange,
+  CapabilityGrantTransition,
+  CapabilityTrustTransition,
+} from "../../actions/capability-security-contract.js";
+import type { AuthorizableActionKind } from "../../actions/host-action-contract.js";
+import type { PrivateActionRootLocatorV1, PublicActor } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { GrantedPermissionBindingV1 } from "../permissions/types.js";
 
 export interface AuthorityScopeIdentityRecordV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   identity_id: string;
   created_at: string;
   content_digest: string;
@@ -15,7 +19,7 @@ export interface AuthorityScopeIdentityRecordV1 {
 
 export interface AuthorityEpochHeadV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   authority_epoch: number;
   event_head_digest: string | null;
@@ -31,12 +35,7 @@ export interface AuthorityEpochHeadV1 {
   content_digest: string;
 }
 
-export type AuthorityChangeKindV1 =
-  | "grant-changed"
-  | "policy-changed"
-  | "secret-revoked"
-  | "registry-trust-changed"
-  | "authority-repaired";
+export type AuthorityChangeKindV1 = CapabilityAuthorityChange;
 
 export interface AuthorityLogicalStateV1 {
   grant_head_digest: string | null;
@@ -50,7 +49,7 @@ export interface AuthorityLogicalStateV1 {
 
 export interface AuthorityEpochEventV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   authority_epoch: number;
   previous_event_digest: string | null;
@@ -81,12 +80,12 @@ export interface GrantFrameV1 {
   plan_digest: string;
   action_root_locator: PrivateActionRootLocatorV1;
   operation_header_digest: string;
-  transition: "issued" | "renewed" | "revoked";
+  transition: CapabilityGrantTransition;
   grant_id: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   principal: { public_actor_id: string; credential_class: PublicActor["credential_class"] };
-  action_types: Array<HostActionKind | "capability.discover">;
+  action_types: AuthorizableActionKind[];
   permissions: GrantedPermissionBindingV1[];
   target_engines: string[];
   acted_by: PublicActor;
@@ -100,7 +99,7 @@ export interface GrantFrameV1 {
 
 export interface RegistryTrustKeyFrameV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   previous_frame_digest: string | null;
   trust_epoch: number;
@@ -111,9 +110,9 @@ export interface RegistryTrustKeyFrameV1 {
   plan_digest: string;
   action_root_locator: PrivateActionRootLocatorV1;
   operation_header_digest: string;
-  transition: "added" | "rescoped" | "deprecated" | "revoked";
+  transition: CapabilityTrustTransition;
   key_id: string;
-  algorithm: "Ed25519";
+  algorithm: typeof CAPABILITY_SIGNATURE_ALGORITHM.ED25519;
   public_key_spki_base64: string;
   registry_origin: string;
   publisher_id: string | null;
@@ -126,7 +125,7 @@ export interface RegistryTrustKeyFrameV1 {
 
 export interface SecretRevocationFrameV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   sequence: number;
   previous_frame_digest: string | null;
@@ -145,6 +144,23 @@ export interface SecretRevocationFrameV1 {
   frame_digest: string;
 }
 
+export const POLICY_AUTHORITY_STATE = Object.freeze({
+  PREPARED: "prepared",
+  EFFECT_IN_PROGRESS: "effect_in_progress",
+  OBSERVED: "observed",
+} as const);
+export type PolicyAuthorityStateV1 =
+  (typeof POLICY_AUTHORITY_STATE)[keyof typeof POLICY_AUTHORITY_STATE];
+export const POLICY_AUTHORITY_STATES = Object.freeze(Object.values(POLICY_AUTHORITY_STATE));
+export const POLICY_AUTHORITY_NEXT_STATE = Object.freeze({
+  [POLICY_AUTHORITY_STATE.PREPARED]: POLICY_AUTHORITY_STATE.EFFECT_IN_PROGRESS,
+  [POLICY_AUTHORITY_STATE.EFFECT_IN_PROGRESS]: POLICY_AUTHORITY_STATE.OBSERVED,
+  [POLICY_AUTHORITY_STATE.OBSERVED]: POLICY_AUTHORITY_STATE.PREPARED,
+} satisfies Readonly<Record<PolicyAuthorityStateV1, PolicyAuthorityStateV1>>);
+
+export const isPolicyAuthorityState = (value: unknown): value is PolicyAuthorityStateV1 =>
+  typeof value === "string" && POLICY_AUTHORITY_STATES.some((candidate) => candidate === value);
+
 export interface PolicyAuthorityFrameV1 {
   schema_version: "1.0";
   sequence: number;
@@ -156,10 +172,10 @@ export interface PolicyAuthorityFrameV1 {
   plan_digest: string;
   action_root_locator: PrivateActionRootLocatorV1;
   operation_header_digest: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   settings_schema_version: string;
-  state: "prepared" | "effect_in_progress" | "observed";
+  state: PolicyAuthorityStateV1;
   expected_settings_sha256: string;
   expected_settings_byte_length: number;
   private_preimage_content_digest: string;

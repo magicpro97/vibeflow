@@ -1,5 +1,14 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import {
+  CONVERSATION_HEAD_STATUS,
+  type ConversationUnresolvedHeadStatus,
+  LINEAGE_HEAD_TRANSITION_KIND,
+  isConversationUnresolvedHeadStatus,
+} from "./conversation-catalog-contract.js";
+import {
+  LINEAGE_PLAN_KIND,
   assertExactAuthorityWrapper,
   sameCanonical,
   validateLineageActionClosure,
@@ -33,7 +42,7 @@ import {
 export interface LineageHeadSelectionPlanV1 {
   schema_version: "1.0";
   root_session_id: string;
-  expected_head_status: "ambiguous" | "unclaimed";
+  expected_head_status: ConversationUnresolvedHeadStatus;
   expected_head_digest: string;
   expected_head_epoch: number;
   candidate: LineageNodeIdentityV1;
@@ -74,7 +83,7 @@ export function assertLineageHeadSelectionPlanV1(
     ]) ||
     value.schema_version !== "1.0" ||
     !isBoundedLineageReference(value.root_session_id) ||
-    !["ambiguous", "unclaimed"].includes(value.expected_head_status as string) ||
+    !isConversationUnresolvedHeadStatus(value.expected_head_status) ||
     !isLineageDigest(value.expected_head_digest) ||
     !Number.isSafeInteger(value.expected_head_epoch) ||
     (value.expected_head_epoch as number) < 0 ||
@@ -149,7 +158,7 @@ function validateSelection(
     prior.content_digest !== plan.expected_head_digest ||
     prior.head_epoch !== plan.expected_head_epoch ||
     prior.root_session_id !== plan.root_session_id ||
-    current.head_status !== "committed" ||
+    current.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     !current.active ||
     nodeKey(current.active) !== nodeKey(plan.candidate) ||
     !prior.candidate_heads.some((candidate) => nodeKey(candidate) === nodeKey(plan.candidate))
@@ -179,9 +188,9 @@ function validateSelection(
     proposal.base.root_session_id !== prior.root_session_id ||
     proposal.base.lineage_head_digest !== prior.content_digest ||
     proposal.base.lineage_head_epoch !== prior.head_epoch ||
-    proposal.action_root_locator.kind !== "conversation" ||
+    proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
     proposal.action_root_locator.root_session_id !== prior.root_session_id ||
-    action.type !== "conversation.select_lineage_head" ||
+    action.type !== HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD ||
     action.root_session_id !== prior.root_session_id ||
     action.candidate_conversation_id !== plan.candidate.conversation_id ||
     action.candidate_revision_id !== plan.candidate.revision_id
@@ -190,13 +199,13 @@ function validateSelection(
   return structuredClone(prior);
 }
 
-const REVISION_ACTIONS = new Set([
-  "conversation.continue_message",
-  "conversation.add_participant",
-  "conversation.remove_participant",
-  "conversation.update_participant",
-  "conversation.update_settings",
-]);
+const REVISION_ACTION_KINDS = Object.freeze([
+  HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE,
+  HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_REMOVE_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_UPDATE_SETTINGS,
+] as const);
 
 function validateChildCommit(
   input: Record<string, unknown>,
@@ -223,7 +232,7 @@ function validateChildCommit(
       dispatch: input.dispatch,
     },
     revisionPlan.plan_digest,
-    "revision-operation",
+    LINEAGE_PLAN_KIND.REVISION_OPERATION,
     operation.header_digest,
   );
   assertTransitionMetadata(
@@ -233,9 +242,9 @@ function validateChildCommit(
     closure.dispatch.created_at,
   );
   if (
-    prior.head_status !== "committed" ||
+    prior.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     !prior.active ||
-    current.head_status !== "committed" ||
+    current.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     !current.active ||
     nodeKey(prior.active) !== nodeKey(operation.parent) ||
     nodeKey(current.active) !== nodeKey(operation.child) ||
@@ -283,9 +292,9 @@ function validateChildCommit(
     proposal.base.revision_id !== operation.parent.revision_id ||
     proposal.base.lineage_head_digest !== prior.content_digest ||
     proposal.base.lineage_head_epoch !== prior.head_epoch ||
-    proposal.action_root_locator.kind !== "conversation" ||
+    proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
     proposal.action_root_locator.root_session_id !== prior.root_session_id ||
-    !REVISION_ACTIONS.has(proposal.action.type) ||
+    !REVISION_ACTION_KINDS.some((kind) => kind === proposal.action.type) ||
     commit.operation_id !== operation.operation_id ||
     commit.payload.authorized_by_action_operation_id !== dispatch.operation_id ||
     commit.payload.effect_action_operation_id !== dispatch.operation_id ||
@@ -304,7 +313,7 @@ function validateTransition(
   lineage: ConversationLineageReadV1,
 ): LineageHeadRecordV1 {
   if (!isPlainLineageRecord(value)) throw new Error("lineage head transition is absent");
-  if (value.kind === "selection") {
+  if (value.kind === LINEAGE_HEAD_TRANSITION_KIND.SELECTION) {
     assertExactAuthorityWrapper(value, [
       "approval",
       "action_plan",
@@ -316,7 +325,8 @@ function validateTransition(
     ]);
     return validateSelection(value, current, lineage);
   }
-  if (value.kind !== "child-commit") throw new Error("invalid lineage head transition kind");
+  if (value.kind !== LINEAGE_HEAD_TRANSITION_KIND.CHILD_COMMIT)
+    throw new Error("invalid lineage head transition kind");
   assertExactAuthorityWrapper(value, [
     "approval",
     "action_plan",
@@ -348,7 +358,10 @@ export function validateLineageHeadAuthorityChain(
     seen.add(current.content_digest);
     const authority = transitions.get(current.content_digest);
     current = validateTransition(authority, current, lineage);
-    if (isPlainLineageRecord(authority) && authority.kind === "child-commit") {
+    if (
+      isPlainLineageRecord(authority) &&
+      authority.kind === LINEAGE_HEAD_TRANSITION_KIND.CHILD_COMMIT
+    ) {
       assertRevisionOperationV1(authority.operation);
       const claimEpoch = authority.operation.revision_claim_epoch;
       if (claimEpoch >= newerPublishedClaimEpoch)

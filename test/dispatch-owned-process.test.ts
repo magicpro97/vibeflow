@@ -16,11 +16,15 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { makeAsyncSpawner } from "../src/dispatch.js";
+import { OWNED_PROCESS_AUTHORITY_ERROR } from "../src/dispatch/owned-process-authority-contract.js";
 import {
   OWNED_CLI_IDENTITY_STATE,
   OWNED_PROCESS_ENV,
   OWNED_PROCESS_LIMIT,
+  OWNED_PROCESS_QUIESCENCE_SCOPE,
+  OWNED_PROCESS_RECORD_FIELD,
   OWNED_PROCESS_STATE,
+  OWNED_PROCESS_STORAGE_NAME,
   OWNED_PROCESS_STRATEGY,
   OWNED_PROCESS_TERMINAL_KIND,
 } from "../src/dispatch/owned-process-contract.js";
@@ -39,14 +43,68 @@ import { createOwnedProcessReleaseProof } from "../src/dispatch/owned-process-re
 import {
   OwnedProcessController,
   OwnedProcessRecordStore,
+  assertOwnedProcessRecord,
   buildOwnedProcessRecord,
   verifyOwnedProcessReleaseProof,
 } from "../src/dispatch/owned-process-runtime.js";
 import { OWNED_SUPERVISOR_TERMINAL_PHASE } from "../src/dispatch/owned-process-status.js";
 import { canonicalJsonBytes, digestV1, processStartIdentity } from "../src/durability/index.js";
+import {
+  PROCESS_START_IDENTITY_PREFIX,
+  PROCESS_START_IDENTITY_SEGMENT,
+  formatPlatformProcessStartIdentity,
+  formatProcessStartIdentity,
+} from "../src/durability/process-identity-contract.js";
+
+const LINUX_BOOT_ID = "123e4567-e89b-12d3-a456-426614174000";
+const linuxIdentity = (ticks: number): string =>
+  formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.LINUX, LINUX_BOOT_ID, ticks);
+const WINDOWS_TICKS = Object.freeze({
+  OWNER: 638_602_314_960_000_001n,
+  SUPERVISOR: 638_602_314_960_000_041n,
+  CLI: 638_602_314_960_000_042n,
+} as const);
+const WINDOWS_IDENTITY = Object.freeze({
+  OWNER: formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.WINDOWS, WINDOWS_TICKS.OWNER),
+  SUPERVISOR: formatProcessStartIdentity(
+    PROCESS_START_IDENTITY_PREFIX.WINDOWS,
+    WINDOWS_TICKS.SUPERVISOR,
+  ),
+  CLI: formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.WINDOWS, WINDOWS_TICKS.CLI),
+} as const);
+const SYNTHETIC_IDENTITY = Object.freeze({
+  LEGACY_OWNER: formatPlatformProcessStartIdentity("freebsd", "legacy-owner"),
+  OWNER: formatPlatformProcessStartIdentity("freebsd", "fixture-owner"),
+  SUPERVISOR: formatPlatformProcessStartIdentity("freebsd", "fixture-supervisor"),
+  CLI: formatPlatformProcessStartIdentity("freebsd", "fixture-cli"),
+  RECEIPT_CLI: formatPlatformProcessStartIdentity("freebsd", "receipt-cli"),
+  REPLACEMENT_CLI: formatPlatformProcessStartIdentity("freebsd", "replacement-cli"),
+  REPLACEMENT_SUPERVISOR: formatPlatformProcessStartIdentity("freebsd", "replacement-supervisor"),
+} as const);
+const WINDOWS_EXITED_CLI_IDENTITY = formatProcessStartIdentity(
+  PROCESS_START_IDENTITY_PREFIX.WINDOWS_EXITED_RECEIPT,
+  WINDOWS_IDENTITY.SUPERVISOR,
+  PROCESS_START_IDENTITY_SEGMENT.PID,
+  701,
+);
 
 function tempRoot(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
+}
+
+function ownedRecordEntry(store: OwnedProcessRecordStore, attemptId: string): string {
+  const entry = store
+    .entries()
+    .find(
+      (candidate) =>
+        store.readEntry(candidate)?.[OWNED_PROCESS_RECORD_FIELD.ATTEMPT_ID] === attemptId,
+    );
+  if (!entry) throw new Error("missing owned process record fixture");
+  return entry;
+}
+
+function ownedRecordPath(root: string, entry: string): string {
+  return join(root, OWNED_PROCESS_STORAGE_NAME.RECORD_DIRECTORY, entry);
 }
 
 describe("owned CLI lifecycle", () => {
@@ -143,7 +201,7 @@ describe("owned CLI lifecycle", () => {
         platform: process.platform,
         strategy: "posix-session" as const,
         owner_pid: process.pid,
-        owner_identity: "legacy-owner",
+        owner_identity: SYNTHETIC_IDENTITY.LEGACY_OWNER,
         supervisor_pid: null,
         supervisor_identity: null,
         cli_pid: null,
@@ -161,11 +219,14 @@ describe("owned CLI lifecycle", () => {
         ...preimage,
         record_digest: digestV1("VF-OWNED-CLI-RUNTIME\0v1\0", preimage),
       };
-      const path = join(root, "process-runtime", "legacy.json");
+      store.reserve(preimage.attempt_id, preimage.engine, createOwnedProcessPlatform());
+      const entry = ownedRecordEntry(store, preimage.attempt_id);
+      const path = ownedRecordPath(root, entry);
       const bytes = canonicalJsonBytes(legacy);
       writeFileSync(path, bytes, { mode: 0o600 });
 
-      const normalized = store.readEntry("legacy.json");
+      const normalized = store.readEntry(entry);
+      assertOwnedProcessRecord(normalized);
       expect(normalized?.quiescence_scope).toBe("legacy-unscoped");
       expect(normalized?.proof_strength).toBe("legacy-unqualified");
       expect(
@@ -223,7 +284,7 @@ describe("owned CLI lifecycle", () => {
     const signals: Array<{ pid: number; signal: NodeJS.Signals | number }> = [];
     const platform = createOwnedProcessPlatform({
       platform: "linux",
-      processStartIdentity: (pid) => (pid === 42 && cliAlive ? "linux:boot:42" : null),
+      processStartIdentity: (pid) => (pid === 42 && cliAlive ? linuxIdentity(42) : null),
       kill: ((pid: number, signal: NodeJS.Signals | number) => {
         if (pid === 42 && signal === 0 && cliAlive) return true;
         if (pid === -41 && cliAlive) {
@@ -250,11 +311,11 @@ describe("owned CLI lifecycle", () => {
       quiescence_scope: "posix-process-group",
       proof_strength: "cooperative-lineage",
       owner_pid: 1,
-      owner_identity: "owner",
+      owner_identity: SYNTHETIC_IDENTITY.OWNER,
       supervisor_pid: 41,
-      supervisor_identity: "linux:boot:41",
+      supervisor_identity: linuxIdentity(41),
       cli_pid: 42,
-      cli_identity: "linux:boot:42",
+      cli_identity: linuxIdentity(42),
       terminal_kind: null,
       state: "running",
       release_reason: null,
@@ -285,7 +346,7 @@ describe("owned CLI lifecycle", () => {
 
   test("Windows process inspection fails closed on mismatch/query failure", () => {
     const responses = new Map<number, string | Error>([
-      [41, "20260826010101.000000+000"],
+      [41, WINDOWS_TICKS.SUPERVISOR.toString()],
       [42, new Error("powershell failed")],
     ]);
     const platform = createOwnedProcessPlatform({
@@ -316,11 +377,11 @@ describe("owned CLI lifecycle", () => {
           platform: "win32",
           strategy: "windows-tree",
           owner_pid: 1,
-          owner_identity: "owner",
+          owner_identity: WINDOWS_IDENTITY.OWNER,
           supervisor_pid: 41,
-          supervisor_identity: "win32:expected",
+          supervisor_identity: WINDOWS_IDENTITY.SUPERVISOR,
           cli_pid: 42,
-          cli_identity: "win32:expected-cli",
+          cli_identity: WINDOWS_IDENTITY.CLI,
           terminal_kind: null,
           state: "running",
           release_reason: null,
@@ -337,6 +398,7 @@ describe("owned CLI lifecycle", () => {
 
   test("Windows tree termination uses taskkill /PID /T and hidden supervisor launch", () => {
     const calls: Array<{ cmd: string; args: string[]; windowsHide?: boolean }> = [];
+    let receiptReads = 0;
     const root = tempRoot("vf-owned-launch-");
     try {
       const platform = {
@@ -344,9 +406,9 @@ describe("owned CLI lifecycle", () => {
         platform: "win32" as const,
         observe: (pid: number) =>
           pid === process.pid
-            ? { pid, identity: "owner", pgid: null, sid: null }
+            ? { pid, identity: WINDOWS_IDENTITY.OWNER, pgid: null, sid: null }
             : pid === 900
-              ? { pid, identity: "supervisor", pgid: null, sid: null }
+              ? { pid, identity: WINDOWS_IDENTITY.SUPERVISOR, pgid: null, sid: null }
               : null,
         proveQuiescent: () => null,
         terminateExactTree: (rootObservation: { pid: number }, force: boolean) => {
@@ -383,7 +445,20 @@ describe("owned CLI lifecycle", () => {
             mkdirSync,
             now: () => 1,
             randomUUID: () => "00000000-0000-4000-8000-000000000001",
-            readFileSync,
+            readFileSync: (() =>
+              JSON.stringify(
+                receiptReads++ === 0
+                  ? {
+                      supervisor_pid: 900,
+                      containment: OWNED_PROCESS_QUIESCENCE_SCOPE.WINDOWS_JOB,
+                    }
+                  : {
+                      cli_pid: 901,
+                      cli_identity: null,
+                      cli_identity_state: OWNED_CLI_IDENTITY_STATE.UNKNOWN,
+                      cli_pgid: null,
+                    },
+              )) as never,
             rmSync: (() => undefined) as never,
             spawn: ((
               cmd: string,
@@ -391,10 +466,6 @@ describe("owned CLI lifecycle", () => {
               options: { env: Record<string, string>; windowsHide?: boolean },
             ) => {
               calls.push({ cmd, args, windowsHide: options.windowsHide });
-              writeFileSync(
-                options.env[OWNED_PROCESS_ENV.RECEIPT] as string,
-                JSON.stringify({ supervisor_pid: 900, cli_pid: 901 }),
-              );
               return fakeChild as never;
             }) as never,
             tmpdir: () => root,
@@ -531,11 +602,11 @@ describe("owned CLI lifecycle", () => {
         platform: process.platform,
         observe: (pid: number) =>
           pid === process.pid
-            ? { pid, identity: "owner", pgid: process.pid, sid: null }
+            ? { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null }
             : pid === 700
-              ? { pid, identity: "supervisor", pgid: 700, sid: null }
+              ? { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null }
               : pid === 701
-                ? { pid, identity: "cli", pgid: 700, sid: null }
+                ? { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null }
                 : null,
         terminateExactTree: () => undefined,
         proveQuiescent: () => true,
@@ -546,9 +617,9 @@ describe("owned CLI lifecycle", () => {
       const uncertain = buildOwnedProcessRecord({
         ...preimage,
         supervisor_pid: 700,
-        supervisor_identity: "supervisor",
+        supervisor_identity: SYNTHETIC_IDENTITY.SUPERVISOR,
         cli_pid: 701,
-        cli_identity: "cli",
+        cli_identity: SYNTHETIC_IDENTITY.CLI,
         state: "uncertain",
         release_reason: "injected",
         updated_at: new Date().toISOString(),
@@ -584,9 +655,11 @@ describe("owned CLI lifecycle", () => {
         strategy: "posix-session" as const,
         platform: process.platform,
         observe: (pid: number) => {
-          if (pid === process.pid) return { pid, identity: "owner", pgid: process.pid, sid: null };
-          if (pid === 700) return { pid, identity: "supervisor", pgid: 700, sid: null };
-          if (pid === 701) return { pid, identity: "cli", pgid: 700, sid: null };
+          if (pid === process.pid)
+            return { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null };
+          if (pid === 700)
+            return { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null };
+          if (pid === 701) return { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null };
           return null;
         },
         terminateExactTree: () => undefined,
@@ -632,6 +705,211 @@ describe("owned CLI lifecycle", () => {
     }
   });
 
+  test("record reads bind decoded attempt identity to the requested storage key", () => {
+    const root = tempRoot("vf-owned-storage-binding-");
+    try {
+      const platform = {
+        strategy: OWNED_PROCESS_STRATEGY.POSIX_SESSION,
+        platform: process.platform,
+        observe: (pid: number) =>
+          pid === process.pid
+            ? { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null }
+            : null,
+        terminateExactTree: () => undefined,
+        proveQuiescent: () => true,
+      };
+      const store = new OwnedProcessRecordStore(root);
+      const sourceAttemptId = "owned-storage-source";
+      const targetAttemptId = "owned-storage-target";
+      store.reserve(sourceAttemptId, "codex", platform);
+      store.reserve(targetAttemptId, "codex", platform);
+      const sourceEntry = ownedRecordEntry(store, sourceAttemptId);
+      const targetEntry = ownedRecordEntry(store, targetAttemptId);
+      writeFileSync(
+        ownedRecordPath(root, targetEntry),
+        readFileSync(ownedRecordPath(root, sourceEntry)),
+      );
+
+      expect(() => store.read(targetAttemptId)).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.STORAGE_BINDING,
+      );
+      expect(() => store.readEntry(targetEntry)).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.STORAGE_BINDING,
+      );
+      expect(() => store.listOpenRecords()).toThrow(OWNED_PROCESS_AUTHORITY_ERROR.STORAGE_BINDING);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("record writes reject mismatched current and next attempts without changing bytes", () => {
+    const root = tempRoot("vf-owned-write-binding-");
+    try {
+      const platform = {
+        strategy: OWNED_PROCESS_STRATEGY.POSIX_SESSION,
+        platform: process.platform,
+        observe: (pid: number) =>
+          pid === process.pid
+            ? { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null }
+            : null,
+        terminateExactTree: () => undefined,
+        proveQuiescent: () => true,
+      };
+      const store = new OwnedProcessRecordStore(root);
+      const targetAttemptId = "owned-write-target";
+      const foreignAttemptId = "owned-write-foreign";
+      const target = store.reserve(targetAttemptId, "codex", platform);
+      const foreign = store.reserve(foreignAttemptId, "codex", platform);
+      const targetPath = ownedRecordPath(root, ownedRecordEntry(store, targetAttemptId));
+      const targetBytes = readFileSync(targetPath);
+
+      expect(() => store.write(targetAttemptId, target, foreign)).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.WRITE_BINDING,
+      );
+      expect(readFileSync(targetPath).equals(targetBytes)).toBe(true);
+      expect(() => store.write(targetAttemptId, foreign, target)).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.WRITE_BINDING,
+      );
+      expect(readFileSync(targetPath).equals(targetBytes)).toBe(true);
+      const invalid = {
+        ...target,
+        [OWNED_PROCESS_RECORD_FIELD.RECORD_DIGEST]:
+          foreign[OWNED_PROCESS_RECORD_FIELD.RECORD_DIGEST],
+      };
+      expect(() => store.write(targetAttemptId, target, invalid)).toThrow();
+      expect(readFileSync(targetPath).equals(targetBytes)).toBe(true);
+      expect(() => store.write(targetAttemptId, invalid, target)).toThrow();
+      expect(readFileSync(targetPath).equals(targetBytes)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("controller bindings and terminal observations are exact-idempotent", () => {
+    const root = tempRoot("vf-owned-controller-authority-");
+    const identities = new Map<number, string>([
+      [process.pid, SYNTHETIC_IDENTITY.OWNER],
+      [700, SYNTHETIC_IDENTITY.SUPERVISOR],
+      [701, SYNTHETIC_IDENTITY.CLI],
+    ]);
+    try {
+      const platform = {
+        strategy: OWNED_PROCESS_STRATEGY.POSIX_SESSION,
+        platform: process.platform,
+        observe: (pid: number) => {
+          const identity = identities.get(pid);
+          return identity ? { pid, identity, pgid: pid === 701 ? 700 : pid, sid: null } : null;
+        },
+        terminateExactTree: () => undefined,
+        proveQuiescent: () => true,
+      };
+      const store = new OwnedProcessRecordStore(root);
+      const attemptId = "owned-controller-authority";
+      const controller = new OwnedProcessController(
+        store,
+        platform,
+        store.reserve(attemptId, "codex", platform),
+      );
+      const path = ownedRecordPath(root, ownedRecordEntry(store, attemptId));
+
+      expect(() =>
+        controller.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED),
+      ).toThrow(OWNED_PROCESS_AUTHORITY_ERROR.ILLEGAL_TRANSITION);
+      controller.bindSupervisor(700);
+      const supervisorBytes = readFileSync(path);
+      controller.bindSupervisor(700);
+      expect(readFileSync(path).equals(supervisorBytes)).toBe(true);
+      identities.set(700, SYNTHETIC_IDENTITY.REPLACEMENT_SUPERVISOR);
+      expect(() => controller.bindSupervisor(700)).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.BINDING_CONFLICT,
+      );
+      expect(readFileSync(path).equals(supervisorBytes)).toBe(true);
+
+      identities.set(700, SYNTHETIC_IDENTITY.SUPERVISOR);
+      controller.bindLaunch(700, 701);
+      const runningBytes = readFileSync(path);
+      controller.bindLaunch(700, 701);
+      expect(readFileSync(path).equals(runningBytes)).toBe(true);
+      identities.set(701, SYNTHETIC_IDENTITY.REPLACEMENT_CLI);
+      expect(() => controller.bindLaunch(700, 701)).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.BINDING_CONFLICT,
+      );
+      expect(readFileSync(path).equals(runningBytes)).toBe(true);
+
+      identities.set(701, SYNTHETIC_IDENTITY.CLI);
+      controller.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED);
+      const terminalBytes = readFileSync(path);
+      controller.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED);
+      expect(readFileSync(path).equals(terminalBytes)).toBe(true);
+      expect(() =>
+        controller.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.OUTPUT_DRAIN_UNPROVEN),
+      ).toThrow(OWNED_PROCESS_AUTHORITY_ERROR.BINDING_CONFLICT);
+      expect(readFileSync(path).equals(terminalBytes)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("repeated finalize returns the original proof and leaves released bytes immutable", () => {
+    const root = tempRoot("vf-owned-finalize-idempotence-");
+    let quiescenceProofs = 0;
+    try {
+      const platform = {
+        strategy: OWNED_PROCESS_STRATEGY.POSIX_SESSION,
+        platform: process.platform,
+        observe: (pid: number) => {
+          if (pid === process.pid)
+            return { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null };
+          if (pid === 700)
+            return { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null };
+          if (pid === 701) return { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null };
+          return null;
+        },
+        terminateExactTree: () => undefined,
+        proveQuiescent: () => {
+          quiescenceProofs++;
+          return true;
+        },
+      };
+      const store = new OwnedProcessRecordStore(root);
+      const attemptId = "owned-finalize-idempotence";
+      const controller = new OwnedProcessController(
+        store,
+        platform,
+        store.reserve(attemptId, "codex", platform),
+      );
+      controller.bindLaunch(700, 701);
+      controller.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED);
+      const firstProof = controller.finalize(0, "engine exit");
+      const path = ownedRecordPath(root, ownedRecordEntry(store, attemptId));
+      const releasedBytes = readFileSync(path);
+      const secondProof = controller.finalize(9, "ignored repeat");
+      const released = store.read(attemptId);
+
+      expect(secondProof).toEqual(firstProof);
+      expect(readFileSync(path).equals(releasedBytes)).toBe(true);
+      expect(quiescenceProofs).toBe(1);
+      expect(
+        firstProof && released ? verifyOwnedProcessReleaseProof(firstProof, released) : false,
+      ).toBe(true);
+      expect(
+        secondProof && released ? verifyOwnedProcessReleaseProof(secondProof, released) : false,
+      ).toBe(true);
+      expect(() => controller.bindSupervisor(700)).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.ILLEGAL_TRANSITION,
+      );
+      expect(() =>
+        controller.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED),
+      ).toThrow(OWNED_PROCESS_AUTHORITY_ERROR.ILLEGAL_TRANSITION);
+      expect(() => controller.failLaunch(700, 701, "late failure")).toThrow(
+        OWNED_PROCESS_AUTHORITY_ERROR.ILLEGAL_TRANSITION,
+      );
+      expect(readFileSync(path).equals(releasedBytes)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("owned terminal records reject unknown strings and persist only contract kinds", () => {
     const root = tempRoot("vf-owned-terminal-contract-");
     try {
@@ -639,7 +917,13 @@ describe("owned CLI lifecycle", () => {
         strategy: OWNED_PROCESS_STRATEGY.POSIX_SESSION,
         platform: process.platform,
         observe: (pid: number) =>
-          pid === process.pid ? { pid, identity: "owner", pgid: process.pid, sid: null } : null,
+          pid === process.pid
+            ? { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null }
+            : pid === 700
+              ? { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null }
+              : pid === 701
+                ? { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null }
+                : null,
         terminateExactTree: () => undefined,
         proveQuiescent: () => true,
       };
@@ -651,6 +935,7 @@ describe("owned CLI lifecycle", () => {
       ).toThrow(/invalid owned process record/);
       const controller = new OwnedProcessController(store, platform, reserved);
 
+      controller.bindLaunch(700, 701);
       controller.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED);
 
       expect(store.read("owned-terminal-contract")?.terminal_kind).toBe(
@@ -670,8 +955,10 @@ describe("owned CLI lifecycle", () => {
         probe: (pid: number) =>
           pid === 701 ? ({ kind: "absent" } as const) : ({ kind: "unknown" } as const),
         observe: (pid: number) => {
-          if (pid === process.pid) return { pid, identity: "owner", pgid: null, sid: null };
-          if (pid === 700) return { pid, identity: "supervisor", pgid: null, sid: null };
+          if (pid === process.pid)
+            return { pid, identity: WINDOWS_IDENTITY.OWNER, pgid: null, sid: null };
+          if (pid === 700)
+            return { pid, identity: WINDOWS_IDENTITY.SUPERVISOR, pgid: null, sid: null };
           return null;
         },
         terminateExactTree: () => undefined,
@@ -684,10 +971,11 @@ describe("owned CLI lifecycle", () => {
         store.reserve("owned-win-fast-exit", "codex", platform),
       );
       const running = controller.bindLaunch(700, 701, {
+        identity: null,
         identityState: OWNED_CLI_IDENTITY_STATE.ABSENT_AFTER_PROBE,
       });
       expect(running.state).toBe(OWNED_PROCESS_STATE.RUNNING);
-      expect(running.cli_identity).toBe("win32-exited:supervisor:pid:701");
+      expect(running.cli_identity).toBe(WINDOWS_EXITED_CLI_IDENTITY);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -698,8 +986,10 @@ describe("owned CLI lifecycle", () => {
     try {
       let transientProbes = 0;
       const observation = (pid: number) => {
-        if (pid === process.pid) return { pid, identity: "owner", pgid: process.pid, sid: null };
-        if (pid === 700) return { pid, identity: "supervisor", pgid: 700, sid: null };
+        if (pid === process.pid)
+          return { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null };
+        if (pid === 700)
+          return { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null };
         return null;
       };
       const transientPlatform = {
@@ -718,12 +1008,13 @@ describe("owned CLI lifecycle", () => {
         store.reserve("owned-transient-probe", "codex", transientPlatform),
       );
       const running = transient.bindLaunch(700, 701, {
-        identity: "receipt-cli",
+        identity: SYNTHETIC_IDENTITY.RECEIPT_CLI,
+        identityState: OWNED_CLI_IDENTITY_STATE.AVAILABLE,
         pgid: 700,
       });
       expect(transientProbes).toBe(2);
       expect(running.state).toBe(OWNED_PROCESS_STATE.RUNNING);
-      expect(running.cli_identity).toBe("receipt-cli");
+      expect(running.cli_identity).toBe(SYNTHETIC_IDENTITY.RECEIPT_CLI);
 
       let persistentProbes = 0;
       const persistentPlatform = {
@@ -738,9 +1029,13 @@ describe("owned CLI lifecycle", () => {
         persistentPlatform,
         store.reserve("owned-persistent-probe", "codex", persistentPlatform),
       );
-      expect(() => persistent.bindLaunch(700, 701, { identity: "receipt-cli", pgid: 700 })).toThrow(
-        /owned CLI identity is unavailable/,
-      );
+      expect(() =>
+        persistent.bindLaunch(700, 701, {
+          identity: SYNTHETIC_IDENTITY.RECEIPT_CLI,
+          identityState: OWNED_CLI_IDENTITY_STATE.AVAILABLE,
+          pgid: 700,
+        }),
+      ).toThrow(/owned CLI identity is unavailable/);
       expect(persistentProbes).toBe(OWNED_PROCESS_LIMIT.IDENTITY_SETTLE_ATTEMPTS);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -757,9 +1052,10 @@ describe("owned CLI lifecycle", () => {
         platform: process.platform,
         observe: (pid: number) => {
           if (pid === process.pid && ownerAlive)
-            return { pid, identity: "owner", pgid: process.pid, sid: null };
-          if (pid === 700) return { pid, identity: "supervisor", pgid: 700, sid: null };
-          if (pid === 701) return { pid, identity: "cli", pgid: 700, sid: null };
+            return { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null };
+          if (pid === 700)
+            return { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null };
+          if (pid === 701) return { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null };
           return null;
         },
         terminateExactTree: () => {
@@ -826,11 +1122,11 @@ describe("owned CLI lifecycle", () => {
         platform: process.platform,
         observe: (pid: number) =>
           pid === process.pid
-            ? { pid, identity: "owner", pgid: process.pid, sid: null }
+            ? { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null }
             : pid === 901
-              ? { pid, identity: "supervisor", pgid: 901, sid: null }
+              ? { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 901, sid: null }
               : pid === 902
-                ? { pid, identity: "cli", pgid: 901, sid: null }
+                ? { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 901, sid: null }
                 : null,
         terminateExactTree: () => undefined,
         proveQuiescent: () => true,
@@ -838,6 +1134,23 @@ describe("owned CLI lifecycle", () => {
       const store = new OwnedProcessRecordStore(root);
       const makeController = (attemptId: string) =>
         new OwnedProcessController(store, platform, store.reserve(attemptId, "codex", platform));
+      const receiptReader = () => {
+        let reads = 0;
+        return (() =>
+          JSON.stringify(
+            reads++ === 0
+              ? {
+                  supervisor_pid: 901,
+                  containment: OWNED_PROCESS_QUIESCENCE_SCOPE.POSIX_PROCESS_GROUP,
+                }
+              : {
+                  cli_pid: 902,
+                  cli_identity: SYNTHETIC_IDENTITY.CLI,
+                  cli_identity_state: OWNED_CLI_IDENTITY_STATE.AVAILABLE,
+                  cli_pgid: 901,
+                },
+          )) as never;
+      };
       const fakeChild = () => {
         const child = new EventEmitter() as EventEmitter & {
           pid: number;
@@ -861,19 +1174,10 @@ describe("owned CLI lifecycle", () => {
           mkdirSync,
           now: () => 1,
           randomUUID: () => "00000000-0000-4000-8000-00000000000a",
-          readFileSync,
+          readFileSync: receiptReader(),
           rmSync: (() => undefined) as never,
           spawn: ((cmd: string, args: string[], options: { env: Record<string, string> }) => {
             receipts.push(options.env[OWNED_PROCESS_ENV.RECEIPT] as string);
-            writeFileSync(
-              options.env[OWNED_PROCESS_ENV.RECEIPT] as string,
-              JSON.stringify({
-                supervisor_pid: 901,
-                cli_pid: 902,
-                cli_identity: "cli",
-                cli_pgid: 901,
-              }),
-            );
             return fakeChild() as never;
           }) as never,
           tmpdir: () => root,
@@ -887,19 +1191,10 @@ describe("owned CLI lifecycle", () => {
           mkdirSync,
           now: () => 1,
           randomUUID: () => "00000000-0000-4000-8000-00000000000b",
-          readFileSync,
+          readFileSync: receiptReader(),
           rmSync: (() => undefined) as never,
           spawn: ((cmd: string, args: string[], options: { env: Record<string, string> }) => {
             receipts.push(options.env[OWNED_PROCESS_ENV.RECEIPT] as string);
-            writeFileSync(
-              options.env[OWNED_PROCESS_ENV.RECEIPT] as string,
-              JSON.stringify({
-                supervisor_pid: 901,
-                cli_pid: 902,
-                cli_identity: "cli",
-                cli_pgid: 901,
-              }),
-            );
             return fakeChild() as never;
           }) as never,
           tmpdir: () => root,

@@ -8,8 +8,12 @@ import {
   realpathSync,
 } from "node:fs";
 import { relative, resolve, sep } from "node:path";
+import { CONVERSATION_MESSAGE_QUEUE_LIMITS } from "./conversation-message-queue-contract.js";
 
-const MAX_FILE_BYTES = 1_024 * 1_024;
+export const CONVERSATION_PRIVATE_CONTEXT_SOURCE_LIMITS = Object.freeze({
+  maxFileBytes: 1_024 * 1_024,
+  maxSelectedContentBytes: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxContentBytes,
+} as const);
 
 function inside(root: string, target: string): boolean {
   return target === root || target.startsWith(`${root}${sep}`);
@@ -51,15 +55,17 @@ export function readConversationPrivateFileRange(input: {
       !sameIdentity(opened, entry)
     )
       throw new Error("private context source is not a stable regular file");
-    if (opened.size > MAX_FILE_BYTES) throw new Error("private context source is oversized");
-    const bytes = Buffer.allocUnsafe(MAX_FILE_BYTES + 1);
+    if (opened.size > CONVERSATION_PRIVATE_CONTEXT_SOURCE_LIMITS.maxFileBytes)
+      throw new Error("private context source is oversized");
+    const bytes = Buffer.allocUnsafe(CONVERSATION_PRIVATE_CONTEXT_SOURCE_LIMITS.maxFileBytes + 1);
     let size = 0;
     while (size < bytes.length) {
       const count = readSync(fd, bytes, size, bytes.length - size, null);
       if (count === 0) break;
       size += count;
     }
-    if (size > MAX_FILE_BYTES) throw new Error("private context source is oversized");
+    if (size > CONVERSATION_PRIVATE_CONTEXT_SOURCE_LIMITS.maxFileBytes)
+      throw new Error("private context source is oversized");
     const after = fstatSync(fd);
     const afterEntry = lstatSync(target);
     if (
@@ -85,7 +91,11 @@ export function readConversationPrivateFileRange(input: {
     const endLine = Math.min(input.endLine, starts.length);
     const endOffset = endLine < starts.length ? (starts[endLine] as number) : text.length;
     const content = text.slice(starts[input.startLine - 1] as number, endOffset);
-    if (Buffer.byteLength(content, "utf8") < 1 || Buffer.byteLength(content, "utf8") > 65_536)
+    if (
+      Buffer.byteLength(content, "utf8") < 1 ||
+      Buffer.byteLength(content, "utf8") >
+        CONVERSATION_PRIVATE_CONTEXT_SOURCE_LIMITS.maxSelectedContentBytes
+    )
       throw new Error("private context range is empty or oversized");
     return { content, start_line: input.startLine, end_line: endLine };
   } finally {

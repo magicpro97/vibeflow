@@ -123,7 +123,7 @@ describe("askInvocation", () => {
     });
     expect(askInvocation("opencode")).toEqual({
       cmd: "opencode",
-      args: ["run", "--format", "json", "-"],
+      args: ["run", "--format", "json"],
       promptMode: "stdin",
     });
     expect(askInvocation("antigravity" as never)).toEqual({
@@ -147,6 +147,7 @@ describe("materializeArgs (#562 — copilot -p takes a VALUE, order matters)", (
   test("stdin engines: args unchanged (prompt goes on stdin, not argv)", () => {
     expect(materializeArgs(askInvocation("claude"), "Q")).toEqual(["-p"]);
     expect(materializeArgs(askInvocation("codex"), "Q")).toEqual(["exec", "-"]);
+    expect(materializeArgs(askInvocation("opencode"), "Q")).toEqual(["run", "--format", "json"]);
   });
   test("arg mode with no -p flag: appends at end", () => {
     expect(materializeArgs({ cmd: "x", args: ["--foo"], promptMode: "arg" }, "Q")).toEqual([
@@ -210,7 +211,7 @@ describe("resumeInvocation (#562 multi-turn — engine-native continue)", () => 
   test("opencode resumes via --continue", () => {
     expect(resumeInvocation("opencode")).toEqual({
       cmd: "opencode",
-      args: ["run", "--continue", "--format", "json", "-"],
+      args: ["run", "--continue", "--format", "json"],
       promptMode: "stdin",
     });
   });
@@ -263,6 +264,29 @@ describe("inheritSpawn (canonical owned-process route)", () => {
     });
     expect(request?.sourceEnv).not.toBe(process.env);
     expect(request?.sourceEnv?.PATH).toBe(process.env.PATH);
+  });
+
+  test("opencode prompt appears exactly once on stdin and never as a positional", async () => {
+    let request: OwnedAiRouteRequest | undefined;
+    const prompt = "OPENCODE PROMPT ONCE";
+    const code = await inheritSpawn(
+      askInvocation("opencode"),
+      prompt,
+      ownedRouteFake(ownedRouteResult(), (value) => {
+        request = value;
+      }),
+    );
+    expect(code).toBe(0);
+    expect(request).toMatchObject({
+      engine: "opencode",
+      command: "opencode",
+      args: ["run", "--format", "json"],
+      input: prompt,
+    });
+    expect(request?.args).not.toContain("-");
+    expect(
+      [...(request?.args ?? []), request?.input ?? ""].filter((value) => value === prompt),
+    ).toHaveLength(1);
   });
 
   test("arg mode materializes the prompt in argv and leaves stdin empty", async () => {

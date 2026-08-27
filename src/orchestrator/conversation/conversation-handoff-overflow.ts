@@ -1,3 +1,4 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
   type ActionProposalRequestV1,
   type ActionRequestAuthorityV1,
@@ -71,7 +72,7 @@ export function rethrowTerminalMessageOverflow(input: {
         conversation_lock_digest: input.base.lock.lock_digest,
       },
       candidate: {
-        type: "conversation.continue_message",
+        type: HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE,
         content: input.request.content,
         target_participants: input.request.target_participants,
         ...(input.request.quote_refs

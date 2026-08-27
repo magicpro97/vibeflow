@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
+import { CONVERSATION_PUBLIC_SCHEMA_VERSION } from "./conversation-public-wire-contract.js";
+import { validatePublicHandoffEventV1 } from "./handoff-nested-validation.js";
 import type {
   PublicArtifactReferenceV1,
   PublicHandoffMessageV1,
@@ -18,45 +20,6 @@ function plain(value: unknown): value is Record<string, unknown> {
       !Array.isArray(value) &&
       Object.getPrototypeOf(value) === Object.prototype,
   );
-}
-
-function projectedEvent(value: unknown): CompactionSourceEventV1 {
-  if (!plain(value)) throw new Error("invalid omitted public event");
-  const common = [
-    "event_id",
-    "conversation_id",
-    "revision_id",
-    "revision_ordinal",
-    "public_seq",
-    "text",
-    "created_at",
-    "redaction_manifest_digest",
-  ];
-  if (
-    common.some((key) =>
-      ["revision_ordinal", "public_seq"].includes(key)
-        ? !Number.isSafeInteger(value[key]) || Number(value[key]) < 0
-        : typeof value[key] !== "string",
-    )
-  )
-    throw new Error("invalid omitted public event fields");
-  const message = "author_public_id" in value;
-  const response = "participant_id" in value;
-  if (message === response) throw new Error("ambiguous omitted public event kind");
-  if (message) {
-    if (
-      typeof value.author_public_id !== "string" ||
-      Reflect.ownKeys(value).length !== common.length + 1
-    )
-      throw new Error("invalid omitted public user message");
-  } else if (
-    typeof value.participant_id !== "string" ||
-    typeof value.role_ref !== "string" ||
-    !["completed", "stopped", "failed"].includes(String(value.terminal_status)) ||
-    Reflect.ownKeys(value).length !== common.length + 3
-  )
-    throw new Error("invalid omitted public response");
-  return structuredClone(value as unknown as CompactionSourceEventV1);
 }
 
 function bytesFor(
@@ -104,12 +67,12 @@ export function resolveCompactionSourceEvents(input: {
     if (
       !plain(decoded) ||
       Reflect.ownKeys(decoded).length !== 2 ||
-      decoded.schema_version !== "1.0" ||
+      decoded.schema_version !== CONVERSATION_PUBLIC_SCHEMA_VERSION ||
       !Array.isArray(decoded.events) ||
       !canonicalJsonBytes(decoded).equals(bytes)
     )
       throw new Error("invalid omitted public artifact bytes");
-    const events = decoded.events.map(projectedEvent);
+    const events = decoded.events.map(validatePublicHandoffEventV1);
     const first = events[0];
     const last = events.at(-1);
     if (

@@ -1,5 +1,5 @@
 import { DIGEST } from "../../actions/record-primitives.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { PublicCapabilityInputStateV1 } from "../wire/query.js";
 import { assertPackageIdentity } from "./helpers.js";
 import type { CliBindingRecordV1, CliCurrentHeadRecordV1, HeadIdentity, Scope } from "./types.js";
@@ -13,7 +13,7 @@ export function assertPrivateInputScopeIdentity(input: {
   if (input.scope !== input.expectedScope)
     throw new CapabilityRuntimeError(
       "private input scope is not owned by this authority",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   if (
     input.scopeIdentityDigest !== input.expectedIdentityDigest ||
@@ -21,7 +21,7 @@ export function assertPrivateInputScopeIdentity(input: {
   )
     throw new CapabilityRuntimeError(
       "private input scope identity digest mismatch",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
 }
 
@@ -42,7 +42,7 @@ export function readValidatedPrivateInputPresence(input: {
   if (input.request.scope !== input.expectedScope)
     throw new CapabilityRuntimeError(
       "private input scope is not owned by this authority",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   assertPackageIdentity(
     input.request.package_id,
@@ -58,12 +58,12 @@ export function readValidatedPrivateInputPresence(input: {
   if (!binding || binding.binding_digest !== head.binding_digest)
     throw new CapabilityRuntimeError(
       "private input current head is corrupted",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   if (!binding.bindings.some((row) => row.input_id === input.request.input_id))
     throw new CapabilityRuntimeError(
       "private input current head omits the requested input",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   return { kind: "private", present: true };
 }

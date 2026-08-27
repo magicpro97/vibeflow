@@ -2,7 +2,7 @@
 title: User Guide
 description: Verifiable end-to-end user guide for the AI-first Home, workflows, traced conversations, the web UI, CLI, generated files, and troubleshooting.
 category: tutorial
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # VibeFlow User Guide
@@ -32,13 +32,13 @@ can check.
 The runtime names in this tree are Claude, Codex, Copilot, OpenCode, and Antigravity. The
 conversation/runtime matrix is:
 
-| Engine | Fresh execution | Tool/sandbox enforcement | Exact native resume | History reconciliation | Phase/admission |
-|--------|-----------------|--------------------------|---------------------|------------------------|-----------------|
-| Claude | yes | full | yes | supported | Phase 1 built-in read-only yes; phase 2+ yes |
-| Codex | yes | partial: sandbox yes, rendered tools denied | yes | supported | Phase 1 built-in read-only yes; phase 2+ yes |
-| Copilot | yes | full | unavailable; no native resume path | unavailable | Phase 1 no; phase 2+ yes when ready/admitted |
-| OpenCode | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; most-recent `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
-| Antigravity | yes | no: conversation launches reject requested tools or sandbox | yes (`--conversation <conversation_id>`) | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Engine | Fresh execution | Tool/sandbox enforcement | Exact native resume | Own-history policy | Phase/admission |
+|--------|-----------------|--------------------------|---------------------|--------------------|-----------------|
+| Claude | yes | full | yes (`-p -r <session_id>`) | native history when exact; bounded public replay otherwise | Phase 1 built-in read-only yes; phase 2+ yes |
+| Codex | yes | partial: sandbox yes, rendered tools denied | yes (`exec resume <thread_id>`) | native history when exact; bounded public replay otherwise | Phase 1 built-in read-only yes; phase 2+ yes |
+| Copilot | yes | full | unavailable; no proved by-id path | bounded public replay | Phase 1 no; phase 2+ yes when ready/admitted |
+| OpenCode | yes | no: conversation launches reject requested tools or sandbox | yes (`run --session <validated ses_...> --format json`) | native history when exact; bounded public replay otherwise | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Antigravity | yes | no: conversation launches reject requested tools or sandbox | unavailable; no evidenced exact binding | bounded public replay | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 
 ---
 
@@ -82,6 +82,9 @@ intake + scan  →  resolve skill NEEDS  →  plan work units  →  dispatch (pa
 - **Skill** — an Anthropic skill-creator folder (`SKILL.md` + optional `scripts/`,
   `references/`). VibeFlow **discovers, validates, and matches** skills; the engine runs
   them. Nothing is pre-installed — skills are acquired on demand and start `unverified`.
+- **Capability package** — a reviewed extension for an installed CLI: skills, MCP servers,
+  tools, hooks, roles, or engine settings. The Fabric owns install, configure, retarget,
+  update, repair, rollback, and removal; VibeFlow remains the harness, not the coding engine.
 - **Confidence gate** — any decision below `1.0` triggers bounded investigation/debate;
   no merge or close on a guess.
 
@@ -90,21 +93,27 @@ intake + scan  →  resolve skill NEEDS  →  plan work units  →  dispatch (pa
 ## 3. The web UI (recommended)
 
 ```bash
-vf            # or: vf ui
+vf                  # AI-first Home on 127.0.0.1:7799
+vf ui               # same stable default
+vf ui --port 0      # explicitly choose an OS-assigned free port
 ```
 
-Opens `http://127.0.0.1:<port>` (loopback only). The default surface is AI-first Home:
+Both default commands open `http://127.0.0.1:7799` (loopback only). If a requested fixed
+port is busy, the TTY flow offers a free-port fallback; a non-interactive launch stops.
+The default surface is AI-first Home:
 
 1. **Searchable session rail** — recent conversations, search, and **New conversation**.
 2. **Central conversation pane** — topic, lifecycle state, participant avatars, and live stream status.
 3. **Composer** — durable FIFO queue, ArrowUp edit of the latest queued human message, private file range, and capability chooser.
 4. **Details inspector** — participants, continuity, lineage, and health.
 5. **Trace / capabilities drawers** — ordered public trace, evidence, and typed CLI capability actions.
-6. **Intake wizard** — when you run `vf init --interactive`, the UI switches to repo setup: path, goal, engines, sources, attachments, and Definition of Done.
+6. **Repository intake stays separate** — `vf init` asks its setup questionnaire when stdin is a TTY; `--no-ask` skips it. `vf ui` never switches Home into an intake wizard.
 
 Security: the server binds to `127.0.0.1`, every write carries a per-process CSRF token,
 the Host/Origin must be loopback, uploads are sanitized and size-capped, and the page ships
-no third-party JavaScript under a strict CSP.
+no third-party JavaScript under a strict CSP. Any non-loopback `--host` instead requires the
+owner's single-use browser bootstrap before `/` reveals that CSRF token; bootstrap replay and
+unauthenticated root scraping return `401`. `--no-open` prints the owner-only URL once.
 
 ### Conversation workspace
 
@@ -116,6 +125,10 @@ The composer keeps collaboration inside the conversation:
 
 1. Send another message while agents are working; it joins the durable FIFO queue instead of
    interrupting or replacing an earlier send.
+   If admission fails before acknowledgement, Home keeps an explicit retryable row. Retry is
+   user-triggered, reuses the exact request and idempotency key, and does not clear or replace a
+   newer composer draft. The rejected row belongs to the current Home UI state; it is not
+   stored in `localStorage` and does not promise browser-restart recovery.
 2. Press ArrowUp with an empty composer to edit the latest queued human message. Press Escape
    to cancel. If dispatch wins the race before the edit commits, the draft is preserved and
    the UI offers an explicit send-as-new action.
@@ -142,8 +155,9 @@ Conversation credentials have separate jobs. The browser receives an `HttpOnly`,
 the page's per-process CSRF token. SSE uses a different, 15-minute token scoped to one
 conversation. Neither token is stored in `localStorage` or `sessionStorage`, and provider
 credentials, native session ids, internal/provider prompts, environment values, and local
-artifact paths are not public DTO fields. The conversation workspace fails closed on LAN-bound
-`vf ui --host 0.0.0.0`; use the loopback UI for conversations.
+artifact paths are not public DTO fields. LAN page authority is not conversation authority:
+the conversation workspace fails closed on every non-loopback bind, even after browser
+bootstrap. Use the loopback UI for conversations.
 
 The public trace does contain the user's topic and messages plus engine responses after
 redaction. “Prompts are private” refers specifically to internal role/provider templates and
@@ -179,9 +193,9 @@ transitions yet simply shows nothing.
 ### Generate context
 
 ```bash
-vf init                       # scan repo + generate canonical context for all engines
+vf init                       # TTY: ask intake questions, then generate context
 vf init --engine claude       # only Claude Code files
-vf init --interactive         # ask the intake questions in the terminal
+vf init --no-ask              # skip the questionnaire
 vf init --memory              # force the claude-mem install (skip the prompt)
 vf init --no-memory           # skip the claude-mem install (skip the prompt)
 vf init --dry-run             # show what would be written
@@ -274,14 +288,18 @@ the durable conversation runtime. Public turns use the canonical `VF-TURN/1` JSO
 private file ranges use a separate `VF-PRIVATE-FILE-RANGES/1` JSON payload that is cleared
 after the turn. The private payload is not written into public trace or browser persistence.
 `--conversation <id>` is the explicit persisted path and `--resume` is compatibility-only:
-it requires `--conversation` and never targets a native latest-session resume path. Claude,
-Codex, OpenCode, and Antigravity support native session resume in their own CLI paths;
-Copilot reports that path as unavailable.
+it requires `--conversation` and never targets a native latest-session shortcut. Exact
+by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode's conversation
+adapter invokes `opencode run --session <validated-ses-id> --format json`; Copilot and
+Antigravity fail closed instead of silently starting fresh under an exact claim.
 
 For an exact proved native resume, the CLI retains its own history and VibeFlow supplies only
 new applicable user messages plus peer-agent responses and reactions. The recipient's own
-prior output is not repeated. Missing or stale cursor proof falls back to the full applicable
-public handoff. Claude, Codex, and OpenCode receive prompts on stdin; Copilot and Antigravity
+prior output is not repeated. Without valid exact authority, the canonical turn includes
+applicable user/peer context plus a bounded structured replay of the recipient's last eight
+public responses. Each replay summary is capped at 2 KiB UTF-8 and carries its source digest,
+provenance, source/replayed counts, and truncation counts, so the recipient's own context is
+never silently omitted. Claude, Codex, and OpenCode receive prompts on stdin; Copilot and Antigravity
 receive native prompt argv. A large Copilot work-unit prompt may be written to
 `.vibeflow/dispatch/<unit>.md` and replaced on argv by a short absolute read pointer. That
 prompt file is a transport fallback, not a resumable session or memory store. Antigravity
@@ -487,8 +505,8 @@ canonical context. Work units and skills appear only when a task actually needs 
   `CONTEXT7_API_KEY` to raise the rate limit (keyless works but is throttled).
 - **An engine CLI isn't launched on `vf run`** — install it; `vf doctor` shows what's missing.
 - **Conversation request returns `401`** — open the loopback page first so it can issue the
-  process-local session cookie. Conversation routes intentionally do not work from a
-  `--host 0.0.0.0` page.
+  process-local session cookie. Conversation routes intentionally do not work from any
+  non-loopback page; its LAN bootstrap/page token is a separate authority.
 - **Conversation write returns `403`** — reload the page; its per-process CSRF token no
   longer matches the running server.
 - **Conversation control returns `409`** — the lifecycle changed, the approval was already
@@ -503,7 +521,9 @@ canonical context. Work units and skills appear only when a task actually needs 
   start identity, and terminal release waits for exit/quiescence plus `streams-drained`.
   Windows uses a kill-on-close Job Object (`kernel-contained`); Linux and macOS use an
   isolated process group (`cooperative-lineage`, because descendants can escape it). The
-  shipped Windows contract is covered by injected platform tests, not a live Windows canary.
+  injected suite covers the Windows contract, and a real `windows-latest` CI smoke job is
+  configured. Treat live Windows evidence as pending until that job is green; a local
+  macOS/Linux run is not a Windows canary.
 - **An artifact preview is unavailable** — only opaque ids emitted by that conversation's
   public trace can be fetched. Raw paths and ids from a different conversation are rejected.
 - **`vf verify` fails on confidence** — raise the unit to `1.0` with evidence, or keep

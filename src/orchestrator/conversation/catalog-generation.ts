@@ -1,5 +1,6 @@
 import { digestHex, digestV1 } from "../../durability/index.js";
 import type { ConversationSessionSummaryV1 } from "./catalog-types.js";
+import { CONVERSATION_CATALOG_SCHEMA_VERSION } from "./conversation-catalog-contract.js";
 import { isMillisecondIsoDate } from "./lineage-types.js";
 
 export interface ConversationCatalogGenerationMaterialV1 {
@@ -17,7 +18,7 @@ export function materializeCatalogGeneration(
   if (!isMillisecondIsoDate(createdAt)) throw new Error("invalid catalog generation timestamp");
   const storedRows = rows.map((row) => ({ ...structuredClone(row), matched_revision: null }));
   const generationPreimage = {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     source_inventory_digest: sourceInventoryDigest,
     source_watermark: sourceWatermark,
     starting_delta_sequence: 0,
@@ -28,7 +29,7 @@ export function materializeCatalogGeneration(
   const generationDigest = digestV1("VF-CONVERSATION-CATALOG-GENERATION\0v1\0", generationPreimage);
   const generationId = `vf-catalog-generation-${digestHex(generationDigest)}`;
   const currentDigest = digestV1("VF-CONVERSATION-CATALOG-CURRENT\0v1\0", {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     generation_id: generationId,
     generation_digest: generationDigest,
     source_watermark: sourceWatermark,

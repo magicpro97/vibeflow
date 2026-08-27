@@ -1,6 +1,7 @@
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { CapabilityPublicInputV1 } from "../../actions/request-types.js";
 import { digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { privateActionInputBindingDigest } from "../planning/action-materialization.js";
 import type {
   CapabilityPrivateInputAuthorityV1,
@@ -74,7 +75,10 @@ export class CliCapabilityPrivateInputAuthorityV1
     assertPackageIdentity(input.package_id, input.package_pin_digest, input.manifest_digest);
     const binding = this.requireBinding(input.reference.private_input_binding_id);
     if (binding.binding_digest !== input.reference.binding_digest)
-      throw new CapabilityRuntimeError("private input reference digest mismatch", "invalid-plan");
+      throw new CapabilityRuntimeError(
+        "private input reference digest mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+      );
     if (
       binding.scope !== input.scope ||
       binding.scope_identity_digest !== input.scope_identity_digest ||
@@ -84,18 +88,18 @@ export class CliCapabilityPrivateInputAuthorityV1
     ) {
       throw new CapabilityRuntimeError(
         "private input reference does not belong to the selected package identity",
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     }
     if (Date.parse(this.now()) >= Date.parse(binding.expires_at))
       throw new CapabilityRuntimeError(
         "private input reference has expired",
-        "private-input-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.PRIVATE_INPUT_STALE,
       );
     if (!binding.bindings.some((row) => row.input_id === input.input_id)) {
       throw new CapabilityRuntimeError(
         `private input reference does not contain ${input.input_id}`,
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     }
   }
@@ -147,7 +151,7 @@ export class CliCapabilityPrivateInputAuthorityV1
     if (currentBinding !== input.current_binding_digest) {
       throw new CapabilityRuntimeError(
         "current private input binding digest is stale",
-        "private-input-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.PRIVATE_INPUT_STALE,
       );
     }
     const currentSources = new Map(
@@ -184,7 +188,7 @@ export class CliCapabilityPrivateInputAuthorityV1
         preparation_digest: null,
         ...this.packageIdentity(input),
         action_root_locator: {
-          kind: "capability",
+          kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
           scope: input.scope,
           scope_identity_digest: input.scope_identity_digest,
         },
@@ -247,7 +251,7 @@ export class CliCapabilityPrivateInputAuthorityV1
     if (!selected)
       throw new CapabilityRuntimeError(
         `private input ${inputId} has no source binding`,
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     const currentHead = this.requireHead(this.headIdentity(input, inputId));
     if (
@@ -256,7 +260,7 @@ export class CliCapabilityPrivateInputAuthorityV1
     ) {
       throw new CapabilityRuntimeError(
         `private input ${inputId} is not selected by the current head`,
-        "private-input-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.PRIVATE_INPUT_STALE,
       );
     }
     return {
@@ -282,13 +286,13 @@ export class CliCapabilityPrivateInputAuthorityV1
     if (record.binding_digest !== head.binding_digest)
       throw new CapabilityRuntimeError(
         "private input head binding digest mismatch",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     const row = record.bindings.find((candidate) => candidate.input_id === identity.input_id);
     if (!row)
       throw new CapabilityRuntimeError(
         `binding ${record.private_binding_id} does not contain ${identity.input_id}`,
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     return { record, row };
   }
@@ -308,17 +312,23 @@ export class CliCapabilityPrivateInputAuthorityV1
     if (!row)
       throw new CapabilityRuntimeError(
         `binding ${record.private_binding_id} does not contain ${input.input_id}`,
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     return { record, row };
   }
 
   private requireBinding(privateBindingId: string): CliBindingRecordV1 {
     if (!/^vf-private-input-binding-[a-f0-9]{64}$/u.test(privateBindingId))
-      throw new CapabilityRuntimeError("invalid private binding identifier", "invalid-plan");
+      throw new CapabilityRuntimeError(
+        "invalid private binding identifier",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+      );
     const record = this.store.readBinding(this.store.bindingPath(privateBindingId));
     if (!record)
-      throw new CapabilityRuntimeError("private binding was not found", "package-not-found");
+      throw new CapabilityRuntimeError(
+        "private binding was not found",
+        CAPABILITY_RUNTIME_ERROR_CODE.PACKAGE_NOT_FOUND,
+      );
     if (
       record.private_binding_id !== privateBindingId ||
       record.binding_digest !==
@@ -326,7 +336,7 @@ export class CliCapabilityPrivateInputAuthorityV1
     ) {
       throw new CapabilityRuntimeError(
         "private binding record integrity mismatch",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     }
     return record;
@@ -337,7 +347,7 @@ export class CliCapabilityPrivateInputAuthorityV1
     if (!head)
       throw new CapabilityRuntimeError(
         `current private input head for ${identity.input_id} is unavailable`,
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     return head;
   }

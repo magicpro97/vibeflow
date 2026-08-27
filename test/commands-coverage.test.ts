@@ -1676,6 +1676,96 @@ describe("commands.skills subcommand branches", () => {
     expect(await skills("sync", ["--mode=weird"])).toBe(2);
   });
 
+  test("skills: sync rejects missing engine values", async () => {
+    expect(await skills("sync", ["--engine"])).toBe(2);
+    expect(await skills("sync", ["--engine="])).toBe(2);
+  });
+
+  test("skills: sync rejects missing skill values", async () => {
+    expect(await skills("sync", ["--skill"])).toBe(2);
+    expect(await skills("sync", ["--skill="])).toBe(2);
+  });
+
+  test("skills: sync rejects unknown skill targets", async () => {
+    expect(await skills("sync", ["--skill", "missing-skill"])).toBe(2);
+    expect(await skills("sync", ["--skill", "Bad_Name"])).toBe(2);
+  });
+
+  test("skills: sync with codex engine writes only the targeted .agents mirror", async () => {
+    mkdirSync(join(dir, CTX_DIR, "skills", "typed-protocol-contracts"), { recursive: true });
+    writeFileSync(
+      join(dir, CTX_DIR, "skills", "typed-protocol-contracts", "SKILL.md"),
+      [
+        "---",
+        "name: typed-protocol-contracts",
+        "description: A targeted codex mirror regression fixture.",
+        "---",
+        "",
+        "# Typed Protocol Contracts",
+        "",
+        "Use when x. The body must be at least 50 chars to pass the actionable instructions check.",
+        "",
+        "## Steps",
+        "1. First step. Second step. Third step. Fourth step. Fifth step. Sixth step.",
+        "",
+      ].join("\n"),
+    );
+    mkdirSync(join(dir, CTX_DIR, "skills", "other-skill"), { recursive: true });
+    writeFileSync(
+      join(dir, CTX_DIR, "skills", "other-skill", "SKILL.md"),
+      [
+        "---",
+        "name: other-skill",
+        "description: A second canonical skill to prove targeting.",
+        "---",
+        "",
+        "# Other Skill",
+        "",
+        "Use when x. The body must be at least 50 chars to pass the actionable instructions check.",
+        "",
+        "## Steps",
+        "1. First step. Second step. Third step. Fourth step. Fifth step. Sixth step.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(await skills("sync", ["--engine", "codex", "--skill", "typed-protocol-contracts"])).toBe(
+      0,
+    );
+
+    expect(existsSync(join(dir, ".agents", "skills", "typed-protocol-contracts", "SKILL.md"))).toBe(
+      true,
+    );
+    expect(existsSync(join(dir, ".agents", "skills", "other-skill"))).toBe(false);
+    expect(existsSync(join(dir, ".github", "skills", "typed-protocol-contracts"))).toBe(false);
+  });
+
+  test("skills: sync accepts equals-form engine and skill targets", async () => {
+    mkdirSync(join(dir, CTX_DIR, "skills", "typed-protocol-contracts"), { recursive: true });
+    writeFileSync(
+      join(dir, CTX_DIR, "skills", "typed-protocol-contracts", "SKILL.md"),
+      [
+        "---",
+        "name: typed-protocol-contracts",
+        "description: Equals-form sync fixture.",
+        "---",
+        "",
+        "# Typed Protocol Contracts",
+        "",
+        "Use when x. The body must be at least 50 chars to pass the actionable instructions check.",
+        "",
+        "## Steps",
+        "1. First step. Second step. Third step. Fourth step. Fifth step. Sixth step.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(await skills("sync", ["--engine=codex", "--skill=typed-protocol-contracts"])).toBe(0);
+    expect(existsSync(join(dir, ".agents", "skills", "typed-protocol-contracts", "SKILL.md"))).toBe(
+      true,
+    );
+  });
+
   test("skills crystallize: no run-id → usage error (2)", async () => {
     expect(await skills("crystallize", [])).toBe(2);
   });
@@ -1716,7 +1806,7 @@ describe("commands.skills subcommand branches", () => {
     expect(await skills("crystallize", ["dup-run"])).toBe(1);
   });
 
-  test.skip("skills: sync rejects bad engine (line 1733-1735)", async () => {
+  test("skills: sync rejects bad engine", async () => {
     expect(await skills("sync", ["--engine", "bogus"])).toBe(2);
     expect(await skills("sync", ["--engine=bogus"])).toBe(2);
   });
@@ -1853,9 +1943,14 @@ describe("commands.skills subcommand branches", () => {
     expect(await skills("verify-sync", ["--engine=claude"])).toBe(0);
   });
 
-  test("skills: verify-sync with --engine=bogus is silently ignored (line 1028/1032)", async () => {
-    // Unknown engine names are filtered out — falls through to "all engines".
-    expect(await skills("verify-sync", ["--engine", "bogus"])).toBe(0);
+  test("skills: verify-sync rejects invalid engine values", async () => {
+    expect(await skills("verify-sync", ["--engine", "bogus"])).toBe(2);
+    expect(await skills("verify-sync", ["--engine=bogus"])).toBe(2);
+  });
+
+  test("skills: verify-sync rejects missing engine values", async () => {
+    expect(await skills("verify-sync", ["--engine"])).toBe(2);
+    expect(await skills("verify-sync", ["--engine="])).toBe(2);
   });
 
   test("skills: verify-sync with missing mirror SKILL.md returns 1 (line 1840-1842)", async () => {
@@ -2658,11 +2753,11 @@ describe("commands.verify branches", () => {
     }
   });
 
-  test("verify --coverage warns when lcov.info is missing (line 2285-2286)", () => {
+  test("verify --coverage fails closed when lcov.info is missing", () => {
     const dir = freshDir("vf-verify-cov-nolcov-");
     mkdirSync(join(dir, "scripts"), { recursive: true });
     writeFileSync(join(dir, "scripts", "waiver-policy.cjs"), "process.exit(0)\n");
-    // No coverage/lcov.info written → the gate is skipped with a yellow hint.
+    // No coverage/lcov.info written → the requested gate is a hard failure.
     writeState(dir, {
       task_id: "T1",
       goal: "g",
@@ -2679,7 +2774,7 @@ describe("commands.verify branches", () => {
           requireReviewEvidence: false,
           spawner: asSpawnSync(makeFakeSpawner()),
         }),
-      ).toBe(0);
+      ).toBe(1);
     } finally {
       process.chdir(orig);
       rmSync(dir, { recursive: true, force: true });

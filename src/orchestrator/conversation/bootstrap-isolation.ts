@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MaterializeAgentBindingOptions } from "../../agents/binding.js";
 import { createIsolationLease, releaseIsolationLease } from "../../dispatch/isolation.js";
+import { ENGINE_ISOLATION_KIND } from "../../dispatch/session-contract.js";
 import {
   type EngineSessionAdapter,
   type IsolationLeaseProjection,
@@ -68,7 +69,7 @@ export function createConversationIsolationAuthority(
       try {
         git(repoRoot, ["worktree", "add", "--quiet", "--detach", cwd, "HEAD"], 60_000);
         return createLease({
-          kind: "worktree",
+          kind: ENGINE_ISOLATION_KIND.WORKTREE,
           root: cwd,
           cwd,
           repoRoot,

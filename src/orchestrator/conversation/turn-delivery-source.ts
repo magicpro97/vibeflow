@@ -1,12 +1,24 @@
 import { digestV1 } from "../../durability/index.js";
 import type { PublicStoredTraceEvent } from "../trace/types.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+  type ConversationMessageQueueTargetParticipantsV1,
+} from "./conversation-message-queue-contract.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type {
   ConversationTurnMessageV1,
   ConversationTurnResponseV1,
 } from "./turn-delivery-types.js";
 
-function applies(targets: "all" | readonly string[], participantId: string): boolean {
-  return targets === "all" || targets.includes(participantId);
+function applies(
+  targets: ConversationMessageQueueTargetParticipantsV1,
+  participantId: string,
+): boolean {
+  return (
+    targets === CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL ||
+    targets.includes(participantId)
+  );
 }
 
 function messageDigest(value: Omit<ConversationTurnMessageV1, "content_digest">): string {
@@ -23,12 +35,13 @@ export function publicTurnMessages(
   afterSeq: number,
 ): ConversationTurnMessageV1[] {
   return events.flatMap((stored) => {
-    if (stored.seq <= afterSeq || stored.event.type !== "user_message") return [];
+    if (stored.seq <= afterSeq || stored.event.type !== CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE)
+      return [];
     const projectedTargets = stored.event.payload.target_participants;
-    const targets: "all" | string[] = Array.isArray(projectedTargets)
+    const targets: ConversationMessageQueueTargetParticipantsV1 = Array.isArray(projectedTargets)
       ? projectedTargets.map(String)
-      : String(projectedTargets) === "all"
-        ? "all"
+      : String(projectedTargets) === CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
+        ? CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
         : (() => {
             throw new Error("public turn message targets are invalid");
           })();
@@ -36,7 +49,7 @@ export function publicTurnMessages(
     const preimage = {
       message_id: stored.event_id,
       public_seq: stored.seq,
-      author_public_id: "human" as const,
+      author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
       content: stored.event.payload.content,
       target_participants: structuredClone(targets),
     };
@@ -60,7 +73,7 @@ export function publicTurnResponses(
   const partial = new Map<string, PartialResponse>();
   const output: ConversationTurnResponseV1[] = [];
   for (const stored of events) {
-    if (stored.event.type === "precommit") {
+    if (stored.event.type === CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT) {
       const payload = stored.event.payload;
       const key = `${payload.round_id}\0${payload.participant_id}`;
       const current = partial.get(key);
@@ -72,7 +85,7 @@ export function publicTurnResponses(
       });
       continue;
     }
-    if (stored.event.type !== "agent_response_delta") continue;
+    if (stored.event.type !== CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) continue;
     const payload = stored.event.payload;
     const key = `${payload.round_id}\0${payload.participant_id}`;
     const current = partial.get(key) ?? {

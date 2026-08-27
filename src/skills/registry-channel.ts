@@ -13,6 +13,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { c, writeFileSafe } from "../core.js";
+import { isSkillScope, isSkillStatus } from "../core/skill-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import type {
@@ -41,6 +42,16 @@ export type {
 } from "./registry-types.js";
 
 const LOCK_REL = join(".vibeflow", "SKILL_REGISTRY.lock.json");
+const FORBIDDEN_MARKETPLACE_KEYS = Object.freeze(["__proto__", "constructor", "prototype"]);
+
+const isMarketplaceRecord = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  return FORBIDDEN_MARKETPLACE_KEYS.every(
+    (key) => !Object.prototype.hasOwnProperty.call(value, key),
+  );
+};
 
 export function registryLockPath(repo: string): string {
   return join(repo, LOCK_REL);
@@ -148,9 +159,8 @@ export function parseMarketplace(
   } catch {
     return { skills: [], errors: ["marketplace.json malformed JSON"] };
   }
-  if (!raw || typeof raw !== "object")
-    return { skills: [], errors: ["marketplace.json not an object"] };
-  const doc = raw as Record<string, unknown>;
+  if (!isMarketplaceRecord(raw)) return { skills: [], errors: ["marketplace.json not an object"] };
+  const doc = raw;
   if (doc.schemaVersion !== 1)
     return {
       skills: [],
@@ -161,11 +171,11 @@ export function parseMarketplace(
   const skills: MarketplaceSkill[] = [];
   const errors: string[] = [];
   for (const s of doc.skills) {
-    if (!s || typeof s !== "object") {
+    if (!isMarketplaceRecord(s)) {
       errors.push("marketplace.json: invalid skill entry");
       continue;
     }
-    const e = s as Record<string, unknown>;
+    const e = s;
     if (typeof e.name !== "string" || !e.name) {
       errors.push("marketplace.json: skill missing name");
       continue;
@@ -174,8 +184,23 @@ export function parseMarketplace(
       errors.push(`marketplace.json: skill "${e.name}" missing version`);
       continue;
     }
-    if (typeof e.status !== "string" || !e.status) {
+    if (e.status === undefined) {
       errors.push(`marketplace.json: skill "${e.name}" missing status`);
+      continue;
+    }
+    if (!isSkillStatus(e.status)) {
+      errors.push(`marketplace.json: skill "${e.name}" invalid status`);
+      continue;
+    }
+    if (e.scope !== undefined && !isSkillScope(e.scope)) {
+      errors.push(`marketplace.json: skill "${e.name}" invalid scope`);
+      continue;
+    }
+    if (
+      e.extends !== undefined &&
+      (!Array.isArray(e.extends) || !e.extends.every((item) => typeof item === "string"))
+    ) {
+      errors.push(`marketplace.json: skill "${e.name}" invalid extends`);
       continue;
     }
     skills.push({
@@ -184,9 +209,9 @@ export function parseMarketplace(
       description: typeof e.description === "string" ? e.description : undefined,
       status: e.status,
       path: typeof e.path === "string" ? e.path : undefined,
-      scope: typeof e.scope === "string" ? e.scope : undefined,
+      scope: e.scope,
       projectId: typeof e["project.id"] === "string" ? e["project.id"] : undefined,
-      extends: Array.isArray(e.extends) ? e.extends.map(String) : undefined,
+      extends: e.extends,
     });
   }
   return { skills, errors };

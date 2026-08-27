@@ -1,6 +1,7 @@
 import type { Ref } from "vue";
 import { conversationHomeApi } from "./conversation-home-api.js";
 import { mergeHomePage, staleHomeCursor } from "./conversation-home-pagination.js";
+import type { HomeQueryApiAuthority } from "./conversation-home-query-authority.js";
 import { readableHomeError } from "./conversation-home-runtime.js";
 import type { HomeCapabilityItem, HomePagingSection } from "./conversation-home-types.js";
 
@@ -13,7 +14,12 @@ interface HomeCapabilityQueryInput {
   paging: HomePagingSection;
 }
 
-export function createHomeCapabilityQueryRuntime(input: HomeCapabilityQueryInput) {
+export function createHomeCapabilityQueryRuntime(
+  input: HomeCapabilityQueryInput,
+  api: Pick<HomeQueryApiAuthority, "capabilities"> = Object.freeze({
+    capabilities: conversationHomeApi.capabilities,
+  }),
+) {
   let generation = 0;
   let refreshController: AbortController | null = null;
   let moreController: AbortController | null = null;
@@ -35,7 +41,7 @@ export function createHomeCapabilityQueryRuntime(input: HomeCapabilityQueryInput
     const controller = new AbortController();
     refreshController = controller;
     try {
-      const response = await conversationHomeApi.capabilities(
+      const response = await api.capabilities(
         { query: query || undefined, scope },
         controller.signal,
       );
@@ -94,7 +100,7 @@ export function createHomeCapabilityQueryRuntime(input: HomeCapabilityQueryInput
     moreController = controller;
     input.paging.loadingMore = true;
     try {
-      const response = await conversationHomeApi.capabilities(
+      const response = await api.capabilities(
         { query: query || undefined, scope, cursor },
         controller.signal,
       );

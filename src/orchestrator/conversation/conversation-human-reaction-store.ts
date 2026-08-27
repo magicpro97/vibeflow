@@ -8,6 +8,17 @@ import {
   privateFileBytes,
 } from "../../durability/index.js";
 import type { ProcessLock } from "../../durability/index.js";
+import {
+  CONVERSATION_HUMAN_REACTION_REQUEST_MODE,
+  CONVERSATION_HUMAN_REACTION_REQUEST_MODES,
+  CONVERSATION_INTERACTION_ACTOR_KIND,
+  CONVERSATION_INTERACTION_ENTRY_KIND,
+  CONVERSATION_INTERACTION_LIMITS,
+  CONVERSATION_INTERACTION_SCHEMA_VERSION,
+  CONVERSATION_REACTION_OPERATION,
+  type ConversationHumanReactionRequestMode,
+  type ConversationReactionOperationKind,
+} from "./conversation-interaction-contract.js";
 import type {
   ConversationInteractionEntryV1,
   ConversationInteractionFoldV1,
@@ -22,16 +33,14 @@ import {
   sameCanonicalInteraction,
 } from "./conversation-interaction-validation.js";
 
-const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
-const MAX_BINDINGS = 16_384;
 const BINDING_FILE = /^[0-9a-f]{64}\.json$/;
 
 interface HumanReactionRequestBindingV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_INTERACTION_SCHEMA_VERSION;
   root_session_id: string;
   actor_public_id: string;
   idempotency_key: string;
-  request_mode: "add" | "remove" | "toggle-self";
+  request_mode: ConversationHumanReactionRequestMode;
   target: PublicMessageLocatorV1;
   emoji: ReactionEmojiV1;
   operation: ConversationReactionOperationV1;
@@ -75,7 +84,7 @@ function activeReactions(
   const active = new Map<string, ConversationReactionOperationV1>();
   for (const operation of operations) {
     const key = activeKey(operation);
-    if (operation.operation === "add") active.set(key, operation);
+    if (operation.operation === CONVERSATION_REACTION_OPERATION.ADD) active.set(key, operation);
     else active.delete(key);
   }
   return active;
@@ -87,7 +96,12 @@ function latestRemove(
 ): ConversationReactionOperationV1 | undefined {
   for (let index = operations.length - 1; index >= 0; index -= 1) {
     const item = operations[index];
-    if (item && activeKey(item) === activeKey(input) && item.operation === "remove") return item;
+    if (
+      item &&
+      activeKey(item) === activeKey(input) &&
+      item.operation === CONVERSATION_REACTION_OPERATION.REMOVE
+    )
+      return item;
   }
   return undefined;
 }
@@ -123,17 +137,18 @@ function decodeBinding(bytes: Buffer): HumanReactionRequestBindingV1 {
   const row = value as unknown as HumanReactionRequestBindingV1;
   assertConversationReactionOperationV1(row.operation);
   if (
-    row.schema_version !== "1.0" ||
+    row.schema_version !== CONVERSATION_INTERACTION_SCHEMA_VERSION ||
     typeof row.idempotency_key !== "string" ||
     row.idempotency_key.length < 1 ||
     Buffer.byteLength(row.idempotency_key, "utf8") > 200 ||
-    !["add", "remove", "toggle-self"].includes(row.request_mode) ||
+    !CONVERSATION_HUMAN_REACTION_REQUEST_MODES.some((mode) => mode === row.request_mode) ||
     row.operation.root_session_id !== row.root_session_id ||
     row.operation.actor_public_id !== row.actor_public_id ||
-    row.operation.actor_kind !== "human" ||
+    row.operation.actor_kind !== CONVERSATION_INTERACTION_ACTOR_KIND.HUMAN ||
     row.operation.emoji !== row.emoji ||
     !sameCanonicalInteraction(row.operation.target, row.target) ||
-    (row.request_mode !== "toggle-self" && row.operation.operation !== row.request_mode)
+    (row.request_mode !== CONVERSATION_HUMAN_REACTION_REQUEST_MODE.TOGGLE_SELF &&
+      row.operation.operation !== row.request_mode)
   )
     throw new Error("reaction idempotency binding is corrupt");
   return structuredClone(row);
@@ -142,13 +157,16 @@ function decodeBinding(bytes: Buffer): HumanReactionRequestBindingV1 {
 function readBinding(
   host: HumanReactionStoreHostV1,
   input: HumanReactionInputV1,
-  mode: "add" | "remove" | "toggle-self",
+  mode: ConversationHumanReactionRequestMode,
 ): ConversationReactionOperationV1 | null {
-  const bytes = privateFileBytes(idempotencyPath(host, input), MAX_OBJECT_BYTES);
+  const bytes = privateFileBytes(
+    idempotencyPath(host, input),
+    CONVERSATION_INTERACTION_LIMITS.maxObjectBytes,
+  );
   if (bytes === null) return null;
   const row = decodeBinding(bytes);
   if (
-    row.schema_version !== "1.0" ||
+    row.schema_version !== CONVERSATION_INTERACTION_SCHEMA_VERSION ||
     row.root_session_id !== input.root_session_id ||
     row.actor_public_id !== input.actor_public_id ||
     row.idempotency_key !== input.idempotency_key ||
@@ -160,10 +178,11 @@ function readBinding(
   if (
     row.operation.root_session_id !== input.root_session_id ||
     row.operation.actor_public_id !== input.actor_public_id ||
-    row.operation.actor_kind !== "human" ||
+    row.operation.actor_kind !== CONVERSATION_INTERACTION_ACTOR_KIND.HUMAN ||
     row.operation.emoji !== input.emoji ||
     !sameCanonicalInteraction(row.operation.target, input.target) ||
-    (mode !== "toggle-self" && row.operation.operation !== mode)
+    (mode !== CONVERSATION_HUMAN_REACTION_REQUEST_MODE.TOGGLE_SELF &&
+      row.operation.operation !== mode)
   )
     throw new Error("reaction idempotency binding conflict");
   return structuredClone(row.operation);
@@ -178,10 +197,16 @@ export function recoverPendingHumanReactionsV1(
   const names = readdirSync(host.idempotencyRoot).sort((left, right) =>
     Buffer.compare(Buffer.from(left), Buffer.from(right)),
   );
-  if (names.length > MAX_BINDINGS || names.some((name) => !BINDING_FILE.test(name)))
+  if (
+    names.length > CONVERSATION_INTERACTION_LIMITS.maxRequestBindings ||
+    names.some((name) => !BINDING_FILE.test(name))
+  )
     throw new Error("reaction idempotency binding inventory is corrupt");
   for (const name of names) {
-    const bytes = privateFileBytes(join(host.idempotencyRoot, name), MAX_OBJECT_BYTES);
+    const bytes = privateFileBytes(
+      join(host.idempotencyRoot, name),
+      CONVERSATION_INTERACTION_LIMITS.maxObjectBytes,
+    );
     if (!bytes) throw new Error("reaction idempotency binding disappeared");
     const binding = decodeBinding(bytes);
     if (idempotencyFilename(binding) !== name)
@@ -202,7 +227,10 @@ export function recoverPendingHumanReactionsV1(
     host.append(
       rootSessionId,
       head,
-      { kind: "reaction-operation", operation: binding.operation },
+      {
+        kind: CONVERSATION_INTERACTION_ENTRY_KIND.REACTION_OPERATION,
+        operation: binding.operation,
+      },
       lock,
     );
   }
@@ -211,12 +239,12 @@ export function recoverPendingHumanReactionsV1(
 function bindRequest(
   host: HumanReactionStoreHostV1,
   input: HumanReactionInputV1,
-  mode: "add" | "remove" | "toggle-self",
+  mode: ConversationHumanReactionRequestMode,
   operation: ConversationReactionOperationV1,
   lock: ProcessLock,
 ): void {
   const binding = {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
     root_session_id: input.root_session_id,
     actor_public_id: input.actor_public_id,
     idempotency_key: input.idempotency_key,
@@ -227,25 +255,25 @@ function bindRequest(
   };
   createOrVerifyPrivateFile(idempotencyPath(host, input), canonicalJsonBytes(binding), {
     lock,
-    maxBytes: MAX_OBJECT_BYTES,
+    maxBytes: CONVERSATION_INTERACTION_LIMITS.maxObjectBytes,
   });
 }
 
 function commitLocked(
   host: HumanReactionStoreHostV1,
   input: HumanReactionInputV1,
-  operationKind: "add" | "remove",
-  mode: "add" | "remove" | "toggle-self",
+  operationKind: ConversationReactionOperationKind,
+  mode: ConversationHumanReactionRequestMode,
   lock: ProcessLock,
   fold: ConversationInteractionFoldV1,
 ): ConversationReactionOperationV1 {
   const active = activeReactions(fold.reactions);
   const activeReaction = active.get(activeKey(input));
-  if (operationKind === "add" && activeReaction) {
+  if (operationKind === CONVERSATION_REACTION_OPERATION.ADD && activeReaction) {
     bindRequest(host, input, mode, activeReaction, lock);
     return activeReaction;
   }
-  if (operationKind === "remove" && !activeReaction) {
+  if (operationKind === CONVERSATION_REACTION_OPERATION.REMOVE && !activeReaction) {
     const priorRemove = latestRemove(fold.reactions, input);
     if (!priorRemove) throw new Error("reaction remove lacks an active owned reaction");
     bindRequest(host, input, mode, priorRemove, lock);
@@ -263,11 +291,11 @@ function commitLocked(
     }),
   )}`;
   const preimage = {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
     operation_id: operationId,
     root_session_id: input.root_session_id,
     actor_public_id: input.actor_public_id,
-    actor_kind: "human" as const,
+    actor_kind: CONVERSATION_INTERACTION_ACTOR_KIND.HUMAN,
     operation: operationKind,
     target: structuredClone(input.target),
     emoji: input.emoji,
@@ -277,7 +305,12 @@ function commitLocked(
   const operation = { ...preimage, operation_digest: reactionOperationDigest(preimage) };
   bindRequest(host, input, mode, operation, lock);
   host.afterRequestBinding?.();
-  host.append(input.root_session_id, head, { kind: "reaction-operation", operation }, lock);
+  host.append(
+    input.root_session_id,
+    head,
+    { kind: CONVERSATION_INTERACTION_ENTRY_KIND.REACTION_OPERATION, operation },
+    lock,
+  );
   host.afterReactionAppend?.();
   return operation;
 }
@@ -285,7 +318,7 @@ function commitLocked(
 export function commitHumanReactionV1(
   host: HumanReactionStoreHostV1,
   input: HumanReactionInputV1,
-  mode: "add" | "remove" | "toggle-self",
+  mode: ConversationHumanReactionRequestMode,
 ): ConversationReactionOperationV1 {
   return host.withLock(`human-reaction:${input.idempotency_key}`, (lock) => {
     recoverPendingHumanReactionsV1(host, input.root_session_id, lock);
@@ -304,17 +337,17 @@ export function commitHumanReactionV1(
       host.append(
         input.root_session_id,
         head,
-        { kind: "reaction-operation", operation: bound },
+        { kind: CONVERSATION_INTERACTION_ENTRY_KIND.REACTION_OPERATION, operation: bound },
         lock,
       );
       host.afterReactionAppend?.();
       return bound;
     }
     const operation =
-      mode === "toggle-self"
+      mode === CONVERSATION_HUMAN_REACTION_REQUEST_MODE.TOGGLE_SELF
         ? activeReactions(fold.reactions).has(activeKey(input))
-          ? "remove"
-          : "add"
+          ? CONVERSATION_REACTION_OPERATION.REMOVE
+          : CONVERSATION_REACTION_OPERATION.ADD
         : mode;
     return commitLocked(host, input, operation, mode, lock, fold);
   });

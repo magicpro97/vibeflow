@@ -13,6 +13,7 @@ import {
 } from "../ask-support.js";
 import { ENGINES, type Engine, c, cwd } from "../core.js";
 import { out } from "../logbus.js";
+import { CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND } from "../orchestrator/conversation/conversation-ask-compatibility.js";
 import {
   type DurableQueuedConversationMessageV1,
   type ObservedConversationResultV1,
@@ -92,7 +93,7 @@ export async function ask(
   if (deps.spawn) {
     const readiness = await (
       deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
-    )(ENGINES);
+    )([...ENGINES]);
     const engine = pickEngine(
       readiness,
       typeof flags.engine === "string" ? flags.engine : undefined,
@@ -206,7 +207,7 @@ export async function ask(
     if (typeof sliced === "string") return fail(sliced);
     const readiness = await (
       deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
-    )(ENGINES);
+    )([...ENGINES]);
     const engine = pickEngine(
       readiness,
       typeof flags.engine === "string" ? flags.engine : undefined,
@@ -289,7 +290,7 @@ export async function ask(
   if (typeof selected === "string") return fail(selected);
   const readiness = await (
     deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
-  )(ENGINES);
+  )([...ENGINES]);
   const engine = pickEngine(readiness, typeof flags.engine === "string" ? flags.engine : undefined);
   if (typeof engine === "string" && !(ENGINES as string[]).includes(engine)) return fail(engine);
   const created = await durable.ask(
@@ -301,7 +302,7 @@ export async function ask(
         engine,
       }),
       request: {
-        kind: "fresh",
+        kind: CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.FRESH,
         question,
         repo_relative_path: selected.repo_relative_path,
         start_line: selected.start_line,

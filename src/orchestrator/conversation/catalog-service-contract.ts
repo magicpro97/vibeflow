@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import type { ConversationLifecycle } from "../trace/types.js";
 import type { CatalogCursorCodec } from "./catalog-cursor.js";
 import type { PublishedRevisionTransitionInputV1 } from "./lineage-published-transition.js";
@@ -8,7 +9,7 @@ import type {
 } from "./source-inventory.js";
 
 export class CatalogDegradedError extends Error {
-  readonly code = "catalog_degraded" as const;
+  readonly code = PUBLIC_ERROR_CODE.CATALOG_DEGRADED;
   constructor(
     readonly recoverableById: boolean,
     options?: ErrorOptions,
@@ -19,7 +20,7 @@ export class CatalogDegradedError extends Error {
 }
 
 export class ConversationCatalogNotFoundError extends Error {
-  readonly code = "not_found" as const;
+  readonly code = PUBLIC_ERROR_CODE.NOT_FOUND;
   constructor() {
     super("conversation is not present in validated sources");
     this.name = "ConversationCatalogNotFoundError";

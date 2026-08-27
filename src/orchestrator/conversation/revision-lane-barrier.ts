@@ -1,3 +1,4 @@
+import { PUBLIC_OPERATION_PARTICIPANT_START_PHASE } from "../../actions/protocol-contract.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
 import { ContextHandoffStore } from "./handoff-store.js";
@@ -104,7 +105,9 @@ export function publishAcceptedRevisionLaneBarrier(input: {
   if (
     input.lanes.size !== input.plan.participant_starts.length ||
     input.plan.participant_starts.some(
-      ({ participant_id }) => input.lanes.get(participant_id)?.state !== "accepted",
+      ({ participant_id }) =>
+        input.lanes.get(participant_id)?.state !==
+        PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED,
     )
   )
     return false;

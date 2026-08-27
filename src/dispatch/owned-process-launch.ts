@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { PROCESS_START_IDENTITY_CONTRACT } from "../durability/process-identity-contract.js";
 import {
   OWNED_CLI_IDENTITY_STATE,
   OWNED_PROCESS_ENV,
@@ -19,10 +19,11 @@ import {
 } from "./owned-process-launch-receipt.js";
 import {
   type OwnedSupervisorLaunchRuntime,
-  createOwnedRuntimeRoot,
+  createOwnedRuntimeArtifacts,
   defaultOwnedSupervisorLaunchRuntime,
 } from "./owned-process-launch-runtime.js";
 import type { OwnedProcessController } from "./owned-process-runtime.js";
+import { OWNED_PROCESS_START_IDENTITY_SCRIPT } from "./owned-process-start-identity-script.js";
 import { watchOwnedSupervisorExit } from "./owned-process-status.js";
 import { spawnOwnedSupervisorChild } from "./owned-process-supervisor-child.js";
 import { OWNED_WINDOWS_JOB_SCRIPT } from "./owned-process-windows-job-script.js";
@@ -39,6 +40,7 @@ const RECEIPT_PHASE = ${JSON.stringify(OWNED_SUPERVISOR_RECEIPT_PHASE)};
 const RECEIPT_KEY = ${JSON.stringify(OWNED_SUPERVISOR_RECEIPT_KEY)};
 const STATUS_KEY = ${JSON.stringify(OWNED_SUPERVISOR_STATUS_KEY)};
 const IDENTITY_STATE = ${JSON.stringify(OWNED_CLI_IDENTITY_STATE)};
+const IDENTITY = ${JSON.stringify(PROCESS_START_IDENTITY_CONTRACT)};
 const ENV = ${JSON.stringify(OWNED_PROCESS_ENV)};
 const EXIT_CODE = ${JSON.stringify(OWNED_PROCESS_EXIT_CODE)};
 const IGNORABLE_STREAM_ERROR_CODE = ${JSON.stringify(OWNED_PROCESS_IGNORABLE_STREAM_ERROR_CODE)};
@@ -108,64 +110,9 @@ const windowsSystemRoot = () => {
 };
 const windowsPowerShell = () =>
   windowsSystemRoot() + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-const startIdentity = (pid) => {
-  if (process.platform === "win32") {
-    try {
-      const creation = execFileSync(
-        windowsPowerShell(),
-        [
-          "-NoProfile",
-          "-Command",
-          "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = " + pid + "\\\"; if ($null -eq $p) { exit " + WINDOWS_QUERY_STATUS.ABSENT + " }; [Console]::WriteLine($p.CreationDate.ToUniversalTime().Ticks)",
-        ],
-        { encoding: "utf8", timeout: TIMING_MS.PLATFORM_PROBE_TIMEOUT, stdio: ["ignore", "pipe", "ignore"] },
-      ).trim();
-      return creation
-        ? { identity: "win32:" + creation, state: IDENTITY_STATE.AVAILABLE }
-        : { identity: null, state: IDENTITY_STATE.UNKNOWN };
-    } catch (error) {
-      return {
-        identity: null,
-        state: error && error.status === WINDOWS_QUERY_STATUS.ABSENT
-          ? IDENTITY_STATE.ABSENT_AFTER_PROBE
-          : IDENTITY_STATE.UNKNOWN,
-      };
-    }
-  }
-  if (process.platform === "linux") {
-    try {
-      const stat = fs.readFileSync("/proc/" + pid + "/stat", "utf8");
-      const match = stat.match(/^(\\d+)\\s+\\((?:.|\\n)+\\)\\s+\\S+\\s+(?:\\S+\\s+){18}(\\d+)/);
-      const bootId = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim().toLowerCase();
-      const identity = match && /^[a-f0-9-]{16,64}$/.test(bootId) ? "linux:" + bootId + ":" + match[2] : null;
-      return identity
-        ? { identity, state: IDENTITY_STATE.AVAILABLE }
-        : { identity: null, state: IDENTITY_STATE.UNKNOWN };
-    } catch {
-      return {
-        identity: null,
-        state: processAbsent(pid) ? IDENTITY_STATE.ABSENT_AFTER_PROBE : IDENTITY_STATE.UNKNOWN,
-      };
-    }
-  }
-  try {
-    const started = execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
-      encoding: "utf8",
-      timeout: TIMING_MS.PLATFORM_PROBE_TIMEOUT,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return started
-      ? { identity: process.platform + ":" + started, state: IDENTITY_STATE.AVAILABLE }
-      : { identity: null, state: IDENTITY_STATE.UNKNOWN };
-  } catch {
-    return {
-      identity: null,
-      state: processAbsent(pid) ? IDENTITY_STATE.ABSENT_AFTER_PROBE : IDENTITY_STATE.UNKNOWN,
-    };
-  }
-};
+${OWNED_PROCESS_START_IDENTITY_SCRIPT}
 const processGroupId = (pid) => {
-  if (process.platform === "win32") return null;
+  if (process.platform === IDENTITY.KIND.WINDOWS) return null;
   try {
     const pgid = execFileSync("/bin/ps", ["-o", "pgid=", "-p", String(pid)], {
       encoding: "utf8",
@@ -304,12 +251,10 @@ export function launchOwnedSupervisorProcess(
   runtime: OwnedSupervisorLaunchRuntime = defaultOwnedSupervisorLaunchRuntime(),
 ): EngineProcess {
   const nonce = runtime.randomUUID();
-  const runtimeRoot = createOwnedRuntimeRoot(runtime, nonce);
-  const receiptRoot = runtimeRoot.path;
-  const cleanupRuntimeRoot = runtimeRoot.cleanup;
-  const bindAckPath = join(receiptRoot, `bind-${nonce}.json`);
-  const receiptPath = join(receiptRoot, `receipt-${nonce}.json`);
-  const statusPath = join(receiptRoot, `status-${nonce}.json`);
+  const { bindAckPath, cleanupRuntimeRoot, receiptPath, statusPath } = createOwnedRuntimeArtifacts(
+    runtime,
+    nonce,
+  );
   const {
     child,
     pid: childPid,

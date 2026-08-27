@@ -1,11 +1,16 @@
 import type { PublicTargetResultV1 } from "../../actions/public-types.js";
 import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { CapabilityEffectBrokerV1 } from "../adapters/types.js";
 import type { CapabilityFabricPlanV1, CapabilityRuntimeAuthorityV1 } from "../planning/types.js";
 import type { CapabilityDurablePlanningGraphV1 } from "../planning/types.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
-import type { CapabilityWalEventV1 } from "../wire/operation.js";
-import type { CapabilityOperationV1 } from "../wire/operation.js";
+import type {
+  CapabilityOperationRecoveryActionV1,
+  CapabilityOperationStatusV1,
+  CapabilityOperationV1,
+  CapabilityWalEventV1,
+} from "../wire/operation.js";
 
 export interface CapabilityExecutionAuthorizationV1 {
   schema_version: "1.0";
@@ -32,13 +37,6 @@ export interface CapabilityPreparedOperationV1 {
   header: CapabilityOperationV1;
 }
 
-export type CapabilityOperationStatusV1 =
-  | "committing"
-  | "succeeded"
-  | "degraded"
-  | "failed"
-  | "needs-recovery";
-
 export interface CapabilityOperationResultV1 {
   schema_version: "1.0";
   operation_id: string;
@@ -49,9 +47,7 @@ export interface CapabilityOperationResultV1 {
   generation_id: string | null;
   targets: PublicTargetResultV1[];
   reason_code: string | null;
-  recovery_actions: Array<
-    "retry" | "rollback" | "repair" | "repair-authority" | "export-redacted-diagnostics"
-  >;
+  recovery_actions: CapabilityOperationRecoveryActionV1[];
   latest_sequence: number;
 }
 
@@ -67,7 +63,7 @@ export interface CapabilityOperationReadV1 extends CapabilityOperationResultV1 {
 }
 
 export interface CapabilityRuntimeAuthorityReaderV1 {
-  read(scope: "project" | "user"): CapabilityRuntimeAuthorityV1;
+  read(scope: CapabilityScope): CapabilityRuntimeAuthorityV1;
   /** Reconstructs the exact current permission authority for the immutable
    * typed execution graph. This is evaluated again inside every frontier. */
   readPermissionAuthority(graph: CapabilityDurablePlanningGraphV1, checkedAt: string): string;
@@ -76,7 +72,7 @@ export interface CapabilityRuntimeAuthorityReaderV1 {
    * The frontier timestamp is sampled after acquiring the lock and before
    * reading any durable authority row. */
   criticalSection<T>(
-    scope: "project" | "user",
+    scope: CapabilityScope,
     operation: string,
     now: () => string,
     callback: (authority: CapabilityRuntimeAuthorityV1, checkedAt: string) => T,

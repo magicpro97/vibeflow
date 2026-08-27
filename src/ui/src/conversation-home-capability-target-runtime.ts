@@ -1,6 +1,9 @@
 import { type ComputedRef, type Ref, ref } from "vue";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { ConversationHomeApiError } from "./conversation-home-api.js";
 import {
+  HOME_CAPABILITY_TARGET_SELECTION_MODE,
   type HomeCapabilityTargetAuthority,
   type HomeCapabilityTargetRequest,
   canonicalHomeCapabilityParticipants,
@@ -98,7 +101,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
   };
 
   function prepareCapabilityInstall(
-    intent: { packageId: string; scope: "project" | "user" },
+    intent: { packageId: string; scope: CapabilityScope },
     revision: HomeRevisionSummary,
     submittedDraft: string,
   ): boolean {
@@ -116,7 +119,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
       pending.scope === intent.scope
     ) {
       reconcileCapabilityTargetSelection();
-      return request.value?.selection_mode === "automatic";
+      return request.value?.selection_mode === HOME_CAPABILITY_TARGET_SELECTION_MODE.AUTOMATIC;
     }
     if (participants.length === 1) {
       const participant = participants[0];
@@ -129,7 +132,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
         participants,
         selected_participant_ids: [participant.participant_id],
         reselection_required: false,
-        selection_mode: "automatic",
+        selection_mode: HOME_CAPABILITY_TARGET_SELECTION_MODE.AUTOMATIC,
       };
       return true;
     }
@@ -141,7 +144,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
       participants,
       selected_participant_ids: [],
       reselection_required: false,
-      selection_mode: "explicit",
+      selection_mode: HOME_CAPABILITY_TARGET_SELECTION_MODE.EXPLICIT,
     };
     input.composerError.value = "Choose one or more AI participants for this capability.";
     return false;
@@ -158,7 +161,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
         participants: [],
         selected_participant_ids: [],
         reselection_required: true,
-        selection_mode: "explicit",
+        selection_mode: HOME_CAPABILITY_TARGET_SELECTION_MODE.EXPLICIT,
       };
       input.composerError.value =
         "Conversation authority changed. Refresh, then choose capability targets again.";
@@ -174,7 +177,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
         participants: [],
         selected_participant_ids: [],
         reselection_required: true,
-        selection_mode: "explicit",
+        selection_mode: HOME_CAPABILITY_TARGET_SELECTION_MODE.EXPLICIT,
       };
       input.composerError.value = readableHomeError(error);
       return;
@@ -191,7 +194,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
       participants,
       selected_participant_ids: [],
       reselection_required: true,
-      selection_mode: "explicit",
+      selection_mode: HOME_CAPABILITY_TARGET_SELECTION_MODE.EXPLICIT,
     };
     input.composerError.value = participants.length
       ? "Conversation authority changed. Choose capability targets again before review."
@@ -219,7 +222,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
         .filter((participant) => selected.has(participant.participant_id))
         .map((participant) => participant.participant_id),
       reselection_required: selected.size === 0,
-      selection_mode: "explicit",
+      selection_mode: HOME_CAPABILITY_TARGET_SELECTION_MODE.EXPLICIT,
     };
     input.composerError.value = "";
   }
@@ -234,7 +237,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
         ? []
         : pending.participants.map((participant) => participant.participant_id),
       reselection_required: allSelected,
-      selection_mode: "explicit",
+      selection_mode: HOME_CAPABILITY_TARGET_SELECTION_MODE.EXPLICIT,
     };
     input.composerError.value = "";
   }
@@ -351,7 +354,7 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
       if (!ownsAuthority(command, pending.authority)) return false;
       if (
         error instanceof ConversationHomeApiError &&
-        error.publicError.code === "stale_conversation"
+        error.publicError.code === PUBLIC_ERROR_CODE.STALE_CONVERSATION
       ) {
         await input.refreshActiveSelection().catch(() => false);
         if (!ownsAuthority(command, pending.authority)) return false;
@@ -362,8 +365,8 @@ export function createHomeCapabilityTargetRuntime(input: HomeCapabilityTargetRun
         const latest = request.value;
         if (!latest || !sameRequest(latest, pending)) return false;
         if (
-          pending.selection_mode === "automatic" &&
-          latest?.selection_mode === "automatic" &&
+          pending.selection_mode === HOME_CAPABILITY_TARGET_SELECTION_MODE.AUTOMATIC &&
+          latest?.selection_mode === HOME_CAPABILITY_TARGET_SELECTION_MODE.AUTOMATIC &&
           sameHomeCapabilityTargetAuthority(latest.authority, pending.authority)
         )
           request.value = null;

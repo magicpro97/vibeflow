@@ -1,17 +1,35 @@
+import type {
+  CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_PERMISSION_KIND,
+  CAPABILITY_MANIFEST_SCHEMA_VERSION,
+  CapabilityManifestAccess,
+  CapabilityManifestDependencyScope,
+  CapabilityManifestFilesystemRoot,
+  CapabilityManifestHealthProbeKind,
+  CapabilityManifestHealthRetry,
+  CapabilityManifestHookEvent,
+  CapabilityManifestIconMediaType,
+  CapabilityManifestInputType,
+  CapabilityManifestInstallerKind,
+  CapabilityManifestInstallerLifecycleScripts,
+  CapabilityManifestMcpTransport,
+  CapabilityManifestNetworkTransport,
+  CapabilityManifestPlatformArch,
+  CapabilityManifestPlatformLibc,
+  CapabilityManifestPlatformOs,
+  CapabilityManifestRuntimeEnforcement,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { EngineName, JsonScalar } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 
-export type CapabilityScope = "project" | "user";
-export type RuntimeEnforcementV1 =
-  | "brokered"
-  | "sandboxed"
-  | "engine-enforced"
-  | "disclosed-not-enforced";
+export type { CapabilityScope } from "../../core/capability-contract.js";
+export type RuntimeEnforcementV1 = CapabilityManifestRuntimeEnforcement;
 export type VersionRangeV1 = string;
 
 export interface PlatformConstraintV1 {
-  os: "darwin" | "linux" | "win32";
-  arch: "arm64" | "x64";
-  libc: "glibc" | "musl" | null;
+  os: CapabilityManifestPlatformOs;
+  arch: CapabilityManifestPlatformArch;
+  libc: CapabilityManifestPlatformLibc | null;
 }
 
 export interface CapabilityMetadataV1 {
@@ -22,7 +40,7 @@ export interface CapabilityMetadataV1 {
   icon: {
     relative_path: string;
     sha256: string;
-    media_type: "image/png" | "image/webp";
+    media_type: CapabilityManifestIconMediaType;
   } | null;
 }
 
@@ -39,11 +57,11 @@ export interface PackageExecutableRefV1 {
 }
 
 export interface HostInstallerSpecV1 {
-  kind: "npm" | "bun" | "pipx" | "uv" | "go" | "cargo" | "download";
+  kind: CapabilityManifestInstallerKind;
   coordinate: string;
   version: string;
   artifact_sha256: string;
-  lifecycle_scripts: "disabled";
+  lifecycle_scripts: CapabilityManifestInstallerLifecycleScripts;
 }
 
 export type CapabilityTemplateValueV1 =
@@ -55,34 +73,46 @@ export type CapabilityStringValueV1 = string | { input_ref: string };
 
 export type CapabilityComponentV1 = CapabilityComponentBaseV1 &
   (
-    | { type: "skill"; bundle_path: string; bundle_sha256: string }
     | {
-        type: "mcp";
-        transport: "stdio" | "http" | "sse";
+        type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL;
+        bundle_path: string;
+        bundle_sha256: string;
+      }
+    | {
+        type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP;
+        transport: CapabilityManifestMcpTransport;
         executable?: PackageExecutableRefV1;
         args?: CapabilityStringValueV1[];
         url?: CapabilityStringValueV1;
         secret_slots?: string[];
       }
     | {
-        type: "tool";
+        type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.TOOL;
         installer: HostInstallerSpecV1;
         expected_binary: string;
         version_constraint: string;
       }
     | {
-        type: "hook";
-        event: "pre-tool" | "post-tool" | "pre-commit" | "pre-push";
+        type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK;
+        event: CapabilityManifestHookEvent;
         vf_handler_id: string;
       }
-    | { type: "role"; role_spec_path: string; role_spec_sha256: string }
-    | { type: "engine-setting"; setting_id: string; value: CapabilityTemplateValueV1 }
+    | {
+        type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE;
+        role_spec_path: string;
+        role_spec_sha256: string;
+      }
+    | {
+        type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.ENGINE_SETTING;
+        setting_id: string;
+        value: CapabilityTemplateValueV1;
+      }
   );
 
 export interface CapabilityInputDeclarationV1 {
   input_id: string;
   label: string;
-  type: "string" | "boolean" | "integer" | "enum" | "project-path" | "secret-handle";
+  type: CapabilityManifestInputType;
   required: boolean;
   default_value: JsonScalar;
   enum_values: string[];
@@ -94,7 +124,7 @@ export interface CapabilityInputDeclarationV1 {
 export interface CapabilityDependencyV1 {
   package_id: string;
   version_range: string;
-  required_scope: "same" | "user-prerequisite";
+  required_scope: CapabilityManifestDependencyScope;
 }
 
 export interface CapabilityConflictV1 {
@@ -105,35 +135,45 @@ export interface CapabilityConflictV1 {
 
 export type CapabilityPermissionKindScopeV1 =
   | {
-      kind: "filesystem";
-      scope: { root: "project" | "user-home"; access: "read" | "write"; path_prefix: string };
+      kind: typeof CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM;
+      scope: {
+        root: CapabilityManifestFilesystemRoot;
+        access: CapabilityManifestAccess;
+        path_prefix: string;
+      };
     }
   | {
-      kind: "network";
+      kind: typeof CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK;
       scope: {
-        transport: "https" | "git-https" | "mcp-https";
+        transport: CapabilityManifestNetworkTransport;
         host: string;
         port: number | null;
         path_prefix: string;
       };
     }
   | {
-      kind: "process";
+      kind: typeof CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS;
       scope: { executable_class: string; argv_prefix: string[]; allow_additional_args: boolean };
     }
-  | { kind: "shell"; scope: { adapter_id: string; template_id: string } }
   | {
-      kind: "config";
+      kind: typeof CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL;
+      scope: { adapter_id: string; template_id: string };
+    }
+  | {
+      kind: typeof CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG;
       scope: {
         engine: EngineName;
         namespace: string;
-        access: "read" | "write";
+        access: CapabilityManifestAccess;
         key_prefix: string;
       };
     }
-  | { kind: "secret"; scope: { input_ids: string[] } }
   | {
-      kind: "hook";
+      kind: typeof CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET;
+      scope: { input_ids: string[] };
+    }
+  | {
+      kind: typeof CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK;
       scope: { engine: EngineName; hook_point: string; participant_id: string | null };
     };
 
@@ -145,20 +185,14 @@ export type CapabilityPermissionV1 = CapabilityPermissionKindScopeV1 & {
 export interface CapabilityHealthDeclarationV1 {
   probe_id: string;
   component_ids: string[];
-  kind:
-    | "binary-version"
-    | "file-hash"
-    | "mcp-handshake"
-    | "hook-selftest"
-    | "role-parse"
-    | "engine-config";
+  kind: CapabilityManifestHealthProbeKind;
   required: boolean;
   timeout_ms: number;
-  retries: 0 | 1 | 2;
+  retries: CapabilityManifestHealthRetry;
 }
 
 export interface CapabilityManifestV1 {
-  schema_version: "1.0";
+  schema_version: typeof CAPABILITY_MANIFEST_SCHEMA_VERSION;
   id: string;
   version: string;
   metadata: CapabilityMetadataV1;

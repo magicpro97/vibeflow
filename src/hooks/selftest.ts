@@ -1,4 +1,5 @@
 import type { HookInput } from "../core.js";
+import { HOOK_DECISION, HOOK_EVENT } from "../core/hook-contract.js";
 import { type EnvGetter, evaluateHook } from "./runner.js";
 
 /** What a corpus case must end up as once decided. */
@@ -46,15 +47,18 @@ const CONFIG_FILES = ["tsconfig.json", "biome.json", ".githooks/pre-commit"];
 function fixtureCases(): SelftestCase[] {
   const cases: SelftestCase[] = [];
   for (const command of ATTACK_COMMANDS) {
-    cases.push({ input: { event: "pre-command", command }, expected: "blocked" });
+    cases.push({ input: { event: HOOK_EVENT.PRE_COMMAND, command }, expected: "blocked" });
   }
   for (const command of BENIGN_COMMANDS) {
-    cases.push({ input: { event: "pre-command", command }, expected: "allowed" });
+    cases.push({ input: { event: HOOK_EVENT.PRE_COMMAND, command }, expected: "allowed" });
   }
   for (const f of CONFIG_FILES) {
-    cases.push({ input: { event: "pre-write", files: [f] }, expected: "blocked" });
+    cases.push({ input: { event: HOOK_EVENT.PRE_WRITE, files: [f] }, expected: "blocked" });
   }
-  cases.push({ input: { event: "pre-write", files: ["src/foo.ts"] }, expected: "allowed" });
+  cases.push({
+    input: { event: HOOK_EVENT.PRE_WRITE, files: ["src/foo.ts"] },
+    expected: "allowed",
+  });
   return cases;
 }
 
@@ -245,7 +249,7 @@ function generatePropertyCases(iterations: number, seed: number): GeneratedCase[
         }
       }
       out.push({
-        input: { event: "pre-command", command },
+        input: { event: HOOK_EVENT.PRE_COMMAND, command },
         expected: "blocked",
         provenance: "property",
       });
@@ -255,7 +259,7 @@ function generatePropertyCases(iterations: number, seed: number): GeneratedCase[
       const core = pick(rng, BENIGN_COMMANDS);
       const wrap = pick(rng, BENIGN_WRAPPERS);
       out.push({
-        input: { event: "pre-command", command: wrap(core) },
+        input: { event: HOOK_EVENT.PRE_COMMAND, command: wrap(core) },
         expected: "allowed",
         provenance: "property",
       });
@@ -270,7 +274,8 @@ function runCases(
 ): { results: SelftestCaseResult[]; failed: number } {
   const results: SelftestCaseResult[] = cases.map(({ input, expected, provenance }) => {
     const r = evaluateHook(input, forceHooksOn);
-    const blocking = r.decision === "block" || r.decision === "require_approval";
+    const blocking =
+      r.decision === HOOK_DECISION.BLOCK || r.decision === HOOK_DECISION.REQUIRE_APPROVAL;
     const actual: "blocked" | "allowed" = blocking ? "blocked" : "allowed";
     return {
       input: caseLabel(input),

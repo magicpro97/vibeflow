@@ -1,10 +1,59 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
+import { PUBLIC_ACTION_SCHEMA_VERSION } from "../../actions/public-action-contract.js";
+import { ENGINE_ATTEMPT_START_OUTCOME } from "../../dispatch/session-contract.js";
 import { digestV1 } from "../../durability/index.js";
+import {
+  type ParticipantCancelModeV1,
+  type ParticipantStartReconciliationModeV1,
+  isParticipantCancelModeV1,
+  isParticipantStartReconciliationModeV1,
+} from "./revision-participant-receipt.js";
 
-export type ConversationControlActionTypeV1 =
-  | "conversation.stop_operation"
-  | "conversation.abandon_revision_operation"
-  | "conversation.retry_revision_operation"
-  | "conversation.reconcile_revision_operation";
+type ValueOf<Contract> = Contract[keyof Contract];
+
+export const CONVERSATION_CONTROL_ACTION_TYPE = Object.freeze({
+  STOP_OPERATION: HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION,
+  ABANDON_REVISION_OPERATION: HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION,
+  RETRY_REVISION_OPERATION: HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION,
+  RECONCILE_REVISION_OPERATION: HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION,
+} as const);
+export type ConversationControlActionTypeV1 = ValueOf<typeof CONVERSATION_CONTROL_ACTION_TYPE>;
+
+export const CONVERSATION_CONTROL_EFFECT_KIND = Object.freeze({
+  CANCEL_OR_PROVE_QUIESCENT: "cancel-or-prove-quiescent",
+  RECONCILE: "reconcile",
+} as const);
+export const CONVERSATION_CONTROL_HOST_CANCEL_ADAPTER_FINGERPRINT =
+  "vf-host-operation-cancel/1" as const;
+export const CONVERSATION_NATIVE_REFERENCE_KIND = Object.freeze({
+  OPERATION_CANCEL_AUTHORITY: "operation-cancel-authority",
+  PARTICIPANT_START_RECEIPT: "participant-start-receipt",
+} as const);
+export const CONVERSATION_NATIVE_REFERENCE_KINDS = Object.freeze(
+  Object.values(CONVERSATION_NATIVE_REFERENCE_KIND),
+);
+export const CONVERSATION_CONTROL_CONDITION_KIND = Object.freeze({
+  OPERATION_TERMINAL: "operation-terminal",
+  PARTICIPANT_QUIESCENT: "participant-quiescent",
+  RECONCILIATION_RESOLUTION: "reconciliation-resolution",
+} as const);
+export const CONVERSATION_CONTROL_OPERATION_TERMINAL_STATES = Object.freeze([
+  ACTION_OPERATION_STATE.SUCCEEDED,
+  ACTION_OPERATION_STATE.FAILED,
+  ACTION_OPERATION_STATE.CANCELED,
+  ACTION_OPERATION_STATE.NEEDS_RECOVERY,
+] as const);
+export const CONVERSATION_CONTROL_PARTICIPANT_OUTCOMES = Object.freeze([
+  "canceled",
+  "failed",
+  ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT,
+] as const);
+export const CONVERSATION_CONTROL_RECONCILIATION_OUTCOMES = Object.freeze([
+  "present",
+  "absent",
+  "unknown",
+] as const);
 
 export type ConversationControlEffectV1 = {
   effect_id: string;
@@ -14,17 +63,17 @@ export type ConversationControlEffectV1 = {
   expected_control_postcondition_digest: string;
 } & (
   | {
-      effect_kind: "cancel-or-prove-quiescent";
-      mode: "idempotent-cancel" | "inspect-cancel" | "vf-process-lease";
+      effect_kind: typeof CONVERSATION_CONTROL_EFFECT_KIND.CANCEL_OR_PROVE_QUIESCENT;
+      mode: ParticipantCancelModeV1;
     }
   | {
-      effect_kind: "reconcile";
-      mode: "provider-idempotency" | "inspect-start" | "vf-process-lease";
+      effect_kind: typeof CONVERSATION_CONTROL_EFFECT_KIND.RECONCILE;
+      mode: ParticipantStartReconciliationModeV1;
     }
 );
 
 export interface ConversationControlEffectPlanV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   target_operation_id: string;
   effects: ConversationControlEffectV1[];
   cleanup_artifact_digests: string[];
@@ -32,12 +81,12 @@ export interface ConversationControlEffectPlanV1 {
 }
 
 export interface ConversationNativeReferenceBindingV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   target_operation_id: string;
   effect_id: string;
   participant_id: string | null;
   adapter_fingerprint: string;
-  reference_kind: "operation-cancel-authority" | "participant-start-receipt";
+  reference_kind: ValueOf<typeof CONVERSATION_NATIVE_REFERENCE_KIND>;
   authority_record_digest: string;
   private_reference_content_digest: string | null;
   binding_digest: string;
@@ -45,20 +94,20 @@ export interface ConversationNativeReferenceBindingV1 {
 
 export type ConversationControlConditionV1 =
   | {
-      kind: "operation-terminal";
-      allowed_states: Array<"succeeded" | "failed" | "canceled" | "needs_recovery">;
+      kind: typeof CONVERSATION_CONTROL_CONDITION_KIND.OPERATION_TERMINAL;
+      allowed_states: Array<(typeof CONVERSATION_CONTROL_OPERATION_TERMINAL_STATES)[number]>;
     }
   | {
-      kind: "participant-quiescent";
-      allowed_outcomes: Array<"canceled" | "failed" | "proved-absent">;
+      kind: typeof CONVERSATION_CONTROL_CONDITION_KIND.PARTICIPANT_QUIESCENT;
+      allowed_outcomes: Array<(typeof CONVERSATION_CONTROL_PARTICIPANT_OUTCOMES)[number]>;
     }
   | {
-      kind: "reconciliation-resolution";
-      allowed_outcomes: Array<"present" | "absent" | "unknown">;
+      kind: typeof CONVERSATION_CONTROL_CONDITION_KIND.RECONCILIATION_RESOLUTION;
+      allowed_outcomes: Array<(typeof CONVERSATION_CONTROL_RECONCILIATION_OUTCOMES)[number]>;
     };
 
 export interface ConversationControlPostconditionBindingV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   target_operation_id: string;
   effect_id: string;
   expected_pre_effect_fold_digest: string;
@@ -85,7 +134,7 @@ export function controlEffectId(input: {
   mode: ConversationControlEffectV1["mode"];
 }): string {
   const preimage = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     target_operation_id: input.target_operation_id,
     participant_id: input.participant_id,
     adapter_fingerprint: input.adapter_fingerprint,
@@ -100,7 +149,7 @@ export function controlEffectId(input: {
 export function materializeConversationNativeReferenceBinding(
   input: Omit<ConversationNativeReferenceBindingV1, "schema_version" | "binding_digest">,
 ): ConversationNativeReferenceBindingV1 {
-  const preimage = { schema_version: "1.0" as const, ...structuredClone(input) };
+  const preimage = { schema_version: PUBLIC_ACTION_SCHEMA_VERSION, ...structuredClone(input) };
   const result = {
     ...preimage,
     binding_digest: digestV1("VF-CONVERSATION-NATIVE-REFERENCE\0v1\0", preimage),
@@ -112,7 +161,7 @@ export function materializeConversationNativeReferenceBinding(
 export function materializeConversationControlPostconditionBinding(
   input: Omit<ConversationControlPostconditionBindingV1, "schema_version" | "binding_digest">,
 ): ConversationControlPostconditionBindingV1 {
-  const preimage = { schema_version: "1.0" as const, ...structuredClone(input) };
+  const preimage = { schema_version: PUBLIC_ACTION_SCHEMA_VERSION, ...structuredClone(input) };
   const result = {
     ...preimage,
     binding_digest: digestV1("VF-CONVERSATION-CONTROL-POSTCONDITION\0v1\0", preimage),
@@ -127,7 +176,7 @@ export function materializeConversationControlEffectPlan(input: {
   cleanup_artifact_digests?: string[];
 }): ConversationControlEffectPlanV1 {
   const preimage = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     target_operation_id: input.target_operation_id,
     effects: structuredClone(input.effects).sort((left, right) =>
       Buffer.compare(Buffer.from(left.effect_id), Buffer.from(right.effect_id)),
@@ -162,12 +211,12 @@ export function assertConversationNativeReferenceBinding(
       "schema_version",
       "target_operation_id",
     ]) ||
-    row.schema_version !== "1.0" ||
+    row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION ||
     !bounded(row.target_operation_id) ||
     !EFFECT.test(row.effect_id) ||
     (row.participant_id !== null && !bounded(row.participant_id)) ||
     !bounded(row.adapter_fingerprint) ||
-    !["operation-cancel-authority", "participant-start-receipt"].includes(row.reference_kind) ||
+    !CONVERSATION_NATIVE_REFERENCE_KINDS.includes(row.reference_kind) ||
     !DIGEST.test(row.authority_record_digest) ||
     (row.private_reference_content_digest !== null &&
       !DIGEST.test(row.private_reference_content_digest)) ||
@@ -187,18 +236,18 @@ export function assertConversationControlPostconditionBinding(
   const row = value as ConversationControlPostconditionBindingV1;
   const condition = row.condition;
   const validCondition =
-    condition?.kind === "operation-terminal"
+    condition?.kind === CONVERSATION_CONTROL_CONDITION_KIND.OPERATION_TERMINAL
       ? exact(condition, ["allowed_states", "kind"]) &&
         JSON.stringify(condition.allowed_states) ===
-          JSON.stringify(["succeeded", "failed", "canceled", "needs_recovery"])
-      : condition?.kind === "participant-quiescent"
+          JSON.stringify(CONVERSATION_CONTROL_OPERATION_TERMINAL_STATES)
+      : condition?.kind === CONVERSATION_CONTROL_CONDITION_KIND.PARTICIPANT_QUIESCENT
         ? exact(condition, ["allowed_outcomes", "kind"]) &&
           JSON.stringify(condition.allowed_outcomes) ===
-            JSON.stringify(["canceled", "failed", "proved-absent"])
-        : condition?.kind === "reconciliation-resolution" &&
+            JSON.stringify(CONVERSATION_CONTROL_PARTICIPANT_OUTCOMES)
+        : condition?.kind === CONVERSATION_CONTROL_CONDITION_KIND.RECONCILIATION_RESOLUTION &&
           exact(condition, ["allowed_outcomes", "kind"]) &&
           JSON.stringify(condition.allowed_outcomes) ===
-            JSON.stringify(["present", "absent", "unknown"]);
+            JSON.stringify(CONVERSATION_CONTROL_RECONCILIATION_OUTCOMES);
   if (
     !exact(row, [
       "binding_digest",
@@ -208,7 +257,7 @@ export function assertConversationControlPostconditionBinding(
       "schema_version",
       "target_operation_id",
     ]) ||
-    row.schema_version !== "1.0" ||
+    row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION ||
     !bounded(row.target_operation_id) ||
     !EFFECT.test(row.effect_id) ||
     !DIGEST.test(row.expected_pre_effect_fold_digest) ||
@@ -235,7 +284,7 @@ export function assertConversationControlEffectPlan(
       "schema_version",
       "target_operation_id",
     ]) ||
-    plan.schema_version !== "1.0" ||
+    plan.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION ||
     !bounded(plan.target_operation_id) ||
     !Array.isArray(plan.effects) ||
     !Array.isArray(plan.cleanup_artifact_digests) ||
@@ -270,10 +319,10 @@ export function assertConversationControlEffectPlan(
     )
       throw new Error("invalid conversation control effect");
     if (
-      (effect.effect_kind === "cancel-or-prove-quiescent" &&
-        !["idempotent-cancel", "inspect-cancel", "vf-process-lease"].includes(effect.mode)) ||
-      (effect.effect_kind === "reconcile" &&
-        !["provider-idempotency", "inspect-start", "vf-process-lease"].includes(effect.mode))
+      (effect.effect_kind === CONVERSATION_CONTROL_EFFECT_KIND.CANCEL_OR_PROVE_QUIESCENT &&
+        !isParticipantCancelModeV1(effect.mode)) ||
+      (effect.effect_kind === CONVERSATION_CONTROL_EFFECT_KIND.RECONCILE &&
+        !isParticipantStartReconciliationModeV1(effect.mode))
     )
       throw new Error("invalid conversation control effect mode");
     prior = effect.effect_id;

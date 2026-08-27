@@ -1,3 +1,31 @@
+import {
+  PROCESS_START_IDENTITY_KIND,
+  isProcessStartIdentity,
+} from "../durability/process-identity-contract.js";
+export { PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS as OWNED_WINDOWS_QUERY_STATUS } from "../durability/process-identity-contract.js";
+export {
+  OWNED_PROCESS_DIGEST_DOMAIN,
+  OWNED_PROCESS_DIGEST_PREFIX,
+  OWNED_PROCESS_LEGACY_OPTIONAL_RECORD_FIELDS,
+  OWNED_PROCESS_RECORD_FIELD,
+  OWNED_PROCESS_RECORD_FIELDS,
+  OWNED_PROCESS_RELEASE_PROOF_FIELD,
+  OWNED_PROCESS_RELEASE_PROOF_FIELDS,
+  OWNED_PROCESS_STORAGE_NAME,
+  hasExactOwnedProcessRecordFields,
+  isOwnedProcessRecordFileName,
+  ownedProcessJsonFileName,
+  ownedProcessRuntimeFileNames,
+} from "./owned-process-persistence-contract.js";
+export type {
+  OwnedProcessRecordField,
+  OwnedProcessReleaseProofField,
+} from "./owned-process-persistence-contract.js";
+
+export const OWNED_PROCESS_IDENTITY_PREFIX = Object.freeze({
+  WINDOWS_EXITED_RECEIPT: PROCESS_START_IDENTITY_KIND.WINDOWS_EXITED_RECEIPT,
+} as const);
+
 export const OWNED_PROCESS_SCHEMA_VERSION = "1.0" as const;
 
 export type OwnedProcessSchemaVersionV1 = typeof OWNED_PROCESS_SCHEMA_VERSION;
@@ -121,10 +149,52 @@ export const OWNED_SUPERVISOR_RECEIPT_KEYS = Object.freeze(
   Object.values(OWNED_SUPERVISOR_RECEIPT_KEY),
 ) as readonly OwnedSupervisorReceiptKey[];
 
+export type OwnedSupervisorLaunchReceiptV1 = {
+  [OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID]: number;
+  [OWNED_SUPERVISOR_RECEIPT_KEY.CONTAINMENT]: OwnedProcessQuiescenceScope;
+};
+
+export type OwnedCliLaunchReceiptV1 = {
+  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PID]: number;
+  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY]: string | null;
+  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY_STATE]: OwnedCliIdentityState;
+  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PGID]: number | null;
+};
+
+const exactWireFields =
+  <Wire>() =>
+  <const Fields extends readonly (keyof Wire)[]>(
+    fields: Fields & (Exclude<keyof Wire, Fields[number]> extends never ? unknown : never),
+  ): Readonly<Fields> =>
+    Object.freeze(fields);
+
+export const OWNED_SUPERVISOR_RECEIPT_FIELDS = Object.freeze({
+  SUPERVISOR: exactWireFields<OwnedSupervisorLaunchReceiptV1>()([
+    OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID,
+    OWNED_SUPERVISOR_RECEIPT_KEY.CONTAINMENT,
+  ] as const),
+  CLI: exactWireFields<OwnedCliLaunchReceiptV1>()([
+    OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PID,
+    OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY,
+    OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY_STATE,
+    OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PGID,
+  ] as const),
+} as const);
+
 export const OWNED_SUPERVISOR_STATUS_KEY = Object.freeze({
   PHASE: "phase",
   EXIT_CODE: "exit_code",
 } as const);
+
+export type OwnedSupervisorStatusV1 = {
+  [OWNED_SUPERVISOR_STATUS_KEY.PHASE]: OwnedSupervisorPhase;
+  [OWNED_SUPERVISOR_STATUS_KEY.EXIT_CODE]: number;
+};
+
+export const OWNED_SUPERVISOR_STATUS_FIELDS = exactWireFields<OwnedSupervisorStatusV1>()([
+  OWNED_SUPERVISOR_STATUS_KEY.PHASE,
+  OWNED_SUPERVISOR_STATUS_KEY.EXIT_CODE,
+] as const);
 
 export const OWNED_CLI_IDENTITY_STATE = Object.freeze({
   AVAILABLE: "available",
@@ -151,10 +221,6 @@ export type OwnedProcessPresenceKind =
 export const OWNED_PROCESS_PRESENCE_KINDS = Object.freeze(
   Object.values(OWNED_PROCESS_PRESENCE_KIND),
 ) as readonly OwnedProcessPresenceKind[];
-
-export const OWNED_PROCESS_IDENTITY_PREFIX = Object.freeze({
-  WINDOWS_EXITED_RECEIPT: "win32-exited",
-} as const);
 
 export const OWNED_SUPERVISOR_OUTCOME_KIND = Object.freeze({
   RUNNING: "running",
@@ -207,10 +273,6 @@ export const OWNED_PROCESS_ENV = Object.freeze({
   CWD: "VF_OWNED_CWD",
   RECEIPT: "VF_OWNED_RECEIPT",
   STATUS: "VF_OWNED_STATUS",
-} as const);
-
-export const OWNED_WINDOWS_QUERY_STATUS = Object.freeze({
-  ABSENT: 3,
 } as const);
 
 export const OWNED_WINDOWS_LIMIT = Object.freeze({
@@ -281,6 +343,16 @@ export const isOwnedSupervisorReceiptKey = (value: unknown): value is OwnedSuper
 
 export const isOwnedCliIdentityState = (value: unknown): value is OwnedCliIdentityState =>
   memberOf(OWNED_CLI_IDENTITY_STATES, value);
+
+export function isOwnedCliIdentityClaim(
+  identity: unknown,
+  identityState: unknown,
+): identity is string | null {
+  if (!isOwnedCliIdentityState(identityState)) return false;
+  return identityState === OWNED_CLI_IDENTITY_STATE.AVAILABLE
+    ? isProcessStartIdentity(identity)
+    : identity === null;
+}
 
 export const isOwnedProcessPresenceKind = (value: unknown): value is OwnedProcessPresenceKind =>
   memberOf(OWNED_PROCESS_PRESENCE_KINDS, value);

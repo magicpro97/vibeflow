@@ -6,6 +6,12 @@ import {
   validateProposalContent,
 } from "./proposal-content-validation.js";
 import { validateProposalOwnership } from "./proposal-ownership-validation.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "./protocol-contract.js";
+import {
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
 import {
   assertActor,
   assertCanonicalSize,
@@ -56,7 +62,7 @@ export const MAX_ACTION_PROPOSAL_BYTES = 512 * 1024;
 
 export function validateProposalDraftShape(draft: ActionProposalDraftV1): void {
   exactObject(draft, PROPOSAL_FIELDS, [], "$.proposal");
-  if (draft.schema_version !== "1.0") invalid("unsupported schema version");
+  if (draft.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION) invalid("unsupported schema version");
   assertCanonicalSize(draft, MAX_ACTION_PROPOSAL_BYTES, "action proposal draft");
   validateProposalOwnership(draft);
   validatePlanning(draft);
@@ -82,11 +88,16 @@ function validatePlanning(draft: ActionProposalDraftV1): void {
     "$.proposal.planning_options",
   );
   const valid =
-    (row.mode === "durable" && row.network_read === "ordinary-host-policy") ||
-    (row.mode === "transient" &&
-      ["forbid", "allow-if-granted"].includes(row.network_read as string));
+    (row.mode === ACTION_PLANNING_MODE.DURABLE &&
+      row.network_read === ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY) ||
+    (row.mode === ACTION_PLANNING_MODE.TRANSIENT &&
+      (row.network_read === ACTION_PLANNING_NETWORK_READ_VALUE.FORBID ||
+        row.network_read === ACTION_PLANNING_NETWORK_READ_VALUE.ALLOW_IF_GRANTED));
   if (!valid) invalid("invalid planning options");
-  if (draft.action_root_locator.kind === "conversation" && row.mode !== "durable")
+  if (
+    draft.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION &&
+    row.mode !== ACTION_PLANNING_MODE.DURABLE
+  )
     invalid("conversation-root planning must be durable");
 }
 

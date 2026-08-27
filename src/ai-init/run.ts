@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { ENGINES, type Engine } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import {
   type EngineCommandResult,
   engineCommand,
@@ -8,6 +9,7 @@ import {
   makeAsyncSpawner,
   materializePrompt,
 } from "../dispatch.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { preflightAllAsync } from "../preflight.js";
 import type { ProjectProfile } from "../scanner.js";
 import { scanRepo } from "../scanner.js";
@@ -153,7 +155,7 @@ async function runAiInitOnce(
   } = opts;
 
   const probe = preflight ?? ((engines, pg) => preflightAllAsync(engines, pg));
-  const readiness = await probe(ENGINES, { probe: true });
+  const readiness = await probe([...ENGINES], { probe: true });
   let engine: Engine | null = null;
   if (forceEngine) {
     const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
@@ -206,7 +208,11 @@ async function runAiInitOnce(
     return { ok: false, engine, reason: invocation.unavailable, prompt, __profile: profile };
   }
 
-  if (process.platform === "win32" && engine === "copilot" && prompt.length > 30_000) {
+  if (
+    process.platform === RUNTIME_PLATFORM.WINDOWS &&
+    engine === AGENT_ENGINE.COPILOT &&
+    prompt.length > 30_000
+  ) {
     return {
       ok: false,
       engine,

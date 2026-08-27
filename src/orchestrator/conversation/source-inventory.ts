@@ -20,6 +20,7 @@ import type {
   ConversationSourceInventoryV1,
   ValidatedConversationSourceV1,
 } from "./catalog-source-types.js";
+import { CONVERSATION_SOURCE_INVENTORY_STATE } from "./conversation-catalog-contract.js";
 import { readConversationRevisionVisibility } from "./revision-artifact-store.js";
 export type {
   ConversationJournalHeadV1,
@@ -41,6 +42,11 @@ import {
   unsafeCatalogSourceIdentityDiagnostic,
 } from "./catalog-source-identity.js";
 import type { PublicParticipantSummaryV1 } from "./catalog-types.js";
+import {
+  CONVERSATION_HEALTH,
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import type { ConversationReviewedActionAuthorityV1 } from "./conversation-reviewed-action.js";
 import { conversationManifestPath } from "./durable-operation-authority.js";
 import {
@@ -53,6 +59,10 @@ import {
   MAX_CONVERSATION_JOURNAL_BYTES,
   readStableConversationJournal,
 } from "./source-inventory-journal.js";
+import {
+  conversationManifestVersion,
+  decodeConversationManifest,
+} from "./source-inventory-manifest.js";
 
 const MANIFEST_NAME = /^[0-9a-f]{64}\.json$/;
 
@@ -66,22 +76,6 @@ export interface ReadConversationSourceInventoryOptions {
 }
 const compareBytes = (left: string, right: string): number =>
   Buffer.compare(Buffer.from(left), Buffer.from(right));
-
-function decodeManifest(bytes: Buffer): unknown {
-  try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  } catch {
-    throw new Error("invalid manifest JSON");
-  }
-}
-
-function manifestVersion(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const manifest = (value as Record<string, unknown>).manifest;
-  return manifest && typeof manifest === "object" && !Array.isArray(manifest)
-    ? (manifest as Record<string, unknown>).version
-    : undefined;
-}
 
 function validateJournal(
   initialSnapshot: Parameters<typeof readStableConversationJournal>[0],
@@ -103,12 +97,12 @@ function validateJournal(
   )
     throw new Error("journal correlation does not match manifest");
   let participants: PublicParticipantSummaryV1[];
-  let lifecycle: ConversationLifecycle = "INIT";
-  let health: ConversationHealth = "healthy";
+  let lifecycle: ConversationLifecycle = CONVERSATION_LIFECYCLE.INIT;
+  let health: ConversationHealth = CONVERSATION_HEALTH.HEALTHY;
   if (records.length) {
     const configured = records[0]?.stored_event.event;
     if (
-      configured?.type !== "conversation_configured" ||
+      configured?.type !== CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED ||
       configured.payload.topic !== manifest.topic ||
       configured.payload.policy !== manifest.policy ||
       configured.payload.max_rounds !== manifest.max_rounds
@@ -213,7 +207,9 @@ function addManifest(
   }
   let decoded: unknown;
   try {
-    decoded = decodeManifest(readPrivateFileBytesAt(artifactDirectory, name, 512 * 1024));
+    decoded = decodeConversationManifest(
+      readPrivateFileBytesAt(artifactDirectory, name, 512 * 1024),
+    );
   } catch {
     diagnostics.push(
       diagnostic(
@@ -225,7 +221,7 @@ function addManifest(
     );
     return;
   }
-  const version = manifestVersion(decoded);
+  const version = conversationManifestVersion(decoded);
   if (version !== "1.0") {
     diagnostics.push(
       diagnostic(
@@ -388,11 +384,15 @@ export function readConversationSourceInventory(
     })),
     degraded: diagnostics.length > 0,
   });
-  const state = diagnostics.length ? "degraded" : sources.length ? "ready" : "empty";
+  const state = diagnostics.length
+    ? CONVERSATION_SOURCE_INVENTORY_STATE.DEGRADED
+    : sources.length
+      ? CONVERSATION_SOURCE_INVENTORY_STATE.READY
+      : CONVERSATION_SOURCE_INVENTORY_STATE.EMPTY;
   return {
     schema_version: "1.0",
     state,
-    authoritative: state !== "degraded",
+    authoritative: state !== CONVERSATION_SOURCE_INVENTORY_STATE.DEGRADED,
     sources,
     diagnostics,
     observed_source_digest: observedSourceDigest,

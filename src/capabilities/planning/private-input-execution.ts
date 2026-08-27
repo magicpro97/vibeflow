@@ -1,14 +1,19 @@
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { emptyBindingDigest } from "../private-input/helpers.js";
 import type { CapabilityPrivateInputAuthorityV1 } from "./input-materializer.js";
 import type { ResolvedCapabilityPackageV1 } from "./types.js";
 
 export function bindCapabilityExecutionPrivateInputs(input: {
   packages: ResolvedCapabilityPackageV1[];
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scopeIdentityDigest: string;
-  actionRootLocator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>;
+  actionRootLocator: Exclude<
+    PrivateActionRootLocatorV1,
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+  >;
   authority: CapabilityPrivateInputAuthorityV1;
 }): ResolvedCapabilityPackageV1[] {
   return input.packages.map((pkg) => {
@@ -32,7 +37,7 @@ export function bindCapabilityExecutionPrivateInputs(input: {
     if (!execution)
       throw new CapabilityRuntimeError(
         "private input execution binding authority is unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     return {
       ...pkg,

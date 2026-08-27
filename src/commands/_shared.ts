@@ -31,6 +31,7 @@ export * from "../adapters/engine-files.js";
 export * from "../agents/detect-roles.js";
 export * from "../agents/render.js";
 export * from "../core.js";
+export * from "../core/ui-cli-contract.js";
 export * from "../dispatch.js";
 export * from "../gates.js";
 export * from "../hooks/adapters.js";
@@ -97,6 +98,12 @@ export * from "../workflow-artifacts.js";
 export * from "../workflow/lifecycle.js";
 export * from "../workflow/merge.js";
 export * from "../logbus.js";
+
+// === hook approval bridge ===
+// (issue #80, phase 7/14+) The `hook` subcommand resolves web-UI approvals
+// through hook-ui-client.ts. The cycle rule forbids hooks.ts from importing
+// that sibling directly, so the helper is routed through this barrel.
+export { requestUiHookApproval } from "./hook-ui-client.js";
 
 // ponytail: liveGuardrailArmed/guardrailOffNote inlined into doctor.ts (#391)
 export { liveGuardrailArmed, guardrailOffNote } from "./doctor.js";
@@ -334,8 +341,9 @@ export {
 export type { PilotEncounter } from "./review-cross.js";
 
 import type { WorkUnit } from "../core.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 // === work-unit completeness check ===
 // Extracted from orchestrate.ts (#643). Shared so server routes can test the
 // same condition without inlining the logic.
 export const isComplete = (u: WorkUnit) =>
-  u.status === "done" && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;
+  u.status === WORK_UNIT_STATUS.DONE && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;

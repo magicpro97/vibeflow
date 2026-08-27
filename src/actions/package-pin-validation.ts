@@ -1,5 +1,14 @@
 import { digestV1 } from "../durability/index.js";
+import {
+  LEGACY_SOURCE_PACKAGE_ID_PREFIX,
+  type LegacySource,
+  isLegacySource,
+} from "./capability-manifest-vocabulary-contract.js";
 import type { PackagePinV1 } from "./preview-types.js";
+import {
+  ACTION_PACKAGE_PIN_SOURCE_KIND,
+  ACTION_PACKAGE_PIN_TRUST_VALUE,
+} from "./public-action-contract.js";
 import {
   assertDigest,
   assertOpaqueId,
@@ -7,14 +16,6 @@ import {
   assertRawSha256,
 } from "./record-primitives.js";
 import { ActionValidationError, exactObject } from "./strict-json.js";
-
-const LEGACY_SOURCES = new Set([
-  "skill-lock",
-  "tool-managed-evidence",
-  "mcp-managed-sidecar",
-  "hook-sentinel",
-  "role-marker",
-]);
 
 export function validatePackagePin(pin: PackagePinV1, path: string): void {
   exactObject(
@@ -45,7 +46,7 @@ export function validatePackagePin(pin: PackagePinV1, path: string): void {
     `${path}.source`,
   );
   switch (source.kind) {
-    case "registry":
+    case ACTION_PACKAGE_PIN_SOURCE_KIND.REGISTRY:
       exactObject(
         pin.source,
         ["kind", "registry_origin", "source_url", "commit_oid", "signature_envelope_digest"],
@@ -57,31 +58,31 @@ export function validatePackagePin(pin: PackagePinV1, path: string): void {
       if (source.commit_oid !== null)
         assertCommitOid(source.commit_oid, `${path}.source.commit_oid`);
       assertDigest(source.signature_envelope_digest, `${path}.source.signature_envelope_digest`);
-      assertMatrix(pin, "verified", false, path);
+      assertMatrix(pin, ACTION_PACKAGE_PIN_TRUST_VALUE.VERIFIED, false, path);
       break;
-    case "git":
+    case ACTION_PACKAGE_PIN_SOURCE_KIND.GIT:
       exactObject(pin.source, ["kind", "canonical_url", "commit_oid"], [], `${path}.source`);
       assertCanonicalSourceUrl(source.canonical_url, `${path}.source.canonical_url`);
       assertCommitOid(source.commit_oid, `${path}.source.commit_oid`);
-      assertMatrix(pin, "source-pinned", false, path);
+      assertMatrix(pin, ACTION_PACKAGE_PIN_TRUST_VALUE.SOURCE_PINNED, false, path);
       break;
-    case "local-dev":
+    case ACTION_PACKAGE_PIN_SOURCE_KIND.LOCAL_DEV:
       exactObject(pin.source, ["kind", "repo_relative_alias"], [], `${path}.source`);
       assertRepoRelativeAlias(source.repo_relative_alias, `${path}.source.repo_relative_alias`);
-      assertMatrix(pin, "dev-unverified", true, path);
+      assertMatrix(pin, ACTION_PACKAGE_PIN_TRUST_VALUE.DEV_UNVERIFIED, true, path);
       break;
-    case "legacy-adopt":
+    case ACTION_PACKAGE_PIN_SOURCE_KIND.LEGACY_ADOPT:
       exactObject(
         pin.source,
         ["kind", "legacy_source", "inspection_evidence_digest"],
         [],
         `${path}.source`,
       );
-      if (!LEGACY_SOURCES.has(source.legacy_source as string))
+      if (!isLegacySource(source.legacy_source))
         invalid("invalid legacy source", `${path}.source.legacy_source`);
       assertDigest(source.inspection_evidence_digest, `${path}.source.inspection_evidence_digest`);
-      assertLegacyIdentity(pin, source.legacy_source as string, path);
-      assertMatrix(pin, "legacy-verified", false, path);
+      assertLegacyIdentity(pin, source.legacy_source, path);
+      assertMatrix(pin, ACTION_PACKAGE_PIN_TRUST_VALUE.LEGACY_VERIFIED, false, path);
       break;
     default:
       invalid("invalid package source kind", `${path}.source.kind`);
@@ -203,16 +204,9 @@ function compareSemver(left: string, right: string): number {
   return 0;
 }
 
-function assertLegacyIdentity(pin: PackagePinV1, source: string, path: string): void {
-  const prefix: Record<string, string> = {
-    "skill-lock": "legacy.skill.",
-    "tool-managed-evidence": "legacy.tool.",
-    "mcp-managed-sidecar": "legacy.mcp.",
-    "hook-sentinel": "legacy.hook.",
-    "role-marker": "legacy.role.",
-  };
+function assertLegacyIdentity(pin: PackagePinV1, source: LegacySource, path: string): void {
   if (
-    !pin.id.startsWith(prefix[source] ?? "\0") ||
+    !pin.id.startsWith(LEGACY_SOURCE_PACKAGE_ID_PREFIX[source]) ||
     !/^0\.0\.0-legacy\.[a-f0-9]{12}$/.test(pin.version)
   )
     invalid("legacy package identity does not match its managed source", path);

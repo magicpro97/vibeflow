@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computed, effectScope, ref, shallowRef } from "vue";
+import { AGENT_ENGINE, ENGINES } from "../src/core/agent-contract.js";
 import { conversationHomeApi } from "../src/ui/src/conversation-home-api.js";
 import {
   HOME_QUOTE_LIMIT,
@@ -9,6 +10,7 @@ import {
   toggleHomeQuoteReference,
 } from "../src/ui/src/conversation-home-authoring.js";
 import { createHomeCommandRuntime } from "../src/ui/src/conversation-home-command-runtime.js";
+import { homeParticipantDisplayLabel } from "../src/ui/src/conversation-home-participant-label.js";
 import { projectHomeTimeline } from "../src/ui/src/conversation-home-projection.js";
 import { projectHomeTrace } from "../src/ui/src/conversation-home-projection.js";
 import { createHomeQueryRuntime } from "../src/ui/src/conversation-home-query-runtime.js";
@@ -177,7 +179,7 @@ describe("AI-first conversation Home", () => {
     expect(parseComposerIntent("   ")).toEqual({ kind: "empty" });
     expect(parseComposerIntent("+reviewer@unknown")).toEqual({
       kind: "invalid",
-      message: "Choose one of: claude, codex, copilot, opencode, antigravity.",
+      message: `Choose one of: ${ENGINES.join(", ")}.`,
     });
     expect(
       matchHomeComposerSuggestions("-@", [
@@ -259,16 +261,48 @@ describe("AI-first conversation Home", () => {
         },
       },
     ] as HomeTimelineItem[];
-    const items = projectHomeTimeline(timeline);
+    const items = projectHomeTimeline(timeline, [
+      {
+        participant_id: "reviewer",
+        role_ref: "direct",
+        engine: AGENT_ENGINE.CLAUDE,
+        model: null,
+      },
+    ]);
 
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       kind: "assistant",
-      title: "reviewer",
+      title: "Direct / Claude",
       body: "Ship it.",
       complete: true,
       evidence: ["tests"],
+      publicAuthorId: "reviewer",
     });
+  });
+
+  test("participant labels prefer configured role and engine without exposing raw ids", () => {
+    expect(
+      homeParticipantDisplayLabel({
+        participantId: "participant-1",
+        roleRef: "brainstorm_participant",
+        engine: AGENT_ENGINE.OPENCODE,
+      }),
+    ).toBe("Brainstorm Participant / OpenCode");
+    expect(
+      homeParticipantDisplayLabel({
+        participantId: "participant-1",
+        roleRef: "participant-1",
+        engine: AGENT_ENGINE.CLAUDE,
+      }),
+    ).toBe("Claude");
+    expect(
+      homeParticipantDisplayLabel({
+        participantId: "participant-1",
+        roleRef: null,
+        engine: "toString",
+      }),
+    ).toBe("AI participant");
   });
 
   test("trace projection exposes only public correlation and evidence references", () => {
@@ -727,19 +761,20 @@ describe("AI-first conversation Home", () => {
       schema_version: "1.0" as const,
       items: [
         {
+          schema_version: "1.0" as const,
           proposal: {
             schema_version: "1.0" as const,
             proposal_id: proposalId,
             proposal_digest: `digest-${proposalId}`,
             origin_event_id: null,
-            action_type: "conversation.update_settings",
+            action_type: "conversation.update_settings" as const,
             domain: "conversation" as const,
             scope: "conversation" as const,
             risk: "low" as const,
             effect_classes: [],
             targets: [],
             package_pins: [],
-            reversibility: "reversible",
+            reversibility: "reversible" as const,
             preview: {
               title: proposalId,
               summary: proposalId,
@@ -765,7 +800,7 @@ describe("AI-first conversation Home", () => {
             latest_event_cursor: null,
             progress: [],
             targets: [],
-            delivery: "inline",
+            delivery: "not-applicable" as const,
             result_ref: null,
             error: null,
             recovery_actions: [],

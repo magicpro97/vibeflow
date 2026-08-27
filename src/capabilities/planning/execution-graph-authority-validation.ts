@@ -1,6 +1,8 @@
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
+import { ACTION_EFFECT_CLASS } from "../../actions/public-action-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import type { CapabilityAdapterRegistryV1 } from "../adapters/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { PackageAuthenticityBindingV1 } from "../source/types.js";
 import type {
   CapabilityControlCredentialBindingV1,
@@ -18,7 +20,7 @@ type ExactObject = <T extends CapabilityExecutionJsonObjectValueV1>(
 ) => T;
 
 function fail(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function exact(left: unknown, right: unknown): boolean {
@@ -30,20 +32,27 @@ function expectedSource(
   graph: CapabilityDurablePlanningGraphV1,
 ): CapabilitySourceAccessDescriptorV1["source"] {
   const source = pin.source;
-  if (source.kind === "registry")
+  if (source.kind === CAPABILITY_SOURCE_KIND.REGISTRY)
     return {
-      kind: "registry",
+      kind: CAPABILITY_SOURCE_KIND.REGISTRY,
       registry_origin: source.registry_origin,
       package_url: source.source_url,
     };
-  if (source.kind === "git")
-    return { kind: "git", canonical_url: source.canonical_url, commit_oid: source.commit_oid };
-  if (source.kind === "local-dev")
-    return { kind: "local-dev", repo_relative_alias: source.repo_relative_alias };
+  if (source.kind === CAPABILITY_SOURCE_KIND.GIT)
+    return {
+      kind: CAPABILITY_SOURCE_KIND.GIT,
+      canonical_url: source.canonical_url,
+      commit_oid: source.commit_oid,
+    };
+  if (source.kind === CAPABILITY_SOURCE_KIND.LOCAL_DEV)
+    return {
+      kind: CAPABILITY_SOURCE_KIND.LOCAL_DEV,
+      repo_relative_alias: source.repo_relative_alias,
+    };
   if (graph.plan.intent.kind !== "adopt")
     fail("legacy package source is not bound to the approved adoption intent");
   return {
-    kind: "legacy-adopt",
+    kind: CAPABILITY_SOURCE_KIND.LEGACY_ADOPT,
     phase: "candidate",
     candidate_digest: graph.plan.intent.candidate_digest,
   };
@@ -111,7 +120,7 @@ function assertSourceChain(input: {
     if (
       descriptor.authorization_mode !== "automatic" ||
       descriptor.intent !== "read-local-package" ||
-      !exact(authority.effect_classes, ["pure-local-read"]) ||
+      !exact(authority.effect_classes, [ACTION_EFFECT_CLASS.PURE_LOCAL_READ]) ||
       descriptor.required_permission_row_digests.length !== 0
     )
       fail("confirmation-free source authority exceeds a closed local read");

@@ -6,6 +6,7 @@ import {
   assertConversationCatalogSourceInventoryEntryV1,
   assertConversationSessionSummaryV1,
 } from "./catalog-types.js";
+import { CONVERSATION_CATALOG_SCHEMA_VERSION } from "./conversation-catalog-contract.js";
 import { isLineageDigest, isMillisecondIsoDate, isSafeCatalogIdentifier } from "./lineage-types.js";
 
 const GENERATION_ID = /^vf-catalog-generation-[0-9a-f]{64}$/;
@@ -19,7 +20,7 @@ export type ConversationCatalogDeltaCauseV1 =
   | "projection-retry";
 
 export interface ConversationCatalogDeltaV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   sequence: number;
   previous_event_digest: string | null;
   root_session_id: string;
@@ -31,7 +32,7 @@ export interface ConversationCatalogDeltaV1 {
 }
 
 export interface ConversationCatalogGenerationV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   generation_id: string;
   source_inventory_digest: string;
   source_watermark: string;
@@ -43,7 +44,7 @@ export interface ConversationCatalogGenerationV1 {
 }
 
 export interface ConversationCatalogCurrentV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   generation_id: string;
   generation_digest: string;
   source_watermark: string;
@@ -119,7 +120,7 @@ export function assertConversationCatalogDeltaV1(
       "source_inventory_digest",
       "source_record",
     ]) ||
-    value.schema_version !== "1.0" ||
+    value.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION ||
     !Number.isSafeInteger(value.sequence) ||
     (value.sequence as number) < 0 ||
     ![
@@ -163,7 +164,7 @@ export function assertCatalogGeneration(
       "source_watermark",
       "starting_delta_sequence",
     ]) ||
-    value.schema_version !== "1.0" ||
+    value.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION ||
     typeof value.generation_id !== "string" ||
     !GENERATION_ID.test(value.generation_id) ||
     !isLineageDigest(value.source_inventory_digest) ||
@@ -207,7 +208,7 @@ export function assertCatalogCurrent(
       "source_watermark",
       "updated_at",
     ]) ||
-    value.schema_version !== "1.0" ||
+    value.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION ||
     typeof value.generation_id !== "string" ||
     !GENERATION_ID.test(value.generation_id) ||
     !isLineageDigest(value.generation_digest) ||

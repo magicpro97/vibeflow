@@ -1,6 +1,7 @@
 import { actionIdempotencyScopeDigest } from "../../actions/idempotency.js";
 import { validateLegacyCandidate } from "../../actions/internal-candidate-validation.js";
 import type { ActionTargetBindingV1 } from "../../actions/preview-types.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import { validateCapabilityManifest } from "../manifest/validation.js";
 import { canonicalPermissionBinding } from "../permissions/index.js";
@@ -28,7 +29,7 @@ export function validateCapabilityPlanningRequest(request: CapabilityPlanningReq
   if (request.action_root_locator) {
     actionIdempotencyScopeDigest(request.action_root_locator);
     if (
-      request.action_root_locator.kind === "capability" &&
+      request.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY &&
       (request.action_root_locator.scope !== request.scope ||
         request.action_root_locator.scope_identity_digest !== request.scope_identity_digest)
     )

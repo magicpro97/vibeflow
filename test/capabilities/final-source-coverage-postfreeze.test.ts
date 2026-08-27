@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  ACTION_ROOT_LOCATOR_KIND,
   ActionAuthorityStore,
   createDurableActionAuthorityReaderV1,
 } from "../../src/actions/index.js";
@@ -859,6 +860,59 @@ describe("final source authority coverage", () => {
         next,
       }),
     ).toThrow(/dedicated durable bootstrap resolver/i);
+  });
+
+  test("rejects an ordinary recovery-bootstrap locator before consulting the action host", () => {
+    let resolveCalls = 0;
+    const resolver = createDurableAuthorityTransitionResolver({
+      resolve: () => {
+        resolveCalls += 1;
+        throw new Error("ordinary resolver consulted the recovery-bootstrap host");
+      },
+    });
+    const event = {
+      change: "grant-changed",
+      action_root_locator: {
+        kind: ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP,
+        bootstrap_identity_digest: digestV1("VF-FINAL-SOURCE-BOOTSTRAP-LOCATOR\0v1\0", 1),
+      },
+    } as AuthorityEpochEventV1;
+
+    expect(() =>
+      resolver.verify({
+        private_root: "/not-consulted",
+        prior: {} as AuthorityEpochHeadV1,
+        event,
+        evidence: { change: "grant-changed", grant_frames: [] },
+        next: {} as AuthorityEpochHeadV1,
+      }),
+    ).toThrow(/ordinary authority transition cannot use a recovery-bootstrap root/i);
+    expect(resolveCalls).toBe(0);
+  });
+
+  test("rejects an unknown action-root kind before consulting the action host", () => {
+    let resolveCalls = 0;
+    const resolver = createDurableAuthorityTransitionResolver({
+      resolve: () => {
+        resolveCalls += 1;
+        throw new Error("ordinary resolver consulted the unknown action-root host");
+      },
+    });
+    const event = {
+      change: "grant-changed",
+      action_root_locator: { kind: "future-root" as never },
+    } as unknown as AuthorityEpochEventV1;
+
+    expect(() =>
+      resolver.verify({
+        private_root: "/not-consulted",
+        prior: {} as AuthorityEpochHeadV1,
+        event,
+        evidence: { change: "grant-changed", grant_frames: [] },
+        next: {} as AuthorityEpochHeadV1,
+      }),
+    ).toThrow(/known non-recovery root/i);
+    expect(resolveCalls).toBe(0);
   });
 
   test("rejects a standalone action reader rooted outside the selected authority", () => {

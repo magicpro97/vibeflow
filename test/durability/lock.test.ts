@@ -30,6 +30,10 @@ import {
   processStartIdentity,
 } from "../../src/durability/lock-owner.js";
 import { publishStableLockRecord, readStableLockRecord } from "../../src/durability/lock-record.js";
+import { formatPlatformProcessStartIdentity } from "../../src/durability/process-identity-contract.js";
+
+const DEAD_PROCESS_IDENTITY = formatPlatformProcessStartIdentity("freebsd", "dead-lock-owner");
+const STALE_PROCESS_IDENTITY = formatPlatformProcessStartIdentity("freebsd", "stale-lock-owner");
 
 function exactOwner(
   platform: "darwin" | "win32",
@@ -305,7 +309,7 @@ test("unknown owner fields, remote owners, symlinks, and release tampering fail 
     seedOwner(path, {
       schema_version: "1.0" as const,
       pid: 2_147_483_647,
-      process_start_identity: "dead",
+      process_start_identity: DEAD_PROCESS_IDENTITY,
       host: hostname(),
       operation: "old",
       nonce: "b".repeat(64),
@@ -319,7 +323,7 @@ test("unknown owner fields, remote owners, symlinks, and release tampering fail 
     seedOwner(path, {
       schema_version: "1.0" as const,
       pid: 2_147_483_647,
-      process_start_identity: "dead",
+      process_start_identity: DEAD_PROCESS_IDENTITY,
       host: "different-host.example",
       operation: "old",
       nonce: "c".repeat(64),
@@ -409,7 +413,7 @@ test("dual owner slots recover each acquire crash point as the exact old or new 
       const stale = {
         schema_version: "1.0" as const,
         pid: 2_147_483_647,
-        process_start_identity: "dead-process-start",
+        process_start_identity: STALE_PROCESS_IDENTITY,
         host: hostname(),
         operation: "prior-owner",
         nonce: "e".repeat(64),

@@ -1,8 +1,14 @@
 import type { Ref, ShallowRef } from "vue";
+import {
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_HEAD_STATUS,
+} from "../../orchestrator/conversation/conversation-catalog-contract.js";
 import { conversationHomeApi } from "./conversation-home-api.js";
 import type { HomeMessageQueueSnapshot } from "./conversation-home-message-queue-types.js";
-import { watchHomeOperation } from "./conversation-home-operation-stream.js";
+import { bindHomeOperationStream } from "./conversation-home-operation-reconcile.js";
+import type { HomeOperationStreamAuthority } from "./conversation-home-operation-stream.js";
 import { mergeHomePage } from "./conversation-home-pagination.js";
+import type { HomeQueryApiAuthority } from "./conversation-home-query-authority.js";
 import type { ActivationEpoch, ActivationResourceRegistry } from "./conversation-home-state.js";
 import type {
   HomeActionView,
@@ -38,14 +44,14 @@ function committedHead(
 ) {
   const active = response.active;
   if (
-    response.schema_version !== "1.0" ||
+    response.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION ||
     response.root_session_id !== rootSessionId ||
-    response.head_status !== "committed" ||
+    response.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     !Number.isSafeInteger(response.head_epoch) ||
     response.head_epoch < 0 ||
     !DIGEST.test(response.head_digest) ||
     !active ||
-    active.schema_version !== "1.0" ||
+    active.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION ||
     !active.conversation_id ||
     !active.revision_id ||
     !Number.isSafeInteger(active.revision_ordinal) ||
@@ -78,16 +84,15 @@ function assertTimelineBinding(
 
 export async function refreshHomeActiveSelection(
   input: RefreshHomeActiveSelectionInput,
+  api: HomeQueryApiAuthority = conversationHomeApi,
+  operationStreamAuthority?: HomeOperationStreamAuthority,
 ): Promise<void> {
-  const head = await conversationHomeApi.head(input.rootSessionId, input.token.signal);
+  const head = await api.head(input.rootSessionId, input.token.signal);
   const active = committedHead(head, input.rootSessionId, input.expectedConversationId);
   const [nextTimeline, actions, messageQueue] = await Promise.all([
-    conversationHomeApi.timeline(
-      { rootSessionId: input.rootSessionId, limit: 50 },
-      input.token.signal,
-    ),
-    conversationHomeApi.pending(active.conversation_id, { limit: 50 }, input.token.signal),
-    conversationHomeApi.messageQueue(input.rootSessionId, input.token.signal),
+    api.timeline({ rootSessionId: input.rootSessionId, limit: 50 }, input.token.signal),
+    api.pending(active.conversation_id, { limit: 50 }, input.token.signal),
+    api.messageQueue(input.rootSessionId, input.token.signal),
   ]);
   if (!input.token.isCurrent() || !input.isRefreshCurrent()) return;
   assertTimelineBinding(nextTimeline, head);
@@ -100,17 +105,18 @@ export async function refreshHomeActiveSelection(
   input.paging.pending.nextCursor = actions.next_cursor;
   input.streams.retain(new Set(actions.items.map((view) => view.proposal.proposal_id)));
   for (const view of actions.items)
-    watchHomeOperation({
-      token: input.token,
-      conversationId: active.conversation_id,
+    bindHomeOperationStream(
+      {
+        token: input.token,
+        streams: input.streams,
+        conversationId: () => active.conversation_id,
+        pendingActions: input.pendingActions,
+        reload: input.reload,
+        invalidUpdate: input.invalidUpdate,
+      },
       view,
-      streams: input.streams,
-      operationFor: (proposalId) =>
-        input.pendingActions.value.find((item) => item.proposal.proposal_id === proposalId)
-          ?.operation,
-      reload: input.reload,
-      invalidUpdate: input.invalidUpdate,
-    });
+      operationStreamAuthority,
+    );
 }
 
 export function mergeHomePendingPage(

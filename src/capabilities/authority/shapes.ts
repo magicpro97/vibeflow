@@ -1,4 +1,7 @@
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import { ACTOR_KINDS, CREDENTIAL_CLASSES } from "../../actions/public-action-contract.js";
 import type { PrivateActionRootLocatorV1, PublicActor } from "../../actions/types.js";
+import { CAPABILITY_SCOPES } from "../../core/capability-contract.js";
 import { CapabilityValidationError, enumeration, exactKeys, text } from "../wire/primitives.js";
 import type {
   AuthorityEpochEventV1,
@@ -11,13 +14,6 @@ import type {
   SecretRevocationFrameV1,
 } from "./types.js";
 
-const ACTOR_KINDS = ["human-browser", "human-cli", "agent", "system-recovery"] as const;
-const CREDENTIALS = [
-  "loopback-session",
-  "interactive-tty",
-  "automation-grant",
-  "recovery",
-] as const;
 const COMMON_FRAME = [
   "schema_version",
   "authority_epoch",
@@ -30,13 +26,13 @@ const COMMON_FRAME = [
 ] as const;
 
 export function validateActionRootLocator(value: PrivateActionRootLocatorV1, path: string): void {
-  if (value.kind === "conversation") {
+  if (value.kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION) {
     exactKeys(value, ["kind", "root_session_id"], [], path);
     text(value.root_session_id, `${path}.root_session_id`, { min: 1, max: 512, ascii: true });
-  } else if (value.kind === "capability") {
+  } else if (value.kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY) {
     exactKeys(value, ["kind", "scope", "scope_identity_digest"], [], path);
-    enumeration(value.scope, ["project", "user"] as const, `${path}.scope`);
-  } else if (value.kind === "recovery-bootstrap") {
+    enumeration(value.scope, CAPABILITY_SCOPES, `${path}.scope`);
+  } else if (value.kind === ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP) {
     exactKeys(value, ["kind", "bootstrap_identity_digest"], [], path);
   } else {
     throw new CapabilityValidationError("invalid action-root locator kind", `${path}.kind`);
@@ -47,7 +43,7 @@ export function validatePublicActor(value: PublicActor, path: string): void {
   exactKeys(value, ["kind", "public_actor_id", "credential_class"], [], path);
   enumeration(value.kind, ACTOR_KINDS, `${path}.kind`);
   text(value.public_actor_id, `${path}.public_actor_id`, { min: 1, max: 512, ascii: true });
-  enumeration(value.credential_class, CREDENTIALS, `${path}.credential_class`);
+  enumeration(value.credential_class, CREDENTIAL_CLASSES, `${path}.credential_class`);
 }
 
 export function assertAuthorityIdentityShape(value: AuthorityScopeIdentityRecordV1): void {

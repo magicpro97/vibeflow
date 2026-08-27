@@ -4,6 +4,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  type AuditedHookDecision,
+  HOOK_DECISION,
+  isAuditedHookDecision,
+} from "../core/hook-contract.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -19,7 +24,7 @@ export interface SkillPolicy {
   schemaVersion: number;
   domains: Record<string, { owners?: string[]; requiredChecks?: string[] }>;
   protectedPaths: ProtectedPathRule[];
-  enforcementLevel: "warn" | "require_approval" | "block";
+  enforcementLevel: AuditedHookDecision;
 }
 
 export interface PolicyValidationResult {
@@ -37,15 +42,13 @@ export function conservativeDefaultPolicy(): SkillPolicy {
     schemaVersion: 1,
     domains: {},
     protectedPaths: [],
-    enforcementLevel: "warn",
+    enforcementLevel: HOOK_DECISION.WARN,
   };
 }
 
 /* ------------------------------------------------------------------ */
 /*  Schema validation                                                 */
 /* ------------------------------------------------------------------ */
-
-const ALLOWED_LEVELS = new Set(["warn", "require_approval", "block"]);
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -72,7 +75,7 @@ function validateSchema(raw: unknown): PolicyValidationResult {
   // enforcementLevel
   const el = raw.enforcementLevel;
   if (el === undefined) errors.push('missing required field "enforcementLevel"');
-  else if (!ALLOWED_LEVELS.has(el as string)) {
+  else if (!isAuditedHookDecision(el)) {
     errors.push(`"enforcementLevel" must be one of: warn, require_approval, block`);
   }
 
@@ -158,9 +161,7 @@ function validateSchema(raw: unknown): PolicyValidationResult {
     schemaVersion: sv === 1 ? 1 : 1,
     domains,
     protectedPaths,
-    enforcementLevel: ALLOWED_LEVELS.has(el as string)
-      ? (el as SkillPolicy["enforcementLevel"])
-      : "warn",
+    enforcementLevel: isAuditedHookDecision(el) ? el : HOOK_DECISION.WARN,
   };
 
   return { policy, errors, warnings };

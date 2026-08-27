@@ -1,13 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { AssertionError } from "node:assert";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CapabilityCliMutationInputV1 } from "../src/capabilities/cli/ports.js";
+import { CapabilityRuntimeError } from "../src/capabilities/operations/errors.js";
 import type {
   CapabilityCliResultV1,
   FabricCliAuthorityMutationCommandV1,
 } from "../src/capabilities/wire/cli.js";
 import { authority } from "../src/commands/authority.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../src/core/capability-contract.js";
 import { digestV1 } from "../src/durability/index.js";
 
 function tempDir() {
@@ -173,5 +176,163 @@ describe("authority CLI durable mutation contract", () => {
     expect(input.conversation_id).toBe("conv-1");
     expect(input.context.actor.credential_class).toBe("recovery");
     expect(input.context.stdin_is_tty).toBe(true);
+  });
+
+  test("post-parse authority input failures emit one safe JSON document", async () => {
+    const root = tempDir();
+    try {
+      const missing = join(root, "private-missing-authority.json");
+      const notFile = join(root, "private-authority-directory");
+      mkdirSync(notFile);
+      const cases = [
+        [
+          "grant",
+          "create",
+          "--grant-file",
+          missing,
+          "--idempotency-key",
+          "missing-grant",
+          "--yes",
+          "--json",
+        ],
+        [
+          "trust",
+          "add",
+          "--scope",
+          "project",
+          "--trust-file",
+          missing,
+          "--idempotency-key",
+          "missing-trust",
+          "--yes",
+          "--json",
+        ],
+        [
+          "policy",
+          "update",
+          "--scope",
+          "project",
+          "--replacement-file",
+          notFile,
+          "--idempotency-key",
+          "unreadable-policy",
+          "--yes",
+          "--json",
+        ],
+      ];
+      for (const argv of cases) {
+        const lines: Array<{ message: string; level: string | undefined }> = [];
+        const code = await authority(argv, {
+          stdinIsTTY: true,
+          stdinHasData: false,
+          mutationPort: {
+            execute() {
+              throw new TypeError("mutation port must not run after an input failure");
+            },
+          },
+          writer: (message, level) => lines.push({ message, level }),
+        });
+        expect(code).toBe(2);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]?.level).toBeUndefined();
+        const document = JSON.parse(lines[0]?.message ?? "") as {
+          kind: string;
+          error: { code: string; message: string };
+        };
+        expect(document.kind).toBe("usage-error");
+        expect(document.error.code).toBe("invalid_request");
+        expect(document.error.message).not.toContain(root);
+        expect(document.error.message).not.toContain("ENOENT");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("tagged mutation-port failures are safe in JSON and human modes", async () => {
+    for (const json of [true, false]) {
+      const lines: Array<{ message: string; level: string | undefined }> = [];
+      const code = await authority(["repair", "--scope", "project", ...(json ? ["--json"] : [])], {
+        stdinIsTTY: true,
+        stdinHasData: false,
+        mutationPort: {
+          execute() {
+            throw new CapabilityRuntimeError(
+              "backend returned undefined at /private/authority/grants.json\n    at repair",
+              CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+            );
+          },
+        },
+        writer: (message, level) => lines.push({ message, level }),
+      });
+      expect(code).toBe(2);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]?.message).toContain("Capability service is unavailable.");
+      expect(lines[0]?.message).not.toContain("/private/authority");
+      expect(lines[0]?.message).not.toContain("undefined");
+      expect(lines[0]?.message).not.toContain("at repair");
+      if (json) {
+        expect(lines[0]?.level).toBeUndefined();
+        expect(JSON.parse(lines[0]?.message ?? "")).toMatchObject({
+          kind: "usage-error",
+          command: "authority.repair",
+          error: { code: "service_unavailable" },
+        });
+      } else {
+        expect(lines[0]?.level).toBe("error");
+        expect(lines[0]?.message).not.toContain("Error:");
+      }
+    }
+  });
+
+  test("all unclassified and programmer faults remain explicit rejections", async () => {
+    class CustomInvariantError extends Error {}
+    const faults: Error[] = [
+      new AssertionError({ message: "assertion invariant fault" }),
+      new TypeError("type invariant fault"),
+      new Error("unclassified operational-looking fault"),
+      new CustomInvariantError("custom invariant fault"),
+      new CapabilityRuntimeError("unknown runtime code", "unclassified" as never),
+    ];
+    for (const fault of faults) {
+      const lines: string[] = [];
+      let observed: unknown;
+      try {
+        await authority(["repair", "--scope", "project", "--json"], {
+          stdinIsTTY: true,
+          stdinHasData: false,
+          mutationPort: {
+            execute() {
+              throw fault;
+            },
+          },
+          writer: (message) => lines.push(message),
+        });
+      } catch (error) {
+        observed = error;
+      }
+      expect(observed).toBe(fault);
+      expect(lines).toEqual([]);
+    }
+  });
+
+  test("non-Error throws are never classified as operational failures", async () => {
+    const thrown = { invariant: "non-error" };
+    let observed: unknown;
+    try {
+      await authority(["repair", "--scope", "project", "--json"], {
+        stdinIsTTY: true,
+        stdinHasData: false,
+        mutationPort: {
+          execute() {
+            throw thrown;
+          },
+        },
+        writer: () => undefined,
+      });
+    } catch (error) {
+      observed = error;
+    }
+    expect(observed).toBe(thrown);
   });
 });

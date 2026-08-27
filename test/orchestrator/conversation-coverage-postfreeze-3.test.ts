@@ -30,6 +30,7 @@ import type {
   PublicMessageLocatorV1,
 } from "../../src/orchestrator/conversation/conversation-interaction-types.js";
 import { ConversationReceiptCandidateUnavailableError } from "../../src/orchestrator/conversation/conversation-receipt-action-authority.js";
+import { conversationRevisionActionPlanDigest } from "../../src/orchestrator/conversation/conversation-revision-action-plan.js";
 import { DirectConversationPolicy } from "../../src/orchestrator/conversation/direct-policy.js";
 import { MAX_CANONICAL_HANDOFF_BYTES } from "../../src/orchestrator/conversation/handoff-limits.js";
 import {
@@ -163,7 +164,7 @@ function revisionFixture(seed = 1) {
     proposal_digest: proposal.proposal_digest,
     approval_id: approval.approval_id,
     approval_digest: approval.approval_digest,
-    plan_digest: sha(`action-plan-${seed}`),
+    plan_digest: conversationRevisionActionPlanDigest("conversation-root", plan),
     authority_epoch: 0,
     authority_head_digest: sha("authority-head"),
     root_session_id: "conversation-root",
@@ -752,6 +753,7 @@ describe("post-freeze message and interaction projections", () => {
     const turn = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision-conversation",
+      recipient_engine: "codex",
       request: {
         participant_id: "participant-1",
         instruction: { kind: "continue" },
@@ -849,7 +851,10 @@ describe("post-freeze recovery evidence", () => {
     );
     const other = revisionFixture(4);
     const unknown = inspectRevisionRecovery({
-      home: { publishedRevisionTransitions: () => [] } as never,
+      home: {
+        publishedRevisionTransitions: () => [],
+        revisions: { readPlan: () => fixture.plan },
+      } as never,
       lineages: { resolve: () => ({ head: other.committedHead }) } as never,
       operation: fixture.operation,
       events: needsRecovery,
@@ -876,7 +881,10 @@ describe("post-freeze recovery evidence", () => {
     const preparing = [fixture.events[0]].filter(Boolean) as typeof fixture.events;
     expect(
       revisionAbandonIsProved({
-        home: { publishedRevisionTransitions: () => [other.transition] } as never,
+        home: {
+          publishedRevisionTransitions: () => [other.transition],
+          revisions: { readPlan: () => fixture.plan },
+        } as never,
         lineages: { resolve: () => ({ head: fixture.priorHead }) } as never,
         operation: fixture.operation,
         events: preparing,

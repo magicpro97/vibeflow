@@ -1,3 +1,8 @@
+import { PUBLIC_OPERATION_PARTICIPANT_START_PHASE } from "../../actions/protocol-contract.js";
+import {
+  ENGINE_ATTEMPT_START_OUTCOME,
+  ENGINE_SESSION_MODE,
+} from "../../dispatch/session-contract.js";
 import {
   type AttemptHandle,
   type EngineSessionAdapter,
@@ -20,7 +25,10 @@ export interface RevisionLaneRetryResultV1 {
   participant_id: string;
   start_generation: number;
   attempt_key: string;
-  outcome: "accepted" | "failed" | "uncertain";
+  outcome:
+    | typeof PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED
+    | typeof PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED
+    | typeof PUBLIC_OPERATION_PARTICIPANT_START_PHASE.UNCERTAIN;
   private_evidence_ref: string | null;
   private_evidence_digest: string | null;
   observed_at: string;
@@ -108,15 +116,27 @@ export class RevisionLaneRetryRuntime {
         const producer =
           receipt.private_native_session_producer_receipt_digest ??
           receipt.private_process_lease_producer_receipt_digest;
-        if (!reference && !producer && ["prepared", "effect_in_progress"].includes(receipt.state))
+        if (
+          !reference &&
+          !producer &&
+          (receipt.state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.PREPARED ||
+            receipt.state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.EFFECT_IN_PROGRESS)
+        )
           continue;
-        if (!reference && !producer && receipt.state === "failed") {
+        if (
+          !reference &&
+          !producer &&
+          receipt.state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED
+        ) {
           const authority = readRevisionStartAuthority({
             reader: this.adapter.startAuthority,
             attemptKey: receipt.attempt_key,
             participant,
           });
-          if (authority?.outcome !== "proved-absent" || authority.native_session_id !== null)
+          if (
+            authority?.outcome !== ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT ||
+            authority.native_session_id !== null
+          )
             throw new Error("revision retry failed-lane absence proof changed");
           continue;
         }
@@ -136,7 +156,8 @@ export class RevisionLaneRetryRuntime {
           evidence.attempt_key !== receipt.attempt_key ||
           !authority ||
           authority.record_digest !== evidence.adapter_evidence_ref ||
-          (receipt.state === "failed" && authority.outcome !== "proved-absent")
+          (receipt.state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED &&
+            authority.outcome !== ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT)
         )
           throw new Error("revision retry private lane evidence changed");
         if (evidence.native_session_id) priorNativeSessions.add(evidence.native_session_id);
@@ -153,7 +174,7 @@ export class RevisionLaneRetryRuntime {
           attemptId: attemptKey,
           spawn: createSpawnOptionsProjection({
             ...binding.spawn,
-            sessionMode: "fresh",
+            sessionMode: ENGINE_SESSION_MODE.FRESH,
             rendered_prompt: `${binding.spawn.rendered_prompt.trimEnd()}\n\n${sharedPrompt}\n`,
           }),
           signal: controller.signal,
@@ -178,7 +199,7 @@ export class RevisionLaneRetryRuntime {
               startAuthority,
               priorNativeSessionIds: priorNativeSessions,
             });
-            const accepted = outcome === "accepted";
+            const accepted = outcome === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED;
             if (!accepted) await terminatePeers(participant.participant_id);
             const stored = startAuthority
               ? this.evidence.write({
@@ -191,7 +212,8 @@ export class RevisionLaneRetryRuntime {
                   adapter_evidence_ref: startAuthority.record_digest,
                   reconciliation_mode: participant.reconciliation_mode,
                   adapter_reference_utf8: startAuthority.evidence_ref,
-                  absence_proved: startAuthority.outcome === "proved-absent",
+                  absence_proved:
+                    startAuthority.outcome === ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT,
                   recorded_at: observedAt,
                 })
               : null;
@@ -227,7 +249,7 @@ export class RevisionLaneRetryRuntime {
               adapter_evidence_ref: authority.record_digest,
               reconciliation_mode: participant.reconciliation_mode,
               adapter_reference_utf8: authority.evidence_ref,
-              absence_proved: authority.outcome === "proved-absent",
+              absence_proved: authority.outcome === ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT,
               recorded_at: input.now(),
             })
           : null;
@@ -236,7 +258,9 @@ export class RevisionLaneRetryRuntime {
           start_generation: generation,
           attempt_key: attemptKey,
           outcome:
-            authority?.outcome === "proved-absent" ? ("failed" as const) : ("uncertain" as const),
+            authority?.outcome === ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT
+              ? PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED
+              : PUBLIC_OPERATION_PARTICIPANT_START_PHASE.UNCERTAIN,
           private_evidence_ref: stored?.ref ?? null,
           private_evidence_digest: stored?.digest ?? null,
           observed_at: input.now(),
@@ -246,12 +270,17 @@ export class RevisionLaneRetryRuntime {
     });
     try {
       const settled = await Promise.all(starts);
-      const allAccepted = settled.every(({ outcome }) => outcome === "accepted");
+      const allAccepted = settled.every(
+        ({ outcome }) => outcome === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED,
+      );
       if (allAccepted && settled.some((result) => !result.resume))
         throw new Error("accepted retry lane lost its resume binding");
       return settled.map(({ resume: _resume, ...result }) => ({
         ...result,
-        outcome: !allAccepted && result.outcome === "accepted" ? "uncertain" : result.outcome,
+        outcome:
+          !allAccepted && result.outcome === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED
+            ? PUBLIC_OPERATION_PARTICIPANT_START_PHASE.UNCERTAIN
+            : result.outcome,
       }));
     } finally {
       await Promise.all(

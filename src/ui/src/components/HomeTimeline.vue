@@ -107,7 +107,7 @@
               <article v-for="quote in item.quoteRefs" :key="`${item.id}-${quote.quoteOrder}-${quote.target.target_event_id}`" class="home-message-quote">
                 <header>
                   <strong>Quote {{ quote.quoteOrder }}</strong>
-                  <small>{{ quoteAuthor(quote.target.author_public_id) }}</small>
+                  <small>{{ quoteAuthor(quote.target) }}</small>
                 </header>
                 <p>{{ quote.target.preview_text }}</p>
                 <button type="button" class="home-button" @click="jumpToQuoteTarget(quote.target.target_event_id)">
@@ -144,7 +144,7 @@
               <article v-for="quote in item.quoteRefs" :key="`${item.id}-${quote.quoteOrder}-${quote.target.target_event_id}`" class="home-message-quote">
                 <header>
                   <strong>Quote {{ quote.quoteOrder }}</strong>
-                  <small>{{ quoteAuthor(quote.target.author_public_id) }}</small>
+                  <small>{{ quoteAuthor(quote.target) }}</small>
                 </header>
                 <p>{{ quote.target.preview_text }}</p>
                 <button type="button" class="home-button" @click="jumpToQuoteTarget(quote.target.target_event_id)">
@@ -221,10 +221,15 @@ import {
   describeHomeActivationLoading,
   describeHomeWelcomeLoading,
 } from "../conversation-home-loading.js";
+import { homeParticipantDisplayLabel } from "../conversation-home-participant-label.js";
 import { projectHomeTimeline } from "../conversation-home-projection.js";
 import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import type { HomeQuoteReference, HomeReactionSummary } from "../conversation-home-types.js";
+import type {
+  HomeQuoteProjection,
+  HomeQuoteReference,
+  HomeReactionSummary,
+} from "../conversation-home-types.js";
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
@@ -233,7 +238,9 @@ const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);
 const followLatest = ref(true);
 const showJump = ref(false);
-const rendered = computed(() => projectHomeTimeline(store.timeline?.items ?? []));
+const rendered = computed(() =>
+  projectHomeTimeline(store.timeline?.items ?? [], store.activeRevision?.participants ?? []),
+);
 const activationLoading = computed(() =>
   describeHomeActivationLoading({
     topic: store.activeSession?.active?.topic ?? store.activeSession?.root.topic ?? null,
@@ -342,8 +349,21 @@ function jumpToQuoteTarget(targetEventId: string): void {
   element.focus({ preventScroll: true });
 }
 
-const quoteAuthor = (authorPublicId: string) =>
-  authorPublicId === "human" ? "You" : authorPublicId;
+const quoteAuthor = (target: HomeQuoteProjection) => {
+  if (target.author_public_id === "human") return "You";
+  const visibleSource = rendered.value.find((item) =>
+    item.sourceEventIds.includes(target.target_event_id),
+  );
+  if (visibleSource) return visibleSource.title;
+  const participant = store.activeRevision?.participants.find(
+    (candidate) => candidate.participant_id === target.author_public_id,
+  );
+  return homeParticipantDisplayLabel({
+    participantId: target.author_public_id,
+    roleRef: participant?.role_ref,
+    engine: participant?.engine,
+  });
+};
 
 function trackScroll() {
   const element = scroller.value;

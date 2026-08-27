@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import {
+  CAPABILITY_MANIFEST_INPUT_TYPE,
+  CAPABILITY_MANIFEST_INPUT_TYPES,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { JsonScalar } from "../../actions/types.js";
 import { canonicalRelativePrefix } from "../permissions/scope.js";
 import {
@@ -158,9 +162,7 @@ function scalar(value: unknown, path: string): JsonScalar {
 export function validateInputDeclaration(value: CapabilityInputDeclarationV1, path: string): void {
   localId(value.input_id, `${path}.input_id`);
   text(value.label, `${path}.label`, { min: 1, max: 256 });
-  if (
-    !["string", "boolean", "integer", "enum", "project-path", "secret-handle"].includes(value.type)
-  )
+  if (!CAPABILITY_MANIFEST_INPUT_TYPES.some((candidate) => candidate === value.type))
     throw new CapabilityValidationError("invalid input type", `${path}.type`);
   if (typeof value.required !== "boolean")
     throw new CapabilityValidationError("required must be boolean", `${path}.required`);
@@ -185,7 +187,7 @@ export function validateInputDeclaration(value: CapabilityInputDeclarationV1, pa
         path,
       );
   };
-  if (value.type === "string") {
+  if (value.type === CAPABILITY_MANIFEST_INPUT_TYPE.STRING) {
     emptyShared();
     if (defaultValue !== null && typeof defaultValue !== "string")
       throw new CapabilityValidationError("string default has wrong type", `${path}.default_value`);
@@ -194,11 +196,11 @@ export function validateInputDeclaration(value: CapabilityInputDeclarationV1, pa
         "string default fails its pattern",
         `${path}.default_value`,
       );
-  } else if (value.type === "boolean") {
+  } else if (value.type === CAPABILITY_MANIFEST_INPUT_TYPE.BOOLEAN) {
     emptyShared();
     if (pattern !== null || (defaultValue !== null && typeof defaultValue !== "boolean"))
       throw new CapabilityValidationError("boolean input has non-canonical fields", path);
-  } else if (value.type === "integer") {
+  } else if (value.type === CAPABILITY_MANIFEST_INPUT_TYPE.INTEGER) {
     if (
       enumValues.length ||
       pattern !== null ||
@@ -213,7 +215,7 @@ export function validateInputDeclaration(value: CapabilityInputDeclarationV1, pa
         "integer default is outside bounds",
         `${path}.default_value`,
       );
-  } else if (value.type === "enum") {
+  } else if (value.type === CAPABILITY_MANIFEST_INPUT_TYPE.ENUM) {
     if (enumValues.length === 0 || min !== null || max !== null || pattern !== null)
       throw new CapabilityValidationError("enum input has non-canonical fields", path);
     if (
@@ -221,7 +223,7 @@ export function validateInputDeclaration(value: CapabilityInputDeclarationV1, pa
       (typeof defaultValue !== "string" || !enumValues.includes(defaultValue))
     )
       throw new CapabilityValidationError("enum default is not declared", `${path}.default_value`);
-  } else if (value.type === "project-path") {
+  } else if (value.type === CAPABILITY_MANIFEST_INPUT_TYPE.PROJECT_PATH) {
     emptyShared();
     if (pattern !== null || (defaultValue !== null && typeof defaultValue !== "string"))
       throw new CapabilityValidationError("project-path input has non-canonical fields", path);

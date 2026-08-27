@@ -1,8 +1,10 @@
 import type { Engine } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import {
   OWNED_PROCESS_TERMINAL_KIND,
   type OwnedProcessTerminalKind,
 } from "./owned-process-contract.js";
+import { ENGINE_SESSION_PROTOCOL } from "./session-contract.js";
 import type { EngineSessionAdapterOptions } from "./session-types.js";
 
 export interface EngineTerminalObservation {
@@ -28,18 +30,18 @@ export function observeSessionTerminal(
   engine: Engine,
   record: string,
 ): EngineTerminalObservation | undefined {
-  if (protocol === "bridge") return undefined;
+  if (protocol === ENGINE_SESSION_PROTOCOL.BRIDGE) return undefined;
   const parsed = parseJsonRecord(record.trim());
   if (!parsed) return undefined;
   if (
-    engine === "claude" &&
+    engine === AGENT_ENGINE.CLAUDE &&
     parsed.type === "result" &&
     parsed.subtype === "success" &&
     typeof parsed.session_id === "string"
   ) {
     return { kind: OWNED_PROCESS_TERMINAL_KIND.CLAUDE_RESULT_SUCCESS, authenticated: true };
   }
-  if (engine === "codex" && parsed.type === "turn.completed") {
+  if (engine === AGENT_ENGINE.CODEX && parsed.type === "turn.completed") {
     return { kind: OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED, authenticated: true };
   }
   return undefined;

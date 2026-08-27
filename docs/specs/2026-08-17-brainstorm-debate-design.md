@@ -633,7 +633,9 @@ Phase 1 requirements:
 - Direct request → agent/skill resolution → CLI execution → streamed response
 - Trace drawer: role, skills, engine, opaque public session reference/status, evidence
 - `vf ask` migrated to shared path (compatibility facade preserved)
-- `vf brainstorm` as alias → debate policy (stub, not full debate yet)
+- `vf brainstorm` as a compatibility facade over the debate policy. The shipped runtime now
+  completes the Phase 2 debate path; `test/commands-brainstorm.test.ts` and
+  `test/orchestrator/debate-policy.test.ts` cover the command and policy execution boundaries.
 
 ### Phase 2 — Orchestration Policies
 

@@ -1,6 +1,6 @@
 import { actionIdempotencyFileKey, actionIdempotencyKeyDigest } from "../../actions/idempotency.js";
 import { digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import { createBindingRecord, validateBindRequest } from "./bind.js";
 import { createHeadRecord, headIdentity, publicBinding } from "./helpers.js";
@@ -37,7 +37,7 @@ export function bindCliPrivateInputs(input: {
     if (existing.request_digest !== requestDigest)
       throw new CapabilityRuntimeError(
         "private-input idempotency key was already used for another request",
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     return existing.binding;
   }

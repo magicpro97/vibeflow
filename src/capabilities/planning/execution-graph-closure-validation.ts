@@ -1,23 +1,15 @@
+import { ACTION_EFFECT_CLASSES } from "../../actions/public-action-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import type { CapabilityActionPlanBindingV1 } from "../action-domain/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import type { CapabilityAdapterSetBindingV1 } from "./execution-types.js";
 import type { CapabilityAdapterPlanV1, CapabilityDurablePlanningGraphV1 } from "./types.js";
 
-const EFFECT_ORDER: readonly import("../../actions/types.js").ActionEffectClass[] = [
-  "pure-local-read",
-  "local-read-with-cache",
-  "network-read",
-  "process-probe",
-  "project-write",
-  "user-write",
-  "external-compensatable",
-  "external-irreversible",
-];
+const EFFECT_ORDER = ACTION_EFFECT_CLASSES;
 
 function fail(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 export function assertCapabilityGraphOuterClosure(graph: CapabilityDurablePlanningGraphV1): void {

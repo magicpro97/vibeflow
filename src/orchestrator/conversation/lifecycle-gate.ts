@@ -1,4 +1,8 @@
 import { TraceLifecycleConflictError } from "../trace/lifecycle-cas.js";
+import {
+  CONVERSATION_TRANSITION_LIFECYCLE,
+  type ConversationTransitionLifecycleV1,
+} from "./conversation-public-wire-contract.js";
 import { ConversationAuthorityClosedError } from "./lifecycle-gate-state.js";
 import { ConversationTerminalEmissionGate } from "./lifecycle-terminal-gate.js";
 export { ConversationAuthorityClosedError } from "./lifecycle-gate-state.js";
@@ -181,10 +185,10 @@ export class ConversationEmissionGate extends ConversationTerminalEmissionGate {
   prepareTransition(
     conversationId: string,
     operationId: string,
-    lifecycle: "ACTIVE" | "PAUSED",
+    lifecycle: ConversationTransitionLifecycleV1,
   ): Promise<void> {
     const entry = this.entries.get(conversationId);
-    const required = lifecycle === "PAUSED" ? "open" : "paused";
+    const required = lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED ? "open" : "paused";
     if (
       !entry ||
       entry.operationId !== operationId ||
@@ -196,7 +200,8 @@ export class ConversationEmissionGate extends ConversationTerminalEmissionGate {
         new ConversationAuthorityClosedError("conversation transition authority missing"),
       );
     }
-    const transitional = lifecycle === "PAUSED" ? "pausing" : "resuming";
+    const transitional =
+      lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED ? "pausing" : "resuming";
     entry.state = transitional;
     return entry.pending ?? Promise.resolve();
   }
@@ -204,7 +209,7 @@ export class ConversationEmissionGate extends ConversationTerminalEmissionGate {
   adoptTransition(
     conversationId: string,
     operationId: string,
-    lifecycle: "ACTIVE" | "PAUSED",
+    lifecycle: ConversationTransitionLifecycleV1,
   ): void {
     const entry = this.entries.get(conversationId);
     if (
@@ -215,7 +220,7 @@ export class ConversationEmissionGate extends ConversationTerminalEmissionGate {
       entry.state === "cancelled"
     )
       return;
-    const settled = lifecycle === "PAUSED" ? "paused" : "open";
+    const settled = lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED ? "paused" : "open";
     if (entry.state === "closing") entry.terminalPrevious = settled;
     else entry.state = settled;
     if (settled === "open") this.resolveWaiters(entry);
@@ -224,22 +229,28 @@ export class ConversationEmissionGate extends ConversationTerminalEmissionGate {
   rejectTransition(
     conversationId: string,
     operationId: string,
-    lifecycle: "ACTIVE" | "PAUSED",
+    lifecycle: ConversationTransitionLifecycleV1,
     error: unknown,
   ): void {
     const durable = error instanceof TraceLifecycleConflictError ? error.durableLifecycle : null;
-    const fallback = lifecycle === "PAUSED" ? "ACTIVE" : "PAUSED";
+    const fallback =
+      lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED
+        ? CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE
+        : CONVERSATION_TRANSITION_LIFECYCLE.PAUSED;
     this.adoptTransition(
       conversationId,
       operationId,
-      durable === "ACTIVE" || durable === "PAUSED" ? durable : fallback,
+      durable === CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE ||
+        durable === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED
+        ? durable
+        : fallback,
     );
   }
 
   transition(
     conversationId: string,
     operationId: string,
-    lifecycle: "ACTIVE" | "PAUSED",
+    lifecycle: ConversationTransitionLifecycleV1,
     append: () => Promise<void>,
   ): Promise<void> {
     const entry = this.entries.get(conversationId);

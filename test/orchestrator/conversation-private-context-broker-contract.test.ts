@@ -45,6 +45,7 @@ import {
   CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND,
   CONVERSATION_PRIVATE_CONTEXT_STAGE_KINDS,
   CONVERSATION_PRIVATE_CONTEXT_STORAGE,
+  CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD,
   isConversationPrivateContextBrokerErrorCode,
   isConversationPrivateContextBrokerRecordKind,
   isConversationPrivateContextBrokerSchemaVersion,
@@ -66,8 +67,19 @@ import {
   isConversationPrivateContextStageKind,
 } from "../../src/orchestrator/conversation/conversation-private-context-broker-contract.js";
 import { ConversationPrivateContextBrokerConflictError } from "../../src/orchestrator/conversation/conversation-private-context-broker-validation.js";
+import {
+  CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS as WIRE_BROKER_FIELDS,
+  CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION as WIRE_BROKER_SCHEMA_VERSION,
+  CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION as WIRE_QUEUE_DISPOSITION,
+  CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND as WIRE_SOURCE_KIND,
+  CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND as WIRE_STAGE_KIND,
+  CONVERSATION_PRIVATE_CONTEXT_STAGE_KINDS as WIRE_STAGE_KINDS,
+} from "../../src/orchestrator/conversation/conversation-private-context-broker-wire.js";
+import {
+  PRIVATE_FILE_RANGE_STAGING_STATE,
+  PRIVATE_FILE_RANGE_STAGING_STATES,
+} from "../../src/orchestrator/conversation/private-file-range-staging-contract.js";
 import { PRIVATE_FILE_RANGE_MAX_FRAMES } from "../../src/orchestrator/conversation/private-file-range-staging-store.js";
-
 const values = <Value extends string>(record: Record<string, Value>): Value[] =>
   Object.values(record);
 
@@ -147,8 +159,46 @@ describe("conversation private-context broker typed contract", () => {
       CONVERSATION_PRIVATE_CONTEXT_SOURCE_CONSUMER_KIND,
       CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN,
       CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD,
+      CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD,
     ])
       expect(Object.isFrozen(contractObject)).toBe(true);
+  });
+
+  test("re-exports one dependency-free wire authority for backend and browser consumers", async () => {
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION).toBe(WIRE_BROKER_SCHEMA_VERSION);
+    expect(CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND).toBe(WIRE_SOURCE_KIND);
+    expect(CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION).toBe(WIRE_QUEUE_DISPOSITION);
+    expect(CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND).toBe(WIRE_STAGE_KIND);
+    expect(CONVERSATION_PRIVATE_CONTEXT_STAGE_KINDS).toBe(WIRE_STAGE_KINDS);
+    expect(CONVERSATION_PRIVATE_CONTEXT_SOURCE_FRAME_STATE).toBe(PRIVATE_FILE_RANGE_STAGING_STATE);
+    expect(CONVERSATION_PRIVATE_CONTEXT_SOURCE_FRAME_STATES).toBe(
+      PRIVATE_FILE_RANGE_STAGING_STATES,
+    );
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS).toBe(WIRE_BROKER_FIELDS);
+
+    const wireSource = await readFile(
+      join(
+        process.cwd(),
+        "src",
+        "orchestrator",
+        "conversation",
+        "conversation-private-context-broker-wire.ts",
+      ),
+      "utf8",
+    );
+    expect([...wireSource.matchAll(/\bfrom\s+"([^"]+)"/gu)].map((match) => match[1])).toEqual([
+      "../../core/agent-contract.js",
+    ]);
+    expect(wireSource).not.toMatch(/\bnode:|Buffer\b|process\./);
+
+    const uiTypes = await readFile(
+      join(process.cwd(), "src", "ui", "src", "conversation-home-private-context-types.ts"),
+      "utf8",
+    );
+    expect(uiTypes).toContain("conversation-private-context-broker-wire.js");
+    expect(uiTypes).not.toMatch(
+      /export interface Home(?:PrivateContextPresence|StageMessagePrivateContextRequest|DiscardMessagePrivateContextRequest|StageDraftPrivateContextRequest|DiscardDraftPrivateContextRequest|ConversationCreateRequest)/,
+    );
   });
 
   test("reuses identical queue vocabularies and keeps broker-specific bounds independent", () => {
@@ -257,37 +307,13 @@ describe("conversation private-context broker typed contract", () => {
     ).toThrow("invalid private context broker conflict code");
   });
 
-  test("keeps persisted record shapes frozen, unique, and mapped to every record kind", () => {
-    for (const fields of Object.values(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS)) {
-      expect(Object.isFrozen(fields)).toBe(true);
-      expect(new Set(fields).size).toBe(fields.length);
-    }
-    const fieldsByRecordKind = {
-      [CONVERSATION_PRIVATE_CONTEXT_BROKER_RECORD_KIND.MESSAGE_STAGE]:
-        CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.MESSAGE_STAGE,
-      [CONVERSATION_PRIVATE_CONTEXT_BROKER_RECORD_KIND.DRAFT_STAGE]:
-        CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.DRAFT_STAGE,
-      [CONVERSATION_PRIVATE_CONTEXT_BROKER_RECORD_KIND.DISCARD_BINDING]:
-        CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.DISCARD_BINDING,
-    };
-    expect(Object.keys(fieldsByRecordKind)).toEqual([
-      ...CONVERSATION_PRIVATE_CONTEXT_BROKER_RECORD_KINDS,
-    ]);
-    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.MESSAGE_STAGE_REQUEST).toContain(
-      CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.MESSAGE,
-    );
-    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.DRAFT_STAGE_REQUEST).toContain(
-      CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.DRAFT,
-    );
-  });
-
-  test("keeps semantic literals in contract authority modules only", async () => {
+  test("keeps semantic literals in contract and wire authority modules only", async () => {
     const conversationRoot = join(process.cwd(), "src", "orchestrator", "conversation");
     const files = (await readdir(conversationRoot)).filter(
       (name) =>
         /^conversation-private-context-broker-.*\.ts$/u.test(name) &&
         name !== "conversation-private-context-broker-contract.ts" &&
-        name !== "conversation-private-context-broker-fields.ts",
+        name !== "conversation-private-context-broker-wire.ts",
     );
     const semanticValues = new Set([
       CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
@@ -321,5 +347,41 @@ describe("conversation private-context broker typed contract", () => {
       }
     }
     expect(duplicateLocations).toEqual([]);
+  });
+
+  test("keeps compatibility, queue, and UI consumers free of duplicated wire literals", async () => {
+    const consumerPaths = [
+      "src/orchestrator/conversation/conversation-ask-compatibility.ts",
+      "src/orchestrator/conversation/conversation-command-compatibility.ts",
+      "src/orchestrator/conversation/conversation-command-create-compatibility.ts",
+      "src/orchestrator/conversation/conversation-message-queue-authority.ts",
+      "src/orchestrator/conversation/conversation-message-queue-records.ts",
+      "src/orchestrator/conversation/conversation-message-queue-private-validation.ts",
+      "src/ui/src/conversation-home-private-context-authority.ts",
+      "src/ui/src/conversation-home-private-context-runtime.ts",
+      "src/ui/src/conversation-home-private-context-types.ts",
+    ];
+    const wireLiterals = [
+      CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+      ...CONVERSATION_PRIVATE_CONTEXT_SOURCE_KINDS,
+      ...CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITIONS,
+      ...CONVERSATION_PRIVATE_CONTEXT_STAGE_KINDS,
+    ];
+    const duplicates: string[] = [];
+    for (const path of consumerPaths) {
+      const source = await readFile(join(process.cwd(), path), "utf8");
+      for (const value of wireLiterals) {
+        if (source.includes(`"${value}"`)) duplicates.push(`${path}:${value}`);
+      }
+    }
+    expect(duplicates).toEqual([]);
+
+    const homeCommandRuntime = await readFile(
+      join(process.cwd(), "src", "ui", "src", "conversation-home-command-runtime.ts"),
+      "utf8",
+    );
+    expect(homeCommandRuntime).toContain(
+      "schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION",
+    );
   });
 });

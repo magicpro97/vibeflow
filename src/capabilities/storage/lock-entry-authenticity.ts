@@ -1,3 +1,4 @@
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type { CapabilityLockEntryV1 } from "../wire/lock.js";
 import { CapabilityValidationError, digest, exactKeys, timestamp } from "../wire/primitives.js";
@@ -55,10 +56,13 @@ export function validateLockEntryAuthenticity(entry: CapabilityLockEntryV1): voi
     binding.manifest_digest !== entry.manifest_digest
   )
     throw new CapabilityValidationError("authenticity binding does not match lock entry", path);
-  if ((entry.pin.source.kind === "registry") !== (binding.registry_signature !== null))
+  if (
+    (entry.pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY) !==
+    (binding.registry_signature !== null)
+  )
     throw new CapabilityValidationError("registry signature nullability mismatch", path);
   if (
-    entry.pin.source.kind === "registry" &&
+    entry.pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY &&
     binding.registry_signature?.envelope_digest !== entry.pin.source.signature_envelope_digest
   )
     throw new CapabilityValidationError("registry envelope digest differs from pin", path);

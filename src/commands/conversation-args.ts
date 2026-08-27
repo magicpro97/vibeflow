@@ -13,6 +13,12 @@ import {
   classifyConversationResult,
   conversationJsonErrorCode,
 } from "../orchestrator/conversation/conversation-command-exit.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "../orchestrator/conversation/conversation-command-result-contract.js";
+import {
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_TERMINAL_LIFECYCLES,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import type {
   OrchestrateLibrary,
   PlanLibrary,
@@ -78,8 +84,11 @@ interface ProductionLibraryDeps {
   ) => Promise<VerifyReport | { gates: PolicyVerifyReport } | PolicyVerifyReport>;
 }
 
-const VALID_ENGINES = new Set<string>(ENGINES);
 const VALUE_FLAGS = new Set(["policy", "resume", "max-rounds"]);
+
+function isConversationEngine(value: string): value is Engine {
+  return ENGINES.some((engine) => engine === value);
+}
 
 function parseTokenValue(args: string[], index: number): [string | boolean, number] {
   const current = args[index] as string;
@@ -134,7 +143,7 @@ export function parseParticipantSpec(spec: string): ConversationCreateParticipan
   const engine = (colon >= 0 ? rest.slice(0, colon) : rest).trim();
   const model = (colon >= 0 ? rest.slice(colon + 1) : "").trim();
   if (!roleRef) throw new Error(`invalid participant "${spec}"`);
-  if (!VALID_ENGINES.has(engine)) throw new Error(`unsupported engine "${engine}"`);
+  if (!isConversationEngine(engine)) throw new Error(`unsupported engine "${engine}"`);
   return {
     role_ref: roleRef,
     engine,
@@ -170,13 +179,13 @@ const readBriefRaw = (base: string): string | null => {
 const sidecarPlanPath = (base: string, revisionId: string): string =>
   join(base, ".vibeflow", "plans", `${revisionId}.md`);
 const lifecycleStatus = (lifecycle: string): ConversationExecutionRecord["status"] =>
-  lifecycle === "COMPLETED"
-    ? "completed"
-    : lifecycle === "STOPPED"
-      ? "stopped"
-      : lifecycle === "ABORTED"
-        ? "aborted"
-        : "failed";
+  lifecycle === CONVERSATION_LIFECYCLE.COMPLETED
+    ? CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED
+    : lifecycle === CONVERSATION_LIFECYCLE.STOPPED
+      ? CONVERSATION_COMMAND_RESULT_STATUS.STOPPED
+      : lifecycle === CONVERSATION_LIFECYCLE.ABORTED
+        ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+        : CONVERSATION_COMMAND_RESULT_STATUS.FAILED;
 
 const runVerifyReport = async (
   base: string,
@@ -273,7 +282,7 @@ function subscribeOutput(
     if (event.seq <= lastSeq) return;
     lastSeq = event.seq;
     events.push(event);
-    if (event.event.type !== "agent_response_delta") return;
+    if (event.event.type !== CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) return;
     const delta = String(event.event.payload.content_delta ?? "");
     if (!delta) return;
     output += delta;
@@ -332,7 +341,7 @@ export async function executeConversationMessage(
     while (true) {
       const snapshot = await service.snapshot(targetConversationId);
       if (!snapshot) throw new Error("conversation not found");
-      if (["COMPLETED", "FAILED", "ABORTED", "STOPPED"].includes(snapshot.lifecycle)) {
+      if (CONVERSATION_TERMINAL_LIFECYCLES.some((value) => value === snapshot.lifecycle)) {
         await stream.replayReady;
         return {
           conversationId: targetConversationId,

@@ -1,3 +1,4 @@
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type {
   AuthorityEpochEventV1,
@@ -31,7 +32,7 @@ export const policyAuthorityFrameDigest = (value: PolicyAuthorityFrameV1): strin
   digestV1("VF-POLICY-AUTHORITY-FRAME\0v1\0", without(value, "frame_digest"));
 
 export function grantStateDigest(
-  scope: "project" | "user",
+  scope: CapabilityScope,
   scopeIdentityDigest: string,
   headFrameDigest: string | null,
   latest: ReadonlyMap<string, GrantFrameV1>,
@@ -48,7 +49,7 @@ export function grantStateDigest(
 }
 
 export function secretRevocationStateDigest(
-  scope: "project" | "user",
+  scope: CapabilityScope,
   scopeIdentityDigest: string,
   headFrameDigest: string | null,
 ): string {

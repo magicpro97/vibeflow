@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 
 const MAX_BYTES = 16 * 1024;
@@ -39,7 +40,9 @@ export class ConversationActionCursorError extends Error {
 
 export class StaleConversationActionCursorError extends Error {
   constructor(
-    readonly code: "stale_pending_proposal_cursor" | "stale_action_projection_cursor",
+    readonly code:
+      | typeof PUBLIC_ERROR_CODE.STALE_PENDING_PROPOSAL_CURSOR
+      | typeof PUBLIC_ERROR_CODE.STALE_ACTION_PROJECTION_CURSOR,
     readonly restart_cursor: string,
     readonly watermark: string,
   ) {
@@ -184,7 +187,9 @@ export class ConversationActionCursorCodec {
     if (stale) {
       const pending = current.kind === "pending-actions";
       throw new StaleConversationActionCursorError(
-        pending ? "stale_pending_proposal_cursor" : "stale_action_projection_cursor",
+        pending
+          ? PUBLIC_ERROR_CODE.STALE_PENDING_PROPOSAL_CURSOR
+          : PUBLIC_ERROR_CODE.STALE_ACTION_PROJECTION_CURSOR,
         this.encode({ ...current, last: null }),
         pending ? current.authority_watermark : current.proposal_set_watermark,
       );

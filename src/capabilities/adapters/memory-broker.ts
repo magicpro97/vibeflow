@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
-import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import { CAPABILITY_MANIFEST_COMPONENT_TYPE } from "../../actions/capability-manifest-vocabulary-contract.js";
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import type { ActionPlanningMode, PrivateActionRootLocatorV1 } from "../../actions/types.js";
 import { digestV1Bytes } from "../../durability/canonical.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
+import {
+  CAPABILITY_HEALTH_OUTCOME,
+  CAPABILITY_OPERATION_RECOVERY_PHASE,
+  type CapabilityOperationRecoveryPhaseV1,
+} from "../wire/operation-state-contract.js";
 import {
   privateEffectBinding,
   privateEffectPayloadDigest,
@@ -57,11 +64,12 @@ export class InMemoryCapabilityEffectBrokerV1 implements CapabilityEffectBrokerV
     const postimage =
       input.operation === "remove" ? null : input.operation === "claim" ? preimage : desired;
     const kind =
-      component.type === "skill" || component.type === "role"
+      component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL ||
+      component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE
         ? ("file" as const)
-        : component.type === "mcp" ||
-            component.type === "hook" ||
-            component.type === "engine-setting"
+        : component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP ||
+            component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK ||
+            component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.ENGINE_SETTING
           ? ("config-key" as const)
           : ("external-effect" as const);
     const preimageBytes = preimage === null ? null : (this.#projectionBytes.get(preimage) ?? null);
@@ -105,8 +113,11 @@ export class InMemoryCapabilityEffectBrokerV1 implements CapabilityEffectBrokerV
 
   prepareRemoval(
     resource: CapabilityOwnedResourceV1,
-    _persistence?: "transient" | "durable",
-    actionRootLocator?: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    _persistence?: ActionPlanningMode,
+    actionRootLocator?: Exclude<
+      PrivateActionRootLocatorV1,
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+    >,
   ) {
     if (!actionRootLocator) throw new Error("memory removal requires its logical action root");
     const observed = this.inspect(resource).content_sha256;
@@ -146,8 +157,11 @@ export class InMemoryCapabilityEffectBrokerV1 implements CapabilityEffectBrokerV
 
   retainPrivateDescriptor(
     descriptor: CapabilityAdapterPrivateDescriptorV1,
-    _persistence: "transient" | "durable",
-    actionRootLocator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    _persistence: ActionPlanningMode,
+    actionRootLocator: Exclude<
+      PrivateActionRootLocatorV1,
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+    >,
   ): CapabilityPrivateEffectBindingV1 {
     const validated = validateAdapterPrivateDescriptor(descriptor);
     const prior = this.#descriptors.get(validated.descriptor_digest);
@@ -229,7 +243,7 @@ export class InMemoryCapabilityEffectBrokerV1 implements CapabilityEffectBrokerV
   reconcile(
     descriptor: CapabilityEffectDescriptorV1,
     privatePayload: CapabilityPrivateEffectPayloadV1,
-    direction: "forward" | "rollback",
+    direction: CapabilityOperationRecoveryPhaseV1,
   ): CapabilityProjectionObservationV1 {
     this.assertPrivatePayload(descriptor, privatePayload);
     const current = this.#values.get(descriptor.resource.ownership_key) ?? null;
@@ -237,7 +251,8 @@ export class InMemoryCapabilityEffectBrokerV1 implements CapabilityEffectBrokerV
     const postimage = descriptor.resource.expected_postimage_sha256;
     if (current !== preimage && current !== postimage)
       throw new Error("memory repair encountered an unapproved state");
-    const desired = direction === "forward" ? postimage : preimage;
+    const desired =
+      direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? postimage : preimage;
     if (desired === null) this.#values.delete(descriptor.resource.ownership_key);
     else this.#values.set(descriptor.resource.ownership_key, desired);
     return this.inspect(descriptor.resource);
@@ -253,7 +268,7 @@ export class InMemoryCapabilityEffectBrokerV1 implements CapabilityEffectBrokerV
     const ready = resources.every(
       (resource) => resource.observed_content_sha256 === resource.expected_postimage_sha256,
     );
-    const outcome = ready ? ("ready" as const) : ("failed" as const);
+    const outcome = ready ? CAPABILITY_HEALTH_OUTCOME.READY : CAPABILITY_HEALTH_OUTCOME.FAILED;
     const evidenceDraft = {
       schema_version: "1.0" as const,
       evidence_schema_id: "vf.adapter-health-memory-test/1" as const,

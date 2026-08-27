@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ACTION_OPERATION_STATE } from "../../src/actions/protocol-contract.js";
 import {
   CapabilityFabricServiceV1,
   CapabilityRuntimeError,
@@ -20,7 +21,12 @@ import {
   projectCapabilityPaths,
   readCapabilityWal,
 } from "../../src/capabilities/storage/index.js";
-import type { CapabilityWalPayloadV1 } from "../../src/capabilities/wire/operation.js";
+import {
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_WAL_OPERATION_TRANSITION_ORIGIN,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityWalPayloadV1,
+} from "../../src/capabilities/wire/operation.js";
 import {
   resolvedRolePackage,
   retainRuntimePackageCache,
@@ -203,9 +209,9 @@ describe("Capability operation restart integrity", () => {
     expect(() => fx.service.execute({ graph, authorization })).toThrow(/crash/);
     const operationId = fx.service.operationId(graph, authorization);
     appendPayload(fx, operationId, {
-      kind: "operation-transition",
-      from: "created",
-      to: "committing",
+      kind: CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION,
+      from: CAPABILITY_WAL_OPERATION_TRANSITION_ORIGIN.CREATED,
+      to: ACTION_OPERATION_STATE.COMMITTING,
       reason_code: null,
     });
     const laterPlan = graph.plan.adapter_plans[1];
@@ -401,6 +407,84 @@ describe("Capability operation restart integrity", () => {
         /single unresolved frontier|unknown approved plan step|operation identity|receipt bytes/i,
       );
     }
+  });
+
+  test("validates full WAL closure before prepared recovery can call the broker", () => {
+    const fx = fixture();
+    const graph = planFor(fx);
+    fx.service.fault = (point) => {
+      if (point === "after-header") throw new CapabilityRuntimeError("crash", "fault");
+    };
+    expect(() => fx.service.execute({ graph, authorization })).toThrow(/crash/);
+    fx.service.fault = null;
+    const operationId = fx.service.operationId(graph, authorization);
+    appendPayload(fx, operationId, {
+      kind: "operation-transition",
+      from: "created",
+      to: "committing",
+      reason_code: null,
+    });
+    const adapterPlan = graph.plan.adapter_plans[0];
+    const step = adapterPlan?.steps[0];
+    if (!adapterPlan || !step) throw new Error("approved adapter step is absent");
+    const validReceipt = createReceipt({
+      operation_id: operationId,
+      plan: adapterPlan,
+      step,
+      state: CAPABILITY_ADAPTER_RECEIPT_STATE.PREPARED,
+      prepared_at: graph.plan.created_at,
+      observed_at: null,
+    });
+    const foreignDraft = {
+      ...validReceipt,
+      plan_id: `vf-adapter-plan-${"8".repeat(64)}`,
+      receipt_digest: "",
+    };
+    const foreignReceipt = {
+      ...foreignDraft,
+      receipt_digest: adapterReceiptDigest(foreignDraft),
+    };
+    appendPayload(fx, operationId, {
+      kind: CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP,
+      receipt: foreignReceipt,
+    });
+    appendPayload(fx, operationId, fakeInventory());
+
+    let brokerCalls = 0;
+    const resolvePrivatePayload = fx.broker.resolvePrivatePayload.bind(fx.broker);
+    fx.broker.resolvePrivatePayload = (...args: Parameters<typeof resolvePrivatePayload>) => {
+      brokerCalls += 1;
+      return resolvePrivatePayload(...args);
+    };
+    const inspect = fx.broker.inspect.bind(fx.broker);
+    fx.broker.inspect = (...args: Parameters<typeof inspect>) => {
+      brokerCalls += 1;
+      return inspect(...args);
+    };
+    const apply = fx.broker.apply.bind(fx.broker);
+    fx.broker.apply = (...args: Parameters<typeof apply>) => {
+      brokerCalls += 1;
+      return apply(...args);
+    };
+    const rollback = fx.broker.rollback.bind(fx.broker);
+    fx.broker.rollback = (...args: Parameters<typeof rollback>) => {
+      brokerCalls += 1;
+      return rollback(...args);
+    };
+    const reconcile = fx.broker.reconcile.bind(fx.broker);
+    fx.broker.reconcile = (...args: Parameters<typeof reconcile>) => {
+      brokerCalls += 1;
+      return reconcile(...args);
+    };
+    const health = fx.broker.health.bind(fx.broker);
+    fx.broker.health = (...args: Parameters<typeof health>) => {
+      brokerCalls += 1;
+      return health(...args);
+    };
+
+    expect(() => fx.service.recover(operationId)).toThrow(/dense execution order/i);
+    expect(brokerCalls).toBe(0);
+    expect(fx.broker.resources()).toEqual([]);
   });
 
   test("rejects inventory preparation before receipts and required health are terminal", () => {

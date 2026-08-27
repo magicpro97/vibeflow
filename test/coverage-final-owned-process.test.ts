@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  OWNED_CLI_IDENTITY_STATE,
   OWNED_PROCESS_EXIT_CODE,
   OWNED_PROCESS_PRESENCE_KIND,
   OWNED_PROCESS_PROOF_STRENGTH,
@@ -44,6 +45,26 @@ import { makeAsyncSpawner } from "../src/dispatch/spawners.js";
 
 const ABSENT = { kind: OWNED_PROCESS_PRESENCE_KIND.ABSENT } as const;
 const UNKNOWN = { kind: OWNED_PROCESS_PRESENCE_KIND.UNKNOWN } as const;
+const LINUX_BOOT_ID = "123e4567-e89b-12d3-a456-426614174000";
+const linuxIdentity = (ticks: number): string => `linux:${LINUX_BOOT_ID}:${ticks}`;
+const SYNTHETIC_IDENTITY = Object.freeze({
+  OWNER: "freebsd:fixture-owner",
+  SUPERVISOR: "freebsd:fixture-supervisor",
+  CLI: "freebsd:fixture-cli",
+  REUSED_OWNER: "freebsd:fixture-reused-owner",
+  REUSED_SUPERVISOR: "freebsd:fixture-reused-supervisor",
+} as const);
+const WINDOWS_TICKS = Object.freeze({
+  OWNER: "638602314960000010",
+  SUPERVISOR: "638602314960000020",
+  CLI: "638602314960000021",
+  REUSED: "638602314960000099",
+} as const);
+const WINDOWS_IDENTITY = Object.freeze({
+  OWNER: `win32:${WINDOWS_TICKS.OWNER}`,
+  SUPERVISOR: `win32:${WINDOWS_TICKS.SUPERVISOR}`,
+  CLI: `win32:${WINDOWS_TICKS.CLI}`,
+} as const);
 
 function observation(pid: number, identity: string, pgid = pid): OwnedProcessObservation {
   return { pid, identity, pgid, sid: null };
@@ -63,6 +84,7 @@ function record(
 ): OwnedAttemptProcessRecordV1 {
   const now = new Date().toISOString();
   const running = state === OWNED_PROCESS_STATE.RUNNING;
+  const windows = overrides.platform === "win32";
   return buildOwnedProcessRecord({
     schema_version: "1.0",
     attempt_id: attemptId,
@@ -73,11 +95,15 @@ function record(
     quiescence_scope: OWNED_PROCESS_QUIESCENCE_SCOPE.POSIX_PROCESS_GROUP,
     proof_strength: OWNED_PROCESS_PROOF_STRENGTH.COOPERATIVE_LINEAGE,
     owner_pid: 10,
-    owner_identity: "owner",
+    owner_identity: windows ? WINDOWS_IDENTITY.OWNER : SYNTHETIC_IDENTITY.OWNER,
     supervisor_pid: running ? 20 : null,
-    supervisor_identity: running ? "supervisor" : null,
+    supervisor_identity: running
+      ? windows
+        ? WINDOWS_IDENTITY.SUPERVISOR
+        : SYNTHETIC_IDENTITY.SUPERVISOR
+      : null,
     cli_pid: running ? 21 : null,
-    cli_identity: running ? "cli" : null,
+    cli_identity: running ? (windows ? WINDOWS_IDENTITY.CLI : SYNTHETIC_IDENTITY.CLI) : null,
     terminal_kind: null,
     state,
     release_reason: state === OWNED_PROCESS_STATE.UNCERTAIN ? "fixture uncertainty" : null,
@@ -151,16 +177,16 @@ describe("final owned-process health coverage", () => {
     expect(
       healthReason(
         record("uncertain-owner-mismatch", OWNED_PROCESS_STATE.UNCERTAIN),
-        fakePlatform(new Map([[10, present(10, "reused-owner")]])),
+        fakePlatform(new Map([[10, present(10, SYNTHETIC_IDENTITY.REUSED_OWNER)]])),
       ),
     ).toBe("owner identity mismatch");
 
     const uncertainWithSupervisor = (attemptId: string) =>
       record(attemptId, OWNED_PROCESS_STATE.UNCERTAIN, {
         supervisor_pid: 20,
-        supervisor_identity: "supervisor",
+        supervisor_identity: SYNTHETIC_IDENTITY.SUPERVISOR,
         cli_pid: 21,
-        cli_identity: "cli",
+        cli_identity: SYNTHETIC_IDENTITY.CLI,
       });
     expect(
       healthReason(
@@ -171,13 +197,13 @@ describe("final owned-process health coverage", () => {
     expect(
       healthReason(
         uncertainWithSupervisor("uncertain-supervisor-mismatch"),
-        fakePlatform(new Map([[20, present(20, "reused-supervisor")]])),
+        fakePlatform(new Map([[20, present(20, SYNTHETIC_IDENTITY.REUSED_SUPERVISOR)]])),
       ),
     ).toBe("supervisor identity mismatch");
     expect(
       healthReason(
         uncertainWithSupervisor("uncertain-proved-orphan"),
-        fakePlatform(new Map([[20, present(20, "supervisor")]])),
+        fakePlatform(new Map([[20, present(20, SYNTHETIC_IDENTITY.SUPERVISOR)]])),
       ),
     ).toBe("runtime already uncertain");
     expect(
@@ -196,7 +222,7 @@ describe("final owned-process health coverage", () => {
     expect(
       healthReason(
         record("running-owner-mismatch", OWNED_PROCESS_STATE.RUNNING),
-        fakePlatform(new Map([[10, present(10, "reused-owner")]])),
+        fakePlatform(new Map([[10, present(10, SYNTHETIC_IDENTITY.REUSED_OWNER)]])),
       ),
     ).toBe("owner identity mismatch");
     expect(
@@ -212,7 +238,7 @@ describe("final owned-process health coverage", () => {
       ),
     ).toBe("supervisor state unknown");
 
-    const racedAway = fakePlatform(new Map([[20, present(20, "supervisor")]]), {
+    const racedAway = fakePlatform(new Map([[20, present(20, SYNTHETIC_IDENTITY.SUPERVISOR)]]), {
       observe: () => null,
       proveQuiescent: () => false,
     });
@@ -278,7 +304,7 @@ describe("final owned-process platform and reaper coverage", () => {
     let identities = 0;
     const platform = createOwnedProcessPlatform({
       platform: "linux",
-      processStartIdentity: () => (identities++ === 0 ? "linux:boot:41" : null),
+      processStartIdentity: () => (identities++ === 0 ? linuxIdentity(41) : null),
       execFileSync: (() => {
         throw new Error("injected ps failure");
       }) as never,
@@ -290,7 +316,7 @@ describe("final owned-process platform and reaper coverage", () => {
     identities = 0;
     const unknown = createOwnedProcessPlatform({
       platform: "linux",
-      processStartIdentity: () => (identities++ === 0 ? "linux:boot:42" : null),
+      processStartIdentity: () => (identities++ === 0 ? linuxIdentity(42) : null),
       execFileSync: (() => {
         throw new Error("injected ps failure");
       }) as never,
@@ -308,7 +334,7 @@ describe("final owned-process platform and reaper coverage", () => {
     const windows = createOwnedProcessPlatform({
       platform: "win32",
       windowsSystemRoot: "C:\\Windows",
-      execFileSync: (() => "actual-creation") as never,
+      execFileSync: (() => WINDOWS_TICKS.REUSED) as never,
     });
     expect(() =>
       windows.terminateExactCliFallback?.(
@@ -318,25 +344,25 @@ describe("final owned-process platform and reaper coverage", () => {
           quiescence_scope: OWNED_PROCESS_QUIESCENCE_SCOPE.WINDOWS_JOB,
           proof_strength: OWNED_PROCESS_PROOF_STRENGTH.KERNEL_CONTAINED,
         }),
-        observation(21, "win32:expected", 21),
+        observation(21, WINDOWS_IDENTITY.CLI, 21),
         false,
       ),
     ).toThrow("owned Windows CLI identity changed");
 
     const posix = createOwnedProcessPlatform({
       platform: "linux",
-      processStartIdentity: (pid) => `linux:boot:${pid}`,
+      processStartIdentity: (pid) => linuxIdentity(pid),
       execFileSync: ((_command: string, args: string[]) =>
         args.includes("pgid=") ? "99" : "") as never,
       kill: (() => true) as typeof process.kill,
     });
-    expect(() => posix.terminateExactTree(observation(20, "linux:boot:20", 20), false)).toThrow(
+    expect(() => posix.terminateExactTree(observation(20, linuxIdentity(20), 20), false)).toThrow(
       "owned POSIX root identity changed",
     );
     expect(() =>
       posix.terminateExactCliFallback?.(
         record("posix-cli-drift", OWNED_PROCESS_STATE.RUNNING),
-        observation(21, "linux:boot:21", 20),
+        observation(21, linuxIdentity(21), 20),
         false,
       ),
     ).toThrow("owned POSIX CLI identity changed");
@@ -376,8 +402,8 @@ describe("final owned-process platform and reaper coverage", () => {
     const hints: Array<Record<string, boolean | undefined>> = [{}, {}];
     const platform = fakePlatform(
       new Map([
-        [20, present(20, "supervisor")],
-        [21, present(21, "cli", 20)],
+        [20, present(20, SYNTHETIC_IDENTITY.SUPERVISOR)],
+        [21, present(21, SYNTHETIC_IDENTITY.CLI, 20)],
       ]),
       {
         terminateExactTree: () => {
@@ -493,7 +519,17 @@ describe("final owned-process launch and status coverage", () => {
             spawn: (() => child) as never,
             readFileSync: (() =>
               JSON.stringify(
-                receipts++ === 0 ? { supervisor_pid: 900 } : { cli_pid: 901 },
+                receipts++ === 0
+                  ? {
+                      supervisor_pid: 900,
+                      containment: OWNED_PROCESS_QUIESCENCE_SCOPE.POSIX_PROCESS_GROUP,
+                    }
+                  : {
+                      cli_pid: 901,
+                      cli_identity: SYNTHETIC_IDENTITY.CLI,
+                      cli_identity_state: OWNED_CLI_IDENTITY_STATE.AVAILABLE,
+                      cli_pgid: 900,
+                    },
               )) as never,
           },
         ),
@@ -560,10 +596,13 @@ describe("final owned-process launch and status coverage", () => {
 
   test("record store lists only open process records", () => {
     const root = mkdtempSync(join(tmpdir(), "vf-final-owned-open-records-"));
-    const platform = fakePlatform(new Map([[process.pid, present(process.pid, "owner")]]), {
-      observe: (pid) => (pid === process.pid ? observation(pid, "owner") : null),
-      proveQuiescent: () => true,
-    });
+    const platform = fakePlatform(
+      new Map([[process.pid, present(process.pid, SYNTHETIC_IDENTITY.OWNER)]]),
+      {
+        observe: (pid) => (pid === process.pid ? observation(pid, SYNTHETIC_IDENTITY.OWNER) : null),
+        proveQuiescent: () => true,
+      },
+    );
     try {
       const store = new OwnedProcessRecordStore(root);
       store.reserve("open-record", "codex", platform);

@@ -6,9 +6,10 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { Skill } from "../core.js";
 import { c } from "../core.js";
+import { SKILL_FRESHNESS, type SkillFreshness } from "../core/skill-contract.js";
 import { out } from "../logbus.js";
 
-export type AnchorStatus = "fresh" | "stale" | "unknown";
+export type AnchorStatus = SkillFreshness;
 
 export interface AnchorResult {
   status: AnchorStatus;
@@ -111,19 +112,19 @@ export function checkAnchors(
   const d = { ...DEFAULT_DEPS, ...deps };
   for (const [relPath, declaredHash] of Object.entries(anchors)) {
     const resolved = resolveAnchorPath(relPath, repo, d.existsSync, d.realpath);
-    if (!resolved.ok) return { status: "stale", reason: resolved.reason };
+    if (!resolved.ok) return { status: SKILL_FRESHNESS.STALE, reason: resolved.reason };
     if (!d.existsSync(resolved.abs))
-      return { status: "stale", reason: `missing target: ${relPath}` };
+      return { status: SKILL_FRESHNESS.STALE, reason: `missing target: ${relPath}` };
     try {
       const content = d.readFileRaw(resolved.abs);
       const actual = createHash("sha256").update(content).digest("hex");
       if (actual !== declaredHash)
-        return { status: "stale", reason: `content changed: ${relPath}` };
+        return { status: SKILL_FRESHNESS.STALE, reason: `content changed: ${relPath}` };
     } catch {
-      return { status: "stale", reason: `unreadable target: ${relPath}` };
+      return { status: SKILL_FRESHNESS.STALE, reason: `unreadable target: ${relPath}` };
     }
   }
-  return { status: "fresh" };
+  return { status: SKILL_FRESHNESS.FRESH };
 }
 
 /** Set skill.freshness / freshnessReason from sourceAnchors. */
@@ -137,7 +138,7 @@ export function enrichFreshness(
     skill.freshness = result.status;
     skill.freshnessReason = result.reason;
   } else if (skill.freshnessReason === undefined) {
-    skill.freshness = "unknown";
+    skill.freshness = SKILL_FRESHNESS.UNKNOWN;
   }
 }
 
@@ -146,10 +147,10 @@ export function verifyFreshnessCommand(found: Skill[], repo: string): number {
   let staleCount = 0;
   for (const skill of found) {
     if (skill.freshness === undefined) enrichFreshness(skill, repo);
-    const f = skill.freshness ?? "unknown";
-    if (f === "fresh") {
+    const f = skill.freshness ?? SKILL_FRESHNESS.UNKNOWN;
+    if (f === SKILL_FRESHNESS.FRESH) {
       out("vf", c.green(`✔ ${skill.name}: fresh`));
-    } else if (f === "stale") {
+    } else if (f === SKILL_FRESHNESS.STALE) {
       staleCount++;
       out("vf", c.red(`✗ ${skill.name}: stale — ${skill.freshnessReason ?? "unknown reason"}`));
     } else {

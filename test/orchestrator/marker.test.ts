@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -181,6 +181,33 @@ describe("readMarker", () => {
     const file = join(dir(), `${u}.json`);
     writeFileSync(file, "not json");
     expect(readMarker(u)).toBeNull();
+  });
+
+  test("fails closed when a marker path cannot be read as a file", async () => {
+    const { readMarker } = await loadMarker();
+    const u = unit("read-directory");
+    const file = join(dir(), `${u}.json`);
+    mkdirSync(file);
+    try {
+      expect(readMarker(u)).toBeNull();
+    } finally {
+      rmSync(file, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects invalid persisted status in read, list, and update flows", async () => {
+    const { createMarker, listMarkers, readMarker, updateMarker } = await loadMarker();
+    const u = unit("read-invalid-status");
+    createMarker(u);
+    const file = join(dir(), `${u}.json`);
+    const persisted = JSON.parse(readFileSync(file, "utf8"));
+    persisted.status = "not-a-marker-status";
+    writeFileSync(file, JSON.stringify(persisted));
+
+    expect(readMarker(u)).toBeNull();
+    expect(listMarkers().some((marker) => marker.unit === u)).toBe(false);
+    expect(updateMarker(u, { confidence: 0.5 })).toBeNull();
+    expect(JSON.parse(readFileSync(file, "utf8")).status).toBe("not-a-marker-status");
   });
 
   test("listMarkers: corrupt marker file is skipped (line 98 catch)", async () => {

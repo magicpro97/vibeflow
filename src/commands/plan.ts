@@ -13,6 +13,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { readSettings } from "../settings.js";
@@ -186,7 +187,7 @@ export async function plan(
     });
     return 1;
   }
-  const result = await dispatch({ engine, prompt, mode: "cli" });
+  const result = await dispatch({ engine, prompt, mode: DISPATCH_MODE.CLI });
   if (!result.ok) {
     out("vf", c.red(`vf plan: dispatch failed: ${result.reason ?? "unknown error"}`), {
       level: "error",

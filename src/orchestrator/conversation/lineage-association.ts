@@ -1,6 +1,10 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import { ACTOR_KINDS, CREDENTIAL_CLASSES } from "../../actions/public-action-contract.js";
 import type { PublicActor } from "../../actions/types.js";
 import { digestV1 } from "../../durability/index.js";
 import type { ConversationCatalogSourceInventoryEntryV1 } from "./catalog-types.js";
+import { CONVERSATION_CATALOG_SOURCE_KIND } from "./conversation-catalog-contract.js";
 import {
   assertExactAuthorityWrapper,
   assertPublicActorsEqual,
@@ -58,10 +62,8 @@ function assertActor(value: unknown): asserts value is PublicActor {
   if (
     !isPlainLineageRecord(value) ||
     !hasExactLineageKeys(value, ["credential_class", "kind", "public_actor_id"]) ||
-    !["human-browser", "human-cli", "agent", "system-recovery"].includes(value.kind as string) ||
-    !["loopback-session", "interactive-tty", "automation-grant", "recovery"].includes(
-      value.credential_class as string,
-    ) ||
+    !ACTOR_KINDS.some((kind) => kind === value.kind) ||
+    !CREDENTIAL_CLASSES.some((credentialClass) => credentialClass === value.credential_class) ||
     !isBoundedLineageReference(value.public_actor_id)
   )
     throw new Error("invalid lineage association actor");
@@ -228,14 +230,14 @@ export function validateLineageAssociationAuthority(
     record.created_at !== dispatch.created_at ||
     proposal.created_at !== plan.created_at ||
     proposal.expires_at !== plan.expires_at ||
-    proposal.action_root_locator.kind !== "conversation" ||
+    proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
     !plan.root_bindings.some(
       (binding) =>
         binding.root_session_id === proposal.base.root_session_id &&
         binding.expected_head_digest === proposal.base.lineage_head_digest &&
         binding.expected_head_epoch === proposal.base.lineage_head_epoch,
     ) ||
-    action.type !== "conversation.associate_lineages" ||
+    action.type !== HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES ||
     !sameCanonical(
       action.root_session_ids,
       plan.root_bindings.map((binding) => binding.root_session_id),
@@ -300,7 +302,7 @@ export function deriveLineageAssociations(
         bucket.sort(compare);
         ids.set(binding.root_session_id, bucket);
         entries.push({
-          source_kind: "lineage-association",
+          source_kind: CONVERSATION_CATALOG_SOURCE_KIND.LINEAGE_ASSOCIATION,
           root_session_id: binding.root_session_id,
           record_id: record.association_id,
           record_digest: record.content_digest,

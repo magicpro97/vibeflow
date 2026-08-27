@@ -1,3 +1,13 @@
+import { CAPABILITY_CLI_COMMAND } from "../actions/capability-cli-contract.js";
+import { LEGACY_SOURCES } from "../actions/capability-manifest-vocabulary-contract.js";
+import { HOST_ACTION_KIND } from "../actions/host-action-contract.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../actions/protocol-contract.js";
+import {
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  ACTOR_KIND,
+  CREDENTIAL_CLASS,
+} from "../actions/public-action-contract.js";
 import { materializeCapabilityPreview } from "../capabilities/action-domain/preview.js";
 import type { CapabilityCliMutationPortV1 } from "../capabilities/cli/ports.js";
 import { CapabilityRuntimeError } from "../capabilities/operations/errors.js";
@@ -6,9 +16,13 @@ import type {
   FabricCliMutationRequestV1,
   PublicPrivateInputBindingV1,
 } from "../capabilities/wire/cli.js";
+import { CAPABILITY_OPERATION_STATUS } from "../capabilities/wire/operation-state-contract.js";
 import type { CapabilityBrowserDetailResponseV1 } from "../capabilities/wire/query.js";
 import { cwd } from "../core.js";
-import { c, out } from "./_shared.js";
+import {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  type CapabilityScope,
+} from "../core/capability-contract.js";
 import { capabilityRequestAction } from "./capability/action-validation.js";
 import { readStrictJsonStdin } from "./capability/io.js";
 import {
@@ -28,9 +42,9 @@ import { resolveCapabilityCliMutationPort } from "./capability/port-binding.js";
 import { statusQueryResult } from "./capability/query-status.js";
 import {
   type CapabilityCliWriter,
-  printResult,
+  defaultCapabilityCliWriter,
+  emitCapabilityCliResult,
   resultError,
-  resultExitCode,
 } from "./capability/render.js";
 import {
   cliAuthority,
@@ -39,13 +53,7 @@ import {
   ephemeralIdempotencyKey,
 } from "./capability/runtime.js";
 
-const DEFAULT_LEGACY_SOURCES = [
-  "skill-lock",
-  "tool-managed-evidence",
-  "mcp-managed-sidecar",
-  "hook-sentinel",
-  "role-marker",
-] as const;
+const DEFAULT_LEGACY_SOURCES = LEGACY_SOURCES;
 
 export interface CapabilityCommandInject {
   base?: string;
@@ -61,17 +69,7 @@ export interface CapabilityCommandInject {
 }
 
 function writer(inject: CapabilityCommandInject): CapabilityCliWriter {
-  return (
-    inject.writer ??
-    ((message, level) =>
-      out("vf", level === "error" ? c.red(message) : message, level ? { level } : undefined))
-  );
-}
-
-function emit(result: CapabilityCliResultV1, json: boolean, sink: CapabilityCliWriter): number {
-  sink(json ? JSON.stringify(result) : "", json ? undefined : undefined);
-  if (!json) printResult(result, sink);
-  return resultExitCode(result);
+  return inject.writer ?? defaultCapabilityCliWriter;
 }
 
 export async function capability(
@@ -86,12 +84,12 @@ export async function capability(
       stdinHasData: inject.stdinHasData ?? !(inject.stdinIsTTY ?? Boolean(process.stdin.isTTY)),
     });
   } catch (error) {
-    return emit(
+    return emitCapabilityCliResult(
       {
         schema_version: "1.0",
         kind: "usage-error",
         command: null,
-        status: "failed",
+        status: CAPABILITY_OPERATION_STATUS.FAILED,
         error: resultError(error),
       },
       argv.includes("--json"),
@@ -114,9 +112,9 @@ export async function capability(
     if (parsed.kind === "query") {
       const response = service.query({
         view:
-          parsed.command === "capability.search"
+          parsed.command === CAPABILITY_CLI_COMMAND.SEARCH
             ? "search"
-            : parsed.command === "capability.list"
+            : parsed.command === CAPABILITY_CLI_COMMAND.LIST
               ? "list"
               : "status",
         scope,
@@ -129,20 +127,22 @@ export async function capability(
         kind: "query",
         command: parsed.command,
         status:
-          parsed.command === "capability.status" ? statusQueryResult(response.items) : "succeeded",
+          parsed.command === CAPABILITY_CLI_COMMAND.STATUS
+            ? statusQueryResult(response.items)
+            : CAPABILITY_OPERATION_STATUS.SUCCEEDED,
         offline: parsed.offline,
         items: response.items,
         next_cursor: response.next_cursor,
         error: null,
       } as CapabilityCliResultV1;
-      return emit(result, parsed.json, sink);
+      return emitCapabilityCliResult(result, parsed.json, sink);
     }
     if (parsed.kind === "inspection") {
       const result: CapabilityCliResultV1 = {
         schema_version: "1.0",
         kind: "legacy-adopt-inspection",
-        command: "capability.adopt.inspect",
-        status: "succeeded",
+        command: CAPABILITY_CLI_COMMAND.ADOPT_INSPECT,
+        status: CAPABILITY_OPERATION_STATUS.SUCCEEDED,
         inspection: service.adoptInspect(
           {
             schema_version: "1.0",
@@ -155,15 +155,15 @@ export async function capability(
           },
           {
             principal_digest: cliAuthority(service, {
-              kind: "human-cli",
+              kind: ACTOR_KIND.HUMAN_CLI,
               public_actor_id: "vf-capability-cli",
               credential_class:
                 (inject.stdinIsTTY ?? Boolean(process.stdin.isTTY))
-                  ? "interactive-tty"
-                  : "automation-grant",
+                  ? CREDENTIAL_CLASS.INTERACTIVE_TTY
+                  : CREDENTIAL_CLASS.AUTOMATION_GRANT,
             }).principal_digest,
             action_root_locator: {
-              kind: "capability",
+              kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
               scope,
               scope_identity_digest: service.options.storage.scopeIdentityDigest,
             },
@@ -171,7 +171,7 @@ export async function capability(
         ).response,
         error: null,
       };
-      return emit(result, parsed.json, sink);
+      return emitCapabilityCliResult(result, parsed.json, sink);
     }
     if (parsed.kind === "private-input") {
       if (!parsed.packageId)
@@ -190,7 +190,7 @@ export async function capability(
         | {
             bind?(request: {
               schema_version: "1.0";
-              scope: "project" | "user";
+              scope: CapabilityScope;
               scope_identity_digest: string;
               package_id: string;
               package_pin_digest: string;
@@ -204,7 +204,7 @@ export async function capability(
       if (!binder?.bind)
         throw new CapabilityRuntimeError(
           "private-input authority is unavailable",
-          "service-unavailable",
+          CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
         );
       const now = inject.now ?? (() => service.clockNow());
       const binding = binder.bind({
@@ -221,12 +221,12 @@ export async function capability(
         ),
         expires_at: new Date(Date.parse(now()) + 10 * 60_000).toISOString(),
       });
-      return emit(
+      return emitCapabilityCliResult(
         {
           schema_version: "1.0",
           kind: "private-input-binding",
-          command: "capability.private-input.bind",
-          status: "succeeded",
+          command: CAPABILITY_CLI_COMMAND.PRIVATE_INPUT_BIND,
+          status: CAPABILITY_OPERATION_STATUS.SUCCEEDED,
           binding,
           error: null,
         },
@@ -236,37 +236,43 @@ export async function capability(
     }
     const command = parsed.command;
     const actor: Parameters<typeof cliAuthority>[1] = {
-      kind: "human-cli" as const,
+      kind: ACTOR_KIND.HUMAN_CLI,
       public_actor_id: "vf-capability-cli",
       credential_class:
         (inject.stdinIsTTY ?? Boolean(process.stdin.isTTY))
-          ? "interactive-tty"
-          : "automation-grant",
+          ? CREDENTIAL_CLASS.INTERACTIVE_TTY
+          : CREDENTIAL_CLASS.AUTOMATION_GRANT,
     };
     const direct = commandAction(parsed, inject.stdin);
     const action =
       "action" in direct ? direct.action : enrichLifecycleSelectorHints(service, scope, direct);
     const planningNetworkRead = transientPlanningNetworkRead(parsed, direct);
-    if (planningNetworkRead === "allow-if-granted" && parsed.offline)
+    if (
+      planningNetworkRead === ACTION_PLANNING_NETWORK_READ_VALUE.ALLOW_IF_GRANTED &&
+      parsed.offline
+    )
       throw new CapabilityCliUsageError(
         "network-enabled planning cannot be combined with --offline",
       );
-    if (planningNetworkRead === "allow-if-granted" && !parsed.dryRun)
+    if (
+      planningNetworkRead === ACTION_PLANNING_NETWORK_READ_VALUE.ALLOW_IF_GRANTED &&
+      !parsed.dryRun
+    )
       throw new CapabilityCliUsageError(
         'planning_options.network_read="allow-if-granted" requires --dry-run',
       );
     if (parsed.dryRun || !parsed.yes) {
       const internal =
-        action.type === "capability.adopt"
+        action.type === HOST_ACTION_KIND.CAPABILITY_ADOPT
           ? {
-              type: "capability.adopt" as const,
+              type: HOST_ACTION_KIND.CAPABILITY_ADOPT,
               scope,
               candidate: service.resolveAdoptCandidate(
                 { candidate_id: action.candidate_id, candidate_digest: action.candidate_digest },
                 {
                   scope,
                   action_root_locator: {
-                    kind: "capability",
+                    kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
                     scope,
                     scope_identity_digest: service.options.storage.scopeIdentityDigest,
                   },
@@ -278,11 +284,11 @@ export async function capability(
         schema_version: "1.0",
         action: internal,
         planning_options: {
-          mode: "transient",
+          mode: ACTION_PLANNING_MODE.TRANSIENT,
           network_read: planningNetworkRead,
         },
         action_root_locator: {
-          kind: "capability",
+          kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
           scope,
           scope_identity_digest: service.options.storage.scopeIdentityDigest,
         },
@@ -293,7 +299,7 @@ export async function capability(
         plan,
         base: service.options.storage.readStatus().lock,
       });
-      return emit(
+      return emitCapabilityCliResult(
         {
           schema_version: "1.0",
           kind: "plan",
@@ -321,7 +327,7 @@ export async function capability(
       now: inject.now,
       runtimeFactory: inject.runtimeFactory,
     });
-    return emit(
+    return emitCapabilityCliResult(
       mutationPort.execute({
         schema_version: "1.0",
         command,
@@ -346,8 +352,8 @@ export async function capability(
         ? {
             schema_version: "1.0",
             kind: "private-input-binding",
-            command: "capability.private-input.bind",
-            status: "failed",
+            command: CAPABILITY_CLI_COMMAND.PRIVATE_INPUT_BIND,
+            status: CAPABILITY_OPERATION_STATUS.FAILED,
             binding: null,
             error: resultError(error),
           }
@@ -356,7 +362,7 @@ export async function capability(
               schema_version: "1.0",
               kind: "query",
               command: parsed.command,
-              status: "failed",
+              status: CAPABILITY_OPERATION_STATUS.FAILED,
               offline: parsed.offline,
               items: [],
               next_cursor: null,
@@ -366,8 +372,8 @@ export async function capability(
             ? {
                 schema_version: "1.0",
                 kind: "legacy-adopt-inspection",
-                command: "capability.adopt.inspect",
-                status: "failed",
+                command: CAPABILITY_CLI_COMMAND.ADOPT_INSPECT,
+                status: CAPABILITY_OPERATION_STATUS.FAILED,
                 inspection: null,
                 error: resultError(error),
               }
@@ -375,9 +381,9 @@ export async function capability(
                 schema_version: "1.0",
                 kind: "usage-error",
                 command: parsed.command,
-                status: "failed",
+                status: CAPABILITY_OPERATION_STATUS.FAILED,
                 error: resultError(error),
               };
-    return emit(failed, parsed.json, sink);
+    return emitCapabilityCliResult(failed, parsed.json, sink);
   }
 }

@@ -1,6 +1,11 @@
 import { join } from "node:path";
+import {
+  CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_MCP_TRANSPORT,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { EngineName } from "../../actions/types.js";
 import { agentFilePath } from "../../agents/render.js";
+import { AGENT_ENGINE } from "../../core/agent-contract.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
 import type { CapabilityComponentV1, CapabilityTemplateValueV1 } from "../manifest/types.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
@@ -37,7 +42,10 @@ const SKILL_ROOT: Record<EngineName, string> = {
   opencode: ".opencode/skills",
   antigravity: ".agents/skills",
 };
-const MCP_CONFIG: Record<Exclude<EngineName, "copilot">, { path: string; key: string | null }> = {
+const MCP_CONFIG: Record<
+  Exclude<EngineName, typeof AGENT_ENGINE.COPILOT>,
+  { path: string; key: string | null }
+> = {
   claude: { path: ".mcp.json", key: "mcpServers" },
   codex: { path: ".codex/config.toml", key: null },
   opencode: { path: "opencode.json", key: "mcp" },
@@ -57,11 +65,11 @@ export interface BuiltFilesystemProjectionV1 {
 
 function renderRole(engine: EngineName, name: string, body: string): string {
   const description = `Capability role ${name}`;
-  if (engine === "codex") {
+  if (engine === AGENT_ENGINE.CODEX) {
     const escaped = body.replace(/\\/g, "\\\\").replace(/\"\"\"/g, '""\\"');
     return `name = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\ndeveloper_instructions = \"\"\"\n${escaped}\n\"\"\"\n`;
   }
-  const mode = engine === "opencode" ? "mode: subagent\n" : "";
+  const mode = engine === AGENT_ENGINE.OPENCODE ? "mode: subagent\n" : "";
   return `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n${mode}---\n\n${body}`;
 }
 
@@ -154,7 +162,10 @@ function mcpValue(
   value: CapabilityPrivateJsonV1;
   auxiliary: Array<{ path: string; bytes: Buffer }>;
 } {
-  const component = input.component as Extract<CapabilityComponentV1, { type: "mcp" }>;
+  const component = input.component as Extract<
+    CapabilityComponentV1,
+    { type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP }
+  >;
   if ((component.secret_slots ?? []).length)
     throw new CapabilityValidationError(
       "MCP secret slots require a runtime secret broker",
@@ -162,12 +173,12 @@ function mcpValue(
     );
   const inputs = new Map(input.package.public_inputs.map((row) => [row.input_id, row.value]));
   const serverName = `vf_${digestHex(digestV1("VF-CAPABILITY-MCP-NAME\0v1\0", projectionOwnershipKey(input))).slice(0, 20)}`;
-  if (component.transport !== "stdio") {
+  if (component.transport !== CAPABILITY_MANIFEST_MCP_TRANSPORT.STDIO) {
     const url = resolveTemplate(component.url as CapabilityTemplateValueV1, inputs);
     const value: CapabilityPrivateJsonV1 =
-      input.target.engine === "antigravity"
+      input.target.engine === AGENT_ENGINE.ANTIGRAVITY
         ? { serverUrl: url }
-        : input.target.engine === "opencode"
+        : input.target.engine === AGENT_ENGINE.OPENCODE
           ? { type: "remote", url }
           : { type: component.transport, url };
     return { serverName, value, auxiliary: [] };
@@ -178,7 +189,7 @@ function mcpValue(
   const command = boundedProjectionPath(roots[input.target.scope], relative);
   const args = (component.args ?? []).map((row) => resolveTemplate(row, inputs));
   const value: CapabilityPrivateJsonV1 =
-    input.target.engine === "opencode"
+    input.target.engine === AGENT_ENGINE.OPENCODE
       ? { type: "local", command: [command, ...args] }
       : { command, args, env: {} };
   return { serverName, value, auxiliary: [{ path: relative, bytes }] };
@@ -188,7 +199,10 @@ function jsonMcpProjection(
   input: CapabilityEffectPreparationRequestV1,
   roots: ProjectionBuilderRootsV1,
 ): BuiltFilesystemProjectionV1 {
-  const engine = input.target.engine as Exclude<EngineName, "copilot" | "codex">;
+  const engine = input.target.engine as Exclude<
+    EngineName,
+    typeof AGENT_ENGINE.COPILOT | typeof AGENT_ENGINE.CODEX
+  >;
   const config = MCP_CONFIG[engine];
   const resolved = mcpValue(input, roots);
   const keyPath = [config.key as string, resolved.serverName];
@@ -326,7 +340,7 @@ export function buildFilesystemProjection(
   roots: ProjectionBuilderRootsV1,
 ): BuiltFilesystemProjectionV1 {
   const { component, package: pkg, target } = input;
-  if (component.type === "skill") {
+  if (component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL) {
     const bytes =
       input.operation === "remove" ? null : (pkg.files.get(component.bundle_path) as Uint8Array);
     return fileProjection(
@@ -337,7 +351,7 @@ export function buildFilesystemProjection(
       0o644,
     );
   }
-  if (component.type === "role") {
+  if (component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE) {
     const source = Buffer.from(pkg.files.get(component.role_spec_path) as Uint8Array).toString(
       "utf8",
     );
@@ -346,13 +360,13 @@ export function buildFilesystemProjection(
       input.operation === "remove" ? null : Buffer.from(renderRole(target.engine, name, source));
     return fileProjection(input, roots, agentFilePath(target.engine, name), bytes, 0o644);
   }
-  if (component.type === "hook") {
+  if (component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK) {
     return buildHookProjection(input, roots);
   }
-  if (component.type === "mcp") {
-    if (target.engine === "copilot")
+  if (component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP) {
+    if (target.engine === AGENT_ENGINE.COPILOT)
       throw new CapabilityValidationError("Copilot MCP is externally managed", target.engine);
-    return target.engine === "codex"
+    return target.engine === AGENT_ENGINE.CODEX
       ? codexMcpProjection(input, roots)
       : jsonMcpProjection(input, roots);
   }

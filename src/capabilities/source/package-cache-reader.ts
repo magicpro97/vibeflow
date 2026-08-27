@@ -1,7 +1,18 @@
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  CAPABILITY_MANIFEST_INPUT_TYPE,
+  CAPABILITY_MANIFEST_PLATFORM_ARCH,
+  CAPABILITY_MANIFEST_PLATFORM_LIBC,
+  CAPABILITY_MANIFEST_PLATFORM_OS,
+  type CapabilityManifestPlatformArch,
+  type CapabilityManifestPlatformLibc,
+  type CapabilityManifestPlatformOs,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
 import type { EngineName } from "../../actions/types.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJson, canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import { readProjectionFile } from "../adapters/filesystem-io.js";
 import type { ValidatedCapabilityManifestV1 } from "../manifest/types.js";
@@ -43,7 +54,6 @@ import type {
   RegistrySignatureEnvelopeV1,
   RegistryTrustSnapshotV1,
 } from "./types.js";
-
 function parseJsonFile<T>(path: string, label: string): T {
   const bytes = readProjectionFile(path);
   if (bytes === null)
@@ -58,9 +68,8 @@ function parseJsonFile<T>(path: string, label: string): T {
     throw new CapabilityValidationError(`${label} is not canonical`, label, "integrity_failure");
   return value as T;
 }
-
 export interface FilesystemCapabilityPackageCacheOptionsV1 {
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scopeIdentityDigest: string;
   privateRoot: string;
   authority: () => CapabilityRuntimeAuthorityV1;
@@ -69,30 +78,25 @@ export interface FilesystemCapabilityPackageCacheOptionsV1 {
   vfVersion?: string;
   engineVersions?: Partial<Record<EngineName, string>>;
   platform?: {
-    os: "darwin" | "linux" | "win32";
-    arch: "arm64" | "x64";
-    libc: "glibc" | "musl" | null;
+    os: CapabilityManifestPlatformOs;
+    arch: CapabilityManifestPlatformArch;
+    libc: CapabilityManifestPlatformLibc | null;
   };
 }
-
 export interface CachedResolutionCandidateV1 {
   candidate: ResolutionCandidateV1;
   resolved: ResolvedCapabilityPackageV1;
 }
-
 export interface CachedPackageExecutionAuthorityV1 {
   record: CapabilityPackageCacheRecordV1;
   resolved: ResolvedCapabilityPackageV1;
   trust: RegistryTrustSnapshotV1;
 }
-
 export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageReaderV1 {
   readonly #now: () => string;
-
   constructor(readonly options: FilesystemCapabilityPackageCacheOptionsV1) {
     this.#now = options.now ?? (() => new Date().toISOString());
   }
-
   read(request: CapabilityPackageReadRequestV1): ResolvedCapabilityPackageV1 | null {
     const resolved = this.readByPin(request.package_pin_digest);
     if (!resolved) return null;
@@ -102,7 +106,6 @@ export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageRead
       ? resolved
       : null;
   }
-
   readByPin(pinDigest: string): ResolvedCapabilityPackageV1 | null {
     if (!DIGEST_PATTERN.test(pinDigest))
       throw new CapabilityValidationError("invalid package pin digest", "pin_digest");
@@ -155,10 +158,14 @@ export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageRead
       files: tree.files,
       dependencies: [],
       public_inputs: parsedManifest.manifest.inputs
-        .filter((input) => input.type !== "secret-handle" && input.default_value !== null)
+        .filter(
+          (input) =>
+            input.type !== CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE &&
+            input.default_value !== null,
+        )
         .map((input) => ({ input_id: input.input_id, value: input.default_value })),
       secret_input_ids: parsedManifest.manifest.inputs
-        .filter((input) => input.type === "secret-handle")
+        .filter((input) => input.type === CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE)
         .map((input) => input.input_id),
       private_input_binding_digest: digestV1("VF-CAPABILITY-PRIVATE-INPUT-BINDING-SET\0v1\0", {
         schema_version: "1.0",
@@ -206,13 +213,19 @@ export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageRead
         })),
         platform: this.options.platform ?? {
           os:
-            process.platform === "win32"
-              ? "win32"
-              : process.platform === "linux"
-                ? "linux"
-                : "darwin",
-          arch: process.arch === "arm64" ? "arm64" : "x64",
-          libc: process.platform === "linux" ? "glibc" : null,
+            process.platform === CAPABILITY_MANIFEST_PLATFORM_OS.WINDOWS
+              ? CAPABILITY_MANIFEST_PLATFORM_OS.WINDOWS
+              : process.platform === CAPABILITY_MANIFEST_PLATFORM_OS.LINUX
+                ? CAPABILITY_MANIFEST_PLATFORM_OS.LINUX
+                : CAPABILITY_MANIFEST_PLATFORM_OS.DARWIN,
+          arch:
+            process.arch === CAPABILITY_MANIFEST_PLATFORM_ARCH.ARM64
+              ? CAPABILITY_MANIFEST_PLATFORM_ARCH.ARM64
+              : CAPABILITY_MANIFEST_PLATFORM_ARCH.X64,
+          libc:
+            process.platform === CAPABILITY_MANIFEST_PLATFORM_OS.LINUX
+              ? CAPABILITY_MANIFEST_PLATFORM_LIBC.GLIBC
+              : null,
         },
       });
       return {
@@ -243,7 +256,7 @@ export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageRead
         "integrity_failure",
       );
     const identityPath =
-      this.options.scope === "project"
+      this.options.scope === CAPABILITY_SCOPE.PROJECT
         ? join(dirname(dirname(this.options.privateRoot)), "PROJECT_ID.json")
         : join(this.options.privateRoot, "authority", "USER_IDENTITY.json");
     return {
@@ -304,7 +317,7 @@ export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageRead
       "cached authenticity binding",
     );
     let verified = null;
-    if (record.package_pin.source.kind === "registry") {
+    if (record.package_pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY) {
       const digest = record.registry_envelope_digest as string;
       const envelope = parseJsonFile<RegistrySignatureEnvelopeV1>(
         packageRegistryEnvelopeCachePath(this.options.privateRoot, digest),
@@ -317,7 +330,7 @@ export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageRead
           "integrity_failure",
         );
       const identityPath =
-        this.options.scope === "project"
+        this.options.scope === CAPABILITY_SCOPE.PROJECT
           ? join(dirname(dirname(this.options.privateRoot)), "PROJECT_ID.json")
           : join(this.options.privateRoot, "authority", "USER_IDENTITY.json");
       const trust = readDurableRegistryTrustSnapshot({
@@ -344,7 +357,7 @@ export class FilesystemCapabilityPackageCacheV1 implements CapabilityPackageRead
           "registry_envelope",
         );
       revalidateCachedRegistryPackagePin(record.package_pin, verified);
-    } else if (record.package_pin.source.kind === "legacy-adopt") {
+    } else if (record.package_pin.source.kind === CAPABILITY_SOURCE_KIND.LEGACY_ADOPT) {
       const evidence = parseJsonFile<LegacyInspectionEvidenceV1>(
         legacyInspectionEvidenceCachePath(
           this.options.privateRoot,

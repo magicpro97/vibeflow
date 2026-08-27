@@ -1,4 +1,8 @@
 import { createHash, createPublicKey } from "node:crypto";
+import {
+  CAPABILITY_SIGNATURE_ALGORITHM,
+  CAPABILITY_TRUST_TRANSITIONS,
+} from "../../actions/capability-security-contract.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import { canonicalRelativePrefix } from "../permissions/scope.js";
 import { assertCanonicalRegistryOrigin } from "../source/url.js";
@@ -33,6 +37,7 @@ import type {
   RegistryTrustKeyFrameV1,
   SecretRevocationFrameV1,
 } from "./types.js";
+import { POLICY_AUTHORITY_STATE, POLICY_AUTHORITY_STATES } from "./types.js";
 
 export function validateTrustFrame(frame: RegistryTrustKeyFrameV1): void {
   assertTrustFrameShape(frame);
@@ -44,12 +49,8 @@ export function validateTrustFrame(frame: RegistryTrustKeyFrameV1): void {
     frame.scope_identity_digest,
     "trust.action_root_locator",
   );
-  enumeration(
-    frame.transition,
-    ["added", "rescoped", "deprecated", "revoked"] as const,
-    "trust.transition",
-  );
-  if (frame.algorithm !== "Ed25519")
+  enumeration(frame.transition, CAPABILITY_TRUST_TRANSITIONS, "trust.transition");
+  if (frame.algorithm !== CAPABILITY_SIGNATURE_ALGORITHM.ED25519)
     throw new CapabilityValidationError("unsupported trust algorithm", "trust.algorithm");
   integer(frame.trust_epoch, "trust.trust_epoch", 1);
   nullableAuthorityDigest(frame.previous_frame_digest, "trust.previous_frame_digest");
@@ -143,7 +144,7 @@ export function validatePolicyFrame(frame: PolicyAuthorityFrameV1): void {
     frame.scope_identity_digest,
     "policy.action_root_locator",
   );
-  enumeration(frame.state, ["prepared", "effect_in_progress", "observed"] as const, "policy.state");
+  enumeration(frame.state, POLICY_AUTHORITY_STATES, "policy.state");
   integer(frame.sequence, "policy.sequence");
   nullableAuthorityDigest(frame.previous_frame_digest, "policy.previous_frame_digest");
   digest(frame.scope_identity_digest, "policy.scope_identity_digest");
@@ -165,7 +166,10 @@ export function validatePolicyFrame(frame: PolicyAuthorityFrameV1): void {
     "replacement_policy_digest",
   ] as const)
     digest(frame[field], `policy.${field}`);
-  if ((frame.state === "observed") !== (frame.observed_settings_sha256 !== null))
+  if (
+    (frame.state === POLICY_AUTHORITY_STATE.OBSERVED) !==
+    (frame.observed_settings_sha256 !== null)
+  )
     throw new CapabilityValidationError(
       "observed policy hash nullability mismatch",
       "policy.observed_settings_sha256",

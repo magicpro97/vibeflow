@@ -1,6 +1,7 @@
 import { parseStrictJson } from "../../actions/strict-json.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJson, privateFileBytes } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { FilesystemCapabilityPackageCacheV1 } from "../source/package-cache-reader.js";
 import { validateCapabilityLock } from "../storage/lock-validation.js";
 import { capabilityHistoryPath } from "../storage/paths.js";
@@ -14,7 +15,7 @@ import {
 import type { ResolvedCapabilityPackageV1 } from "./types.js";
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "invalid-plan");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN);
 }
 
 export interface CapabilityInstalledStateOptionsV1 {
@@ -36,13 +37,13 @@ export function loadInstalledPackages(
     )
       throw new CapabilityRuntimeError(
         "installed package cache closure is unavailable",
-        "scope-needs-recovery",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
       );
     return materializeCurrentPackageInputs({
       pkg: { ...pkg, dependencies: structuredClone(entry.dependencies) },
       publicInputs: entry.public_inputs,
       secretInputIds: entry.secret_input_ids,
-      scope: lock?.scope as "project" | "user",
+      scope: lock?.scope as CapabilityScope,
       scopeIdentityDigest: options.storage.scopeIdentityDigest,
       privateInputs: options.privateInputs,
     });

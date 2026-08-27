@@ -199,11 +199,16 @@ describe("collectVerifyReportAsync", () => {
     expect((covGate as { label: string; pass: boolean }).pass).toBe(true);
   });
 
-  test("coverage gate skipped when lcov.info missing", async () => {
+  test("coverage gate fails when lcov.info is missing", async () => {
     const dir = tempProject({ typecheck: "exit 0" });
     const report = await collectVerifyReportAsync(dir, { spawner: fakeSpawner(0), coverage: true });
     const covGate = report.toolchain.find((g) => g.label === "coverage:gate");
     expect(covGate).toBeUndefined();
+    expect(report.gates.coverage).toMatchObject({
+      status: "fail",
+      details: "coverage/lcov.info not found",
+    });
+    expect(report.ok).toBe(false);
   });
 
   test("flutter toolchain runs flutter test (#440)", async () => {

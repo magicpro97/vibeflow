@@ -4,29 +4,23 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  GATE_STATE,
+  PENDING_REQUIRED_WORK_UNIT_GATES,
+  WORK_UNIT_GATE,
+  WORK_UNIT_RISK_CLASS,
+  WORK_UNIT_STATUS,
+} from "../core/workflow-contract.js";
 import { parseEngineSummary } from "../dispatch/prompt.js";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { isVerifiableEvidence, policyGates } from "../gates.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
 import { thresholdFor } from "../orchestrator/investigate.js";
 import { type GateRunner, defaultRun, scopedGate } from "../orchestrator/scoped-gate.js";
+import { type Git, type Usage, appendEvidence, scalar } from "../workflow/units-ingest-support.js";
 import { type WorkUnit, mutateUnits, readState, sanitizeUnitName } from "./_shared.js";
 import { makeReviewer } from "./dispatch-reviewer.js";
-type Usage = {
-  status?: unknown;
-  exit_code?: unknown;
-  timed_out?: unknown;
-  result_file?: unknown;
-  contract_hash?: unknown;
-  stdout_sha256?: unknown;
-  duration_seconds?: unknown;
-  hermes_usage?: {
-    total_tokens?: unknown;
-    estimated_cost_usd?: unknown;
-    completed?: unknown;
-    failed?: unknown;
-  };
-};
-type Git = (args: string[], cwd: string) => string;
 export type UnitsIngestInject = {
   git?: Git;
   read?: (p: string) => Buffer;
@@ -49,9 +43,6 @@ const validPath = (p: string) =>
   !/[\r\n\0]/.test(p) &&
   p === p.trim() &&
   p.split("/").every((x) => x && x !== "." && x !== "..");
-const scalar = (v: string) => v.trim(); // ponytail: 400-line ceiling; expand when ceiling removed
-// biome-ignore format: production file ceiling
-function appendEvidence(history: string[], fresh: string[]) { const evidence = [...history]; const seen = new Set(history); const appended: string[] = []; for (const item of fresh) if (!seen.has(item)) { seen.add(item); evidence.push(item); appended.push(item); } return { evidence, appended }; }
 function readSafe(path: string): Buffer {
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
@@ -141,17 +132,17 @@ function measuredEvidence(command: string, status: number | null, stdout: string
 function normalizeLegacyGateReason(unit: WorkUnit) {
   const evidence = [...(unit.evidence ?? [])]; const at = unit.evidence_at;
   const rawIndex = evidence.findIndex((reason, index) => {
-    const gate = reason.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as "build" | "lint" | "test";
+    const gate = reason.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as keyof WorkUnit["gates"];
     const measured = evidence[index - 1]; const canonical = `vf units ingest → ${JSON.stringify(reason)}`;
     return !!gate && index < evidence.length - 1 && evidence.indexOf(canonical, index + 1) > index && !!at?.[canonical] && !!measured && !!at?.[reason] && at[reason] === at[measured];
   });
   const index = rawIndex >= 0 ? rawIndex : evidence.length - 1; const reason = evidence[index];
   const measured = evidence[index - 1];
-  const gate = reason?.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as "build" | "lint" | "test";
+  const gate = reason?.match(/^gate (build|lint|test): [^\r\n]+(?![\s\S])/)?.[1] as keyof WorkUnit["gates"];
   const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const expected = gate === "build" ? "(?:bun run --cwd src/ui build|bunx tsc --noEmit)" : gate === "lint" ? escaped(`bunx biome check ${(unit.scope ?? []).join(" ")}`) : gate === "test" ? "bun test --timeout 30000" : "";
   const measuredShape = expected && new RegExp(`^${expected} → "exit (?:-1|[1-9]\\d*): (?:\\\\"|[^"\\r\\n])*"(?![\\s\\S])`);
-  if (!reason || !measured || !measuredShape || unit.status !== "blocked" || isVerifiableEvidence(reason) || (rawIndex < 0 && unit.gates?.[gate] !== "fail") || !measuredShape.test(measured) || !at?.[reason] || at[reason] !== at[measured]) return unit;
+  if (!reason || !measured || !measuredShape || unit.status !== WORK_UNIT_STATUS.BLOCKED || isVerifiableEvidence(reason) || (rawIndex < 0 && unit.gates?.[gate] !== GATE_STATE.FAIL) || !measuredShape.test(measured) || !at?.[reason] || at[reason] !== at[measured]) return unit;
   const normalized = `${rawIndex >= 0 ? "vf units ingest legacy" : "vf units ingest"} → ${JSON.stringify(reason)}`; if (evidence.includes(normalized) || Object.hasOwn(at, normalized)) return unit; evidence[index] = normalized;
   const evidence_at = { ...at, [normalized]: at[reason] }; delete evidence_at[reason]; return { ...unit, evidence, evidence_at };
 }
@@ -184,7 +175,7 @@ export async function unitsIngest(
         if (!Object.hasOwn(evidence_at, item)) evidence_at[item] = new Date().toISOString();
       return mutate(base, "update", {
         name,
-        status: "blocked",
+        status: WORK_UNIT_STATUS.BLOCKED,
         confidence: 0,
         gates,
         resources,
@@ -301,7 +292,7 @@ export async function unitsIngest(
         symlinkSync(
           realpathSync(modules),
           target,
-          process.platform === "win32" ? "junction" : "dir",
+          process.platform === RUNTIME_PLATFORM.WINDOWS ? "junction" : "dir",
         );
     }
     const run: GateRunner = (command, cwd) => {
@@ -311,7 +302,10 @@ export async function unitsIngest(
     };
     const build = run("bun run --cwd src/ui build", wt);
     if (build.status !== 0) {
-      finalGates = { build: "fail", lint: "pending", test: "pending", review: "pending" };
+      finalGates = {
+        ...PENDING_REQUIRED_WORK_UNIT_GATES,
+        [WORK_UNIT_GATE.BUILD]: GATE_STATE.FAIL,
+      };
       finalResources = {
         agents: 1,
         tokens: hu.total_tokens as number,
@@ -333,7 +327,7 @@ export async function unitsIngest(
       if (!measured.pass) failure = `gate ${measured.failedGate}: ${measured.detail ?? ""}`;
       else {
         const outcome = {
-          status: "done" as const,
+          status: WORK_UNIT_STATUS.DONE,
           confidence: summary.confidence,
           evidence: [`commit ${commit}`, ...outputs],
           gates,
@@ -342,12 +336,12 @@ export async function unitsIngest(
         const reviewUnit = structuredClone(unit);
         const reviewEvidenceLength = reviewUnit.evidence?.length ?? 0;
         const review = await (inject.reviewer ?? makeReviewer)(
-          "cli",
-          thresholdFor(unit.riskClass ?? "feature"),
+          DISPATCH_MODE.CLI,
+          thresholdFor(unit.riskClass ?? WORK_UNIT_RISK_CLASS.FEATURE),
           { cwd: wt, diffReader: () => `${changed.join("\n")}\n` },
         )(reviewUnit, outcome);
         const reviewerEvidence = reviewUnit.evidence?.slice(reviewEvidenceLength) ?? [];
-        gates.review = review.pass ? "pass" : "fail";
+        gates.review = review.pass ? GATE_STATE.PASS : GATE_STATE.FAIL;
         if (!review.pass) failure = `review: ${review.reason}`;
         else {
           const freshEvidence = [`commit ${commit}`, ...outputs, ...reviewerEvidence];
@@ -361,7 +355,7 @@ export async function unitsIngest(
           candidate = {
             ...normalizedUnit,
             name,
-            status: "done",
+            status: WORK_UNIT_STATUS.DONE,
             confidence: summary.confidence,
             skills_used: summary.skills_used,
             gates,
@@ -369,7 +363,8 @@ export async function unitsIngest(
             evidence,
             evidence_at,
           };
-          if (unit.status === "done") candidate = { ...normalizedUnit, evidence, evidence_at };
+          if (unit.status === WORK_UNIT_STATUS.DONE)
+            candidate = { ...normalizedUnit, evidence, evidence_at };
           if (!policyGates({ ...state, work_units: [candidate] }, { base: wt }).ok)
             failure = "policy gate failed";
         }

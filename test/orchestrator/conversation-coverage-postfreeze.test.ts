@@ -12,6 +12,7 @@ import {
   materializeApproval,
   materializeDispatchRecord,
 } from "../../src/actions/index.js";
+import { AGENT_ENGINE } from "../../src/core/agent-contract.js";
 import {
   AttemptStartAuthorityStore,
   createDurableAttemptStartAuthorityReaderV1,
@@ -95,6 +96,7 @@ import {
   materializeAssociationPlan,
   materializeSelectionPlan,
 } from "../../src/orchestrator/conversation/conversation-receipt-native-plans.js";
+import { conversationRevisionActionPlanDigest } from "../../src/orchestrator/conversation/conversation-revision-action-plan.js";
 import {
   ConversationMessageReferenceUnavailableError,
   ConversationSocialAuthorityV1,
@@ -167,6 +169,11 @@ import { ConversationRevisionStore } from "../../src/orchestrator/conversation/r
 import { prepareRuntimeConversationTurn } from "../../src/orchestrator/conversation/runtime-turn-delivery.js";
 import { readConversationSourceInventory } from "../../src/orchestrator/conversation/source-inventory.js";
 import { timelineInteractionProjection } from "../../src/orchestrator/conversation/timeline-interaction-projection.js";
+import {
+  CONVERSATION_TURN_DELIVERY_MODE,
+  CONVERSATION_TURN_INSTRUCTION_KIND,
+  CONVERSATION_TURN_PRIVATE_CONTEXT_KIND,
+} from "../../src/orchestrator/conversation/turn-delivery-contract.js";
 import type { MessageRequest } from "../../src/orchestrator/conversation/types.js";
 import { DurableArtifactRegistry } from "../../src/orchestrator/trace/artifacts.js";
 import { TraceStore } from "../../src/orchestrator/trace/store.js";
@@ -423,14 +430,15 @@ const oversizedHandoff = (): HandoffTooLargeError => {
   throw new Error("oversized handoff fixture did not overflow");
 };
 
-const revisionOperation = (): RevisionOperationV1 =>
-  materializeRevisionOperation({
+const revisionOperation = (): RevisionOperationV1 => {
+  const plan = revisionPlan();
+  return materializeRevisionOperation({
     operation_id: `vf-operation-${"5".repeat(64)}`,
     proposal_id: `vf-proposal-${"6".repeat(64)}`,
     proposal_digest: postfreezeDigest("revision-proposal"),
     approval_id: `vf-approval-${"7".repeat(64)}`,
     approval_digest: postfreezeDigest("revision-approval"),
-    plan_digest: postfreezeDigest("revision-plan"),
+    plan_digest: conversationRevisionActionPlanDigest("root-session", plan),
     authority_epoch: 0,
     authority_head_digest: postfreezeDigest("revision-authority"),
     root_session_id: "root-session",
@@ -447,12 +455,13 @@ const revisionOperation = (): RevisionOperationV1 =>
     expected_parent_last_seq: 0,
     expected_parent_lock_digest: postfreezeDigest("revision-parent-lock"),
     permission_digest: postfreezeDigest("revision-permission"),
-    binding_set_digest: postfreezeDigest("revision-bindings"),
+    binding_set_digest: plan.resulting_binding_set_digest,
     handoff_digest: postfreezeDigest("revision-handoff"),
-    handoff_selection_digest: postfreezeDigest("revision-selection"),
+    handoff_selection_digest: plan.handoff_selection_plan_digest,
     prompt_projection_digest: postfreezeDigest("revision-prompt"),
     created_at: STAGED_AT,
   });
+};
 
 const revisionPlan = (): RevisionPreparationPlanV1 =>
   materializeRevisionPreparationPlan({
@@ -1093,7 +1102,7 @@ describe("post-freeze oversized handoff publication", () => {
           prompt_projection: { transcript: { omitted_public_ranges: [range] } },
         } as any,
       }),
-    ).toThrow("invalid omitted public user message");
+    ).toThrow("invalid public handoff event");
   });
 
   test("rejects an unplanned artifact inside the compaction idempotency namespace", () => {
@@ -2066,7 +2075,7 @@ describe("post-freeze runtime private turn delivery", () => {
         homeAuthorities: {
           privateTurnContexts: {
             readCreate: () => ({
-              context_kind: "conversation-create",
+              context_kind: CONVERSATION_TURN_PRIVATE_CONTEXT_KIND.CONVERSATION_CREATE,
               target_participant_ids: ["participant-1"],
               file_range: {
                 repo_relative_path: "src/decision.ts",
@@ -2081,7 +2090,12 @@ describe("post-freeze runtime private turn delivery", () => {
         },
       } as any,
       {
-        manifest: { conversation_id: "conversation", revision_id: "revision" },
+        manifest: {
+          conversation_id: "conversation",
+          revision_id: "revision",
+          bindings: [{ participant_id: "participant-1" }],
+        },
+        bindings: [{ resolved: { engine: AGENT_ENGINE.CODEX } }],
         resumeBindings: new Map(),
         turnDeliveries: new Map(),
         turnObservations: new Map(),
@@ -2089,13 +2103,16 @@ describe("post-freeze runtime private turn delivery", () => {
       } as any,
       {
         participant_id: "participant-1",
-        instruction: { kind: "direct", topic: "Inspect the selected source" },
+        instruction: {
+          kind: CONVERSATION_TURN_INSTRUCTION_KIND.DIRECT,
+          topic: "Inspect the selected source",
+        },
       },
     );
 
     expect(prepared.envelope).toMatchObject({
       recipient_participant_id: "participant-1",
-      delivery_mode: "full-history",
+      delivery_mode: CONVERSATION_TURN_DELIVERY_MODE.FULL_HISTORY,
       through_public_seq: 0,
     });
     expect(prepared.private_context_prompt).toContain("src/decision.ts");

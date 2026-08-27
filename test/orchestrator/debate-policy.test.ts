@@ -234,6 +234,7 @@ function harness(
         prepareConversationTurn({
           conversation_id: correlation.conversation_id,
           revision_id: correlation.revision_id,
+          recipient_engine: "codex",
           request,
           events: [],
           resume: null,

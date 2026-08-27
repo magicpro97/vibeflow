@@ -1,4 +1,12 @@
 import type { ComputedRef, Ref } from "vue";
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+import {
+  ACTION_CHALLENGE_CLASS,
+  ACTION_DECISION,
+  ACTION_SCOPE,
+} from "../../actions/public-action-contract.js";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
+import type { ActionApprovalChallengeRequestV1 } from "../../actions/public-types.js";
 import { ConversationHomeApiError, conversationHomeApi } from "./conversation-home-api.js";
 import {
   captureHomeCommandToken,
@@ -19,7 +27,16 @@ interface HomeActionMutationRuntimeInput {
   challenges: Ref<Record<string, HomePendingChallenge>>;
   actionBusy: Ref<Record<string, boolean>>;
   actionBusyTokens: Ref<Record<string, string>>;
+  reconcileOperation(view: HomeActionView): void;
 }
+
+const HOME_ACTION_MUTATION = Object.freeze({
+  APPROVE: "approve",
+  DENY: "deny",
+  COMMIT: "commit",
+  CANCEL: "cancel",
+} as const);
+type HomeActionMutation = (typeof HOME_ACTION_MUTATION)[keyof typeof HOME_ACTION_MUTATION];
 
 function removeRecordEntry<Value>(
   source: Record<string, Value>,
@@ -45,10 +62,15 @@ export function createHomeActionMutationRuntime(input: HomeActionMutationRuntime
     apply: (view: HomeActionView) => void,
     fallback: HomeActionView,
   ): void => {
-    const current =
-      input.pendingActions.value.find((item) => item.proposal.proposal_id === proposalId) ??
-      fallback;
+    const current = input.pendingActions.value.find(
+      (item) => item.proposal.proposal_id === proposalId,
+    );
+    if (!current) {
+      apply(fallback);
+      return;
+    }
     apply(current);
+    input.reconcileOperation(current);
   };
 
   const beginBusy = (proposalId: string, commandId: string): void => {
@@ -86,17 +108,14 @@ export function createHomeActionMutationRuntime(input: HomeActionMutationRuntime
 
   const challengeClassForView = (
     view: HomeActionView,
-  ): "fresh-user-scope" | "public-literal" | null =>
-    view.proposal.action_type === "conversation.publish_suspected_literal"
-      ? "public-literal"
-      : view.proposal.scope === "user"
-        ? "fresh-user-scope"
+  ): ActionApprovalChallengeRequestV1["challenge_class"] | null =>
+    view.proposal.action_type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
+      ? ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL
+      : view.proposal.scope === ACTION_SCOPE.USER
+        ? ACTION_CHALLENGE_CLASS.FRESH_USER_SCOPE
         : null;
 
-  async function mutateAction(
-    view: HomeActionView,
-    mutation: "approve" | "deny" | "commit" | "cancel",
-  ): Promise<void> {
+  async function mutateAction(view: HomeActionView, mutation: HomeActionMutation): Promise<void> {
     const conversationId = input.selectedConversationId.value;
     const proposalId = view.proposal.proposal_id;
     if (!conversationId || !input.online.value || input.actionBusy.value[proposalId]) return;
@@ -107,7 +126,7 @@ export function createHomeActionMutationRuntime(input: HomeActionMutationRuntime
     );
     beginBusy(proposalId, command.command_id);
     try {
-      if (mutation === "commit") {
+      if (mutation === HOME_ACTION_MUTATION.COMMIT) {
         if (!view.approval) throw new Error("Approve this proposal before running it.");
         const result = await conversationHomeApi.commit(
           conversationId,
@@ -126,7 +145,7 @@ export function createHomeActionMutationRuntime(input: HomeActionMutationRuntime
         clearChallenge(proposalId);
         return;
       }
-      if (mutation === "cancel") {
+      if (mutation === HOME_ACTION_MUTATION.CANCEL) {
         const result = await conversationHomeApi.cancel(
           conversationId,
           proposalId,
@@ -144,13 +163,16 @@ export function createHomeActionMutationRuntime(input: HomeActionMutationRuntime
         return;
       }
       const challengeClass = challengeClassForView(view);
-      const challenge = mutation === "approve" ? readChallenge(proposalId) : null;
-      if (mutation === "approve" && challengeClass && !challenge) return;
+      const challenge =
+        mutation === HOME_ACTION_MUTATION.APPROVE ? readChallenge(proposalId) : null;
+      if (mutation === HOME_ACTION_MUTATION.APPROVE && challengeClass && !challenge) return;
       const result = await conversationHomeApi.approve(
         conversationId,
         proposalId,
         view.proposal.proposal_digest,
-        mutation === "approve" ? "approved" : "denied",
+        mutation === HOME_ACTION_MUTATION.APPROVE
+          ? ACTION_DECISION.APPROVED
+          : ACTION_DECISION.DENIED,
         challenge ? { id: challenge.id, response: challenge.response } : null,
       );
       if (!isCurrent(command)) return;
@@ -167,8 +189,8 @@ export function createHomeActionMutationRuntime(input: HomeActionMutationRuntime
       if (
         isCurrent(command) &&
         error instanceof ConversationHomeApiError &&
-        (error.publicError.code === "challenge_expired" ||
-          error.publicError.code === "stale_proposal")
+        (error.publicError.code === PUBLIC_ERROR_CODE.CHALLENGE_EXPIRED ||
+          error.publicError.code === PUBLIC_ERROR_CODE.STALE_PROPOSAL)
       )
         clearChallenge(proposalId);
       if (isCurrent(command)) input.activationError.value = readableHomeError(error);

@@ -1,5 +1,5 @@
 import { canonicalJson } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import type { ResolvedCapabilityPackageV1 } from "./types.js";
 
@@ -38,7 +38,7 @@ export function capabilityClosurePackageSet(
     if (retained && !sameResolvedPackage(retained, pkg))
       throw new CapabilityRuntimeError(
         "capability closure contains conflicting package identities",
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     packages.set(pkg.pin.id, pkg);
   }
@@ -55,7 +55,7 @@ export function capabilityClosurePackagePins(
     if (retained && canonicalJson(retained) !== canonicalJson(pin))
       throw new CapabilityRuntimeError(
         "capability closure contains conflicting package pins",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     pins.set(pin.id, pin);
   }

@@ -1,4 +1,7 @@
 import type { ComputedRef, Ref, ShallowRef } from "vue";
+import type { CapabilityScope } from "../../core/capability-contract.js";
+import type { ConversationCatalogHealth } from "../../orchestrator/conversation/conversation-catalog-contract.js";
+import type { ConversationClientStreamState } from "../../orchestrator/conversation/conversation-sse-contract.js";
 import type { HomeMessageQueueSnapshot } from "./conversation-home-message-queue-types.js";
 import type { ActivationEpoch } from "./conversation-home-state.js";
 import type {
@@ -14,7 +17,7 @@ import type {
 export interface HomeQueryRuntimeInput {
   sessions: Ref<HomeSessionSummary[]>;
   sessionQuery: Ref<string>;
-  catalogHealth: Ref<"ready" | "rebuilding" | "degraded">;
+  catalogHealth: Ref<ConversationCatalogHealth>;
   catalogLoading: Ref<boolean>;
   catalogError: Ref<string>;
   activeRootId: Ref<string | null>;
@@ -28,11 +31,11 @@ export interface HomeQueryRuntimeInput {
   activationLoading: Ref<boolean>;
   activationError: Ref<string>;
   online: Ref<boolean>;
-  streamStatus: Ref<"idle" | "connecting" | "live" | "reconnecting" | "error">;
+  streamStatus: Ref<ConversationClientStreamState>;
   streamError: Ref<string>;
   capabilities: Ref<HomeCapabilityItem[]>;
   capabilityQuery: Ref<string>;
-  capabilityScope: Ref<"project" | "user">;
+  capabilityScope: Ref<CapabilityScope>;
   capabilityLoading: Ref<boolean>;
   capabilityError: Ref<string>;
   paging: HomePagingState;

@@ -2,7 +2,7 @@
 title: Workflow
 description: End-to-end workflow — intake questions, context normalization, conversation runtime, and output report for VibeFlow task coordination.
 category: how-to
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Workflow
@@ -24,23 +24,25 @@ last_updated: 2026-08-26
 2. CLI starts local server and opens AI-first Home
 3. User selects a prior session or starts a new conversation in the central pane
 4. User adds/removes agents, sends or queues messages, and optionally stages private file ranges
-5. User edits the latest queued human message with ArrowUp, or adds ordered quotes/reactions
-6. Tool scans the repo and resolves source, reader, and capability skills when needed
-7. Tool reads and normalizes documents, then creates canonical project context
-8. Coordinator plans work; specialist agents investigate/debate uncertain decisions
-9. Runtime delivers structured public turns and separate one-shot private file context
-10. Exact resumes keep native CLI history and receive only new user/peer deltas
-11. Coordinator splits tasks into non-overlapping scopes and generates engine instructions
-12. Tool dispatches the selected CLI through the canonical owned async route
-13. Inline Home cards resolve approvals, installs, repair, cancellation, and lifecycle actions
-14. Hooks validate commands, writes, diffs, and final output
-15. Tool shows contextual loading, logs, diffs, tests, risk, and conversation trace
-16. Tool verifies completion and proposes skill updates from encountered problems
+5. Failed unacknowledged admission stays retryable with its exact idempotency-bound request
+6. User edits the latest queued human message with ArrowUp, or adds ordered quotes/reactions
+7. Tool scans the repo and resolves source, reader, and capability skills when needed
+8. Tool reads and normalizes documents, then creates canonical project context
+9. Coordinator plans work; specialist agents investigate/debate uncertain decisions
+10. Runtime delivers structured public turns and separate one-shot private file context
+11. Exact Claude/Codex/OpenCode resumes get new user/peer deltas; other turns get bounded own history
+12. Coordinator splits tasks into non-overlapping scopes and generates engine instructions
+13. Tool dispatches the selected CLI through the canonical owned async route
+14. Inline Home cards resolve approvals, installs, repair, cancellation, and lifecycle actions
+15. Hooks validate commands, writes, diffs, and final output
+16. Tool shows contextual loading, logs, diffs, tests, risk, and conversation trace
+17. Tool verifies completion and proposes skill updates from encountered problems
 ```
 
 ## Intake questions
 
-The web UI should ask:
+`vf init` asks these questions when stdin is a TTY; `--no-ask` skips them. AI-first Home
+does not switch into an intake wizard.
 
 ```text
 Repository:
@@ -106,11 +108,14 @@ Example normalized document record:
 
 ## Conversation turn delivery
 
-Public participant input is canonical JSON prefixed by `VF-TURN/1`. When native binding,
+Public participant input is canonical JSON prefixed by `VF-TURN/1`. Claude, Codex, and
+OpenCode are the only exact by-id engines. When native binding,
 public cursor, and interaction cursor are all proved, `exact-delta` mode reuses the CLI's own
 session and sends only newly applicable user messages plus peer-agent responses/reactions.
 The recipient's own previous output is already in native history and is not sent again.
-Missing or stale proof uses `full-history` with the applicable public context and may include
+Without valid exact proof, `full-history` adds the recipient's last eight public responses to
+applicable user/peer context. Each own-history summary is capped at 2 KiB UTF-8 and includes
+source digest, provenance, and count/truncation metadata. It may include
 the content-addressed `VF-HANDOFF/1` shared handoff.
 
 Private file ranges travel separately as `VF-PRIVATE-FILE-RANGES/1` canonical JSON and are
@@ -129,8 +134,8 @@ exit/quiescence plus `streams-drained`.
 
 `vf doctor` reports active, recovered, or uncertain records. `vf doctor --fix` acts only on
 an exact proved orphan; live or identity-unprovable owners stay fail-closed. Injected platform
-tests cover the Windows contract, but the current evidence does not claim a live Windows
-canary.
+tests cover the Windows contract and a real `windows-latest` CI smoke job is configured.
+Live Windows evidence remains pending until that job is green.
 
 ## Output report
 

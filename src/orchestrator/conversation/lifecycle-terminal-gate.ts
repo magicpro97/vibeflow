@@ -1,3 +1,4 @@
+import { CONVERSATION_TERMINAL_LIFECYCLE } from "./conversation-public-wire-contract.js";
 import {
   ConversationAuthorityClosedError,
   type EmissionGateEntry,
@@ -66,14 +67,15 @@ export class ConversationTerminalEmissionGate {
       );
     }
     let effective =
-      entry.terminal === "ABORTED" && lifecycle === "COMPLETED"
-        ? "ABORTED"
+      entry.terminal === CONVERSATION_TERMINAL_LIFECYCLE.ABORTED &&
+      lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED
+        ? CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
         : (entry.state === "cancelled" || this.cancellationClaimed(conversationId, operationId)) &&
-            lifecycle !== "ABORTED"
-          ? "ABORTED"
-          : lifecycle === "COMPLETED" &&
+            lifecycle !== CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
+          ? CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
+          : lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED &&
               (entry.state === "paused" || entry.state === "pausing" || entry.state === "resuming")
-            ? "ABORTED"
+            ? CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
             : lifecycle;
     if (entry.terminal) {
       if (entry.terminalPending)
@@ -95,11 +97,11 @@ export class ConversationTerminalEmissionGate {
       .catch(() => undefined)
       .then(() => {
         if (
-          lifecycle !== "ABORTED" &&
+          lifecycle !== CONVERSATION_TERMINAL_LIFECYCLE.ABORTED &&
           (entry.terminalPrevious === "cancelled" ||
             this.cancellationClaimed(conversationId, operationId))
         ) {
-          effective = "ABORTED";
+          effective = CONVERSATION_TERMINAL_LIFECYCLE.ABORTED;
           entry.terminal = effective;
         }
         return append(effective);

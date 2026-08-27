@@ -1,3 +1,7 @@
+import {
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+  PUBLIC_TARGET_RESULT_OUTCOME,
+} from "../../actions/public-operation-contract.js";
 import type { PublicTargetResultV1 } from "../../actions/public-types.js";
 import { digestV1 } from "../../durability/index.js";
 import type { PermissionBindingRowV1 } from "../permissions/types.js";
@@ -12,6 +16,7 @@ import type {
   CapabilityLockV1,
   CapabilityLockedTargetV1,
 } from "../wire/lock.js";
+import { CAPABILITY_LOCK_TARGET_STATE } from "../wire/lock.js";
 import { bytewise } from "../wire/primitives.js";
 
 function targetPermissionRows(
@@ -67,7 +72,7 @@ function lockedTarget(
     item.health_plan.filter((probe) => probe.target_ids.includes(result.target_id)),
   );
   const source = plan.targets.find((target) => target.target_id === result.target_id);
-  if (!source || source.subject.kind !== "capability")
+  if (!source || source.subject.kind !== PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY)
     throw new Error("target result is not in plan");
   return {
     target_id: result.target_id,
@@ -76,7 +81,10 @@ function lockedTarget(
     engine: result.target.engine,
     participant_id: result.target.participant_id,
     required: result.target.required,
-    state: result.outcome === "degraded" ? "degraded" : "installed",
+    state:
+      result.outcome === PUBLIC_TARGET_RESULT_OUTCOME.DEGRADED
+        ? CAPABILITY_LOCK_TARGET_STATE.DEGRADED
+        : CAPABILITY_LOCK_TARGET_STATE.INSTALLED,
     adapter_fingerprints: [...new Set(adapterPlans.map((item) => item.adapter.fingerprint))].sort(
       bytewise,
     ),
@@ -102,9 +110,10 @@ function lockEntry(
   const targets = results
     .filter(
       (result) =>
-        result.subject.kind === "capability" &&
+        result.subject.kind === PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY &&
         result.subject.package_id === pkg.pin.id &&
-        ["applied", "degraded"].includes(result.outcome),
+        (result.outcome === PUBLIC_TARGET_RESULT_OUTCOME.APPLIED ||
+          result.outcome === PUBLIC_TARGET_RESULT_OUTCOME.DEGRADED),
     )
     .map((result) => lockedTarget(plan, result))
     .filter((target) => target.projections.length > 0)

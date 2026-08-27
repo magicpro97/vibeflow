@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { HOOK_TEMPLATE_IDS, type HookConfig } from "./hooks/templates.js";
+import { isRiskLevel } from "./core/hook-contract.js";
+import { HOOK_TEMPLATE_IDS } from "./hooks/templates.js";
 import type { VibeSettings } from "./settings.js";
 
 type Policy = Pick<VibeSettings, "envPolicy" | "hooks">;
@@ -12,8 +13,6 @@ export interface PolicyDiffEntry {
 
 const MAX_ITEMS = 50;
 const SAFE_TEXT = /^[\x20-\x7e]{1,200}$/;
-const HOOK_TEMPLATES = new Set<string>(HOOK_TEMPLATE_IDS);
-const RISK_LEVELS = new Set(["none", "low", "medium", "high", "critical"]);
 
 function strings(value: unknown): string[] | null {
   if (
@@ -51,7 +50,11 @@ export function validatePolicyCandidate(value: unknown): Policy | null {
     )
       return null;
     const templates = strings(obj.templates);
-    if (!templates || !templates.every((template) => HOOK_TEMPLATES.has(template))) return null;
+    if (
+      !templates ||
+      !templates.every((template) => HOOK_TEMPLATE_IDS.some((candidate) => candidate === template))
+    )
+      return null;
     if (!Array.isArray(obj.custom) || obj.custom.length > MAX_ITEMS) return null;
     const custom = [] as NonNullable<VibeSettings["hooks"]>["custom"];
     for (const rule of obj.custom) {
@@ -74,8 +77,7 @@ export function validatePolicyCandidate(value: unknown): Policy | null {
         (item.kind !== "command" && item.kind !== "file") ||
         typeof item.pattern !== "string" ||
         !SAFE_TEXT.test(item.pattern) ||
-        typeof item.risk !== "string" ||
-        !RISK_LEVELS.has(item.risk)
+        !isRiskLevel(item.risk)
       )
         return null;
       if (
@@ -87,7 +89,7 @@ export function validatePolicyCandidate(value: unknown): Policy | null {
         name: item.name,
         kind: item.kind,
         pattern: item.pattern,
-        risk: item.risk as HookConfig["custom"][number]["risk"],
+        risk: item.risk,
         ...(item.reason === undefined ? {} : { reason: item.reason }),
       });
     }

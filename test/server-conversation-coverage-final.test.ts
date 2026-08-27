@@ -104,8 +104,16 @@ async function responseText(response: Response): Promise<string> {
 
 describe("conversation server final behavioral coverage", () => {
   test("normalizes bracketed IPv6 hosts and rejects malformed bracket authorities", () => {
+    expect(isConversationLoopbackHost("localhost")).toBe(true);
+    expect(isConversationLoopbackHost("127.0.0.1")).toBe(true);
+    expect(isConversationLoopbackHost("127.0.0.1:4321")).toBe(true);
+    expect(isConversationLoopbackHost("::1")).toBe(true);
     expect(isConversationLoopbackHost("[::1]:4321")).toBe(true);
     expect(isConversationLoopbackHost("[::1]")).toBe(true);
+    expect(isConversationLoopbackHost("0.0.0.0")).toBe(false);
+    expect(isConversationLoopbackHost("::")).toBe(false);
+    expect(isConversationLoopbackHost("192.168.1.25")).toBe(false);
+    expect(isConversationLoopbackHost("lan-host.local")).toBe(false);
     expect(isConversationLoopbackHost("[::1")).toBe(false);
     expect(isConversationLoopbackHost("[::1]:port")).toBe(false);
     expect(conversationUrlHost("::1")).toBe("[::1]");

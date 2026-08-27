@@ -17,6 +17,7 @@ import {
 import { CAPABILITY_DESIGN_PATH } from "../verify/normative-matrix-source.js";
 import { checkNormativeMatrix } from "../verify/normative-matrix.js";
 import { type NormativeProofRunV2, runNormativeProofs } from "../verify/normative-proof-run.js";
+import { VERIFY_RUNTIME_AUTHORITY } from "../verify/runtime-authority.js";
 import {
   appendJournal,
   c,
@@ -85,7 +86,7 @@ export function verify(
       const r = (inject.spawner ?? spawnSync)(wrapped.cmd, wrapped.args, {
         stdio: "pipe",
         cwd: sandbox?.ok ? sandbox.spec.target : dir,
-        timeout: 300000,
+        timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
       });
       if (sandbox?.ok && r.status === null)
         sandboxRuntime.run(["rm", "-f", sandbox.spec.containerName], base);
@@ -143,8 +144,8 @@ export function verify(
           `coverage gate ${pass ? "passed" : "failed"}`,
         );
       } else {
-        coverageResult = gateResult("skipped", "coverage/lcov.info not found");
-        out("vf", c.yellow("⚠ coverage/lcov.info not found — run `bun run coverage` first"));
+        coverageResult = gateResult("fail", "coverage/lcov.info not found");
+        out("vf", c.red("✗ coverage/lcov.info not found — run `bun run coverage` first"));
       }
     }
 

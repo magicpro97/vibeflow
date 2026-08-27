@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import { arch, constants as osConstants } from "node:os";
 import { durabilityError } from "./errors.js";
+import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 export interface NativeBindings {
   openat: (
@@ -22,7 +23,7 @@ export interface NativeBindings {
 
 export const IS_BUN =
   typeof (process.versions as Record<string, string | undefined>).bun === "string";
-export const O_CLOEXEC = process.platform === "darwin" ? 0x01000000 : 0o2000000;
+export const O_CLOEXEC = process.platform === RUNTIME_PLATFORM.DARWIN ? 0x01000000 : 0o2000000;
 const RUNTIME_REQUIRE = createRequire(import.meta.url);
 
 let bindings: NativeBindings | null = null;
@@ -67,7 +68,7 @@ function linuxLibcCandidates(): string[] {
 export function loadBunBindings(): NativeBindings {
   const ffi = RUNTIME_REQUIRE("bun:ffi") as typeof import("bun:ffi");
   const { FFIType } = ffi;
-  const errnoSymbol = process.platform === "darwin" ? "__error" : "__errno_location";
+  const errnoSymbol = process.platform === RUNTIME_PLATFORM.DARWIN ? "__error" : "__errno_location";
   const definitions = {
     openat: {
       args: [FFIType.i32, FFIType.cstring, FFIType.i32, FFIType.i32],
@@ -93,7 +94,9 @@ export function loadBunBindings(): NativeBindings {
   let library: ReturnType<typeof ffi.dlopen> | null = null;
   let failure: unknown;
   const candidates =
-    process.platform === "darwin" ? ["/usr/lib/libSystem.B.dylib"] : linuxLibcCandidates();
+    process.platform === RUNTIME_PLATFORM.DARWIN
+      ? ["/usr/lib/libSystem.B.dylib"]
+      : linuxLibcCandidates();
   for (const candidate of candidates) {
     try {
       library = ffi.dlopen(candidate, definitions);
@@ -125,7 +128,9 @@ export function loadBunBindings(): NativeBindings {
 
 export function loadNodeBindings(): NativeBindings {
   const koffi = RUNTIME_REQUIRE("koffi") as typeof import("koffi").default;
-  const library = koffi.load(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : null);
+  const library = koffi.load(
+    process.platform === RUNTIME_PLATFORM.DARWIN ? "/usr/lib/libSystem.B.dylib" : null,
+  );
   nativeLibrary = library;
   errnoReader = koffi.errno;
   errnoTable = koffi.os.errno;
@@ -146,7 +151,7 @@ export function loadNodeBindings(): NativeBindings {
     unlinkat: library.func("int unlinkat(int, const char *, int)") as NativeBindings["unlinkat"],
     flock: library.func("int flock(int, int)") as NativeBindings["flock"],
     fcntl:
-      process.platform === "darwin"
+      process.platform === RUNTIME_PLATFORM.DARWIN
         ? (library.func("int fcntl(int, int, ...)") as NativeBindings["fcntl"])
         : null,
   };
@@ -165,7 +170,7 @@ export function initializeNativeRuntime(input: {
   try {
     if (input.disabled)
       return { bindings: null, unavailableReason: "native durability was disabled by the runtime" };
-    if (input.platform !== "darwin" && input.platform !== "linux")
+    if (input.platform !== RUNTIME_PLATFORM.DARWIN && input.platform !== RUNTIME_PLATFORM.LINUX)
       return {
         bindings: null,
         unavailableReason: `native durability is unsupported on ${input.platform}`,

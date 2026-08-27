@@ -75,14 +75,14 @@
         <button type="button" class="home-button" :disabled="busy || !store.online" @click="store.mutateAction(view, 'deny')">Decline</button>
       </template>
       <button
-        v-else-if="view.approval.decision === 'approved' && view.operation.state === 'approved'"
+        v-else-if="view.approval.decision === ACTION_DECISION.APPROVED && view.operation.state === ACTION_OPERATION_STATE.APPROVED"
         type="button"
         class="home-button home-button--primary"
         :disabled="busy || !store.online"
         @click="store.mutateAction(view, 'commit')"
       >Run approved action</button>
       <button
-        v-if="!['approved', 'requested'].includes(view.operation.state)"
+        v-if="view.operation.state !== ACTION_OPERATION_STATE.APPROVED"
         type="button"
         class="home-button"
         :disabled="busy || !store.online"
@@ -110,6 +110,13 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { HOST_ACTION_KIND } from "../../../actions/host-action-contract.js";
+import { ACTION_OPERATION_STATE } from "../../../actions/protocol-contract.js";
+import {
+  ACTION_DECISION,
+  ACTION_DOMAIN,
+  ACTION_SCOPE,
+} from "../../../actions/public-action-contract.js";
 import { planHomeRecovery } from "../conversation-home-recovery.js";
 import { terminalHomeOperation } from "../conversation-home-runtime.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
@@ -122,31 +129,27 @@ const busy = computed(() => Boolean(store.actionBusy[props.view.proposal.proposa
 const challenge = computed(() => store.challenges[props.view.proposal.proposal_id]);
 const needsChallenge = computed(
   () =>
-    props.view.proposal.scope === "user" ||
-    props.view.proposal.action_type === "conversation.publish_suspected_literal",
+    props.view.proposal.scope === ACTION_SCOPE.USER ||
+    props.view.proposal.action_type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
 );
 const expiryClock = ref(Date.now());
 let expiryTimer: ReturnType<typeof setTimeout> | null = null;
 const proposalExpired = computed(
   () =>
-    props.view.operation.state === "pending_review" &&
+    props.view.operation.state === ACTION_OPERATION_STATE.PENDING_REVIEW &&
     Date.parse(props.view.proposal.expires_at) <= expiryClock.value,
 );
 const approvalExpired = computed(
   () =>
-    props.view.approval?.decision === "approved" &&
-    props.view.operation.state === "approved" &&
+    props.view.approval?.decision === ACTION_DECISION.APPROVED &&
+    props.view.operation.state === ACTION_OPERATION_STATE.APPROVED &&
     Date.parse(props.view.approval.expires_at) <= expiryClock.value,
 );
-const staleTerminal = computed(
-  () =>
-    /stale/i.test(props.view.operation.error?.code ?? "") ||
-    /stale/i.test(props.view.operation.error?.message ?? ""),
-);
+const staleTerminal = computed(() => props.view.operation.state === ACTION_OPERATION_STATE.STALE);
 const terminal = computed(
   () =>
     terminalHomeOperation(props.view.operation.state) ||
-    props.view.operation.state === "denied" ||
+    props.view.operation.state === ACTION_OPERATION_STATE.DENIED ||
     staleTerminal.value ||
     approvalExpired.value ||
     proposalExpired.value,
@@ -163,13 +166,13 @@ const progressLabel = computed(() =>
     : "Waiting for approval",
 );
 const domainLabel = computed(() =>
-  props.view.proposal.domain === "capability" ? "CLI capability" : "Conversation",
+  props.view.proposal.domain === ACTION_DOMAIN.CAPABILITY ? "CLI capability" : "Conversation",
 );
 const cardState = computed(() =>
   staleTerminal.value
-    ? "stale"
+    ? ACTION_OPERATION_STATE.STALE
     : approvalExpired.value || proposalExpired.value
-      ? "expired"
+      ? ACTION_OPERATION_STATE.EXPIRED
       : props.view.operation.state,
 );
 const terminalNote = computed(() => {
@@ -182,10 +185,11 @@ const terminalNote = computed(() => {
       props.view.operation.error?.message ||
       "This action result went stale. Refresh the current review queue."
     );
-  if (props.view.operation.state === "canceled")
+  if (props.view.operation.state === ACTION_OPERATION_STATE.CANCELED)
     return "This action was canceled before a durable receipt completed.";
-  if (props.view.operation.state === "denied") return "This action was declined and will not run.";
-  if (props.view.operation.state === "needs_recovery")
+  if (props.view.operation.state === ACTION_OPERATION_STATE.DENIED)
+    return "This action was declined and will not run.";
+  if (props.view.operation.state === ACTION_OPERATION_STATE.NEEDS_RECOVERY)
     return "This action stopped at a guarded failure. Choose a recovery path to continue.";
   return "";
 });
@@ -193,7 +197,7 @@ const stateLabel = computed(() => {
   if (approvalExpired.value) return "approval expired";
   if (proposalExpired.value) return "proposal expired";
   if (staleTerminal.value) return "stale result";
-  if (props.view.operation.state === "denied") return "declined";
+  if (props.view.operation.state === ACTION_OPERATION_STATE.DENIED) return "declined";
   return props.view.operation.state.replaceAll("_", " ");
 });
 const recoveryPlans = computed(() =>
@@ -214,10 +218,11 @@ function scheduleExactExpiry() {
   expiryTimer = null;
   expiryClock.value = Date.now();
   const deadlines = [
-    props.view.operation.state === "pending_review"
+    props.view.operation.state === ACTION_OPERATION_STATE.PENDING_REVIEW
       ? Date.parse(props.view.proposal.expires_at)
       : Number.NaN,
-    props.view.operation.state === "approved" && props.view.approval?.decision === "approved"
+    props.view.operation.state === ACTION_OPERATION_STATE.APPROVED &&
+    props.view.approval?.decision === ACTION_DECISION.APPROVED
       ? Date.parse(props.view.approval.expires_at)
       : Number.NaN,
   ].filter((deadline) => Number.isFinite(deadline) && deadline > expiryClock.value);

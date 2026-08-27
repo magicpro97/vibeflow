@@ -7,6 +7,7 @@ import {
   renderCopilotAgent,
   renderForEngine,
   renderOpencodeAgent,
+  renderRoleForSpawn,
   safeAgentName,
   yamlQuote,
 } from "../src/agents/render.js";
@@ -91,6 +92,18 @@ describe("renderAntigravityAgent", () => {
     expect(renderForEngine("antigravity" as never, SPEC)).toBe(out);
     expect(agentFilePath("antigravity" as never, "My Role")).toBe(
       ".agents/agents/My Role/agent.md",
+    );
+  });
+});
+
+describe("renderRoleForSpawn", () => {
+  test("maps canonical model overrides through the Codex alias table", () => {
+    expect(renderRoleForSpawn("codex", SPEC, { modelOverride: "sonnet" }).model).toBe("gpt-5.4");
+    expect(renderRoleForSpawn("codex", SPEC, { modelOverride: "gpt-5.4-codex" }).model).toBe(
+      "gpt-5.4-codex",
+    );
+    expect(renderRoleForSpawn("codex", SPEC, { modelOverride: "custom-model" }).model).toBe(
+      "custom-model",
     );
   });
 });

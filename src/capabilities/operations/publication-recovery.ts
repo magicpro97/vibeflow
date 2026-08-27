@@ -1,3 +1,4 @@
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
 import { canonicalJsonBytes, privateFileBytes } from "../../durability/index.js";
 import type {
@@ -10,9 +11,13 @@ import { capabilityHistoryPath } from "../storage/paths.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
 import type { CapabilityHealthInventoryV1 } from "../storage/types.js";
-import type { CapabilityPreEffectRefusalReasonV1 } from "../wire/operation.js";
+import {
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityPreEffectRefusalReasonV1,
+} from "../wire/operation.js";
 import { capabilityAuthorityFrontier, capabilityRecoveryFrontier } from "./authority-frontier.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import { foldCapabilityOperation, readOperationBaseLock } from "./fold.js";
 import { readCapabilityHealthCurrent, readCapabilityHealthInventory } from "./health-inventory.js";
 import type { CapabilityOperationJournalV1 } from "./operation-journal.js";
@@ -78,8 +83,13 @@ function failAfterDurableRecoveryTerminal(
   reason: string,
   message: string,
 ): never {
-  input.journal.terminal(input.operationId, "needs_recovery", reason, input.held);
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  input.journal.terminal(
+    input.operationId,
+    ACTION_OPERATION_STATE.NEEDS_RECOVERY,
+    reason,
+    input.held,
+  );
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 export function recoverCapabilityPublication(input: {
@@ -95,15 +105,18 @@ export function recoverCapabilityPublication(input: {
   actionAuthority: CapabilityOperationActionAuthorityV1;
 }): CapabilityPublicationRecoveryOutcomeV1 {
   const events = readCapabilityWal(input.storage.paths, input.operationId);
-  const preparedEvent = events.find((event) => event.payload.kind === "health-inventory-prepared");
-  if (preparedEvent?.payload.kind !== "health-inventory-prepared") return { kind: "none" };
+  const preparedEvent = events.find(
+    (event) => event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED,
+  );
+  if (preparedEvent?.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED)
+    return { kind: "none" };
   const prepared = preparedEvent.payload;
   const retainedTransition = events
-    .filter((event) => event.payload.kind === "operation-transition")
+    .filter((event) => event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION)
     .at(-1)?.payload;
   if (
-    retainedTransition?.kind === "operation-transition" &&
-    retainedTransition.to === "needs_recovery"
+    retainedTransition?.kind === CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION &&
+    retainedTransition.to === ACTION_OPERATION_STATE.NEEDS_RECOVERY
   )
     return {
       kind: "result",
@@ -154,17 +167,17 @@ export function recoverCapabilityPublication(input: {
   const retainedRefusal = events.find(
     (event) =>
       event.sequence > preparedEvent.sequence &&
-      event.payload.kind === "pre-effect-refusal" &&
-      event.payload.refusal.frontier_kind === "lock-publication",
+      event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.PRE_EFFECT_REFUSAL &&
+      event.payload.refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION,
   );
-  if (retainedRefusal?.payload.kind === "pre-effect-refusal")
+  if (retainedRefusal?.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.PRE_EFFECT_REFUSAL)
     return {
       kind: "rollback-required",
       reason: retainedRefusal.payload.refusal.reason_code,
     };
   const committed = events.some(
     (event) =>
-      event.payload.kind === "lock-commit" &&
+      event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT &&
       event.payload.generation_id === prepared.generation_id &&
       event.payload.lock_digest === prepared.lock_digest,
   );
@@ -185,7 +198,7 @@ export function recoverCapabilityPublication(input: {
             stepId: null,
             targetIds: capabilityHostTargetIds(input.plan),
             held: input.held,
-            frontier: "lock-publication",
+            frontier: CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION,
             authorityCheck,
           }),
         effect: () => {
@@ -193,7 +206,7 @@ export function recoverCapabilityPublication(input: {
           input.journal.append(
             input.operationId,
             {
-              kind: "lock-commit",
+              kind: CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT,
               generation_id: objects.proposed.generation_id,
               lock_digest: objects.proposed.content_digest,
               health_inventory_digest: objects.inventory.inventory_digest,
@@ -213,7 +226,7 @@ export function recoverCapabilityPublication(input: {
     } else if (currentDigest !== objects.proposed.content_digest) {
       input.journal.terminal(
         input.operationId,
-        "needs_recovery",
+        ACTION_OPERATION_STATE.NEEDS_RECOVERY,
         "lock-publication-third-state",
         input.held,
       );
@@ -231,7 +244,7 @@ export function recoverCapabilityPublication(input: {
           input.journal.append(
             input.operationId,
             {
-              kind: "lock-commit",
+              kind: CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT,
               generation_id: objects.proposed.generation_id,
               lock_digest: objects.proposed.content_digest,
               health_inventory_digest: objects.inventory.inventory_digest,
@@ -247,7 +260,7 @@ export function recoverCapabilityPublication(input: {
   } else if (currentDigest !== objects.proposed.content_digest) {
     input.journal.terminal(
       input.operationId,
-      "needs_recovery",
+      ACTION_OPERATION_STATE.NEEDS_RECOVERY,
       "committed-lock-missing",
       input.held,
     );
@@ -286,7 +299,7 @@ export function recoverCapabilityPublication(input: {
   if (!matchesPriorPointer && !matchesNextPointer) {
     input.journal.terminal(
       input.operationId,
-      "needs_recovery",
+      ACTION_OPERATION_STATE.NEEDS_RECOVERY,
       "health-pointer-third-state",
       input.held,
     );
@@ -301,7 +314,7 @@ export function recoverCapabilityPublication(input: {
     operation: `capability-pointer-recovery:${input.operationId}`,
     recover: () => {
       if (matchesPriorPointer) input.storage.publishHealthCurrent(pointer, nextPointer, input.held);
-      input.journal.terminal(input.operationId, "succeeded", null, input.held);
+      input.journal.terminal(input.operationId, ACTION_OPERATION_STATE.SUCCEEDED, null, input.held);
     },
   });
   return {

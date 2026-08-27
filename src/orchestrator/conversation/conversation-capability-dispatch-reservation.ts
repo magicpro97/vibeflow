@@ -6,6 +6,8 @@ import {
   type ActionProposalV1,
   deriveOperationId,
 } from "../../actions/index.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import { ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import {
   type ProcessLock,
   acquireProcessLock,
@@ -265,8 +267,8 @@ export class ConversationCapabilityDispatchReservationStoreV1 {
     )
       throw new Error("capability dispatch reservation has no exact prepared dispatch");
     if (
-      proposal.domain !== "capability" ||
-      proposal.action_root_locator.kind !== "conversation" ||
+      proposal.domain !== ACTION_DOMAIN.CAPABILITY ||
+      proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
       proposal.base.root_session_id !== source.root_session_id ||
       proposal.base.conversation_id !== source.conversation_id ||
       proposal.base.revision_id !== source.revision_id ||

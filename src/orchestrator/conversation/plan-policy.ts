@@ -1,4 +1,8 @@
 import {
+  CONVERSATION_COMMAND_FAILURE_STATUS,
+  CONVERSATION_COMMAND_RESULT_STATUS,
+} from "./conversation-command-result-contract.js";
+import {
   type PlanArtifact,
   type PlanArtifactLocator,
   type PlanService,
@@ -27,7 +31,9 @@ export interface PlanWorkflowPolicies {
 
 const failed = (context: ConversationContext): ConversationOrchestrationResult => ({
   operation_id: context.correlation.operation_id,
-  status: context.signal.aborted ? "aborted" : "failed",
+  status: context.signal.aborted
+    ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+    : CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
   artifact_refs: [],
 });
 
@@ -38,7 +44,11 @@ const mergeRefs = (
 ): ConversationOrchestrationResult => ({
   operation_id: context.correlation.operation_id,
   status,
-  artifact_refs: status === "failed" || status === "aborted" ? [] : [...new Set(refs.flat())],
+  artifact_refs:
+    status === CONVERSATION_COMMAND_FAILURE_STATUS.FAILED ||
+    status === CONVERSATION_COMMAND_FAILURE_STATUS.ABORTED
+      ? []
+      : [...new Set(refs.flat())],
 });
 
 /** Durable plan → approval → units → human review → verify workflow policy. */
@@ -72,7 +82,8 @@ export class PlanConversationPolicy implements ConversationPolicy {
       if (context.signal.aborted) return failed(context);
       const plan = await this.persistRevision(context);
       if (context.signal.aborted) return failed(context);
-      if (!this.workflow) return mergeRefs(context, "completed", [plan.ref]);
+      if (!this.workflow)
+        return mergeRefs(context, CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED, [plan.ref]);
       const requested = await this.workflow.orchestrate.execute(context);
       if (context.signal.aborted) return failed(context);
       if (requested.operation_id !== context.correlation.operation_id) return failed(context);
@@ -95,14 +106,14 @@ export class PlanConversationPolicy implements ConversationPolicy {
         : await this.workflow.orchestrate.continueAfterApproval(context, decision);
       if (context.signal.aborted) return failed(context);
       if (executed.operation_id !== context.correlation.operation_id) return failed(context);
-      if (executed.status !== "completed") {
+      if (executed.status !== CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED) {
         return mergeRefs(context, executed.status, executed.artifact_refs);
       }
       const reviewed = await this.workflow.review.execute(context);
       if (context.signal.aborted) return failed(context);
       if (
         reviewed.operation_id !== context.correlation.operation_id ||
-        reviewed.status !== "completed"
+        reviewed.status !== CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED
       ) {
         return failed(context);
       }
@@ -110,13 +121,13 @@ export class PlanConversationPolicy implements ConversationPolicy {
       if (context.signal.aborted) return failed(context);
       if (
         verified.operation_id !== context.correlation.operation_id ||
-        verified.status !== "completed"
+        verified.status !== CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED
       ) {
         return failed(context);
       }
       return mergeRefs(
         context,
-        "completed",
+        CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
         [plan.ref],
         executed.artifact_refs,
         reviewed.artifact_refs,

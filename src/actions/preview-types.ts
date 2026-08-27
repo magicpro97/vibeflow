@@ -1,58 +1,96 @@
+import type { LegacySource } from "./capability-manifest-vocabulary-contract.js";
 import type {
+  ACTION_PACKAGE_PIN_SOURCE_KIND,
+  ACTION_PREVIEW_PROJECTOR_VERSION,
+  ACTION_TARGET_DISPOSITION_EXECUTION_VALUE,
+  ActionConfigDiffMode,
+  ActionDependencyChange,
   ActionEffectClass,
+  ActionHealthPlanKind,
+  ActionHealthPlanRetry,
+  ActionPackagePinTrust,
+  ActionPermissionChange,
+  ActionPermissionEnforcement,
+  ActionTargetManualReasonCode,
+  ActionTargetRequiredUserActionReasonCode,
+  ActionTargetUnsupportedReasonCode,
+  Reversibility,
+} from "./public-action-contract.js";
+import type {
+  PUBLIC_ACTION_TARGET_APPLY_FAILURE,
+  PUBLIC_ACTION_TARGET_HEALTH_FAILURE,
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+  PublicActionTargetScopeV1,
+} from "./public-operation-contract.js";
+import type {
   ActionPlanningOptionsV1,
   CapabilityScope,
   EngineName,
   HostActionKind,
   JsonValue,
   RecoveryAction,
-  Reversibility,
 } from "./types.js";
 
 export type ActionTargetV1 = {
-  scope: CapabilityScope;
+  scope: PublicActionTargetScopeV1 & CapabilityScope;
   engine: EngineName | null;
   participant_id: string | null;
 } & (
-  | { required: true; on_apply_failure: "abort-scope"; on_health_failure: "abort-scope" }
+  | {
+      required: true;
+      on_apply_failure: typeof PUBLIC_ACTION_TARGET_APPLY_FAILURE.ABORT_SCOPE;
+      on_health_failure: typeof PUBLIC_ACTION_TARGET_HEALTH_FAILURE.ABORT_SCOPE;
+    }
   | {
       required: false;
-      on_apply_failure: "omit-after-rollback";
-      on_health_failure: "omit-after-rollback" | "commit-degraded";
+      on_apply_failure: typeof PUBLIC_ACTION_TARGET_APPLY_FAILURE.OMIT_AFTER_ROLLBACK;
+      on_health_failure:
+        | typeof PUBLIC_ACTION_TARGET_HEALTH_FAILURE.OMIT_AFTER_ROLLBACK
+        | typeof PUBLIC_ACTION_TARGET_HEALTH_FAILURE.COMMIT_DEGRADED;
     }
 );
 export interface ActionTargetBindingV1 {
   target_id: string;
   target: ActionTargetV1;
   subject:
-    | { kind: "conversation"; action_type: HostActionKind; participant_id: string | null }
-    | { kind: "capability"; package_id: string; component_id: string };
+    | {
+        kind: typeof PUBLIC_ACTION_TARGET_SUBJECT_KIND.CONVERSATION;
+        action_type: HostActionKind;
+        participant_id: string | null;
+      }
+    | {
+        kind: typeof PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY;
+        package_id: string;
+        component_id: string;
+      };
 }
 export interface PackagePinV1 {
   id: string;
   version: string;
   source:
     | {
-        kind: "registry";
+        kind: typeof ACTION_PACKAGE_PIN_SOURCE_KIND.REGISTRY;
         registry_origin: string;
         source_url: string;
         commit_oid: string | null;
         signature_envelope_digest: string;
       }
-    | { kind: "git"; canonical_url: string; commit_oid: string }
-    | { kind: "local-dev"; repo_relative_alias: string }
     | {
-        kind: "legacy-adopt";
-        legacy_source:
-          | "skill-lock"
-          | "tool-managed-evidence"
-          | "mcp-managed-sidecar"
-          | "hook-sentinel"
-          | "role-marker";
+        kind: typeof ACTION_PACKAGE_PIN_SOURCE_KIND.GIT;
+        canonical_url: string;
+        commit_oid: string;
+      }
+    | {
+        kind: typeof ACTION_PACKAGE_PIN_SOURCE_KIND.LOCAL_DEV;
+        repo_relative_alias: string;
+      }
+    | {
+        kind: typeof ACTION_PACKAGE_PIN_SOURCE_KIND.LEGACY_ADOPT;
+        legacy_source: LegacySource;
         inspection_evidence_digest: string;
       };
   content_sha256: string;
-  trust: "verified" | "source-pinned" | "dev-unverified" | "legacy-verified";
+  trust: ActionPackagePinTrust;
   nonportable: boolean;
   pin_digest: string;
 }
@@ -73,38 +111,42 @@ export interface PublicReviewFieldV1 {
   private_binding_digest: string | null;
 }
 export type CapabilityTargetDispositionV1 =
-  | { target_id: string; execution: "host"; reason_code: null }
   | {
       target_id: string;
-      execution: "manual";
-      reason_code: "manual-config-change" | "manual-runtime-setup" | "disclosed-not-enforced";
+      execution: typeof ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST;
+      reason_code: null;
     }
   | {
       target_id: string;
-      execution: "required-user-action";
-      reason_code: "native-install-required" | "external-confirmation-required";
+      execution: typeof ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.MANUAL;
+      reason_code: ActionTargetManualReasonCode;
     }
   | {
       target_id: string;
-      execution: "unsupported";
-      reason_code: "adapter-unavailable" | "enforcement-unavailable" | "target-unsupported";
+      execution: typeof ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.REQUIRED_USER_ACTION;
+      reason_code: ActionTargetRequiredUserActionReasonCode;
+    }
+  | {
+      target_id: string;
+      execution: typeof ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.UNSUPPORTED;
+      reason_code: ActionTargetUnsupportedReasonCode;
     };
 export interface PublicPermissionDeltaV1 {
   permission_id: string;
-  change: "add" | "remove" | "expand" | "narrow" | "unchanged";
+  change: ActionPermissionChange;
   public_scope: string;
-  enforcement: "brokered" | "sandboxed" | "engine-enforced" | "disclosed-not-enforced";
+  enforcement: ActionPermissionEnforcement;
 }
 export interface PublicDependencyDeltaV1 {
   package_id: string;
-  change: "add" | "remove" | "update" | "unchanged";
+  change: ActionDependencyChange;
   from_version: string | null;
   to_version: string | null;
 }
 export interface PublicConfigDiffV1 {
   target: string;
   target_ids: string[];
-  mode: "surgical" | "full-file" | "manual";
+  mode: ActionConfigDiffMode;
   before_digest: string;
   after_digest: string;
   bounded_before: string | null;
@@ -113,18 +155,12 @@ export interface PublicConfigDiffV1 {
 export interface PublicEnforcementDisclosureV1 {
   permission_id: string;
   engine: EngineName;
-  enforcement: "brokered" | "sandboxed" | "engine-enforced" | "disclosed-not-enforced";
+  enforcement: ActionPermissionEnforcement;
   explanation: string;
 }
 export interface PublicHealthPlanV1 {
   probe_id: string;
-  kind:
-    | "binary-version"
-    | "file-hash"
-    | "mcp-handshake"
-    | "hook-selftest"
-    | "role-parse"
-    | "engine-config";
+  kind: ActionHealthPlanKind;
   evidence_schema_id: string;
   target_ids: string[];
   required: boolean;
@@ -132,7 +168,7 @@ export interface PublicHealthPlanV1 {
   permission_ids: string[];
   enforcement_digest: string;
   timeout_ms: number;
-  retries: 0 | 1 | 2;
+  retries: ActionHealthPlanRetry;
   evidence_valid_for_ms: number;
 }
 export interface HostRenderedPreviewV1 {
@@ -152,7 +188,7 @@ export interface HostRenderedPreviewV1 {
   reversibility: Reversibility;
   health_plan: PublicHealthPlanV1[];
   recovery_actions: RecoveryAction[];
-  projector_version: "vf-public-projector/1";
+  projector_version: typeof ACTION_PREVIEW_PROJECTOR_VERSION;
   rules_digest: string;
   redaction_manifest_digest: string;
 }

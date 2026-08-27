@@ -1,13 +1,17 @@
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import type { JsonValue } from "./types.js";
 
 export class ActionValidationError extends Error {
-  readonly code: "invalid_request" | "unsupported_schema_version" | "target_unsupported";
+  readonly code:
+    | typeof PUBLIC_ERROR_CODE.INVALID_REQUEST
+    | typeof PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION
+    | typeof PUBLIC_ERROR_CODE.TARGET_UNSUPPORTED;
   readonly path: string;
 
   constructor(
     message: string,
     path = "$",
-    code: ActionValidationError["code"] = "invalid_request",
+    code: ActionValidationError["code"] = PUBLIC_ERROR_CODE.INVALID_REQUEST,
   ) {
     super(`${path}: ${message}`);
     this.name = "ActionValidationError";

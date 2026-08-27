@@ -6,6 +6,8 @@
 // surface (commands.ts, _shared.js, tests) keeps importing it unchanged.
 
 import { ENGINES } from "../core/types.js";
+import { GATE_STATE, PRE_REVIEW_WORK_UNIT_GATES } from "../core/workflow-contract.js";
+import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
 import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
 import { out } from "./_shared.js";
@@ -24,7 +26,7 @@ import { getUnitDiff, runLLMReview } from "./dispatch-reviewer-llm.js";
  * closed).
  */
 export function makeReviewer(
-  mode: "cli" | "bridge" | "dry",
+  mode: DispatchMode,
   threshold: number,
   inject?: {
     diffReader?: DiffReader;
@@ -45,11 +47,11 @@ export function makeReviewer(
     Boolean(inject?.goal) && process.env.VF_LLM_REVIEW === "1" && Boolean(process.env.VIBEFLOW_AI);
 
   return async (unit, outcome) => {
-    if (mode === "dry") {
+    if (mode === DISPATCH_MODE.DRY) {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
     const failedGate = outcome.gates
-      ? (["build", "lint", "test"] as const).find((k) => outcome.gates?.[k] === "fail")
+      ? PRE_REVIEW_WORK_UNIT_GATES.find((gate) => outcome.gates?.[gate] === GATE_STATE.FAIL)
       : undefined;
     if (failedGate) {
       return { pass: false, reason: `measured gate failed: ${failedGate}` };

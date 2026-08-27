@@ -1,5 +1,10 @@
-import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
+import { canonicalJsonBytes } from "../../durability/index.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
+import {
+  CONVERSATION_ARTIFACT_TYPE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
+import { assertPublicCompactionArtifactV1 } from "./handoff-nested-validation.js";
 import { handoffSourcePublicHeadDigest } from "./handoff-selection.js";
 import type {
   PublicCompactionArtifactV1,
@@ -9,7 +14,6 @@ import type {
 import type { ConversationLineageReadV1, ValidatedLineageNodeV1 } from "./lineage-reader.js";
 
 type PublicEvent = PublicHandoffMessageV1 | PublicHandoffResponseV1;
-const DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 function key(node: { conversation_id: string; revision_id: string }): string {
   return `${node.conversation_id}\0${node.revision_id}`;
@@ -30,23 +34,8 @@ function selectedAncestry(
 }
 
 export function validatePublicCompactionArtifact(value: unknown): PublicCompactionArtifactV1 {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new Error("invalid public compaction artifact");
-  const artifact = value as PublicCompactionArtifactV1;
-  const { content_digest: _digest, ...preimage } = artifact;
-  if (
-    artifact.schema_version !== "1.0" ||
-    artifact.profile !== "vf-public-compaction/1" ||
-    !DIGEST.test(artifact.source_public_head_digest) ||
-    !DIGEST.test(artifact.oversized_candidate_digest) ||
-    !DIGEST.test(artifact.selection_plan_digest) ||
-    !DIGEST.test(artifact.compaction_input_digest) ||
-    (artifact.previous_compaction_digest !== null &&
-      !DIGEST.test(artifact.previous_compaction_digest)) ||
-    digestV1("VF-PUBLIC-COMPACTION-ARTIFACT\0v1\0", preimage) !== artifact.content_digest
-  )
-    throw new Error("invalid public compaction artifact binding");
-  return structuredClone(artifact);
+  assertPublicCompactionArtifactV1(value);
+  return structuredClone(value);
 }
 
 function prefixEvents(
@@ -71,8 +60,8 @@ export function resolveActiveCompaction(input: {
   for (const node of selectedAncestry(input.lineage, input.parent)) {
     for (const { stored_event: event } of node.source.journal_records) {
       if (
-        event.event.type !== "artifact_created" ||
-        event.event.payload.artifact_type !== "compaction"
+        event.event.type !== CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED ||
+        event.event.payload.artifact_type !== CONVERSATION_ARTIFACT_TYPE.COMPACTION
       )
         continue;
       const bytes = input.artifacts.readArtifact(

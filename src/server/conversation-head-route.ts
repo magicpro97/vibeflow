@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import {
   ConversationLineageNotFoundError,
   type ConversationLineageService,
@@ -17,26 +18,30 @@ export async function handleConversationHeadRoute(
   rootSessionId: string,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "GET")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   try {
     const body = authority.lineage.head(rootSessionId);
     return Response.json(body, { status: 200, headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof ConversationLineageNotFoundError)
-      return conversationReadError("not_found", {
+      return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
         message: "The conversation head was not found for this root session.",
       });
     if (error instanceof LineageAuthorityCorruptError)
-      return conversationReadError("authority_corrupt", {
+      return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
         message: "Conversation head authority is corrupt.",
-        recoveryAction: "repair-authority",
+        recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
       });
-    return conversationReadError("service_unavailable", {
+    return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
       message: "The conversation head is unavailable.",
       retryable: true,
-      recoveryAction: "retry",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
     });
   }
 }

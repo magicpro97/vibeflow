@@ -251,6 +251,26 @@ export class ConversationArtifactStore {
       };
     });
   }
+  removeResumeBinding(
+    conversationId: string,
+    participantId: string,
+    expected: Pick<InternalResumeBinding, "attemptId" | "engine" | "nativeSessionId">,
+  ): boolean {
+    let removed = false;
+    this.updateRecord(conversationId, (record) => ({
+      ...record,
+      resume_bindings: record.resume_bindings.filter((item) => {
+        const matches =
+          item.participant_id === participantId &&
+          item.attemptId === expected.attemptId &&
+          item.engine === expected.engine &&
+          item.nativeSessionId === expected.nativeSessionId;
+        removed ||= matches;
+        return !matches;
+      }),
+    }));
+    return removed;
+  }
   recordResumeBindings(
     conversationId: string,
     bindings: Array<

@@ -1,3 +1,4 @@
+import { type WorkUnitStatus, isWorkUnitStatus } from "../../core/workflow-contract.js";
 import { sanitizePublicText } from "../../dispatch/public-redaction.js";
 import { TRACE_LIMITS, utf8Bytes } from "../trace/limits.js";
 import type { OrchestrateService, PlanArtifact } from "./services.js";
@@ -9,11 +10,8 @@ import type {
   DryRunResult,
 } from "./types.js";
 
-const UNIT_STATUSES = ["pending", "running", "verifying", "done", "blocked"] as const;
-type UnitStatus = (typeof UNIT_STATUSES)[number];
-
 export interface OrchestrationResultSnapshot {
-  readonly units: readonly Readonly<{ name: string; status: UnitStatus }>[];
+  readonly units: readonly Readonly<{ name: string; status: WorkUnitStatus }>[];
   readonly reviews: readonly Readonly<{ unit: string; pass: boolean; reason: string }>[];
 }
 
@@ -55,10 +53,7 @@ export function snapshotOrchestrationResult(value: unknown): OrchestrationResult
     reason: ownValue(review, "reason"),
   }));
   if (
-    units.some(
-      ({ name, status }) =>
-        !boundedReference(name) || !UNIT_STATUSES.includes(status as UnitStatus),
-    ) ||
+    units.some(({ name, status }) => !boundedReference(name) || !isWorkUnitStatus(status)) ||
     reviews.some(
       ({ unit, pass, reason }) =>
         !boundedReference(unit) ||

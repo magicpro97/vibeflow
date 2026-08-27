@@ -1,3 +1,5 @@
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import { ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import { deriveOperationId } from "../../actions/records.js";
 import { canonicalJson } from "../../durability/index.js";
 import { capabilityActionPlanDigest } from "../action-domain/action-plan.js";
@@ -6,7 +8,7 @@ import type {
   CapabilityFabricPlanV1,
 } from "../planning/types.js";
 import type { CapabilityOperationV1 } from "../wire/operation.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import type { CapabilityExecutionAuthorizationV1 } from "./types.js";
 
 function bytewise(left: string, right: string): number {
@@ -32,7 +34,7 @@ export function expectedCapabilityOperationId(
   header: Pick<CapabilityOperationV1, "proposal_id" | "approval_id">,
 ): string {
   return deriveOperationId(
-    { proposal_id: header.proposal_id, domain: "capability" },
+    { proposal_id: header.proposal_id, domain: ACTION_DOMAIN.CAPABILITY },
     header.approval_id,
   );
 }
@@ -44,7 +46,7 @@ export function capabilityOperationIdForAuthorization(
   if (authorization.operation_id && authorization.operation_id !== expected)
     throw new CapabilityRuntimeError(
       "capability operation ID does not match proposal approval authority",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
   return expected;
 }
@@ -102,7 +104,7 @@ export function assertCapabilityOperationHeaderClosure(
   if (header.operation_id !== expectedCapabilityOperationId(header))
     throw new CapabilityRuntimeError(
       "capability operation ID is not derived from its proposal and approval",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   const expected = capabilityOperationPlanClosure(graph);
   const expectedCreatedAt = expected.created_at;
@@ -113,7 +115,7 @@ export function assertCapabilityOperationHeaderClosure(
   if (canonicalJson(actual) !== canonicalJson(expected))
     throw new CapabilityRuntimeError(
       "capability operation header escaped its immutable plan closure",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   const createdAt = Date.parse(header.created_at);
   if (
@@ -123,20 +125,23 @@ export function assertCapabilityOperationHeaderClosure(
   )
     throw new CapabilityRuntimeError(
       "capability operation header predates its immutable plan",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   if (
-    header.action_root_locator.kind === "conversation" &&
+    header.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION &&
     header.conversation_correlation?.root_session_id !== header.action_root_locator.root_session_id
   )
     throw new CapabilityRuntimeError(
       "conversation capability operation lacks its exact correlation root",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
-  if (header.action_root_locator.kind === "capability" && header.conversation_correlation !== null)
+  if (
+    header.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY &&
+    header.conversation_correlation !== null
+  )
     throw new CapabilityRuntimeError(
       "standalone capability operation cannot claim conversation correlation",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
 }
 
@@ -159,7 +164,7 @@ export function assertCapabilityExecutionAuthorization(
   )
     throw new CapabilityRuntimeError(
       "execution authorization does not match the durable operation header",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
 }
 
@@ -173,6 +178,6 @@ export function assertCapabilityAuthorizationPlanRoot(
   )
     throw new CapabilityRuntimeError(
       "execution authorization action root escaped the plan closure",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
 }

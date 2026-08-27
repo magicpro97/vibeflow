@@ -1,10 +1,25 @@
 import { createHash } from "node:crypto";
+import { ACTION_PREVIEW_PROJECTOR_VERSION } from "../../actions/public-action-contract.js";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
-import { HANDOFF_PROMPT_PREFIX, MAX_CANONICAL_HANDOFF_BYTES } from "./handoff-limits.js";
+import {
+  CONVERSATION_PUBLIC_ARTIFACT_DELIVERY,
+  CONVERSATION_PUBLIC_PROFILE,
+  CONVERSATION_PUBLIC_SCHEMA_VERSION,
+} from "./conversation-public-wire-contract.js";
+import {
+  HANDOFF_PROMPT_PREFIX,
+  MAX_CANONICAL_HANDOFF_BYTES,
+  MAX_CONTEXT_HANDOFF_OBJECT_BYTES,
+} from "./handoff-limits.js";
 import {
   type OmittedPublicEventArtifactV1,
   buildOmittedPublicEventRanges,
 } from "./handoff-omission.js";
+import {
+  materializeHandoffOptionalGroup,
+  materializeHandoffSelectionPlan,
+} from "./handoff-selection-plan.js";
 import type {
   ContextHandoffV1,
   HandoffSelectionPlanV1,
@@ -50,7 +65,7 @@ export class HandoffTooLargeError extends Error {
     readonly shared_prompt_bytes: Buffer,
     readonly omitted_public_event_artifacts: OmittedPublicEventArtifactV1[],
   ) {
-    super("handoff_too_large");
+    super(PUBLIC_ERROR_CODE.HANDOFF_TOO_LARGE);
     this.name = "HandoffTooLargeError";
   }
 }
@@ -75,7 +90,7 @@ export function handoffSourcePublicHeadDigest(
   publicEvents: Array<PublicHandoffMessageV1 | PublicHandoffResponseV1>,
 ): string {
   return digestV1("VF-HANDOFF-SOURCE-PUBLIC-HEAD\0v1\0", {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION,
     source: structuredClone(source),
     public_events: structuredClone(publicEvents).sort(eventOrder),
   });
@@ -122,7 +137,7 @@ export function contextHandoffContentDigest(
 ): string {
   return lengthPrefixedDigest(
     "VF-CONTEXT-HANDOFF-CONTENT\0v1\0",
-    canonicalJsonBytes(handoff, { maxBytes: 16 * 1024 * 1024 }),
+    canonicalJsonBytes(handoff, { maxBytes: MAX_CONTEXT_HANDOFF_OBJECT_BYTES }),
   );
 }
 
@@ -136,7 +151,7 @@ function asSelection(
   if ("artifact" in value) return structuredClone(value);
   return {
     artifact: structuredClone(value),
-    delivery: "conversation-artifact-resolver",
+    delivery: CONVERSATION_PUBLIC_ARTIFACT_DELIVERY.RESOLVER,
     public_text: null,
   };
 }
@@ -156,10 +171,10 @@ function buildPolicy(source: PublicHandoffSourceV1, policyValue: string) {
     public_summary: policyValue.normalize("NFC"),
     source_policy_value: policyValue.normalize("NFC"),
     source_conversation_lock_digest: source.lock_digest,
-    projector_version: "vf-public-projector/1" as const,
+    projector_version: ACTION_PREVIEW_PROJECTOR_VERSION,
     rules_digest: digestV1("VF-PUBLIC-HANDOFF-RULES\0v1\0", {
-      schema_version: "1.0",
-      projector_version: "vf-public-projector/1",
+      schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION,
+      projector_version: ACTION_PREVIEW_PROJECTOR_VERSION,
     }),
   };
   const policy_digest = digestV1("VF-PUBLIC-HANDOFF-POLICY\0v1\0", preimage);
@@ -230,23 +245,17 @@ export function buildContextHandoff(raw: BuildContextHandoffInputV1): BuiltConte
     );
   }
   const source_public_head_digest = handoffSourcePublicHeadDigest(input.source, publicEvents);
-  const optional_groups = input.final_responses.map((event) => {
-    const preimage = {
-      schema_version: "1.0" as const,
+  const optional_groups = input.final_responses.map((event) =>
+    materializeHandoffOptionalGroup({
+      schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION,
       source_public_head_digest,
       anchor_revision_ordinal: event.revision_ordinal,
       anchor_public_seq: event.public_seq,
       anchor_event_id: event.event_id,
       event_ids: [event.event_id],
       artifact_ids: [] as string[],
-    };
-    return {
-      group_id: `vf-handoff-group-${digestHex(
-        digestV1("VF-HANDOFF-OPTIONAL-GROUP\0v1\0", preimage),
-      )}`,
-      ...preimage,
-    };
-  });
+    }),
+  );
   const policy = buildPolicy(input.source, input.policy_value);
   let retainedResponses = [...input.final_responses];
   let projection: PromptHandoffProjectionV1;
@@ -266,7 +275,7 @@ export function buildContextHandoff(raw: BuildContextHandoffInputV1): BuiltConte
     const omissionSelections: PromptArtifactSelectionV1[] = omitted_public_event_artifacts.map(
       ({ range }) => ({
         artifact: structuredClone(range.artifact),
-        delivery: "conversation-artifact-resolver",
+        delivery: CONVERSATION_PUBLIC_ARTIFACT_DELIVERY.RESOLVER,
         public_text: null,
       }),
     );
@@ -276,7 +285,7 @@ export function buildContextHandoff(raw: BuildContextHandoffInputV1): BuiltConte
       ...artifactSelections,
       ...(compaction?.omitted_public_ranges ?? []).map(({ artifact }) => ({
         artifact: structuredClone(artifact),
-        delivery: "conversation-artifact-resolver" as const,
+        delivery: CONVERSATION_PUBLIC_ARTIFACT_DELIVERY.RESOLVER,
         public_text: null,
       })),
       ...omissionSelections,
@@ -289,21 +298,17 @@ export function buildContextHandoff(raw: BuildContextHandoffInputV1): BuiltConte
     const projectedArtifacts = [...byArtifactId.values()].sort((left, right) =>
       compareText(left.artifact.artifact_id, right.artifact.artifact_id),
     );
-    const planPreimage = {
-      schema_version: "1.0" as const,
+    selection_plan = materializeHandoffSelectionPlan({
+      schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION,
       source_public_head_digest,
       active_compaction_digest: compaction?.content_digest ?? null,
       prompt_budget_bytes: input.prompt_budget_bytes,
       mandatory_artifact_ids: projectedArtifacts.map(({ artifact }) => artifact.artifact_id),
       optional_groups,
-    };
-    selection_plan = {
-      ...planPreimage,
-      selection_digest: digestV1("VF-HANDOFF-SELECTION-PLAN\0v1\0", planPreimage),
-    };
+    });
     projection = {
-      schema_version: "1.0",
-      projection_profile: "vf-public-handoff/1",
+      schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION,
+      projection_profile: CONVERSATION_PUBLIC_PROFILE.HANDOFF,
       source: structuredClone(input.source),
       topic: input.topic,
       policy,
@@ -348,8 +353,8 @@ export function buildContextHandoff(raw: BuildContextHandoffInputV1): BuiltConte
   } while (retrySelection);
   const prompt_projection_digest = contextHandoffPromptDigest(projection);
   const withoutIdentity: Omit<ContextHandoffV1, "handoff_id" | "digest"> = {
-    schema_version: "1.0",
-    projection_profile: "vf-public-handoff/1",
+    schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION,
+    projection_profile: CONVERSATION_PUBLIC_PROFILE.HANDOFF,
     source: structuredClone(projection.source),
     topic: projection.topic,
     policy: structuredClone(projection.policy),

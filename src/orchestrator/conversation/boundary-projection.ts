@@ -3,6 +3,11 @@ import { ENGINES, type Engine } from "../../core.js";
 import { sanitizePublicText } from "../../dispatch/public-redaction.js";
 import { isValidParticipantModel } from "../trace/validation.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
+import {
+  CONVERSATION_COMMAND_FAILURE_STATUS,
+  CONVERSATION_COMMAND_RESULT_STATUS,
+  CONVERSATION_ORCHESTRATION_RESULT_STATUSES,
+} from "./conversation-command-result-contract.js";
 import { snapshotMaterializedBindings, snapshotRuntimeValue } from "./emission-authority.js";
 import type { RuntimeCreateRequest, RuntimePreviewRequest } from "./policy-registry.js";
 import type {
@@ -61,7 +66,7 @@ const boundedText = (value: unknown, max = 200, key?: string): string => {
 const failedResult = (operationId: string): ConversationOrchestrationResult =>
   Object.freeze({
     operation_id: operationId,
-    status: "failed" as const,
+    status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
     artifact_refs: Object.freeze([]) as unknown as string[],
   });
 
@@ -75,12 +80,16 @@ export function projectOrchestrationResult(
     const record = exactData(value, ["artifact_refs", "operation_id", "status"]);
     if (
       record.operation_id !== operationId ||
-      !["completed", "aborted", "failed", "awaiting_approval"].includes(String(record.status))
+      !CONVERSATION_ORCHESTRATION_RESULT_STATUSES.some((status) => status === record.status)
     ) {
       return failedResult(operationId);
     }
     const refs = denseArray(record.artifact_refs, 512);
-    if ((record.status === "failed" || record.status === "aborted") && refs.length) {
+    if (
+      (record.status === CONVERSATION_COMMAND_FAILURE_STATUS.FAILED ||
+        record.status === CONVERSATION_COMMAND_FAILURE_STATUS.ABORTED) &&
+      refs.length
+    ) {
       return failedResult(operationId);
     }
     const durable = store.readRecord(conversationId);

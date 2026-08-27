@@ -1,3 +1,5 @@
+import { PUBLIC_ACTION_TARGET_HEALTH_FAILURE } from "../../actions/public-operation-contract.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../../core/capability-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import type { CapabilityEffectBrokerV1 } from "../adapters/types.js";
 import type {
@@ -6,7 +8,15 @@ import type {
 } from "../planning/types.js";
 import { readCapabilityWal } from "../storage/operation-store.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
-import type { AdapterReceiptV1, CapabilityPreEffectRefusalReasonV1 } from "../wire/operation.js";
+import {
+  CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_HEALTH_OUTCOME,
+  CAPABILITY_OPERATION_RECOVERY_PHASE,
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityPreEffectRefusalReasonV1,
+} from "../wire/operation.js";
 import { bytewise } from "../wire/primitives.js";
 import {
   capabilityAuthorityFrontier,
@@ -39,7 +49,7 @@ export function runCapabilityHealth(input: {
   journal: CapabilityOperationJournalV1;
   options: CapabilityEffectRuntimeOptionsV1;
   fault?: ((point: CapabilityRuntimeFaultPointV1) => void) | null;
-}): "health-failed" | CapabilityPreEffectRefusalReasonV1 | null {
+}): typeof CAPABILITY_RUNTIME_ERROR_CODE.HEALTH_FAILED | CapabilityPreEffectRefusalReasonV1 | null {
   const { plan, operationId, held, journal, options } = input;
   for (const adapterPlan of plan.adapter_plans) {
     const receipts = new Map(
@@ -53,7 +63,10 @@ export function runCapabilityHealth(input: {
         .filter((target) =>
           adapterPlan.steps
             .filter((step) => step.target_ids.includes(target.target_id))
-            .every((step) => receipts.get(step.step_id)?.state === "applied"),
+            .every(
+              (step) =>
+                receipts.get(step.step_id)?.state === CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED,
+            ),
         )
         .map((target) => target.target_id),
     );
@@ -70,23 +83,27 @@ export function runCapabilityHealth(input: {
       )
       .sort(bytewise);
     const existingEvents = readCapabilityWal(journal.options.storage.paths, operationId).filter(
-      (event) => event.payload.kind === "health" && event.payload.plan_id === adapterPlan.plan_id,
+      (event) =>
+        event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH &&
+        event.payload.plan_id === adapterPlan.plan_id,
     );
     const selectedDigest =
-      existingEvents[0]?.payload.kind === "health"
+      existingEvents[0]?.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH
         ? existingEvents[0].payload.observation_digest
         : null;
     if (selectedDigest) {
       if (
         existingEvents.some(
           (event) =>
-            event.payload.kind !== "health" || event.payload.observation_digest !== selectedDigest,
+            event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH ||
+            event.payload.observation_digest !== selectedDigest,
         )
       )
         throw new Error("initial health frontier selected conflicting observations");
       const retained = readAdapterHealthObservation(journal.options.storage, selectedDigest);
       const observedPrefix = existingEvents.map((event) => {
-        if (event.payload.kind !== "health") throw new Error("health event narrowing failed");
+        if (event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH)
+          throw new Error("health event narrowing failed");
         const { kind: _, ...row } = event.payload;
         return row;
       });
@@ -111,7 +128,7 @@ export function runCapabilityHealth(input: {
         journal.append(
           operationId,
           {
-            kind: "health",
+            kind: CAPABILITY_WAL_PAYLOAD_KIND.HEALTH,
             plan_id: retained.plan_id,
             observation_digest: retained.observation_digest,
             ...result,
@@ -123,10 +140,13 @@ export function runCapabilityHealth(input: {
     }
     const selectedRows = readCapabilityWal(journal.options.storage.paths, operationId)
       .filter(
-        (event) => event.payload.kind === "health" && event.payload.plan_id === adapterPlan.plan_id,
+        (event) =>
+          event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH &&
+          event.payload.plan_id === adapterPlan.plan_id,
       )
       .map((event) => {
-        if (event.payload.kind !== "health") throw new Error("health event narrowing failed");
+        if (event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH)
+          throw new Error("health event narrowing failed");
         return event.payload;
       });
     const selectedKeys = selectedRows
@@ -148,7 +168,7 @@ export function runCapabilityHealth(input: {
             stepId: null,
             targetIds: batchTargetIds,
             held,
-            frontier: "health-batch",
+            frontier: CAPABILITY_PRE_EFFECT_FRONTIER.HEALTH_BATCH,
             authorityCheck,
           }),
         effect: () => {
@@ -197,7 +217,7 @@ export function runCapabilityHealth(input: {
             journal.append(
               operationId,
               {
-                kind: "health",
+                kind: CAPABILITY_WAL_PAYLOAD_KIND.HEALTH,
                 plan_id: observation.plan_id,
                 observation_digest: observation.observation_digest,
                 ...result,
@@ -214,19 +234,22 @@ export function runCapabilityHealth(input: {
     }
     const evaluated = readCapabilityWal(journal.options.storage.paths, operationId)
       .filter(
-        (event) => event.payload.kind === "health" && event.payload.plan_id === adapterPlan.plan_id,
+        (event) =>
+          event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH &&
+          event.payload.plan_id === adapterPlan.plan_id,
       )
       .map((event) => {
-        if (event.payload.kind !== "health") throw new Error("health event narrowing failed");
+        if (event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH)
+          throw new Error("health event narrowing failed");
         return event.payload;
       });
     for (const result of evaluated) {
       const probe = adapterPlan.health_plan.find((row) => row.probe_id === result.probe_id);
       if (!probe) throw new Error("health result escaped the approved plan");
-      if (probe.required && result.outcome !== "ready") {
+      if (probe.required && result.outcome !== CAPABILITY_HEALTH_OUTCOME.READY) {
         const target = plan.targets.find((row) => row.target_id === result.target_id)?.target;
-        if (!target || target.required) return "health-failed";
-        if (target.on_health_failure === "omit-after-rollback") {
+        if (!target || target.required) return CAPABILITY_RUNTIME_ERROR_CODE.HEALTH_FAILED;
+        if (target.on_health_failure === PUBLIC_ACTION_TARGET_HEALTH_FAILURE.OMIT_AFTER_ROLLBACK) {
           const restored = rollbackAppliedCapabilityEffects({
             plan,
             graph: input.graph,
@@ -236,7 +259,7 @@ export function runCapabilityHealth(input: {
             options,
             targetIds: new Set([result.target_id]),
           });
-          if (!restored) return "health-failed";
+          if (!restored) return CAPABILITY_RUNTIME_ERROR_CODE.HEALTH_FAILED;
         }
       }
     }
@@ -255,14 +278,16 @@ export function rollbackAppliedCapabilityEffects(input: {
 }): boolean {
   const { plan, graph, operationId, held, journal, options, targetIds } = input;
   const applied = readCapabilityWal(journal.options.storage.paths, operationId)
-    .filter(
-      (event) => event.payload.kind === "adapter-step" && event.payload.receipt.state === "applied",
+    .flatMap((event) =>
+      event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP &&
+      event.payload.receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED
+        ? [event.payload.receipt]
+        : [],
     )
-    .map((event) => (event.payload.kind === "adapter-step" ? event.payload.receipt : null))
-    .filter((receipt): receipt is AdapterReceiptV1 => receipt !== null)
     .filter(
       (receipt) =>
-        journal.latestReceipt(operationId, receipt.plan_id, receipt.step_id)?.state === "applied",
+        journal.latestReceipt(operationId, receipt.plan_id, receipt.step_id)?.state ===
+        CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED,
     )
     .filter(
       (receipt) => !targetIds || receipt.target_ids.some((targetId) => targetIds.has(targetId)),
@@ -279,14 +304,14 @@ export function rollbackAppliedCapabilityEffects(input: {
             plan,
             receipt.plan_id,
             receipt.step_id,
-            "rollback",
+            CAPABILITY_OPERATION_RECOVERY_PHASE.ROLLBACK,
           );
           journal.appendReceipt({
             operationId,
             plan,
             planId: receipt.plan_id,
             stepId: receipt.step_id,
-            state: "reverse_in_progress",
+            state: CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSE_IN_PROGRESS,
             evidence: receipt.bounded_evidence_digest,
             error: null,
             held,
@@ -303,14 +328,14 @@ export function rollbackAppliedCapabilityEffects(input: {
             plan,
             planId: receipt.plan_id,
             stepId: receipt.step_id,
-            state: "reversed",
+            state: CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSED,
             evidence: journal.receiptEvidence({
               operationId,
               plan,
               planId: receipt.plan_id,
               stepId: receipt.step_id,
               descriptor,
-              state: "reversed",
+              state: CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSED,
               error: null,
               observedAt,
               held,
@@ -322,8 +347,16 @@ export function rollbackAppliedCapabilityEffects(input: {
         },
       });
     } catch {
-      const descriptor = journal.descriptorFor(plan, receipt.plan_id, receipt.step_id, "rollback");
-      if (journal.latestReceipt(operationId, receipt.plan_id, receipt.step_id)?.state === "applied")
+      const descriptor = journal.descriptorFor(
+        plan,
+        receipt.plan_id,
+        receipt.step_id,
+        CAPABILITY_OPERATION_RECOVERY_PHASE.ROLLBACK,
+      );
+      if (
+        journal.latestReceipt(operationId, receipt.plan_id, receipt.step_id)?.state ===
+        CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED
+      )
         return false;
       const observedAt = options.now();
       journal.appendReceipt({
@@ -331,19 +364,19 @@ export function rollbackAppliedCapabilityEffects(input: {
         plan,
         planId: receipt.plan_id,
         stepId: receipt.step_id,
-        state: "uncertain",
+        state: CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN,
         evidence: journal.receiptEvidence({
           operationId,
           plan,
           planId: receipt.plan_id,
           stepId: receipt.step_id,
           descriptor,
-          state: "uncertain",
-          error: "rollback-failed",
+          state: CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN,
+          error: CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE.ROLLBACK_FAILED,
           observedAt,
           held,
         }),
-        error: "rollback-failed",
+        error: CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE.ROLLBACK_FAILED,
         observedAt,
         held,
       });

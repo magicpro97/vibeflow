@@ -1,3 +1,4 @@
+import { CONVERSATION_REACTION_OPERATION } from "./conversation-interaction-contract.js";
 import type {
   ConversationInteractionFoldV1,
   ConversationInteractionProjectionV1,
@@ -13,7 +14,7 @@ function activeOperations(
   const active = new Map<string, ConversationReactionOperationV1>();
   for (const operation of operations) {
     const key = `${operation.target.target_event_id}\0${operation.actor_public_id}\0${operation.emoji}`;
-    if (operation.operation === "add") active.set(key, operation);
+    if (operation.operation === CONVERSATION_REACTION_OPERATION.ADD) active.set(key, operation);
     else active.delete(key);
   }
   return [...active.values()];

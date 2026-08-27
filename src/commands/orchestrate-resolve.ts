@@ -19,6 +19,8 @@
 // - engineReady: the stronger pre-dispatch gate. A live preflight
 //   probe of the single chosen engine.
 
+import { WORK_UNIT_RISK_CLASS, isWorkUnitRiskClass } from "../core/workflow-contract.js";
+import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import type { Engine, EngineReadiness, PreflightFn, RiskClass } from "./_shared.js";
 import {
   DEFAULT_ENGINE,
@@ -31,10 +33,10 @@ import {
   preflightAllAsync,
 } from "./_shared.js";
 
-export function resolveMode(flags: Record<string, string | boolean>): "cli" | "bridge" | "dry" {
-  if (flags.yes) return "cli";
-  if (flags.dry) return "dry";
-  return process.env.VIBEFLOW_AI ? "bridge" : "dry";
+export function resolveMode(flags: Record<string, string | boolean>): DispatchMode {
+  if (flags.yes) return DISPATCH_MODE.CLI;
+  if (flags.dry) return DISPATCH_MODE.DRY;
+  return process.env.VIBEFLOW_AI ? DISPATCH_MODE.BRIDGE : DISPATCH_MODE.DRY;
 }
 
 export function resolveEngine(flags: Record<string, string | boolean>): Engine {
@@ -44,17 +46,7 @@ export function resolveEngine(flags: Record<string, string | boolean>): Engine {
 }
 
 export function resolveRisk(flags: Record<string, string | boolean>): RiskClass {
-  const valid: RiskClass[] = [
-    "docs",
-    "simple-code",
-    "feature",
-    "architecture",
-    "security",
-    "deploy",
-  ];
-  return typeof flags.risk === "string" && (valid as string[]).includes(flags.risk)
-    ? (flags.risk as RiskClass)
-    : "feature";
+  return isWorkUnitRiskClass(flags.risk) ? flags.risk : WORK_UNIT_RISK_CLASS.FEATURE;
 }
 
 /**
@@ -68,10 +60,10 @@ export function resolveRisk(flags: Record<string, string | boolean>): RiskClass 
 // to deterministically hit the unavailable and warning branches.
 export function announceLaunch(
   engine: Engine,
-  mode: "cli" | "bridge" | "dry",
+  mode: DispatchMode,
   engineCommandFn: (e: Engine) => ReturnType<typeof engineCommand> = engineCommand,
 ): { skip: boolean } {
-  if (mode !== "cli") return { skip: false };
+  if (mode !== DISPATCH_MODE.CLI) return { skip: false };
   const banner = downgradeBannerText(engine);
   if (banner) out("vf", c.yellow(banner));
   const invocation = engineCommandFn(engine);
@@ -105,10 +97,10 @@ export function readyStub(engine: Engine): EngineReadiness {
 // Without the export, the run path would re-implement the same gate.
 export async function engineReady(
   engine: Engine,
-  mode: "cli" | "bridge" | "dry",
+  mode: DispatchMode,
   preflight?: PreflightFn,
 ): Promise<boolean> {
-  if (mode !== "cli") return true;
+  if (mode !== DISPATCH_MODE.CLI) return true;
   const probe = preflight ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }));
   const [readiness] = await probe([engine]);
   if (readiness?.level === "ready") return true;

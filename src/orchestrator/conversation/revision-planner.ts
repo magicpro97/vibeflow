@@ -1,4 +1,6 @@
 import { digestHex, digestV1 } from "../../durability/index.js";
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
+import { CONVERSATION_PUBLIC_PROFILE } from "./conversation-public-wire-contract.js";
 import {
   type RevisionReservationRecordV1,
   revisionReservationDigest,
@@ -14,68 +16,18 @@ import {
   type LineageNodeIdentityV1,
   lineageHeadDigest,
 } from "./lineage-types.js";
-import type { ParticipantStartReceiptV1 } from "./revision-participant-receipt.js";
-
-export type RevisionOperationStateV1 =
-  | "preparing"
-  | "prepared"
-  | "published"
-  | "starting"
-  | "started"
-  | "abandoned"
-  | "start_failed"
-  | "needs_recovery";
-
-export interface RevisionActionTerminalBindingV1 {
-  action_operation_id: string;
-  outcome: "succeeded" | "failed" | "needs_recovery";
-  reason_code: string | null;
-}
-
-export type RevisionOperationPayloadV1 =
-  | {
-      kind: "state-transition";
-      from: RevisionOperationStateV1 | "created";
-      to: RevisionOperationStateV1;
-      authorized_by_action_operation_id: string;
-      effect_action_operation_id: string;
-      action_terminals: RevisionActionTerminalBindingV1[];
-      reason_code: string | null;
-    }
-  | {
-      kind: "participant-start";
-      authorized_by_action_operation_id: string;
-      effect_action_operation_id: string;
-      receipt: ParticipantStartReceiptV1;
-    }
-  | {
-      kind: "reconciliation-result";
-      authorized_by_action_operation_id: string;
-      effect_action_operation_id: string;
-      observed_state_digest: string;
-      outcome: "failed";
-      action_terminals: RevisionActionTerminalBindingV1[];
-      reason_code: string;
-    }
-  | {
-      kind: "head-commit";
-      authorized_by_action_operation_id: string;
-      effect_action_operation_id: string;
-      prior_head_digest: string;
-      prior_head_checkpoint_digest: string;
-      committed_head_digest: string;
-      directory_fsync_completed: true;
-    };
-
-export interface RevisionOperationEventV1 {
-  schema_version: "1.0";
-  operation_id: string;
-  sequence: number;
-  previous_event_digest: string | null;
-  payload: RevisionOperationPayloadV1;
-  recorded_at: string;
-  event_digest: string;
-}
+import {
+  REVISION_OPERATION_EVENT_SCHEMA_VERSION,
+  REVISION_OPERATION_EVENT_STORAGE,
+  type RevisionOperationEventV1,
+  type RevisionOperationPayloadV1,
+} from "./revision-operation-event-contract.js";
+export type {
+  RevisionActionTerminalBindingV1,
+  RevisionOperationEventV1,
+  RevisionOperationPayloadV1,
+  RevisionOperationStateV1,
+} from "./revision-operation-event-contract.js";
 
 export interface DeriveRevisionChildIdentityInputV1 {
   root_session_id: string;
@@ -119,7 +71,7 @@ export function materializeRevisionOperation(input: RevisionOperationInputV1): R
     schema_version: "1.0",
     ...structuredClone(input),
     reservation_epoch: input.expected_reservation_epoch + 1,
-    handoff_profile: "vf-public-handoff/1",
+    handoff_profile: CONVERSATION_PUBLIC_PROFILE.HANDOFF,
     handoff_id: `vf-handoff-${digestHex(input.handoff_digest)}`,
   };
   const operation: RevisionOperationV1 = {
@@ -189,7 +141,7 @@ export function materializeRevisionEvent(
 ): RevisionOperationEventV1 {
   const prior = events.at(-1);
   const preimage: Omit<RevisionOperationEventV1, "event_digest"> = {
-    schema_version: "1.0",
+    schema_version: REVISION_OPERATION_EVENT_SCHEMA_VERSION,
     operation_id: operation.operation_id,
     sequence: events.length,
     previous_event_digest: prior?.event_digest ?? null,
@@ -198,7 +150,7 @@ export function materializeRevisionEvent(
   };
   return {
     ...preimage,
-    event_digest: digestV1("VF-REVISION-OPERATION-EVENT\0v1\0", preimage),
+    event_digest: digestV1(REVISION_OPERATION_EVENT_STORAGE.DIGEST_DOMAIN, preimage),
   };
 }
 
@@ -225,7 +177,7 @@ export function materializeRevisionHead(
   operation: RevisionOperationV1,
 ): LineageHeadRecordV1 {
   if (
-    prior.head_status !== "committed" ||
+    prior.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     prior.active === null ||
     prior.content_digest !== operation.expected_head_digest
   )
@@ -233,7 +185,7 @@ export function materializeRevisionHead(
   const preimage: Omit<LineageHeadRecordV1, "content_digest"> = {
     schema_version: "1.0",
     root_session_id: operation.root_session_id,
-    head_status: "committed",
+    head_status: CONVERSATION_HEAD_STATUS.COMMITTED,
     active: structuredClone(operation.child),
     candidate_heads: [],
     head_epoch: prior.head_epoch + 1,

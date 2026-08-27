@@ -1,4 +1,5 @@
 import { type Engine, hasCommand, resolveCommand, resolveEngineBinary } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import {
   GH_AUTH_TIMEOUT_MS,
@@ -28,7 +29,7 @@ export function runAttempts(
   runAttempt: (attempt: ProbeInvocation, timeoutMs?: number) => Promise<ProbeResult>,
   stamp: (level: ReadinessLevel, detail: string) => EngineReadiness,
 ): Promise<void> {
-  if (engine === "copilot" && has("gh")) {
+  if (engine === AGENT_ENGINE.COPILOT && has("gh")) {
     const auth = runAttempt(ghAuthInvocation(), GH_AUTH_TIMEOUT_MS) as Promise<ProbeResult>;
     return auth.then((authResult) => {
       if (authResult.status !== 0) {
@@ -72,10 +73,10 @@ export async function checkEngineAsync(
   if (opts.probe === false) {
     return Promise.resolve(stamp("ready", `${engine}: installed (probe skipped)`));
   }
-  if (engine === "copilot" && !hasGh(has, usesDefaultHasAsync)) {
+  if (engine === AGENT_ENGINE.COPILOT && !hasGh(has, usesDefaultHasAsync)) {
     return Promise.resolve(stamp("no-binary", ghInstallHint()));
   }
-  if (engine === "copilot" && spawner !== undefined) {
+  if (engine === AGENT_ENGINE.COPILOT && spawner !== undefined) {
     try {
       const auth = checkCopilotAuth(has, spawner, usesDefaultHasAsync);
       return Promise.resolve(stamp(auth.level, auth.detail));
@@ -84,13 +85,13 @@ export async function checkEngineAsync(
       return Promise.resolve(stamp("probe-failed", `${engine}: probe failed (${msg})`));
     }
   }
-  if (engine === "copilot" && hasGh(has, usesDefaultHasAsync)) {
+  if (engine === AGENT_ENGINE.COPILOT && hasGh(has, usesDefaultHasAsync)) {
     const ghCmd = usesDefaultHasAsync ? (resolveEngineBinary("gh") ?? "gh") : "gh";
     const ghResult = defaultSpawner(ghCmd, ["auth", "status"], "", GH_AUTH_TIMEOUT_MS);
     if (ghResult.status === 0) {
       return Promise.resolve(stamp("ready", "copilot: GitHub auth OK"));
     }
-    const failed = failedAuth("copilot", ghResult);
+    const failed = failedAuth(AGENT_ENGINE.COPILOT, ghResult);
     return Promise.resolve(stamp(failed.level, failed.detail));
   }
   if (spawner !== undefined) {

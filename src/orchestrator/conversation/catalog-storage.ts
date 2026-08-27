@@ -29,6 +29,7 @@ import {
   sameCatalogCanonical,
 } from "./catalog-storage-validation.js";
 import { assertConversationCatalogSourceInventoryEntryV1 } from "./catalog-types.js";
+import { CONVERSATION_CATALOG_SCHEMA_VERSION } from "./conversation-catalog-contract.js";
 import { isLineageDigest } from "./lineage-types.js";
 
 export {
@@ -130,7 +131,7 @@ export class ConversationCatalogStore {
       const sequence = existing.length;
       const previous = existing.at(-1)?.event_digest ?? null;
       const preimage: Omit<ConversationCatalogDeltaV1, "event_digest"> = {
-        schema_version: "1.0",
+        schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
         sequence,
         previous_event_digest: previous,
         ...structuredClone(draft),
@@ -217,7 +218,7 @@ export class ConversationCatalogStore {
         matched_revision: null,
       }));
       const preimage = {
-        schema_version: "1.0" as const,
+        schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
         ...structuredClone(input),
         rows: storedRows,
       };
@@ -234,7 +235,7 @@ export class ConversationCatalogStore {
         { lock, maxBytes: MAX_CATALOG_FILE_BYTES },
       );
       const currentPreimage = {
-        schema_version: "1.0" as const,
+        schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
         generation_id: generation.generation_id,
         generation_digest: generation.content_digest,
         source_watermark: generation.source_watermark,

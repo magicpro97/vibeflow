@@ -2,11 +2,15 @@ import { sanitizePublicText } from "../trace/public-sanitize.js";
 import type { CatalogCursorCodec } from "./catalog-cursor.js";
 import { conversationLockDigest } from "./catalog-lock.js";
 import {
-  CONVERSATION_CATALOG_SCHEMA_VERSION,
   type ConversationRevisionSummaryV1,
   type ConversationSessionSummaryV1,
   safePublicRoleReference,
 } from "./catalog-types.js";
+import {
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_HEAD_STATUS,
+  CONVERSATION_LINEAGE_STATUS,
+} from "./conversation-catalog-contract.js";
 import type { ConversationLineageReadV1, ValidatedLineageNodeV1 } from "./lineage-reader.js";
 import {
   type LineageHeadRecordV1,
@@ -35,7 +39,7 @@ export function createConversationRevisionSummary(
     revision_ordinal: node.node.revision_ordinal,
     parent_conversation_id: source.manifest.parent_conversation_id,
     parent_revision_id: source.manifest.parent_revision_id,
-    lineage_status: "verified",
+    lineage_status: CONVERSATION_LINEAGE_STATUS.VERIFIED,
     topic: sanitizePublicText(source.manifest.topic, "topic", []),
     policy: safePublicRoleReference(source.manifest.policy),
     lifecycle: source.journal_head.lifecycle,
@@ -111,7 +115,7 @@ export function createCatalogRow(
       )
     : [];
   const activeNode = activeNodes.length === 1 ? activeNodes[0] : null;
-  if (head.head_status === "committed" && !activeNode)
+  if (head.head_status === CONVERSATION_HEAD_STATUS.COMMITTED && !activeNode)
     throw new Error("active lineage node is missing");
   const nodes = new Map(lineage.nodes.map((item) => [item.node.conversation_id, item]));
   const root = createConversationRevisionSummary(rootNode, revisionClaimEpoch);
@@ -126,7 +130,7 @@ export function createCatalogRow(
     ),
   ];
   return {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     root_session_id: lineage.root_session_id,
     head_status: head.head_status,
     root,

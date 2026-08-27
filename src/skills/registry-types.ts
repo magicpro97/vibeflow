@@ -1,3 +1,5 @@
+import type { SkillScope, SkillStatus } from "../core/skill-contract.js";
+
 export interface SpawnResult {
   status: number | null;
   stdout: string | Buffer;
@@ -14,10 +16,10 @@ export interface MarketplaceSkill {
   name: string;
   version: string;
   description?: string;
-  status: string;
+  status: SkillStatus;
   path?: string;
   /** #655: declared scope in the published marketplace entry. */
-  scope?: string;
+  scope?: SkillScope;
   projectId?: string;
   extends?: string[];
 }

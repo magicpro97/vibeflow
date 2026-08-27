@@ -1,4 +1,5 @@
 import type { ConversationArtifactStore } from "./artifact-store.js";
+import { CONVERSATION_ARTIFACT_TYPE } from "./conversation-public-wire-contract.js";
 import type { PlanArtifact, PlanArtifactLocator } from "./services.js";
 import type { ConversationContext } from "./types.js";
 
@@ -10,7 +11,9 @@ export function persistedPlanLocator(store: ConversationArtifactStore): PlanArti
       visited.add(conversationId);
       const record = store.readRecord(conversationId);
       if (!record) return null;
-      const plan = record.artifacts.filter((entry) => entry.artifact_type === "plan").at(-1);
+      const plan = record.artifacts
+        .filter((entry) => entry.artifact_type === CONVERSATION_ARTIFACT_TYPE.PLAN)
+        .at(-1);
       if (plan) {
         return Object.freeze({
           artifact_id: plan.artifact_id,

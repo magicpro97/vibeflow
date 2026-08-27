@@ -233,8 +233,25 @@ export function installNodeBunShim(target = globalThis, deps = undefined) {
         socket.once("close", () => sockets.delete(socket));
       });
       const hostname = opts.hostname ?? "127.0.0.1";
+      const ready = new Promise((resolve, reject) => {
+        const settled = () => {
+          server.off("listening", listening);
+          server.off("error", failed);
+        };
+        const listening = () => {
+          settled();
+          resolve();
+        };
+        const failed = (error) => {
+          settled();
+          reject(error);
+        };
+        server.once("listening", listening);
+        server.once("error", failed);
+      });
       server.listen(opts.port ?? 0, hostname);
       return {
+        ready,
         get port() {
           return server.address()?.port ?? opts.port ?? 0;
         },

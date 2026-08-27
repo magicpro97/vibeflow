@@ -85,12 +85,12 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
     }
   });
 
-  test("opencode → run --format json --auto -", () => {
+  test("opencode → run --format json --auto with prompt only on stdin", () => {
     const r = engineCommand("opencode");
     expect(isUnavailable(r)).toBe(false);
     if (!isUnavailable(r)) {
       expect(r.cmd).toBe("opencode");
-      expect(r.args).toEqual(["run", "--format", "json", "--auto", "-"]);
+      expect(r.args).toEqual(["run", "--format", "json", "--auto"]);
       expect(r.promptMode).toBe("stdin");
     }
   });
@@ -131,17 +131,25 @@ describe("engineCommand resume (#618 PR2a)", () => {
     expect(r).toEqual({ cmd: "codex", args: ["exec", "resume", CODEX_UUID, "--json", "-"] });
   });
 
-  test("copilot ignores resumeSessionId in PR2a (fresh)", () => {
-    const r = engineCommand("copilot", { has: () => true }, false, "sess-abc-123");
-    expect(r).toMatchObject({ cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" });
+  test("copilot rejects an exact resume id instead of silently starting fresh", () => {
+    expect(() => engineCommand("copilot", { has: () => true }, false, "sess-abc-123")).toThrow(
+      /exact resume is unavailable/,
+    );
   });
 
-  test("antigravity explicit conversation resume uses --conversation before -p", () => {
-    expect(engineCommand("antigravity" as never, {}, false, "conversation-123")).toEqual({
-      cmd: "agy",
-      args: ["--conversation", "conversation-123", "-p"],
-      promptMode: "arg",
+  test("opencode exact resume passes one validated opaque id to --session", () => {
+    const id = "ses_fc311e3c9ffegocll2MayNGmaZ";
+    expect(engineCommand("opencode", {}, false, id)).toEqual({
+      cmd: "opencode",
+      args: ["run", "--session", id, "--format", "json", "--auto"],
+      promptMode: "stdin",
     });
+  });
+
+  test("antigravity cannot claim exact resume without an evidenced exact binding", () => {
+    expect(() => engineCommand("antigravity" as never, {}, false, "conversation-123")).toThrow(
+      /exact resume is unavailable/,
+    );
   });
 });
 

@@ -1,5 +1,12 @@
+import { ENGINE_OUTPUT_STREAM } from "../../dispatch/session-contract.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
+import {
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import { DirectOutputStreamV1 } from "./direct-output-stream.js";
 import { MAX_DIRECT_CONTINUATIONS } from "./message-delivery.js";
+import { CONVERSATION_TURN_INSTRUCTION_KIND } from "./turn-delivery-contract.js";
 import type {
   ConversationContext,
   ConversationOrchestrationResult,
@@ -40,7 +47,7 @@ export class DirectConversationPolicy implements ConversationPolicy {
     if (context.bindings.length !== 1) {
       return {
         operation_id: context.correlation.operation_id,
-        status: "failed",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
         artifact_refs: [],
       };
     }
@@ -48,13 +55,13 @@ export class DirectConversationPolicy implements ConversationPolicy {
     if (!participantId) {
       return {
         operation_id: context.correlation.operation_id,
-        status: "failed",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
         artifact_refs: [],
       };
     }
     let delivery = await context.prepareTurn({
       participant_id: participantId,
-      instruction: { kind: "direct", topic: context.topic },
+      instruction: { kind: CONVERSATION_TURN_INSTRUCTION_KIND.DIRECT, topic: context.topic },
     });
     let continuation = 0;
     while (true) {
@@ -74,7 +81,7 @@ export class DirectConversationPolicy implements ConversationPolicy {
         const emitted = attempt.emit({
           idempotency_key: `${eventPrefix}:chunk:${index}`,
           event: {
-            type: "agent_response_delta",
+            type: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
             payload: {
               round_id: `direct:${context.correlation.operation_id}`,
               participant_id: participantId,
@@ -89,19 +96,20 @@ export class DirectConversationPolicy implements ConversationPolicy {
       };
       const outputStream = new DirectOutputStreamV1(queueDelta);
       const unsubscribe = attempt.onChunk((chunk) => {
-        if (chunk.stream === "stdout" && chunk.content) outputStream.push(chunk.content);
+        if (chunk.stream === ENGINE_OUTPUT_STREAM.STDOUT && chunk.content)
+          outputStream.push(chunk.content);
       });
       const result = await attempt.completion;
       unsubscribe();
       const parsed = outputStream.finish(result.output);
       await emissionChain;
-      const complete = result.state === "completed";
+      const complete = result.state === CONVERSATION_OPERATION_STATE.COMPLETED;
       const failed = !result.ok || context.signal.aborted;
       let pending = false;
       if (!failed) {
         delivery = await context.prepareTurn({
           participant_id: participantId,
-          instruction: { kind: "direct", topic: null },
+          instruction: { kind: CONVERSATION_TURN_INSTRUCTION_KIND.DIRECT, topic: null },
         });
         pending = delivery.applicable_user_message_count > 0;
       }
@@ -118,7 +126,7 @@ export class DirectConversationPolicy implements ConversationPolicy {
         const response = await attempt.emit({
           idempotency_key: responseIdempotencyKey,
           event: {
-            type: "agent_response_delta",
+            type: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
             payload: {
               round_id: `direct:${context.correlation.operation_id}`,
               participant_id: participantId,
@@ -139,7 +147,7 @@ export class DirectConversationPolicy implements ConversationPolicy {
           await attempt.emit({
             idempotency_key: `${eventPrefix}:action-candidate:${stagedCandidate.diagnostic_code ?? "rejected"}`,
             event: {
-              type: "error",
+              type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
               payload: {
                 agent_id: participantId,
                 code: stagedCandidate.diagnostic_code ?? "action_candidate_rejected",
@@ -152,7 +160,9 @@ export class DirectConversationPolicy implements ConversationPolicy {
       if (failed) {
         return {
           operation_id: context.correlation.operation_id,
-          status: context.signal.aborted ? "aborted" : "failed",
+          status: context.signal.aborted
+            ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+            : CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
           artifact_refs: [],
         };
       }
@@ -162,7 +172,7 @@ export class DirectConversationPolicy implements ConversationPolicy {
         await context.emit({
           idempotency_key: `direct:${context.correlation.operation_id}:continuation-limit`,
           event: {
-            type: "error",
+            type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
             payload: {
               agent_id: null,
               code: "message_continuation_limit",
@@ -172,14 +182,14 @@ export class DirectConversationPolicy implements ConversationPolicy {
         });
         return {
           operation_id: context.correlation.operation_id,
-          status: "failed",
+          status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
           artifact_refs: [],
         };
       }
     }
     return {
       operation_id: context.correlation.operation_id,
-      status: "completed",
+      status: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
       artifact_refs: [],
     };
   }

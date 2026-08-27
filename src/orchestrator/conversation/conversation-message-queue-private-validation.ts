@@ -1,4 +1,6 @@
+import { boundedOwnerAscii, isProcessLockOwnerStartIdentity } from "../../durability/lock-owner.js";
 import {
+  CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   CONVERSATION_MESSAGE_QUEUE_STATE,
 } from "./conversation-message-queue-contract.js";
@@ -23,6 +25,10 @@ import {
   queueExactKeys,
   queueRecord,
 } from "./conversation-message-queue-validation.js";
+import {
+  CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION,
+  CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND,
+} from "./conversation-private-context-broker-wire.js";
 
 const QUEUE_ID = /^vf-queued-message-[0-9a-f]{64}$/;
 const OPERATION_ID = /^vf-operation-[0-9a-f]{64}$/;
@@ -33,21 +39,12 @@ export function assertQueueClaimOwnerV1(
 ): asserts value is PrivateConversationMessageQueueClaimOwnerV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "pid",
-      "process_start_identity",
-      "host",
-      "operation",
-      "nonce",
-      "durable_operation_id",
-      "owner_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.CLAIM_OWNER) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !Number.isInteger(value.pid) ||
     (value.pid as number) < 1 ||
     (value.pid as number) > 2_147_483_647 ||
-    !boundedOwnerAscii(value.process_start_identity, 512) ||
+    !isProcessLockOwnerStartIdentity(value.process_start_identity) ||
     !boundedOwnerAscii(value.host, 255) ||
     !boundedOwnerAscii(value.operation, 512) ||
     typeof value.nonce !== "string" ||
@@ -69,17 +66,7 @@ export function assertQueueContextDispositionV1(
 ): asserts value is PrivateConversationMessageQueueContextDispositionV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "root_session_id",
-      "queue_item_id",
-      "private_context_binding_digest",
-      "recorded_at",
-      "disposition_digest",
-      "queue_outcome",
-      "disposition",
-      "public_event_id",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.CONTEXT_DISPOSITION) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueReference(value.root_session_id) ||
     typeof value.queue_item_id !== "string" ||
@@ -89,11 +76,11 @@ export function assertQueueContextDispositionV1(
     !isQueueDigest(value.disposition_digest) ||
     !(
       (value.queue_outcome === CONVERSATION_MESSAGE_QUEUE_STATE.DELIVERED &&
-        value.disposition === "consumed" &&
+        value.disposition === CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION.CONSUMED &&
         typeof value.public_event_id === "string" &&
         UUID.test(value.public_event_id)) ||
       (value.queue_outcome === CONVERSATION_MESSAGE_QUEUE_STATE.STALE &&
-        value.disposition === "released" &&
+        value.disposition === CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION.RELEASED &&
         value.public_event_id === null)
     )
   )
@@ -109,20 +96,7 @@ export function assertQueueDeliveryProofV1(
 ): asserts value is PrivateConversationMessageQueueDeliveryProofV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "queue_item_id",
-      "queue_sequence",
-      "claimed_item_digest",
-      "public_event_id",
-      "public_seq",
-      "stable_operation_digest",
-      "prior_effective_authority_digest",
-      "successor_authority",
-      "private_context_binding_digest",
-      "private_context_disposition_digest",
-      "proof_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.DELIVERY_PROOF) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     typeof value.queue_item_id !== "string" ||
     !QUEUE_ID.test(value.queue_item_id) ||
@@ -158,21 +132,7 @@ export function assertQueueContextBindingV1(
   const typed = value as unknown as PrivateConversationMessageQueueContextBindingV1;
   const { private_context_binding_digest: _digest, ...preimage } = typed;
   if (
-    !queueExactKeys(value, [
-      "schema_version",
-      "root_session_id",
-      "queue_item_id",
-      "queue_sequence",
-      "owner_principal_digest",
-      "enqueue_idempotency_key_digest",
-      "source_kind",
-      "source_record_ref",
-      "source_record_digest",
-      "source_reservation_digest",
-      "target_participant_ids",
-      "retained_at",
-      "private_context_binding_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.CONTEXT_BINDING) ||
     typed.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueReference(typed.root_session_id) ||
     !QUEUE_ID.test(typed.queue_item_id) ||
@@ -180,7 +140,7 @@ export function assertQueueContextBindingV1(
     typed.queue_sequence < 1 ||
     !isQueueDigest(typed.owner_principal_digest) ||
     !isQueueDigest(typed.enqueue_idempotency_key_digest) ||
-    typed.source_kind !== "private-file-range" ||
+    typed.source_kind !== CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND.PRIVATE_FILE_RANGE ||
     !isQueueReference(typed.source_record_ref, 4_096) ||
     !isQueueDigest(typed.source_record_digest) ||
     !isQueueDigest(typed.source_reservation_digest) ||
@@ -195,4 +155,3 @@ export function assertQueueContextBindingV1(
   )
     throw new Error("invalid queue private context binding");
 }
-import { boundedOwnerAscii } from "../../durability/lock-owner.js";

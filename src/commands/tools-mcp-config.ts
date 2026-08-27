@@ -2,7 +2,7 @@
 // Owns reading/writing .mcp.json (claude/copilot), .codex/config.toml, and printing
 // copilot mcp add commands. Also hosts `repoLanguages` (moved here to avoid a
 // circular import with tools.ts). All imports through `./_shared.js`.
-
+import { SKILL_MCP_TRANSPORT, SKILL_STATUS } from "../core/skill-contract.js";
 import {
   buildUserEntry,
   c,
@@ -339,8 +339,8 @@ function copilotAddCommand(
   name: string,
   def: NonNullable<VibeSettings["mcpServers"]>[string],
 ): string {
-  const transport = def.transport ?? "stdio";
-  if (transport === "stdio") {
+  const transport = def.transport ?? SKILL_MCP_TRANSPORT.STDIO;
+  if (transport === SKILL_MCP_TRANSPORT.STDIO) {
     const s = def as { command: string; args?: string[] };
     const args = (s.args ?? []).map((a) => JSON.stringify(a)).join(" ");
     return `copilot mcp add ${name} --transport stdio -- ${s.command} ${args}`.trim();
@@ -374,7 +374,7 @@ export function writeToolConfigs(
   const skillServers = skillMcpServers(skills);
   const skillByServer = new Map<string, string>();
   for (const skill of skills) {
-    if (skill.status !== "deprecated" && skill.mcp?.name) {
+    if (skill.status !== SKILL_STATUS.DEPRECATED && skill.mcp?.name) {
       skillByServer.set(skill.mcp.name, skill.name);
     }
   }

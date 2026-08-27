@@ -1,6 +1,5 @@
 import type { Engine } from "../core.js";
-import type { DispatchMarker } from "./marker.js";
-import { readMarker } from "./marker.js";
+import { type DispatchMarker, MARKER_STATUS, readMarker } from "./marker.js";
 
 /** #618 PR2b-1: decide whether a unit dispatch should resume the engine's prior session.
  *  Resume only when the operator opted in (`resume`), a marker survives from a crashed run
@@ -18,7 +17,8 @@ export function resolveResumeId(
   const marker = read(unit);
   if (!marker) return undefined;
   // Resume only crash-dở states; a clean `done` or not-yet-started `pending` never resumes.
-  if (marker.status === "done" || marker.status === "pending") return undefined;
+  if (marker.status === MARKER_STATUS.DONE || marker.status === MARKER_STATUS.PENDING)
+    return undefined;
   if (!marker.engineSessionId || !marker.engineSessionEngine) return undefined;
   if (marker.engineSessionEngine !== engine) {
     throw new Error(

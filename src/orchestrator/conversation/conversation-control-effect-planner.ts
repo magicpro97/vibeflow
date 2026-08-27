@@ -1,4 +1,13 @@
+import { PUBLIC_OPERATION_PARTICIPANT_START_PHASE } from "../../actions/protocol-contract.js";
 import {
+  CONVERSATION_CONTROL_ACTION_TYPE,
+  CONVERSATION_CONTROL_CONDITION_KIND,
+  CONVERSATION_CONTROL_EFFECT_KIND,
+  CONVERSATION_CONTROL_HOST_CANCEL_ADAPTER_FINGERPRINT,
+  CONVERSATION_CONTROL_OPERATION_TERMINAL_STATES,
+  CONVERSATION_CONTROL_PARTICIPANT_OUTCOMES,
+  CONVERSATION_CONTROL_RECONCILIATION_OUTCOMES,
+  CONVERSATION_NATIVE_REFERENCE_KIND,
   type ConversationControlActionTypeV1,
   type ConversationControlConditionV1,
   type ConversationControlEffectPlanV1,
@@ -14,7 +23,11 @@ import type {
   RevisionOperationV1,
   RevisionPreparationPlanV1,
 } from "./lineage-revision-operation.js";
-import type { ParticipantStartReceiptV1 } from "./revision-participant-receipt.js";
+import { REVISION_OPERATION_EVENT_PAYLOAD_KIND } from "./revision-operation-event-contract.js";
+import {
+  PARTICIPANT_CANCEL_MODE,
+  type ParticipantStartReceiptV1,
+} from "./revision-participant-receipt.js";
 import type { RevisionOperationEventV1 } from "./revision-planner.js";
 
 export interface ConversationControlEffectClosureV1 {
@@ -26,25 +39,25 @@ export interface ConversationControlEffectClosureV1 {
 function latestReceipts(events: readonly RevisionOperationEventV1[]) {
   const latest = new Map<string, ParticipantStartReceiptV1>();
   for (const event of events)
-    if (event.payload.kind === "participant-start")
+    if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.PARTICIPANT_START)
       latest.set(event.payload.receipt.participant_id, event.payload.receipt);
   return latest;
 }
 
 function conditionFor(actionType: ConversationControlActionTypeV1): ConversationControlConditionV1 {
-  if (actionType === "conversation.stop_operation")
+  if (actionType === CONVERSATION_CONTROL_ACTION_TYPE.STOP_OPERATION)
     return {
-      kind: "operation-terminal",
-      allowed_states: ["succeeded", "failed", "canceled", "needs_recovery"],
+      kind: CONVERSATION_CONTROL_CONDITION_KIND.OPERATION_TERMINAL,
+      allowed_states: [...CONVERSATION_CONTROL_OPERATION_TERMINAL_STATES],
     };
-  if (actionType === "conversation.reconcile_revision_operation")
+  if (actionType === CONVERSATION_CONTROL_ACTION_TYPE.RECONCILE_REVISION_OPERATION)
     return {
-      kind: "reconciliation-resolution",
-      allowed_outcomes: ["present", "absent", "unknown"],
+      kind: CONVERSATION_CONTROL_CONDITION_KIND.RECONCILIATION_RESOLUTION,
+      allowed_outcomes: [...CONVERSATION_CONTROL_RECONCILIATION_OUTCOMES],
     };
   return {
-    kind: "participant-quiescent",
-    allowed_outcomes: ["canceled", "failed", "proved-absent"],
+    kind: CONVERSATION_CONTROL_CONDITION_KIND.PARTICIPANT_QUIESCENT,
+    allowed_outcomes: [...CONVERSATION_CONTROL_PARTICIPANT_OUTCOMES],
   };
 }
 
@@ -88,44 +101,52 @@ function closeEffect(input: {
     expected_control_postcondition_digest: postcondition.binding_digest,
   };
   const effect: ConversationControlEffectV1 =
-    input.effect_kind === "reconcile"
+    input.effect_kind === CONVERSATION_CONTROL_EFFECT_KIND.RECONCILE
       ? {
           ...common,
-          effect_kind: "reconcile",
+          effect_kind: CONVERSATION_CONTROL_EFFECT_KIND.RECONCILE,
           mode: input.mode as Extract<
             ConversationControlEffectV1,
-            { effect_kind: "reconcile" }
+            { effect_kind: typeof CONVERSATION_CONTROL_EFFECT_KIND.RECONCILE }
           >["mode"],
         }
       : {
           ...common,
-          effect_kind: "cancel-or-prove-quiescent",
+          effect_kind: CONVERSATION_CONTROL_EFFECT_KIND.CANCEL_OR_PROVE_QUIESCENT,
           mode: input.mode as Extract<
             ConversationControlEffectV1,
-            { effect_kind: "cancel-or-prove-quiescent" }
+            {
+              effect_kind: typeof CONVERSATION_CONTROL_EFFECT_KIND.CANCEL_OR_PROVE_QUIESCENT;
+            }
           >["mode"],
         };
   return { effect, native, postcondition };
 }
 
 export function materializeRevisionControlEffectClosure(input: {
-  action_type: Exclude<ConversationControlActionTypeV1, "conversation.stop_operation">;
+  action_type: Exclude<
+    ConversationControlActionTypeV1,
+    typeof CONVERSATION_CONTROL_ACTION_TYPE.STOP_OPERATION
+  >;
   operation: RevisionOperationV1;
   preparation: RevisionPreparationPlanV1;
   events: readonly RevisionOperationEventV1[];
   expected_pre_effect_fold_digest: string;
 }): ConversationControlEffectClosureV1 {
   const receipts = latestReceipts(input.events);
-  if (input.action_type === "conversation.abandon_revision_operation" && receipts.size !== 0)
+  if (
+    input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.ABANDON_REVISION_OPERATION &&
+    receipts.size !== 0
+  )
     throw new Error("revision abandon effect closure contains participant effects");
   const participants =
-    input.action_type === "conversation.abandon_revision_operation"
+    input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.ABANDON_REVISION_OPERATION
       ? []
       : input.preparation.participant_starts.filter(({ participant_id }) =>
           receipts.has(participant_id),
         );
   if (
-    input.action_type === "conversation.retry_revision_operation" &&
+    input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.RETRY_REVISION_OPERATION &&
     participants.length !== input.preparation.participant_starts.length
   )
     throw new Error("revision retry control effect closure is incomplete");
@@ -133,21 +154,25 @@ export function materializeRevisionControlEffectClosure(input: {
     const receipt = receipts.get(participant.participant_id);
     if (!receipt) throw new Error("revision control lane receipt disappeared");
     if (
-      input.action_type === "conversation.retry_revision_operation" &&
-      !["failed", "canceled"].includes(receipt.state)
+      input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.RETRY_REVISION_OPERATION &&
+      receipt.state !== PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED &&
+      receipt.state !== PUBLIC_OPERATION_PARTICIPANT_START_PHASE.CANCELED
     )
       throw new Error("revision retry control effect is not quiescent");
     const privateRef = receipt.private_native_session_ref ?? receipt.private_process_lease_ref;
-    if (privateRef === null && receipt.state !== "failed")
+    if (privateRef === null && receipt.state !== PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED)
       throw new Error("revision control lane lacks an exact native reference");
-    const reconcile = input.action_type === "conversation.reconcile_revision_operation";
+    const reconcile =
+      input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.RECONCILE_REVISION_OPERATION;
     return closeEffect({
       target_operation_id: input.operation.operation_id,
       participant_id: participant.participant_id,
       adapter_fingerprint: participant.adapter_fingerprint,
-      effect_kind: reconcile ? "reconcile" : "cancel-or-prove-quiescent",
+      effect_kind: reconcile
+        ? CONVERSATION_CONTROL_EFFECT_KIND.RECONCILE
+        : CONVERSATION_CONTROL_EFFECT_KIND.CANCEL_OR_PROVE_QUIESCENT,
       mode: reconcile ? participant.reconciliation_mode : participant.cancellation_mode,
-      reference_kind: "participant-start-receipt",
+      reference_kind: CONVERSATION_NATIVE_REFERENCE_KIND.PARTICIPANT_START_RECEIPT,
       authority_record_digest: receipt.receipt_digest,
       private_reference_content_digest: privateRef,
       expected_pre_effect_fold_digest: input.expected_pre_effect_fold_digest,
@@ -172,14 +197,14 @@ export function materializeStopControlEffectClosure(input: {
   const row = closeEffect({
     target_operation_id: input.target_operation_id,
     participant_id: null,
-    adapter_fingerprint: "vf-host-operation-cancel/1",
-    effect_kind: "cancel-or-prove-quiescent",
-    mode: "idempotent-cancel",
-    reference_kind: "operation-cancel-authority",
+    adapter_fingerprint: CONVERSATION_CONTROL_HOST_CANCEL_ADAPTER_FINGERPRINT,
+    effect_kind: CONVERSATION_CONTROL_EFFECT_KIND.CANCEL_OR_PROVE_QUIESCENT,
+    mode: PARTICIPANT_CANCEL_MODE.IDEMPOTENT_CANCEL,
+    reference_kind: CONVERSATION_NATIVE_REFERENCE_KIND.OPERATION_CANCEL_AUTHORITY,
     authority_record_digest: input.expected_operation_header_digest,
     private_reference_content_digest: null,
     expected_pre_effect_fold_digest: input.expected_pre_effect_fold_digest,
-    condition: conditionFor("conversation.stop_operation"),
+    condition: conditionFor(CONVERSATION_CONTROL_ACTION_TYPE.STOP_OPERATION),
   });
   return {
     plan: materializeConversationControlEffectPlan({

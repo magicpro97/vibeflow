@@ -1,9 +1,15 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const EVIDENCE_DIR = ".vibeflow/review-evidence/v1";
 export const MAX_RECORD_BYTES = 64 * 1024;
+export const REVIEWER_RESULT_AUTHORITY = Object.freeze({
+  schemaVersion: 1,
+  digestAlgorithm: "sha256",
+  passedStatus: "passed",
+} as const);
 const IDS = [
   "api-mutation-owned-fields",
   "input-bound-parser-allocation",
@@ -15,6 +21,14 @@ type Id = (typeof IDS)[number];
 export type Changed = { status: string; path: string };
 export type GitRead = (repo: string, args: string[]) => { status: number; stdout: string };
 export type Check = { required: boolean; ok: boolean; reason: string };
+
+/** Digest of the canonical name-status manifest supplied to a reviewer. */
+export function changedManifestDigest(changed: readonly Changed[]): string {
+  const canonical = changed.map(({ status, path }) => ({ status, path }));
+  return createHash(REVIEWER_RESULT_AUTHORITY.digestAlgorithm)
+    .update(JSON.stringify(canonical))
+    .digest("hex");
+}
 
 type RecordV1 = {
   schemaVersion: 1;

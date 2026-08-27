@@ -1,12 +1,16 @@
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../../core/capability-contract.js";
 import { ownedProjectionRecord } from "../planning/resource-planner.js";
 import type {
   CapabilityDurablePlanningGraphV1,
   CapabilityFabricPlanV1,
 } from "../planning/types.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
-import type {
-  CapabilityOperationV1,
-  CapabilityPreEffectRefusalReasonV1,
+import {
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityOperationV1,
+  type CapabilityPreEffectRefusalReasonV1,
 } from "../wire/operation.js";
 import { requireCapabilityActionAuthority } from "./action-authority.js";
 import { capabilityAuthorityFrontier } from "./authority-frontier.js";
@@ -55,8 +59,8 @@ export function finishCapabilityOperationAfterRollback(
   });
   input.journal.terminal(
     input.operationId,
-    rollbackOk ? "failed" : "needs_recovery",
-    rollbackOk ? input.reason : "rollback-failed",
+    rollbackOk ? ACTION_OPERATION_STATE.FAILED : ACTION_OPERATION_STATE.NEEDS_RECOVERY,
+    rollbackOk ? input.reason : CAPABILITY_RUNTIME_ERROR_CODE.ROLLBACK_FAILED,
     input.held,
   );
   return foldCapabilityOperation(
@@ -115,7 +119,7 @@ export function continueCapabilityOperation(
         stepId: null,
         targetIds: capabilityHostTargetIds(plan),
         held,
-        frontier: "lock-publication",
+        frontier: CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION,
         authorityCheck,
       }),
     effect: () => null,
@@ -126,7 +130,7 @@ export function continueCapabilityOperation(
   if (currentStatus.state === "corrupt" || currentStatus.state === "unsupported")
     throw new CapabilityRuntimeError(
       "capability current lock cannot be validated for publication",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   const current = currentStatus.lock;
   const interim = foldCapabilityOperation(
@@ -160,13 +164,13 @@ export function continueCapabilityOperation(
   )
     throw new CapabilityRuntimeError(
       "capability checkpoint base differs from the locked operation base",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   const priorPointer = readCapabilityHealthCurrent(options.storage);
   if (current !== null && priorPointer === null)
     throw new CapabilityRuntimeError(
       "capability base lock has no selected health inventory",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   if (priorPointer)
     readCapabilityHealthInventory(options.storage, priorPointer.inventory_digest, current);
@@ -199,7 +203,7 @@ export function continueCapabilityOperation(
   journal.append(
     header.operation_id,
     {
-      kind: "health-inventory-prepared",
+      kind: CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED,
       generation_id: proposed.generation_id,
       lock_digest: proposed.content_digest,
       health_inventory_digest: inventory.inventory_digest,
@@ -224,7 +228,7 @@ export function continueCapabilityOperation(
         stepId: null,
         targetIds: capabilityHostTargetIds(plan),
         held,
-        frontier: "lock-publication",
+        frontier: CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION,
         authorityCheck,
       }),
     effect: () => {
@@ -233,7 +237,7 @@ export function continueCapabilityOperation(
       journal.append(
         header.operation_id,
         {
-          kind: "lock-commit",
+          kind: CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT,
           generation_id: proposed.generation_id,
           lock_digest: proposed.content_digest,
           health_inventory_digest: inventory.inventory_digest,
@@ -247,7 +251,7 @@ export function continueCapabilityOperation(
       );
       input.fault?.("after-lock-commit");
       options.storage.publishHealthCurrent(priorPointer, nextPointer, held);
-      journal.terminal(header.operation_id, "succeeded", null, held);
+      journal.terminal(header.operation_id, ACTION_OPERATION_STATE.SUCCEEDED, null, held);
     },
   });
   if (!publication.authorized) {

@@ -1,19 +1,48 @@
+import { isAgentEngine } from "../core/agent-contract.js";
+import { CAPABILITY_SCOPE, isCapabilityScope } from "../core/capability-contract.js";
 import { digestHex, digestV1 } from "../durability/index.js";
+import {
+  type CapabilityHostActionKind,
+  HOST_ACTION_KIND,
+  type HostActionKind,
+  isCapabilityHostActionKind,
+} from "./host-action-contract.js";
 import type { HostActionV1 } from "./internal-action-types.js";
 import { validatePackagePin } from "./package-pin-validation.js";
 import type { ActionTargetBindingV1, PackagePinV1 } from "./preview-types.js";
 import { validateProposalPreview } from "./preview-validation.js";
+import {
+  ACTION_CONFIG_DIFF_MODE,
+  ACTION_EFFECT_CLASS,
+  ACTION_PACKAGE_PIN_TRUST_VALUE,
+  ACTION_PERMISSION_CHANGE,
+  ACTION_PERMISSION_ENFORCEMENT_VALUE,
+  ACTION_RISK,
+  type ActionEffectClass,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
+import {
+  PUBLIC_ACTION_TARGET_APPLY_FAILURE,
+  PUBLIC_ACTION_TARGET_HEALTH_FAILURE,
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+} from "./public-operation-contract.js";
 import { assertDigest, assertOpaqueId, assertPackageId, bytewise } from "./record-primitives.js";
 import { ActionValidationError, exactObject } from "./strict-json.js";
 import type { ActionProposalDraftV1, ActionRisk } from "./types.js";
 
+type SameUnion<Left, Right> = Exclude<Left, Right> extends never
+  ? Exclude<Right, Left> extends never
+    ? true
+    : false
+  : false;
+
 export const EMPTY_ADAPTER_SET_DIGEST = digestV1("VF-ADAPTER-SET\0v1\0", {
-  schema_version: "1.0",
+  schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
   adapter_registry_digest: null,
   adapters: [],
 });
 export const EMPTY_PERMISSION_DIGEST = digestV1("VF-PERMISSION-BINDING\0v1\0", {
-  schema_version: "1.0",
+  schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
   permissions: [],
   secret_input_ids: [],
 });
@@ -22,44 +51,42 @@ export const EMPTY_SOURCE_AUTHORITY_SET_DIGEST = digestV1(
   [],
 );
 
-const CAPABILITY_ACTIONS = new Set([
-  "capability.install",
-  "capability.update",
-  "capability.configure",
-  "capability.retarget",
-  "capability.remove",
-  "capability.rollback_scope",
-  "capability.restore_package",
-  "capability.repair",
-  "capability.adopt",
-]);
-const AUTHORITY_ACTIONS = new Set([
-  "grant.create",
-  "grant.renew",
-  "grant.revoke",
-  "policy.update_authority",
-  "secret.revoke",
-  "registry.trust_key",
-]);
-const EFFECT_RANK = new Map([
-  ["pure-local-read", 0],
-  ["local-read-with-cache", 0],
-  ["network-read", 0],
-  ["process-probe", 0],
-  ["project-write", 1],
-  ["user-write", 2],
-  ["external-compensatable", 2],
-  ["external-irreversible", 3],
-]);
-const RISKS: ActionRisk[] = ["low", "medium", "high", "critical"];
-const ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
+export const AUTHORITY_HOST_ACTION_KINDS = Object.freeze([
+  HOST_ACTION_KIND.GRANT_CREATE,
+  HOST_ACTION_KIND.GRANT_RENEW,
+  HOST_ACTION_KIND.GRANT_REVOKE,
+  HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY,
+  HOST_ACTION_KIND.SECRET_REVOKE,
+  HOST_ACTION_KIND.REGISTRY_TRUST_KEY,
+] as const satisfies readonly HostActionKind[]);
 
-export function isCapabilityAction(type: string): boolean {
-  return CAPABILITY_ACTIONS.has(type);
+export type AuthorityHostActionKind = Extract<
+  HostActionKind,
+  `grant.${string}` | `policy.${string}` | `secret.${string}` | `registry.${string}`
+>;
+
+const _authorityActionKindParity = true satisfies SameUnion<
+  (typeof AUTHORITY_HOST_ACTION_KINDS)[number],
+  AuthorityHostActionKind
+>;
+void _authorityActionKindParity;
+const EFFECT_RANK = new Map<ActionEffectClass, number>([
+  [ACTION_EFFECT_CLASS.PURE_LOCAL_READ, 0],
+  [ACTION_EFFECT_CLASS.LOCAL_READ_WITH_CACHE, 0],
+  [ACTION_EFFECT_CLASS.NETWORK_READ, 0],
+  [ACTION_EFFECT_CLASS.PROCESS_PROBE, 0],
+  [ACTION_EFFECT_CLASS.PROJECT_WRITE, 1],
+  [ACTION_EFFECT_CLASS.USER_WRITE, 2],
+  [ACTION_EFFECT_CLASS.EXTERNAL_COMPENSATABLE, 2],
+  [ACTION_EFFECT_CLASS.EXTERNAL_IRREVERSIBLE, 3],
+]);
+const RISKS = Object.freeze(Object.values(ACTION_RISK));
+export function isCapabilityAction(type: string): type is CapabilityHostActionKind {
+  return isCapabilityHostActionKind(type);
 }
 
-export function isAuthorityAction(type: string): boolean {
-  return AUTHORITY_ACTIONS.has(type);
+export function isAuthorityAction(type: string): type is AuthorityHostActionKind {
+  return AUTHORITY_HOST_ACTION_KINDS.some((candidate) => candidate === type);
 }
 
 export function validateProposalContent(draft: ActionProposalDraftV1): void {
@@ -72,7 +99,10 @@ export function validateProposalContent(draft: ActionProposalDraftV1): void {
 
 export function targetId(binding: Omit<ActionTargetBindingV1, "target_id">): string {
   return `vf-target-${digestHex(
-    digestV1("VF-ACTION-TARGET-ID\0v1\0", { schema_version: "1.0", ...binding }),
+    digestV1("VF-ACTION-TARGET-ID\0v1\0", {
+      schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
+      ...binding,
+    }),
   )}`;
 }
 
@@ -88,20 +118,21 @@ function validateTargets(targets: ActionTargetBindingV1[], action: HostActionV1)
       [],
       `${path}.target`,
     );
-    if (!["project", "user"].includes(target.scope as string)) invalid("invalid target scope");
-    if (target.engine !== null && !ENGINES.has(target.engine as string))
-      invalid("invalid target engine");
+    if (!isCapabilityScope(target.scope)) invalid("invalid target scope");
+    if (target.engine !== null && !isAgentEngine(target.engine)) invalid("invalid target engine");
     if (target.participant_id !== null)
       assertOpaqueId(target.participant_id, `${path}.target.participant_id`);
     if (
       target.required === true &&
-      (target.on_apply_failure !== "abort-scope" || target.on_health_failure !== "abort-scope")
+      (target.on_apply_failure !== PUBLIC_ACTION_TARGET_APPLY_FAILURE.ABORT_SCOPE ||
+        target.on_health_failure !== PUBLIC_ACTION_TARGET_HEALTH_FAILURE.ABORT_SCOPE)
     )
       invalid("required target failure policy mismatch");
     if (
       target.required === false &&
-      (target.on_apply_failure !== "omit-after-rollback" ||
-        !["omit-after-rollback", "commit-degraded"].includes(target.on_health_failure as string))
+      (target.on_apply_failure !== PUBLIC_ACTION_TARGET_APPLY_FAILURE.OMIT_AFTER_ROLLBACK ||
+        (target.on_health_failure !== PUBLIC_ACTION_TARGET_HEALTH_FAILURE.OMIT_AFTER_ROLLBACK &&
+          target.on_health_failure !== PUBLIC_ACTION_TARGET_HEALTH_FAILURE.COMMIT_DEGRADED))
     )
       invalid("optional target failure policy mismatch");
     if (typeof target.required !== "boolean") invalid("invalid target required flag");
@@ -111,12 +142,12 @@ function validateTargets(targets: ActionTargetBindingV1[], action: HostActionV1)
       ["action_type", "participant_id", "package_id", "component_id"],
       `${path}.subject`,
     );
-    if (subject.kind === "conversation") {
+    if (subject.kind === PUBLIC_ACTION_TARGET_SUBJECT_KIND.CONVERSATION) {
       exactObject(row.subject, ["kind", "action_type", "participant_id"], [], `${path}.subject`);
       if (subject.action_type !== action.type) invalid("target subject action mismatch");
       if (subject.participant_id !== null)
         assertOpaqueId(subject.participant_id, `${path}.subject.participant_id`);
-    } else if (subject.kind === "capability") {
+    } else if (subject.kind === PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY) {
       exactObject(row.subject, ["kind", "package_id", "component_id"], [], `${path}.subject`);
       assertPackageId(subject.package_id, `${path}.subject.package_id`);
       assertOpaqueId(subject.component_id, `${path}.subject.component_id`);
@@ -168,10 +199,11 @@ function validateDigests(draft: ActionProposalDraftV1): void {
 
 function deriveRisk(draft: ActionProposalDraftV1): ActionRisk {
   let rank =
-    draft.action.type === "authority.repair" ||
-    draft.action.type === "conversation.publish_suspected_literal"
+    draft.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR ||
+    draft.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
       ? 3
-      : isAuthorityAction(draft.action.type) || draft.action.type === "capability.adopt"
+      : isAuthorityAction(draft.action.type) ||
+          draft.action.type === HOST_ACTION_KIND.CAPABILITY_ADOPT
         ? 2
         : 1;
   for (const effect of draft.effect_classes) rank = Math.max(rank, EFFECT_RANK.get(effect) ?? 4);
@@ -180,12 +212,26 @@ function deriveRisk(draft: ActionProposalDraftV1): ActionRisk {
     { reversible: 0, compensatable: 1, manual: 2, irreversible: 3 }[draft.reversibility],
   );
   if (
-    draft.base.capability_scope === "user" ||
-    draft.target_set.some((row) => row.target.scope === "user") ||
-    draft.package_pins.some((pin) => ["dev-unverified", "legacy-verified"].includes(pin.trust)) ||
-    draft.preview.permission_delta.some((row) => ["add", "expand"].includes(row.change)) ||
-    draft.preview.enforcement.some((row) => row.enforcement === "disclosed-not-enforced") ||
-    draft.preview.config_diffs.some((row) => ["full-file", "manual"].includes(row.mode))
+    draft.base.capability_scope === CAPABILITY_SCOPE.USER ||
+    draft.target_set.some((row) => row.target.scope === CAPABILITY_SCOPE.USER) ||
+    draft.package_pins.some(
+      (pin) =>
+        pin.trust === ACTION_PACKAGE_PIN_TRUST_VALUE.DEV_UNVERIFIED ||
+        pin.trust === ACTION_PACKAGE_PIN_TRUST_VALUE.LEGACY_VERIFIED,
+    ) ||
+    draft.preview.permission_delta.some(
+      (row) =>
+        row.change === ACTION_PERMISSION_CHANGE.ADD ||
+        row.change === ACTION_PERMISSION_CHANGE.EXPAND,
+    ) ||
+    draft.preview.enforcement.some(
+      (row) => row.enforcement === ACTION_PERMISSION_ENFORCEMENT_VALUE.DISCLOSED_NOT_ENFORCED,
+    ) ||
+    draft.preview.config_diffs.some(
+      (row) =>
+        row.mode === ACTION_CONFIG_DIFF_MODE.FULL_FILE ||
+        row.mode === ACTION_CONFIG_DIFF_MODE.MANUAL,
+    )
   )
     rank = Math.max(rank, 2);
   if (rank > 3) invalid("unknown effect class");

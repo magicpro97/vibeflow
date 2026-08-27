@@ -1,3 +1,4 @@
+import { isCapabilityHostActionKind } from "../actions/host-action-contract.js";
 import {
   type ActionApprovalV1,
   type ActionPlanningOptionsV1,
@@ -8,9 +9,18 @@ import {
   deriveOperationId,
   validateInternalHostAction,
 } from "../actions/index.js";
+import {
+  ACTION_ROOT_LOCATOR_KIND,
+  type ActionOperationDomainTerminalState,
+} from "../actions/protocol-contract.js";
+import {
+  ACTION_DECISION,
+  ACTION_DOMAIN,
+  type PUBLIC_ACTION_SCHEMA_VERSION,
+} from "../actions/public-action-contract.js";
 import { canonicalJson } from "../durability/index.js";
 import { capabilityActionPlanDigest } from "./action-domain/action-plan.js";
-import { CapabilityRuntimeError } from "./operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./operations/errors.js";
 import type { CapabilityOperationResultV1 } from "./operations/types.js";
 import type { CapabilityPreparedOperationV1 } from "./operations/types.js";
 import {
@@ -28,12 +38,12 @@ import type {
 export type { CapabilityHostActionV1 } from "./planning/types.js";
 
 export interface CapabilityIntentPreparationRequestV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   action: CapabilityHostActionV1;
   planning_options: ActionPlanningOptionsV1;
   action_root_locator: Exclude<
     import("../actions/types.js").PrivateActionRootLocatorV1,
-    { kind: "recovery-bootstrap" }
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
   >;
   /** Host-authenticated request authority used by exact source-access planning. */
   request_authority: ActionRequestAuthorityV1;
@@ -44,7 +54,7 @@ export interface CapabilityIntentMaterializerV1 {
 }
 
 export interface CapabilityApprovedExecutionRequestV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   graph: CapabilityDurablePlanningGraphV1;
   proposal: ActionProposalV1;
   approval: ActionApprovalV1;
@@ -64,19 +74,19 @@ export interface CapabilityActionControllerV1 {
 }
 
 export interface CapabilityOperationAuthorityEvidenceV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   operation_id: string;
   header_digest: string;
   prepared_at: string;
   terminal: {
-    outcome: "succeeded" | "failed" | "needs_recovery";
+    outcome: ActionOperationDomainTerminalState;
     domain_terminal_digest: string;
     recorded_at: string;
   } | null;
 }
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "authorization-mismatch");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH);
 }
 
 export function assertApprovedCapabilityClosure(
@@ -91,12 +101,18 @@ export function assertApprovedCapabilityClosure(
   }
   const { graph, proposal, approval } = request;
   const { plan } = graph;
-  if (proposal.domain !== "capability" || !proposal.action.type.startsWith("capability."))
+  if (
+    proposal.domain !== ACTION_DOMAIN.CAPABILITY ||
+    !isCapabilityHostActionKind(proposal.action.type)
+  )
     invalid("proposal is not a capability domain action");
-  if (approval.decision !== "approved" || Date.parse(approval.expires_at) <= Date.parse(now))
+  if (
+    approval.decision !== ACTION_DECISION.APPROVED ||
+    Date.parse(approval.expires_at) <= Date.parse(now)
+  )
     invalid("capability approval is denied or expired");
   if (
-    proposal.action_root_locator.kind === "recovery-bootstrap" ||
+    proposal.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP ||
     canonicalJson(proposal.action_root_locator) !== canonicalJson(plan.action_root_locator) ||
     canonicalJson(plan.action_root_locator) !==
       canonicalJson(plan.execution_closure.action_root_locator) ||
@@ -130,7 +146,7 @@ export function validateCapabilityIntentAction(
   action: CapabilityHostActionV1,
 ): CapabilityHostActionV1 {
   const validated = validateInternalHostAction(action);
-  if (!validated.type.startsWith("capability."))
+  if (!isCapabilityHostActionKind(validated.type))
     invalid("intent action is outside capability domain");
   return validated as CapabilityHostActionV1;
 }

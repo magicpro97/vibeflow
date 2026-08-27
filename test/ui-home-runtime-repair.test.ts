@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 import { computed, reactive, ref, shallowRef } from "vue";
+import {
+  ACTION_OPERATION_EVENT_SCHEMA_VERSION,
+  ACTION_OPERATION_SSE_EVENT,
+  ACTION_OPERATION_STATE,
+} from "../src/actions/protocol-contract.js";
+import {
+  PUBLIC_OPERATION_FIXED_PHASE,
+  PUBLIC_OPERATION_PROGRESS_STATUS,
+} from "../src/actions/public-operation-contract.js";
+import type { ActionOperationEventV1 } from "../src/actions/public-types.js";
 import { conversationApi } from "../src/ui/src/conversation-api.js";
 import {
   ConversationHomeApiError,
@@ -59,6 +69,7 @@ function revision(
 
 function actionView(proposalId: string): HomeActionView {
   return {
+    schema_version: "1.0",
     proposal: {
       schema_version: "1.0",
       proposal_id: proposalId,
@@ -97,7 +108,7 @@ function actionView(proposalId: string): HomeActionView {
       latest_event_cursor: null,
       progress: [],
       targets: [],
-      delivery: "inline",
+      delivery: "pending",
       result_ref: null,
       error: null,
       recovery_actions: [],
@@ -730,7 +741,7 @@ describe("Home runtime review repairs", () => {
   });
 
   test("a terminal operation reload immediately rebinds the live stream to the new head", async () => {
-    type Listener = (event: { data: string }) => void;
+    type Listener = (event: { data: string; lastEventId: string }) => void;
     class FakeEventSource {
       static readonly instances: FakeEventSource[] = [];
       readonly listeners = new Map<string, Listener[]>();
@@ -745,9 +756,12 @@ describe("Home runtime review repairs", () => {
         this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
       }
 
-      emit(type: string, value: unknown): void {
+      emit(type: string, value: ActionOperationEventV1): void {
         for (const listener of this.listeners.get(type) ?? [])
-          listener({ data: JSON.stringify(value) });
+          listener({
+            data: JSON.stringify(value),
+            lastEventId: value.event_cursor,
+          });
       }
 
       close(): void {
@@ -788,6 +802,7 @@ describe("Home runtime review repairs", () => {
     ]);
     let currentRevision = rootRevision;
     let headEpoch = 1;
+    let headReads = 0;
     const pending = actionView("proposal-revision");
     const renewedConversationIds: string[] = [];
     conversationApi.renewStreamToken = (async (conversationId) => {
@@ -797,14 +812,17 @@ describe("Home runtime review repairs", () => {
         stream_token_expires_at: "invalid-expiry",
       };
     }) as typeof conversationApi.renewStreamToken;
-    conversationHomeApi.head = (async (): Promise<HomeAuthoritativeHeadResponse> => ({
-      schema_version: "1.0",
-      root_session_id: rootSessionId,
-      head_status: "committed",
-      head_epoch: headEpoch,
-      head_digest: digest(headEpoch === 1 ? "d" : "e"),
-      active: currentRevision,
-    })) as typeof conversationHomeApi.head;
+    conversationHomeApi.head = (async (): Promise<HomeAuthoritativeHeadResponse> => {
+      headReads += 1;
+      return {
+        schema_version: "1.0",
+        root_session_id: rootSessionId,
+        head_status: "committed",
+        head_epoch: headEpoch,
+        head_digest: digest(headEpoch === 1 ? "d" : "e"),
+        active: currentRevision,
+      };
+    }) as typeof conversationHomeApi.head;
     conversationHomeApi.timeline = (async () =>
       timeline(rootSessionId, currentRevision, headEpoch)) as typeof conversationHomeApi.timeline;
     conversationHomeApi.pending = (async (conversationId) => ({
@@ -825,6 +843,7 @@ describe("Home runtime review repairs", () => {
     const authoritativeHead = shallowRef<HomeAuthoritativeHeadResponse | null>(null);
     const activeTimeline = shallowRef<HomeTimelineResponse | null>(null);
     const pendingActions = ref<HomeActionView[]>([]);
+    const activationError = ref("");
     const readEpoch = new ActivationEpoch();
     const commandAuthority = new ActivationEpoch();
     const runtime = createHomeQueryRuntime({
@@ -842,7 +861,7 @@ describe("Home runtime review repairs", () => {
       clearMessageQueueProjection: () => {},
       messageQueueHasLiveItems: () => false,
       activationLoading: ref(false),
-      activationError: ref(""),
+      activationError,
       online: ref(true),
       streamStatus: ref("idle"),
       streamError: ref(""),
@@ -880,15 +899,55 @@ describe("Home runtime review repairs", () => {
       );
       expect(operationSource).toBeDefined();
       expect(rootSource).toBeDefined();
+      expect(headReads).toBe(1);
+
+      const operationId = pending.operation.operation_id;
+      if (!operationId) throw new Error("expected a live operation identity");
+      const startedAt = "2026-08-26T00:00:01.000Z";
+      operationSource?.emit(ACTION_OPERATION_SSE_EVENT.OPERATION, {
+        schema_version: ACTION_OPERATION_EVENT_SCHEMA_VERSION,
+        operation_id: operationId,
+        phase_sequence: 0,
+        state: ACTION_OPERATION_STATE.COMMITTING,
+        progress: {
+          sequence: 0,
+          phase: PUBLIC_OPERATION_FIXED_PHASE.OPERATION_STARTED,
+          status: PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+          message_code: `operation.${PUBLIC_OPERATION_FIXED_PHASE.OPERATION_STARTED}`,
+          at: startedAt,
+        },
+        target: null,
+        error: null,
+        occurred_at: startedAt,
+        event_cursor: `vf-operation-event-${"1".repeat(64)}`,
+      });
+      await flush();
+
+      expect(headReads).toBe(1);
+      expect(pending.operation.state).toBe(ACTION_OPERATION_STATE.COMMITTING);
+      expect(pending.operation.progress).toHaveLength(1);
+      expect(operationSource?.closed).toBeFalse();
+      expect(activationError.value).toBe("");
 
       currentRevision = childRevision;
       headEpoch = 2;
-      operationSource?.emit("operation", {
-        state: "succeeded",
-        phase_sequence: 0,
-        progress: null,
+      const succeededAt = "2026-08-26T00:00:02.000Z";
+      operationSource?.emit(ACTION_OPERATION_SSE_EVENT.OPERATION, {
+        schema_version: ACTION_OPERATION_EVENT_SCHEMA_VERSION,
+        operation_id: operationId,
+        phase_sequence: 1,
+        state: ACTION_OPERATION_STATE.SUCCEEDED,
+        progress: {
+          sequence: 1,
+          phase: PUBLIC_OPERATION_FIXED_PHASE.OPERATION_SUCCEEDED,
+          status: PUBLIC_OPERATION_PROGRESS_STATUS.SUCCEEDED,
+          message_code: `operation.${PUBLIC_OPERATION_FIXED_PHASE.OPERATION_SUCCEEDED}`,
+          at: succeededAt,
+        },
         target: null,
-        event_cursor: `vf-operation-event-${"1".repeat(64)}`,
+        error: null,
+        occurred_at: succeededAt,
+        event_cursor: `vf-operation-event-${"2".repeat(64)}`,
       });
       await flush(24);
 
@@ -896,8 +955,11 @@ describe("Home runtime review repairs", () => {
         source.url.includes(`${childRevision.conversation_id}/events?`),
       );
       expect(rootSource?.closed).toBeTrue();
+      expect(operationSource?.closed).toBeTrue();
       expect(childSource).toBeDefined();
       expect(childSource?.closed).toBeFalse();
+      expect(headReads).toBe(2);
+      expect(activationError.value).toBe("");
       expect(authoritativeHead.value?.active?.revision_id).toBe("revision-child");
       expect(renewedConversationIds).toEqual(["conversation-root", "conversation-child"]);
     } finally {

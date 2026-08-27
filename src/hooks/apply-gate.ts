@@ -10,7 +10,16 @@
 import { randomUUID } from "node:crypto";
 import { cwd } from "node:process";
 import { getUnitDiffResult } from "../commands/dispatch-reviewer-llm.js";
-import type { Engine, HookInput, HookResult, RiskLevel } from "../core.js";
+import type { Engine, HookInput, HookResult } from "../core.js";
+import {
+  HOOK_DECISION,
+  HOOK_ENFORCEMENT_MODE,
+  HOOK_EVENT,
+  type HookConfirmationDecision,
+  RISK_LEVEL,
+  type RiskLevel,
+} from "../core/hook-contract.js";
+import { GATE_STATE, WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { registerPending } from "../server/pending-hooks.js";
 import { engineEnforcement } from "./adapters.js";
 import type { SemanticJudge } from "./risk-semantic.js";
@@ -73,12 +82,12 @@ export function classifyDiff(
   judge?: SemanticJudge,
 ): { risk: RiskLevel; reasons: string[] } {
   const hunks = parseHunks(diff);
-  let risk: RiskLevel = "none";
+  let risk: RiskLevel = RISK_LEVEL.NONE;
   const reasons: string[] = [];
   for (const h of hunks) {
     const joined = h.added.join("\n");
     const input: HookInput = {
-      event: "pre-command",
+      event: HOOK_EVENT.PRE_COMMAND,
       command: joined,
       files: [h.path],
       content: joined,
@@ -89,7 +98,10 @@ export function classifyDiff(
     try {
       scored = scoreRisk(input, undefined, judge);
     } catch {
-      scored = { risk: "critical", reasons: [`${h.path}: risk scorer threw — fail-closed`] };
+      scored = {
+        risk: RISK_LEVEL.CRITICAL,
+        reasons: [`${h.path}: risk scorer threw — fail-closed`],
+      };
     }
     if (RISK_ORDER.indexOf(scored.risk) > RISK_ORDER.indexOf(risk)) risk = scored.risk;
     // A hunk names itself only for REAL signals. scoreRisk floors every non-empty command to
@@ -106,7 +118,7 @@ export function classifyDiff(
 export interface ApplyGateDeps {
   classify?: (diff: string) => { risk: RiskLevel; reasons: string[] };
   /** Resolve a HIGH-risk diff to allow/block. Default: the web-UI approval modal. */
-  confirm?: (input: HookInput, result: HookResult) => Promise<"allow" | "block">;
+  confirm?: (input: HookInput, result: HookResult) => Promise<HookConfirmationDecision>;
   /** Optional semantic (LLM) risk tier, threaded into the default classifier. */
   judge?: SemanticJudge;
   /** Risk at/above which the gate asks for confirmation. Default `high`. */
@@ -133,12 +145,12 @@ export async function defaultConfirm(
   input: HookInput,
   result: HookResult,
   register: typeof registerPending = registerPending,
-): Promise<"allow" | "block"> {
+): Promise<HookConfirmationDecision> {
   try {
     // AWAIT so a REJECTED promise (not just a sync throw) is caught and fails closed.
     return await register(randomUUID(), input, result);
   } catch {
-    return "block";
+    return HOOK_DECISION.BLOCK;
   }
 }
 
@@ -155,8 +167,12 @@ export async function enforceApplyGate(
   diff: string,
   deps: ApplyGateDeps = {},
 ): Promise<{ allowed: boolean; risk: RiskLevel; reasons: string[] }> {
-  if (engineEnforcement(engine).preActionBlocking === "native") {
-    return { allowed: true, risk: "none", reasons: [`${engine} blocks natively — no apply-gate`] };
+  if (engineEnforcement(engine).preActionBlocking === HOOK_ENFORCEMENT_MODE.NATIVE) {
+    return {
+      allowed: true,
+      risk: RISK_LEVEL.NONE,
+      reasons: [`${engine} blocks natively — no apply-gate`],
+    };
   }
 
   let risk: RiskLevel;
@@ -164,23 +180,23 @@ export async function enforceApplyGate(
   try {
     ({ risk, reasons } = (deps.classify ?? ((d) => classifyDiff(d, deps.judge)))(diff));
   } catch {
-    risk = "critical";
+    risk = RISK_LEVEL.CRITICAL;
     reasons = ["apply-gate classifier threw — fail-closed to critical"];
   }
 
-  const threshold = deps.threshold ?? "high";
+  const threshold = deps.threshold ?? RISK_LEVEL.HIGH;
   if (RISK_ORDER.indexOf(risk) >= RISK_ORDER.indexOf(threshold)) {
-    const input: HookInput = { event: "pre-command", command: diff.slice(0, 500) };
-    const result: HookResult = { decision: "require_approval", risk, reasons };
+    const input: HookInput = { event: HOOK_EVENT.PRE_COMMAND, command: diff.slice(0, 500) };
+    const result: HookResult = { decision: HOOK_DECISION.REQUIRE_APPROVAL, risk, reasons };
     // A confirm that THROWS/rejects (modal unreachable, server down) must fail CLOSED to
     // block — never crash the wave (run.ts awaits this outside the dispatcher try/catch).
-    let decision: "allow" | "block";
+    let decision: HookConfirmationDecision;
     try {
       decision = await (deps.confirm ?? defaultConfirm)(input, result);
     } catch {
       return { allowed: false, risk, reasons: [...reasons, "confirm unreachable — fail-closed"] };
     }
-    return { allowed: decision === "allow", risk, reasons };
+    return { allowed: decision === HOOK_DECISION.ALLOW, risk, reasons };
   }
   return { allowed: true, risk, reasons };
 }
@@ -216,14 +232,14 @@ export async function applyGateBlock(
     unit.scope ?? [],
   );
   if (!ok) {
-    unit.status = "blocked";
-    unit.gates = { ...unit.gates, security: "fail" };
+    unit.status = WORK_UNIT_STATUS.BLOCKED;
+    unit.gates = { ...unit.gates, security: GATE_STATE.FAIL };
     return { reason: "apply-gate blocked: could not read unit diff — fail-closed" };
   }
   const g = await opts.applyGate(opts.applyGateEngine, diff);
   if (g.allowed) return null;
-  unit.status = "blocked";
-  unit.gates = { ...unit.gates, security: "fail" };
+  unit.status = WORK_UNIT_STATUS.BLOCKED;
+  unit.gates = { ...unit.gates, security: GATE_STATE.FAIL };
   return { reason: `apply-gate blocked: ${g.reasons.join("; ") || "risky diff"}` };
 }
 

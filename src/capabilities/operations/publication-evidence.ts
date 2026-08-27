@@ -1,4 +1,5 @@
 import { parseStrictJson } from "../../actions/strict-json.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import {
   canonicalJson,
   canonicalJsonBytes,
@@ -10,18 +11,18 @@ import { validateCapabilityLock } from "../storage/lock-validation.js";
 import { capabilityHistoryPath } from "../storage/paths.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
 import type { CapabilityHealthCurrentV1 } from "../storage/types.js";
-import type { CapabilityWalEventV1 } from "../wire/operation.js";
+import { CAPABILITY_WAL_PAYLOAD_KIND, type CapabilityWalEventV1 } from "../wire/operation.js";
 import { bytewise } from "../wire/primitives.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import { resolveHealthObservationBatches } from "./health-evidence.js";
 import { readCapabilityHealthBinding, readCapabilityHealthInventory } from "./health-inventory.js";
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 export function materializeCapabilityPublicationHealthPointer(input: {
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scopeIdentityDigest: string;
   inventoryEpoch: number;
   inventoryDigest: string;
@@ -45,13 +46,13 @@ export function assertCapabilityPublicationEvidence(input: {
   events: readonly CapabilityWalEventV1[];
 }): void {
   const preparedEvents = input.events.filter(
-    (event) => event.payload.kind === "health-inventory-prepared",
+    (event) => event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED,
   );
   if (preparedEvents.length === 0) return;
   if (preparedEvents.length !== 1)
     invalid("capability operation has duplicate inventory preparation");
   const preparedEvent = preparedEvents[0];
-  if (preparedEvent?.payload.kind !== "health-inventory-prepared")
+  if (preparedEvent?.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED)
     invalid("capability inventory preparation narrowing failed");
   const bytes = privateFileBytes(
     capabilityHistoryPath(input.storage.paths, preparedEvent.payload.generation_id),

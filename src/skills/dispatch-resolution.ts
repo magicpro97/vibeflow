@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import type { Skill } from "../core.js";
+import { SKILL_SOURCE, SKILL_STATUS } from "../core/skill-contract.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { assertNoSymlinkPathComponents } from "../orchestrator/trace/path-safety.js";
 import { mergeBodies, parseSkillReference, resolveAllAdapters } from "./adapter.js";
@@ -74,7 +76,7 @@ function inside(root: string, candidate: string): boolean {
     rel === "" ||
     (!isAbsolute(rel) &&
       rel !== ".." &&
-      !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+      !rel.startsWith(`..${process.platform === RUNTIME_PLATFORM.WINDOWS ? "\\" : "/"}`))
   );
 }
 
@@ -101,7 +103,7 @@ function parseOptions(
   dir: string,
   registries: ReturnType<typeof parseRegistryLock>["registries"],
 ): ParseSkillOpts {
-  if (source !== "shared") return { provenance: "local" };
+  if (source !== SKILL_SOURCE.SHARED) return { provenance: "local" };
   const identity = trustedIdentityForSharedSkill(basename(dir), registries, dir);
   const home = sharedHome(root);
   return {
@@ -196,7 +198,7 @@ function findSkill(ref: string, index: Map<string, CanonicalSkillNode>): Canonic
       `skill "${parsed.baseName}" requires version ${parsed.version}, installed ${node.skill.version ?? "none"}`,
     );
   }
-  if (node.skill.status === "deprecated")
+  if (node.skill.status === SKILL_STATUS.DEPRECATED)
     throw new Error(`skill "${node.skill.name}" is deprecated`);
   return node;
 }

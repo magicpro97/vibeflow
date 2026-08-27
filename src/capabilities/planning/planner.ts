@@ -3,7 +3,15 @@ import type {
   ActionTargetBindingV1,
   CapabilityTargetDispositionV1,
 } from "../../actions/preview-types.js";
-import type { ActionEffectClass, Reversibility } from "../../actions/types.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import {
+  ACTION_EFFECT_CLASSES,
+  ACTION_PLANNING_MODE,
+  ACTION_REVERSIBILITY,
+  ACTION_TARGET_DISPOSITION_EXECUTION_VALUE,
+} from "../../actions/public-action-contract.js";
+import type { ActionPlanningMode, Reversibility } from "../../actions/types.js";
+import { CAPABILITY_PLAN_STATUS } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import {
   CAPABILITY_ADAPTER_REGISTRY_V1,
@@ -17,6 +25,7 @@ import { capabilityActionDigest } from "./action-materialization.js";
 import { buildHostAdapterPlan, buildNonHostAdapterPlan } from "./component-planner.js";
 import { buildTargetBinding, resolveTargetDisposition } from "./component-target.js";
 import { assembleCapabilityDurablePlanningGraph } from "./execution-graph.js";
+import { CAPABILITY_EXECUTION_LEDGER_MODE } from "./execution-ledger-contract.js";
 import { finalizeCapabilityExecutionPlans } from "./execution-plan-finalization.js";
 import { isProvedCapabilityNoOp } from "./no-op.js";
 import { buildOrphanRemovalPlans } from "./orphan-planner.js";
@@ -52,23 +61,14 @@ function selectedTargets(
   );
 }
 
-const EFFECT_ORDER: ActionEffectClass[] = [
-  "pure-local-read",
-  "local-read-with-cache",
-  "network-read",
-  "process-probe",
-  "project-write",
-  "user-write",
-  "external-compensatable",
-  "external-irreversible",
-];
-const REVERSIBILITY: Reversibility[] = ["reversible", "compensatable", "manual", "irreversible"];
+const EFFECT_ORDER = ACTION_EFFECT_CLASSES;
+const REVERSIBILITY = ACTION_REVERSIBILITY;
 
 export function buildCapabilityPlan(
   request: CapabilityPlanningRequestV1,
   broker: CapabilityEffectBrokerV1,
   now: string,
-  persistence: "transient" | "durable" = "transient",
+  persistence: ActionPlanningMode = ACTION_PLANNING_MODE.TRANSIENT,
 ): CapabilityFabricPlanV1 {
   return buildCapabilityPlanningGraph(request, broker, now, persistence).plan;
 }
@@ -77,11 +77,11 @@ export function buildCapabilityPlanningGraph(
   request: CapabilityPlanningRequestV1,
   broker: CapabilityEffectBrokerV1,
   now: string,
-  persistence: "transient" | "durable" = "transient",
+  persistence: ActionPlanningMode = ACTION_PLANNING_MODE.TRANSIENT,
 ): CapabilityDurablePlanningGraphV1 {
   validateCapabilityPlanningRequest(request);
   const actionRootLocator = request.action_root_locator ?? {
-    kind: "capability" as const,
+    kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
     scope: request.scope,
     scope_identity_digest: request.scope_identity_digest,
   };
@@ -133,7 +133,11 @@ export function buildCapabilityPlanningGraph(
             }
           : resolveCapabilityAdapter(component.type, engine);
         const resolvedDisposition = adoptingPackage
-          ? { target_id: target.target_id, execution: "host" as const, reason_code: null }
+          ? {
+              target_id: target.target_id,
+              execution: ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST,
+              reason_code: null,
+            }
           : resolveTargetDisposition(
               entry,
               target.target_id,
@@ -142,8 +146,12 @@ export function buildCapabilityPlanningGraph(
               request.scope,
             );
         target_dispositions.push(resolvedDisposition);
-        if (entry.adapter === null || resolvedDisposition.execution === "unsupported") continue;
-        if (resolvedDisposition.execution !== "host") {
+        if (
+          entry.adapter === null ||
+          resolvedDisposition.execution === ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.UNSUPPORTED
+        )
+          continue;
+        if (resolvedDisposition.execution !== ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST) {
           const empty = buildNonHostAdapterPlan({
             request,
             pkg,
@@ -240,10 +248,12 @@ export function buildCapabilityPlanningGraph(
   const reversibility = REVERSIBILITY[
     Math.max(0, ...finalizedPlans.map((plan) => REVERSIBILITY.indexOf(plan.reversibility)))
   ] as Reversibility;
-  const possibleSurvivors = target_dispositions.filter((row) => row.execution === "host").length;
+  const possibleSurvivors = target_dispositions.filter(
+    (row) => row.execution === ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST,
+  ).length;
   const hasRequiredNonHost = target_dispositions.some(
     (row) =>
-      row.execution !== "host" &&
+      row.execution !== ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST &&
       targets.find((target) => target.target_id === row.target_id)?.target.required,
   );
   const effectCount = finalizedPlans.reduce((sum, plan) => sum + plan.steps.length, 0);
@@ -258,10 +268,10 @@ export function buildCapabilityPlanningGraph(
   });
   const status: CapabilityFabricPlanV1["status"] =
     hasRequiredNonHost || (targets.length > 0 && possibleSurvivors === 0)
-      ? "action-required"
+      ? CAPABILITY_PLAN_STATUS.ACTION_REQUIRED
       : provedNoOp
-        ? "no-op"
-        : "planned";
+        ? CAPABILITY_PLAN_STATUS.NO_OP
+        : CAPABILITY_PLAN_STATUS.PLANNED;
   const planDraft = {
     schema_version: "1.0" as const,
     status,
@@ -324,6 +334,9 @@ export function buildCapabilityPlanningGraph(
     stepEnforcement: finalized.stepEnforcement,
     probeEnforcement: finalized.probeEnforcement,
     packages: effectPackages,
-    mode: persistence === "durable" ? "durable-proposal" : "transient-preview",
+    mode:
+      persistence === ACTION_PLANNING_MODE.DURABLE
+        ? CAPABILITY_EXECUTION_LEDGER_MODE.DURABLE_PROPOSAL
+        : CAPABILITY_EXECUTION_LEDGER_MODE.TRANSIENT_PREVIEW,
   });
 }

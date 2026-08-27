@@ -2,7 +2,7 @@
 title: Master Spec
 description: Master specification — one-sentence summary, design principles, engine support, skill system, hook system, and security posture.
 category: reference
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # VibeFlow Master Spec
@@ -31,7 +31,7 @@ A local-first npm CLI harness that opens AI-first Home and coordinates Claude Co
 
 ```text
 - Starts from npm/npx
-- Opens AI-first Home plus the intake wizard
+- Opens AI-first Home; `vf init` handles repository intake in a TTY
 - Keeps session search, queue editing, participant actions, quotes, reactions, and approvals in chat
 - Collects repo, task, docs, and work management sources
 - Finds source connector skills
@@ -49,8 +49,10 @@ A local-first npm CLI harness that opens AI-first Home and coordinates Claude Co
 
 ```text
 Main agent is the coordinator; the selected CLI remains the engine of record.
+Exact by-id resume is limited to Claude, Codex, and OpenCode.
 An exact resume trusts the CLI's own history and sends only new user and peer-agent deltas.
 Do not repeat a recipient's own prior output when native cursor proof is exact.
+Without exact authority, replay bounded structured own public history; never omit it silently.
 Do not rely on stale model memory for version-sensitive tasks.
 Use verified skills when available.
 Search trusted external docs/skills when needed.
@@ -62,6 +64,7 @@ No evidence, no conclusion.
 No verification, no completion.
 Generate the fewest files possible.
 Everything a tool emits is AI-generated, not hand-maintained boilerplate.
+Declare persisted/API/config vocabularies once as frozen `as const` authorities; never duplicate them as enums or raw UI/backend unions.
 ```
 
 ## Conversation and owned-process contract
@@ -69,19 +72,22 @@ Everything a tool emits is AI-generated, not hand-maintained boilerplate.
 - `vf` / `vf ui` open AI-first Home: searchable session rail, central conversation,
   queue-aware composer, participant details, and inline typed actions.
 - Sends made during agent work enter durable FIFO order. ArrowUp edits only the latest queued
-  human message; a race preserves the draft for explicit send-as-new.
+  human message; a race preserves the draft for explicit send-as-new. Failed unacknowledged
+  admission remains a retryable row whose retry reuses the exact idempotency-bound request.
 - Add/remove agent actions happen in chat. Quotes may reference one through eight visible
   cross-source messages; reactions use the bounded typed emoji set and agent anti-spam cap.
 - Public delivery is canonical `VF-TURN/1` JSON. Exact native resume sends only new user and
-  peer response/reaction deltas; full/unproved delivery uses applicable public history and may
-  add content-addressed `VF-HANDOFF/1`.
+  peer response/reaction deltas; full/unproved delivery adds up to eight recipient responses,
+  capped at 2 KiB UTF-8 each with provenance/digest/counts, and may add content-addressed
+  `VF-HANDOFF/1`.
 - Private ranges use one-shot `VF-PRIVATE-FILE-RANGES/1` JSON. A Copilot prompt file is an argv
   transport fallback, not session history or memory.
 - Owned async launches persist supervisor/CLI PID plus exact start identity and release only
   after quiescence plus `streams-drained`.
 - Windows uses a kill-on-close Job Object with `kernel-contained` proof. Linux/macOS use an
   isolated process group with `cooperative-lineage` proof. Live/unprovable recovery fails
-  closed. The current evidence has injected Windows tests, not a live Windows canary.
+  closed. Injected tests exist and a `windows-latest` smoke job is configured; live Windows
+  evidence remains pending until that job is green.
 
 ## Minimal-footprint and AI-generated output
 

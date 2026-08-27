@@ -1,4 +1,6 @@
 import {
+  ACTION_PRODUCER_REQUEST_BINDING_KIND,
+  ACTION_ROOT_LOCATOR_KIND,
   type ActionAuthorityResolverV1,
   ActionAuthorityStaleError,
   type ActionDispatchRecordV1,
@@ -18,11 +20,22 @@ import {
 } from "../../capabilities/action-domain/operation-evidence.js";
 import { CapabilityRuntimeError } from "../../capabilities/operations/errors.js";
 import type { CapabilityFabricServiceV1 } from "../../capabilities/service.js";
+import {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  type CapabilityScope,
+  isCapabilityScope,
+} from "../../core/capability-contract.js";
+
+const NON_STALE_RUNTIME_ERROR_CODES = Object.freeze([
+  CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+  CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+  CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+] as const);
 
 function stale(error: unknown, now: string): never {
   if (
     error instanceof CapabilityRuntimeError &&
-    !["integrity-failure", "invalid-plan", "service-unavailable"].includes(error.runtime_code)
+    !NON_STALE_RUNTIME_ERROR_CODES.some((code) => code === error.runtime_code)
   )
     throw new ActionAuthorityStaleError(now, error.runtime_code);
   throw error;
@@ -42,22 +55,32 @@ function dispatchApproval(dispatch: ActionDispatchRecordV1) {
   };
 }
 
+function proposalCapabilityScope(proposal: ActionProposalV1): CapabilityScope {
+  const scope = proposal.base.capability_scope;
+  if (!isCapabilityScope(scope))
+    throw new CapabilityRuntimeError(
+      "standalone capability proposal scope is invalid",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
+    );
+  return scope;
+}
+
 export class StandaloneCapabilityActionAuthorityResolver implements ActionAuthorityResolverV1 {
   constructor(
     private readonly objects: CapabilityActionObjectStoreV1,
-    private readonly serviceFor: (scope: "project" | "user") => CapabilityFabricServiceV1,
+    private readonly serviceFor: (scope: CapabilityScope) => CapabilityFabricServiceV1,
   ) {}
 
   private current(proposal: ActionProposalV1, now: string) {
     try {
       if (
-        proposal.action_root_locator.kind !== "capability" ||
+        proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CAPABILITY ||
         proposal.base.capability_scope === null ||
         proposal.base.capability_scope !== proposal.action_root_locator.scope
       )
         throw new CapabilityRuntimeError(
           "standalone capability proposal root is incomplete",
-          "authorization-mismatch",
+          CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
         );
       const graph = this.objects.readGraph(proposal);
       this.serviceFor(proposal.base.capability_scope).revalidateGraph(graph);
@@ -73,7 +96,8 @@ export class StandaloneCapabilityActionAuthorityResolver implements ActionAuthor
     now,
   }) => {
     if (
-      proposal.producer_request_binding.kind !== "canonical-action-request" ||
+      proposal.producer_request_binding.kind !==
+        ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST ||
       proposal.producer_request_binding.digest !== canonical_request_digest
     )
       throw new Error("capability proposal request binding mismatch");
@@ -94,7 +118,7 @@ export class StandaloneCapabilityActionAuthorityResolver implements ActionAuthor
   prepareDispatch: ActionAuthorityResolverV1["prepareDispatch"] = ({ proposal, approval, now }) => {
     this.current(proposal, now);
     const operationId = deriveOperationId(proposal, approval.approval_id);
-    const service = this.serviceFor(proposal.base.capability_scope as "project" | "user");
+    const service = this.serviceFor(proposalCapabilityScope(proposal));
     const authority = service.options.actionAuthority;
     if (!authority) throw new Error("capability action authority is unavailable");
     const domain = readCapabilityDomainPreparedEvidence(
@@ -115,7 +139,7 @@ export class StandaloneCapabilityActionAuthorityResolver implements ActionAuthor
     proposal,
     dispatch,
   }) => {
-    const service = this.serviceFor(proposal.base.capability_scope as "project" | "user");
+    const service = this.serviceFor(proposalCapabilityScope(proposal));
     const authority = service.options.actionAuthority;
     if (!authority) throw new Error("capability action authority is unavailable");
     const domain = readCapabilityDomainPreparedEvidence(
@@ -139,7 +163,7 @@ export class StandaloneCapabilityActionAuthorityResolver implements ActionAuthor
   };
 
   resolveTerminal: ActionAuthorityResolverV1["resolveTerminal"] = ({ proposal, dispatch }) => {
-    const service = this.serviceFor(proposal.base.capability_scope as "project" | "user");
+    const service = this.serviceFor(proposalCapabilityScope(proposal));
     const authority = service.options.actionAuthority;
     if (!authority) throw new Error("capability action authority is unavailable");
     const domain = readCapabilityDomainAuthorityEvidence(
@@ -172,7 +196,7 @@ export class StandaloneCapabilityActionAuthorityResolver implements ActionAuthor
     domain_terminal_digest,
     recorded_at,
   }) => {
-    const service = this.serviceFor(proposal.base.capability_scope as "project" | "user");
+    const service = this.serviceFor(proposalCapabilityScope(proposal));
     const authority = service.options.actionAuthority;
     if (!authority) throw new Error("capability action authority is unavailable");
     const domain = readCapabilityDomainAuthorityEvidence(

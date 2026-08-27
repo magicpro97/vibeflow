@@ -1,3 +1,4 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
   type ActionProposalRequestV1,
   type ActionRequestAuthorityV1,
@@ -6,6 +7,10 @@ import {
   type JsonValue,
   deriveOperationId,
 } from "../../actions/index.js";
+import {
+  ACTION_OPERATION_STATE,
+  type ActionOperationDomainTerminalState,
+} from "../../actions/protocol-contract.js";
 import type { TraceStore } from "../trace/store.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import { conversationLockDigest } from "./catalog-lock.js";
@@ -39,24 +44,37 @@ import { ConversationRevisionControlAuthority } from "./conversation-revision-co
 import type { ConversationLineageService } from "./lineage-service.js";
 import type { ConversationOrchestrator } from "./service.js";
 
-const RECEIPT_ACTIONS = new Set<BrowserHostActionRequestV1["type"]>([
-  "conversation.select_lineage_head",
-  "conversation.associate_lineages",
-  "conversation.publish_suspected_literal",
-  "conversation.stop_operation",
-  "context.compact",
-]);
+type SameUnion<Left, Right> = Exclude<Left, Right> extends never
+  ? Exclude<Right, Left> extends never
+    ? true
+    : false
+  : false;
+
+export const CONVERSATION_RECEIPT_ACTION_KINDS = Object.freeze([
+  HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD,
+  HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES,
+  HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
+  HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION,
+  HOST_ACTION_KIND.CONTEXT_COMPACT,
+] as const satisfies readonly ConversationReceiptActionKindV1[]);
+
+const _receiptActionKindParity = true satisfies SameUnion<
+  (typeof CONVERSATION_RECEIPT_ACTION_KINDS)[number],
+  ConversationReceiptActionKindV1
+>;
+void _receiptActionKindParity;
+
 type ReceiptCandidate = Extract<
   BrowserHostActionRequestV1,
   { type: ConversationReceiptActionKindV1 }
 >;
 
 function isReceiptCandidate(candidate: BrowserHostActionRequestV1): candidate is ReceiptCandidate {
-  return RECEIPT_ACTIONS.has(candidate.type);
+  return isReceiptActionType(candidate.type);
 }
 
 function isReceiptActionType(value: string): value is ConversationReceiptActionKindV1 {
-  return RECEIPT_ACTIONS.has(value as BrowserHostActionRequestV1["type"]);
+  return CONVERSATION_RECEIPT_ACTION_KINDS.some((candidate) => candidate === value);
 }
 
 export { ConversationReceiptCandidateUnavailableError } from "./conversation-receipt-errors.js";
@@ -116,19 +134,16 @@ export class ConversationReceiptActionAuthority {
   }
 
   supports(candidate: { type: HostActionKind }): boolean {
-    return (
-      RECEIPT_ACTIONS.has(candidate.type as BrowserHostActionRequestV1["type"]) ||
-      this.controls.supports(candidate)
-    );
+    return isReceiptActionType(candidate.type) || this.controls.supports(candidate);
   }
 
   recoverCanceledLineageMutations(): void {
     for (const reservation of this.options.home.lineageMutations.active()) {
       const snapshot = this.options.home.actions.get(reservation.proposal_id);
       const kind =
-        snapshot?.proposal.action.type === "conversation.publish_suspected_literal"
+        snapshot?.proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
           ? "public-literal"
-          : snapshot?.proposal.action.type === "context.compact"
+          : snapshot?.proposal.action.type === HOST_ACTION_KIND.CONTEXT_COMPACT
             ? "context-compaction"
             : null;
       if (
@@ -158,9 +173,9 @@ export class ConversationReceiptActionAuthority {
   }) {
     const candidate = input.request.candidate;
     if (this.controls.supports(candidate)) return this.controls.propose(input);
-    if (candidate.type === "conversation.publish_suspected_literal")
+    if (candidate.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL)
       return this.literals.propose(input);
-    if (candidate.type === "context.compact") return this.compactions.propose(input);
+    if (candidate.type === HOST_ACTION_KIND.CONTEXT_COMPACT) return this.compactions.propose(input);
     if (!isReceiptCandidate(candidate)) throw new Error("unsupported conversation receipt action");
     const resolved = this.options.lineages.resolve(input.conversation_id);
     assertReceiptSource(resolved, input.request);
@@ -172,13 +187,13 @@ export class ConversationReceiptActionAuthority {
     );
     let native: { plan_digest: string };
     let kind: "lineage-head" | "lineage-association" | "conversation-control";
-    if (candidate.type === "conversation.select_lineage_head") {
+    if (candidate.type === HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD) {
       native = materializeSelectionPlan(resolved, candidate, createdAt);
       kind = "lineage-head";
-    } else if (candidate.type === "conversation.associate_lineages") {
+    } else if (candidate.type === HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES) {
       native = materializeAssociationPlan(this.options.lineages, candidate, createdAt);
       kind = "lineage-association";
-    } else if (candidate.type === "conversation.stop_operation") {
+    } else if (candidate.type === HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION) {
       const operationAuthority = await this.ordinaryOperationAuthority({
         root_session_id: resolved.lineage.root_session_id,
         conversation_id: resolved.requested.node.conversation_id,
@@ -221,9 +236,9 @@ export class ConversationReceiptActionAuthority {
     const snapshot = this.options.home.actions.get(input.proposal_id);
     if (snapshot && this.controls.supports(snapshot.proposal.action))
       return this.controls.commit(input.proposal_id);
-    if (snapshot?.proposal.action.type === "conversation.publish_suspected_literal")
+    if (snapshot?.proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL)
       return this.literals.commit(input.proposal_id);
-    if (snapshot?.proposal.action.type === "context.compact")
+    if (snapshot?.proposal.action.type === HOST_ACTION_KIND.CONTEXT_COMPACT)
       return this.compactions.commit(input.proposal_id);
     const stored = this.options.home.actionReceipts.readPlan(input.proposal_id);
     if (!snapshot?.approval || !stored) throw new Error("conversation receipt approval is absent");
@@ -241,7 +256,7 @@ export class ConversationReceiptActionAuthority {
       });
       return;
     }
-    if (actionType === "conversation.stop_operation") {
+    if (actionType === HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION) {
       const native = stored.native_plan.effect_binding as {
         target_operation_id?: unknown;
         expected_operation_header_digest?: unknown;
@@ -293,7 +308,7 @@ export class ConversationReceiptActionAuthority {
         bytewise(`${left.kind}\0${left.identity}`, `${right.kind}\0${right.identity}`),
       ),
     });
-    let outcome: "succeeded" | "failed" | "needs_recovery" = "succeeded";
+    let outcome: ActionOperationDomainTerminalState = ACTION_OPERATION_STATE.SUCCEEDED;
     let reason: string | null = null;
     let observed: ConversationReceiptEffectResultV1 = { facts: expected.facts };
     try {
@@ -352,7 +367,9 @@ export class ConversationReceiptActionAuthority {
     conversation_lock_digest: string;
   }): Promise<OrdinaryConversationOperationAuthorityV1> {
     if (this.options.artifactStore.operationOwner(input.operation_id) !== input.conversation_id)
-      throw new ConversationReceiptCandidateUnavailableError("conversation.stop_operation");
+      throw new ConversationReceiptCandidateUnavailableError(
+        HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION,
+      );
     const events = await this.options.service.events(input.conversation_id, 0);
     if (!events) throw new Error("ordinary operation trace authority is absent");
     return foldOrdinaryConversationOperation({

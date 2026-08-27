@@ -1,7 +1,17 @@
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type { CapabilityDurablePlanningGraphV1 } from "../planning/types.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
-import type { CapabilityOperationV1 } from "../wire/operation.js";
+import {
+  CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE,
+  CAPABILITY_ADAPTER_RECEIPT_PUBLICATION_TERMINAL_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_PRE_EFFECT_OBSERVED_STATE,
+  CAPABILITY_PRE_EFFECT_REFUSAL_REASON,
+  type CapabilityOperationV1,
+  isCapabilityAdapterReceiptStateIn,
+} from "../wire/operation.js";
 import { requireCapabilityActionAuthority } from "./action-authority.js";
 import { capabilityAuthorityFrontier } from "./authority-frontier.js";
 import { CapabilityRuntimeError } from "./errors.js";
@@ -24,7 +34,12 @@ type CapabilityStepFrontierOutcomeV1 =
       descriptor: ReturnType<CapabilityOperationJournalV1["descriptorFor"]>;
       observed: string | null;
     }
-  | { kind: "applied" | "failed" | "uncertain" };
+  | {
+      kind:
+        | typeof CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED
+        | typeof CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED
+        | typeof CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN;
+    };
 
 function preimageDigest(ownershipKey: string, contentSha256: string | null): string {
   return digestV1("VF-CAPABILITY-PRE-EFFECT-OWNED-RESOURCE\0v1\0", {
@@ -51,7 +66,14 @@ export function executeCapabilitySteps(input: {
         adapterPlan.plan_id,
         step.step_id,
       );
-      if (selected && ["applied", "failed", "reversed"].includes(selected.state)) continue;
+      if (
+        selected &&
+        isCapabilityAdapterReceiptStateIn(
+          CAPABILITY_ADAPTER_RECEIPT_PUBLICATION_TERMINAL_STATES,
+          selected.state,
+        )
+      )
+        continue;
       const frontier = capabilityAuthorityFrontier<CapabilityStepFrontierOutcomeV1>({
         graph,
         options,
@@ -83,13 +105,13 @@ export function executeCapabilitySteps(input: {
           ).content_sha256;
           if (observed !== descriptor.resource.expected_preimage_sha256)
             return { kind: "preimage-stale" as const, descriptor, observed };
-          if (selected?.state !== "prepared") {
+          if (selected?.state !== CAPABILITY_ADAPTER_RECEIPT_STATE.PREPARED) {
             journal.appendReceipt({
               operationId: header.operation_id,
               plan,
               planId: adapterPlan.plan_id,
               stepId: step.step_id,
-              state: "prepared",
+              state: CAPABILITY_ADAPTER_RECEIPT_STATE.PREPARED,
               evidence: null,
               error: null,
               held,
@@ -101,7 +123,7 @@ export function executeCapabilitySteps(input: {
             plan,
             planId: adapterPlan.plan_id,
             stepId: step.step_id,
-            state: "effect_in_progress",
+            state: CAPABILITY_ADAPTER_RECEIPT_STATE.EFFECT_IN_PROGRESS,
             evidence: null,
             error: null,
             held,
@@ -118,14 +140,14 @@ export function executeCapabilitySteps(input: {
               plan,
               planId: adapterPlan.plan_id,
               stepId: step.step_id,
-              state: "applied",
+              state: CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED,
               evidence: journal.receiptEvidence({
                 operationId: header.operation_id,
                 plan,
                 planId: adapterPlan.plan_id,
                 stepId: step.step_id,
                 descriptor,
-                state: "applied",
+                state: CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED,
                 error: null,
                 observedAt,
                 held,
@@ -135,14 +157,22 @@ export function executeCapabilitySteps(input: {
               held,
             });
             input.fault?.("after-applied");
-            return { kind: "applied" as const };
+            return { kind: CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED };
           } catch (error) {
-            if (error instanceof CapabilityRuntimeError && error.runtime_code === "fault")
+            if (
+              error instanceof CapabilityRuntimeError &&
+              error.runtime_code === CAPABILITY_RUNTIME_ERROR_CODE.FAULT
+            )
               throw error;
             const live = options.broker.inspect(descriptor.resource, privatePayload).content_sha256;
             const state =
-              live === descriptor.resource.expected_preimage_sha256 ? "failed" : "uncertain";
-            const receiptError = state === "failed" ? "apply-failed" : "third-state";
+              live === descriptor.resource.expected_preimage_sha256
+                ? CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED
+                : CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN;
+            const receiptError =
+              state === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED
+                ? CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE.APPLY_FAILED
+                : CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE.THIRD_STATE;
             const observedAt = options.now();
             journal.appendReceipt({
               operationId: header.operation_id,
@@ -178,7 +208,7 @@ export function executeCapabilitySteps(input: {
         journal.appendRefusal({
           operationId: header.operation_id,
           plan,
-          reason: "owned-preimage-stale",
+          reason: CAPABILITY_PRE_EFFECT_REFUSAL_REASON.OWNED_PREIMAGE_STALE,
           planId: adapterPlan.plan_id,
           stepId: step.step_id,
           targetIds: step.target_ids,
@@ -188,13 +218,24 @@ export function executeCapabilitySteps(input: {
             descriptor.resource.expected_preimage_sha256,
           ),
           observedDigest: preimageDigest(descriptor.resource.ownership_key, outcome.observed),
-          observedState: outcome.observed === null ? "absent" : "changed",
+          observedState:
+            outcome.observed === null
+              ? CAPABILITY_PRE_EFFECT_OBSERVED_STATE.ABSENT
+              : CAPABILITY_PRE_EFFECT_OBSERVED_STATE.CHANGED,
           held,
         });
-        return { kind: "rollback", reason: "owned-preimage-stale" };
+        return {
+          kind: "rollback",
+          reason: CAPABILITY_PRE_EFFECT_REFUSAL_REASON.OWNED_PREIMAGE_STALE,
+        };
       }
-      if (outcome.kind === "uncertain") {
-        journal.terminal(header.operation_id, "needs_recovery", "scope-needs-recovery", held);
+      if (outcome.kind === CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN) {
+        journal.terminal(
+          header.operation_id,
+          ACTION_OPERATION_STATE.NEEDS_RECOVERY,
+          CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+          held,
+        );
         return {
           kind: "result",
           result: foldCapabilityOperation(
@@ -204,8 +245,8 @@ export function executeCapabilitySteps(input: {
           ),
         };
       }
-      if (outcome.kind === "failed" && step.required)
-        return { kind: "rollback", reason: "apply-failed" };
+      if (outcome.kind === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED && step.required)
+        return { kind: "rollback", reason: CAPABILITY_RUNTIME_ERROR_CODE.APPLY_FAILED };
     }
   }
   return { kind: "continue" };

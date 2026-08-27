@@ -3,9 +3,16 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { type JSONCParseError, parseJSONC } from "confbox/jsonc";
 import { parse as parseToml } from "smol-toml";
+import { AGENT_ENGINE } from "./core/agent-contract.js";
 import { registryCacheDir, registryLockPath } from "./skills/registry-channel.js";
 
-export type SuperpowersEngine = "claude" | "codex" | "opencode";
+/** Engines with a first-party Superpowers installation adapter, in receipt order. */
+export const SUPERPOWERS_ENGINES = Object.freeze([
+  AGENT_ENGINE.CLAUDE,
+  AGENT_ENGINE.CODEX,
+  AGENT_ENGINE.OPENCODE,
+] as const);
+export type SuperpowersEngine = (typeof SUPERPOWERS_ENGINES)[number];
 export type SuperpowersSyncStatus =
   | "planned"
   | "installed"
@@ -55,7 +62,6 @@ export interface MergeResult {
 
 const CANONICAL_URL = "https://github.com/obra/superpowers.git";
 const FULL_OID = /^[0-9a-f]{40}$/;
-const ENGINES: readonly SuperpowersEngine[] = ["claude", "codex", "opencode"];
 const TELEMETRY_KEY = "SUPERPOWERS_DISABLE_TELEMETRY";
 const MANAGED_SPEC =
   /^superpowers@git\+https:\/\/github\.com\/obra\/superpowers(?:\.git)?\/?(?:#.*)?$/;
@@ -341,7 +347,7 @@ export function parseReceipt(raw: string | undefined): SuperpowersReceipt | null
     const engines = object(receipt.engines, "Superpowers receipt engines");
     for (const [engine, oid] of Object.entries(engines)) {
       if (
-        !ENGINES.includes(engine as SuperpowersEngine) ||
+        !SUPERPOWERS_ENGINES.includes(engine as SuperpowersEngine) ||
         typeof oid !== "string" ||
         !FULL_OID.test(oid)
       )
@@ -358,13 +364,13 @@ export function renderReceipt(
   engine: SuperpowersEngine,
   oid: string,
 ): string {
-  if (!ENGINES.includes(engine)) throw new Error("Unknown Superpowers engine");
+  if (!SUPERPOWERS_ENGINES.includes(engine)) throw new Error("Unknown Superpowers engine");
   requireOID(oid);
   if (current.schemaVersion !== 1) throw new Error("Invalid Superpowers receipt");
   const currentEngines = object(current.engines, "Superpowers receipt engines");
   for (const [currentEngine, currentOID] of Object.entries(currentEngines)) {
     if (
-      !ENGINES.includes(currentEngine as SuperpowersEngine) ||
+      !SUPERPOWERS_ENGINES.includes(currentEngine as SuperpowersEngine) ||
       typeof currentOID !== "string" ||
       !FULL_OID.test(currentOID)
     )

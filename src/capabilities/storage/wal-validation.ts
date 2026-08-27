@@ -43,7 +43,7 @@ export function validateCapabilityWalEvent(
   integer(value.sequence, "event.sequence");
   if (value.previous_event_digest !== null)
     digest(value.previous_event_digest, "event.previous_event_digest");
-  validateCapabilityWalPayload(value.payload);
+  validateCapabilityWalPayload(value.payload, expectedOperationId);
   timestamp(value.recorded_at, "event.recorded_at");
   if (value.event_digest !== capabilityWalEventDigest(value))
     throw new CapabilityValidationError(

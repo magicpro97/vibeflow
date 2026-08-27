@@ -5,7 +5,8 @@ import { join } from "node:path";
 import type { ProjectContext } from "../adapters/context-builders.js";
 import type { UnitBrief } from "../adapters/dispatch-prompt.js";
 import { dispatchPrompt } from "../adapters/dispatch-prompt.js";
-import type { Engine } from "../core.js";
+import { AGENT_ENGINE, type Engine } from "../core/agent-contract.js";
+import { CONVERSATION_RECONCILIATION_STATUS as HISTORY_STATUS } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import type { HistoryReconcileRequest, HistoryReconcileResult } from "./session-types.js";
 import type { EngineSummary } from "./types.js";
 
@@ -202,24 +203,28 @@ export function parseSessionId(stdout: string): string | undefined {
 
 /** Parse only the selected engine's authenticated protocol record, never a cross-engine decoy. */
 export function parseEngineSessionId(engine: Engine, stdout: string): string | undefined {
-  if (engine === "copilot" || engine === "antigravity") return undefined;
+  if (engine === AGENT_ENGINE.COPILOT || engine === AGENT_ENGINE.ANTIGRAVITY) return undefined;
   const blocks = extractJsonObjects(stdout);
-  const ordered = engine === "claude" ? blocks.reverse() : blocks;
+  const ordered = engine === AGENT_ENGINE.CLAUDE ? blocks.reverse() : blocks;
   for (const block of ordered) {
     try {
       const value = JSON.parse(block.trim()) as Record<string, unknown>;
-      if (engine === "claude" && value.type === "result" && typeof value.session_id === "string") {
+      if (
+        engine === AGENT_ENGINE.CLAUDE &&
+        value.type === "result" &&
+        typeof value.session_id === "string"
+      ) {
         return value.session_id;
       }
       if (
-        engine === "codex" &&
+        engine === AGENT_ENGINE.CODEX &&
         value.type === "thread.started" &&
         typeof value.thread_id === "string"
       ) {
         return value.thread_id;
       }
       if (
-        engine === "opencode" &&
+        engine === AGENT_ENGINE.OPENCODE &&
         value.type === "step_start" &&
         typeof value.sessionID === "string"
       ) {
@@ -237,12 +242,11 @@ export interface LoadedNativeHistory {
   complete: boolean;
 }
 
-function nativeHistoryRoots(engine: "claude" | "codex"): string[] {
-  return [
-    engine === "claude"
-      ? join(homedir(), ".claude", "projects")
-      : join(homedir(), ".codex", "sessions"),
-  ];
+type NativeHistoryEngine = Extract<Engine, typeof AGENT_ENGINE.CLAUDE | typeof AGENT_ENGINE.CODEX>;
+
+function nativeHistoryRoots(engine: NativeHistoryEngine): string[] {
+  const root = engine === AGENT_ENGINE.CLAUDE ? ".claude/projects" : ".codex/sessions";
+  return [join(homedir(), root)];
 }
 
 /** Locate a supported CLI's persisted JSONL by exact opaque session id, without exposing paths. */
@@ -250,14 +254,15 @@ export function loadNativeHistory(
   request: HistoryReconcileRequest,
   roots?: readonly string[],
 ): LoadedNativeHistory | undefined {
-  if (request.engine !== "claude" && request.engine !== "codex") return undefined;
+  if (request.engine !== AGENT_ENGINE.CLAUDE && request.engine !== AGENT_ENGINE.CODEX)
+    return undefined;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(request.nativeSessionId)) return undefined;
   const escapedId = request.nativeSessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const codexName = new RegExp(
     `^rollout-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}(?:-\\d+)?-${escapedId}\\.jsonl$`,
   );
   const matches = (name: string) =>
-    request.engine === "claude"
+    request.engine === AGENT_ENGINE.CLAUDE
       ? name === `${request.nativeSessionId}.jsonl`
       : codexName.test(name);
   let visited = 0;
@@ -301,9 +306,9 @@ export function loadNativeHistory(
 
 /** Project supplied native history without ever returning its internal session identifier. */
 export function reconcileNativeHistory(request: HistoryReconcileRequest): HistoryReconcileResult {
-  if (request.engine !== "claude" && request.engine !== "codex") {
+  if (request.engine !== AGENT_ENGINE.CLAUDE && request.engine !== AGENT_ENGINE.CODEX) {
     return {
-      status: "unavailable",
+      status: HISTORY_STATUS.UNAVAILABLE,
       imported_turn_count: 0,
       imported_tool_count: 0,
       completeness_reason: `${request.engine} native history completeness is not supported`,
@@ -311,7 +316,7 @@ export function reconcileNativeHistory(request: HistoryReconcileRequest): Histor
   }
   if (!request.history) {
     return {
-      status: "partial",
+      status: HISTORY_STATUS.PARTIAL,
       imported_turn_count: 0,
       imported_tool_count: 0,
       completeness_reason: "supported native history was not supplied",
@@ -347,7 +352,7 @@ export function reconcileNativeHistory(request: HistoryReconcileRequest): Histor
     }
     const item = value as Record<string, unknown>;
     const type = typeof item.type === "string" ? item.type : "";
-    if (request.engine === "claude") {
+    if (request.engine === AGENT_ENGINE.CLAUDE) {
       if (!claudeTypes.has(type)) recognized = false;
       if (item.sessionId === request.nativeSessionId) exactIdentity = true;
       else if (typeof item.sessionId === "string") recognized = false;
@@ -363,7 +368,7 @@ export function reconcileNativeHistory(request: HistoryReconcileRequest): Histor
       ).length;
     }
     const payload = item.payload as Record<string, unknown> | undefined;
-    if (request.engine === "codex" && type === "session_meta") {
+    if (request.engine === AGENT_ENGINE.CODEX && type === "session_meta") {
       if (payload?.id === request.nativeSessionId) exactIdentity = true;
       else recognized = false;
     }
@@ -382,7 +387,7 @@ export function reconcileNativeHistory(request: HistoryReconcileRequest): Histor
     }
   }
   return {
-    status: recognized && exactIdentity ? "reconciled" : "partial",
+    status: recognized && exactIdentity ? HISTORY_STATUS.RECONCILED : HISTORY_STATUS.PARTIAL,
     imported_turn_count: turns,
     imported_tool_count: tools,
     completeness_reason:

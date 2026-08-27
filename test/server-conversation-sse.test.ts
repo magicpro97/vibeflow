@@ -133,6 +133,10 @@ describe("conversation SSE stream", () => {
     emitQueue(event);
     emitQueue({ ...event, root_session_id: "wrong-root" });
     emitQueue({ ...event, queue_item_id: "private-claim-id" });
+    emitQueue({
+      ...event,
+      unexpected_field: true,
+    } as unknown as PublicConversationMessageQueueInvalidationV1);
 
     const reader = response.body?.getReader();
     if (!reader) throw new Error("missing SSE body");

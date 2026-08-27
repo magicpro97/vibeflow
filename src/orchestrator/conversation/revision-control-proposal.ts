@@ -1,9 +1,11 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type {
   ActionProposalRequestV1,
   ActionRequestAuthorityV1,
   BrowserHostActionRequestV1,
   HostActionV1,
 } from "../../actions/index.js";
+import { PUBLIC_OPERATION_REVISION_PHASE } from "../../actions/public-operation-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import { conversationLockDigest } from "./catalog-lock.js";
 import { materializeRevisionControlEffectClosure } from "./conversation-control-effect-planner.js";
@@ -15,18 +17,18 @@ import { revisionAbandonIsProved, revisionRetryIsProved } from "./revision-contr
 import { foldRevisionOperation } from "./revision-fold.js";
 
 export const REVISION_CONTROL_ACTIONS = new Set<BrowserHostActionRequestV1["type"]>([
-  "conversation.abandon_revision_operation",
-  "conversation.retry_revision_operation",
-  "conversation.reconcile_revision_operation",
+  HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION,
+  HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION,
+  HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION,
 ]);
 
 export type RevisionControlCandidateV1 = Extract<
   BrowserHostActionRequestV1,
   {
     type:
-      | "conversation.abandon_revision_operation"
-      | "conversation.retry_revision_operation"
-      | "conversation.reconcile_revision_operation";
+      | typeof HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION
+      | typeof HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION
+      | typeof HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION;
   }
 >;
 
@@ -53,7 +55,7 @@ export async function proposeRevisionControlAction(input: {
   try {
     resolved = input.lineages.resolve(input.conversation_id);
   } catch (error) {
-    if (candidate.type !== "conversation.abandon_revision_operation") throw error;
+    if (candidate.type !== HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION) throw error;
     resolved = input.lineages.resolveRevisionRecovery(
       input.conversation_id,
       operation.root_session_id,
@@ -64,14 +66,14 @@ export async function proposeRevisionControlAction(input: {
   if (operation.root_session_id !== resolved.lineage.root_session_id)
     throw new Error("revision control target is absent from the selected lineage");
   const events = input.home.revisions.readEvents(operation.operation_id);
-  const folded = foldRevisionOperation(operation, events);
   const preparation = input.home.revisions.readPlan(operation.operation_id);
   if (!preparation) throw new Error("revision control preparation plan disappeared");
+  const folded = foldRevisionOperation(operation, events, { preparationPlan: preparation });
   const quiescent = input.quiescent(operation.child.conversation_id, operation.operation_id);
   const createdAt = input.home.now();
   const headDigest = resolved.head.content_digest;
   let action: HostActionV1;
-  if (candidate.type === "conversation.abandon_revision_operation") {
+  if (candidate.type === HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION) {
     if (
       !revisionAbandonIsProved({
         home: input.home,
@@ -83,7 +85,7 @@ export async function proposeRevisionControlAction(input: {
     )
       throw new Error("revision operation is not abandonable");
     action = { ...candidate, expected_header_digest: operation.header_digest };
-  } else if (candidate.type === "conversation.retry_revision_operation") {
+  } else if (candidate.type === HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION) {
     if (
       !revisionRetryIsProved({
         home: input.home,
@@ -100,7 +102,7 @@ export async function proposeRevisionControlAction(input: {
       expected_head_digest: headDigest,
     };
   } else {
-    if (folded.state !== "needs_recovery")
+    if (folded.state !== PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY)
       throw new Error("revision operation does not need reconciliation");
     action = {
       ...candidate,
@@ -127,7 +129,7 @@ export async function proposeRevisionControlAction(input: {
     expected_operation_state_digest: folded.state_digest,
     expected_lineage_head_digest: headDigest,
     expected_effect_action_operation_id:
-      candidate.type === "conversation.reconcile_revision_operation"
+      candidate.type === HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION
         ? folded.effect_action_operation_id
         : null,
     control_effect_plan_digest: effect.plan.plan_digest,

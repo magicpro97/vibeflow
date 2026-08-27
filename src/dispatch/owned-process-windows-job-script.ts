@@ -9,7 +9,7 @@ const WINDOWS_JOB = ${JSON.stringify(OWNED_WINDOWS_JOB)};
 const WINDOWS_LIMIT = ${JSON.stringify(OWNED_WINDOWS_LIMIT)};
 const QUIESCENCE_SCOPE = ${JSON.stringify(OWNED_PROCESS_QUIESCENCE_SCOPE)};
 const initializeWindowsJob = () => {
-  if (process.platform !== "win32") return null;
+  if (process.platform !== IDENTITY.KIND.WINDOWS) return null;
   const koffi = require("koffi");
   const kernel32 = koffi.load("Kernel32.dll");
   const createJobObject = kernel32.func("void * CreateJobObjectW(void *, void *)");

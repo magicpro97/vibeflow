@@ -1,4 +1,12 @@
-import type { HookDecision, HookInput, HookResult, RiskLevel } from "../core.js";
+import type { HookInput, HookResult } from "../core.js";
+import {
+  HOOK_DECISION,
+  HOOK_EVENT,
+  type HookDecision,
+  RISK_LEVEL,
+  type RiskLevel,
+  isHookEvent,
+} from "../core/hook-contract.js";
 import type { SemanticJudge } from "./risk-semantic.js";
 import { scoreRisk } from "./risk.js";
 import type { ResolvedHookPolicy } from "./templates.js";
@@ -6,14 +14,14 @@ import type { ResolvedHookPolicy } from "./templates.js";
 /** Map a risk level to a guardrail decision (HOOKS_AND_GUARDRAILS.md vocabulary). */
 function decisionFor(risk: RiskLevel): HookDecision {
   switch (risk) {
-    case "critical":
-      return "block";
-    case "high":
-      return "require_approval";
-    case "medium":
-      return "warn";
+    case RISK_LEVEL.CRITICAL:
+      return HOOK_DECISION.BLOCK;
+    case RISK_LEVEL.HIGH:
+      return HOOK_DECISION.REQUIRE_APPROVAL;
+    case RISK_LEVEL.MEDIUM:
+      return HOOK_DECISION.WARN;
     default:
-      return "allow";
+      return HOOK_DECISION.ALLOW;
   }
 }
 
@@ -21,7 +29,7 @@ function decisionFor(risk: RiskLevel): HookDecision {
 export type EnvGetter = () => NodeJS.ProcessEnv;
 
 /** Values of VIBEFLOW_HOOKS that explicitly disable the hook-decision layer. */
-const HOOKS_OFF_VALUES = new Set(["off", "0"]);
+const HOOKS_OFF_VALUES = Object.freeze(["off", "0"] as const);
 
 /**
  * Kill-switch check (item 4). FAIL SAFE: hooks are disabled ONLY when VIBEFLOW_HOOKS is the
@@ -32,12 +40,19 @@ const HOOKS_OFF_VALUES = new Set(["off", "0"]);
  */
 export function hooksDisabled(env: NodeJS.ProcessEnv): boolean {
   const raw = env.VIBEFLOW_HOOKS;
-  return typeof raw === "string" && HOOKS_OFF_VALUES.has(raw.trim().toLowerCase());
+  return (
+    typeof raw === "string" &&
+    HOOKS_OFF_VALUES.some((candidate) => candidate === raw.trim().toLowerCase())
+  );
 }
 
 /** A neutral allow result used when the kill-switch turns the hook-decision layer off. */
 function disabledResult(): HookResult {
-  return { decision: "allow", risk: "none", reasons: ["hooks disabled via VIBEFLOW_HOOKS"] };
+  return {
+    decision: HOOK_DECISION.ALLOW,
+    risk: RISK_LEVEL.NONE,
+    reasons: ["hooks disabled via VIBEFLOW_HOOKS"],
+  };
 }
 
 /**
@@ -71,21 +86,9 @@ export function evaluateHook(
   const stale = specStale(input);
   if (stale.length === 0) return { decision, risk, reasons };
   // Advisory: only escalate a benign `allow` to `warn`; never weaken a stronger decision.
-  const advised = decision === "allow" ? "warn" : decision;
+  const advised = decision === HOOK_DECISION.ALLOW ? HOOK_DECISION.WARN : decision;
   return { decision: advised, risk, reasons: [...reasons, ...stale] };
 }
-
-const HOOK_EVENTS = [
-  "pre-tool-use",
-  "post-tool-use",
-  "pre-write",
-  "post-write",
-  "pre-command",
-  "post-command",
-  "stop",
-  "skill-compliance",
-  "verify-result",
-] as const;
 
 /**
  * Map Claude Code's native `hook_event_name` to our internal HookEvent vocabulary.
@@ -95,15 +98,15 @@ const HOOK_EVENTS = [
 function mapClaudeEvent(name: string): HookInput["event"] {
   switch (name) {
     case "PreToolUse":
-      return "pre-tool-use";
+      return HOOK_EVENT.PRE_TOOL_USE;
     case "PostToolUse":
-      return "post-tool-use";
+      return HOOK_EVENT.POST_TOOL_USE;
     case "Stop":
     case "SubagentStop":
-      return "stop";
+      return HOOK_EVENT.STOP;
     default:
       // A real Claude event we don't model explicitly: treat as a recognized no-op gate.
-      return "pre-tool-use";
+      return HOOK_EVENT.PRE_TOOL_USE;
   }
 }
 
@@ -116,14 +119,14 @@ function mapClaudeEvent(name: string): HookInput["event"] {
 function mapCopilotEvent(name: string): HookInput["event"] | null {
   switch (name) {
     case "preToolUse":
-      return "pre-tool-use";
+      return HOOK_EVENT.PRE_TOOL_USE;
     case "postToolUse":
-      return "post-tool-use";
+      return HOOK_EVENT.POST_TOOL_USE;
     case "sessionStart":
     case "userPromptSubmitted":
-      return "pre-tool-use"; // treat agent/session start as a recognized no-op gate
+      return HOOK_EVENT.PRE_TOOL_USE; // treat agent/session start as a recognized no-op gate
     case "sessionEnd":
-      return "stop";
+      return HOOK_EVENT.STOP;
     case "errorOccurred":
     case "preCompact":
     case "agentStop":
@@ -184,7 +187,8 @@ function parseAntigravityNative(obj: Record<string, unknown>): HookInput | null 
   // PostToolUse payloads carry toolCall and must route through post-tool-use
   // branch so post-action audit/verification runs. Any unrecognized or absent
   // event defaults to pre-tool-use (conservative: treat as before-tool gate).
-  const event: HookInput["event"] = obj.event === "PostToolUse" ? "post-tool-use" : "pre-tool-use";
+  const event: HookInput["event"] =
+    obj.event === "PostToolUse" ? HOOK_EVENT.POST_TOOL_USE : HOOK_EVENT.PRE_TOOL_USE;
   return {
     event,
     tool: toolCall.name,
@@ -227,12 +231,12 @@ export function parseHookInput(raw: string): HookInput | null {
     return null;
   }
   const event = obj.event;
-  if (typeof event === "string" && HOOK_EVENTS.includes(event as HookInput["event"])) {
+  if (isHookEvent(event)) {
     const asStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
     const asStrArr = (v: unknown): string[] | undefined =>
       Array.isArray(v) ? v.map(String) : undefined;
     return {
-      event: event as HookInput["event"],
+      event,
       tool: asStr(obj.tool),
       workspace: asStr(obj.workspace),
       command: asStr(obj.command),
@@ -280,7 +284,11 @@ export function exitCodeFor(_decision: HookDecision): number {
  */
 export function presentAntigravityDecision(result: HookResult): { json: string; exitCode: number } {
   const decision =
-    result.decision === "block" ? "deny" : result.decision === "require_approval" ? "ask" : "allow";
+    result.decision === HOOK_DECISION.BLOCK
+      ? "deny"
+      : result.decision === HOOK_DECISION.REQUIRE_APPROVAL
+        ? "ask"
+        : "allow";
   return { json: JSON.stringify({ decision, reason: result.reasons.join("; ") }), exitCode: 0 };
 }
 
@@ -290,11 +298,11 @@ export function presentDecision(
   verifyGate: (input: HookInput) => string | null = () => null,
 ): { json: string; exitCode: number } {
   // --- PreToolUse: permissionDecision envelope ---
-  if (input.event === "pre-tool-use") {
+  if (input.event === HOOK_EVENT.PRE_TOOL_USE) {
     const permissionDecision =
-      result.decision === "block"
+      result.decision === HOOK_DECISION.BLOCK
         ? ("deny" as const)
-        : result.decision === "require_approval"
+        : result.decision === HOOK_DECISION.REQUIRE_APPROVAL
           ? ("ask" as const)
           : ("allow" as const);
     return {
@@ -312,12 +320,12 @@ export function presentDecision(
   // Block: top-level `decision:block` (exit 0 — Claude reads JSON, blocks the stop)
   // Risks but no block: `hookSpecificOutput.additionalContext` to inject feedback
   // No risks: `{suppressOutput:true}` for silent approval (no JSON noise)
-  if (input.event === "stop") {
+  if (input.event === HOOK_EVENT.STOP) {
     const hasRisks = result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
     // Risk-scan block always wins (destructive cmd / secret in the final state).
-    if (result.decision === "block") {
+    if (result.decision === HOOK_DECISION.BLOCK) {
       return {
-        json: JSON.stringify({ decision: "block", reason: result.reasons.join("; ") }),
+        json: JSON.stringify({ decision: HOOK_DECISION.BLOCK, reason: result.reasons.join("; ") }),
         exitCode: 0,
       };
     }
@@ -328,7 +336,7 @@ export function presentDecision(
     const verifyReason = verifyGate(input);
     if (verifyReason && !input.stopHookActive) {
       return {
-        json: JSON.stringify({ decision: "block", reason: verifyReason }),
+        json: JSON.stringify({ decision: HOOK_DECISION.BLOCK, reason: verifyReason }),
         exitCode: 0,
       };
     }
@@ -353,7 +361,7 @@ export function presentDecision(
   // --- PostToolUse events ---
   // Feedback: `hookSpecificOutput.additionalContext`
   // Silent: `{suppressOutput:true}`
-  if (input.event === "post-tool-use") {
+  if (input.event === HOOK_EVENT.POST_TOOL_USE) {
     const hasFeedback =
       result.reasons.length > 0 && result.reasons[0] !== "no risk signals detected";
     if (!hasFeedback) {

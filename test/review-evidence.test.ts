@@ -1,11 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { reviewEvidence, reviewerFromResult } from "../src/commands/review-evidence.js";
+import {
+  type ReviewSubject,
+  type ReviewerResult,
+  reviewEvidence,
+  reviewerFromResult,
+} from "../src/commands/review-evidence.js";
 import { appendReviewEvidence } from "../src/hooks/review-evidence-gate.js";
 import {
   type Changed,
+  REVIEWER_RESULT_AUTHORITY,
   changedFiles,
+  changedManifestDigest,
   checkReviewEvidence,
   isSha,
   parseRecord,
@@ -20,6 +35,27 @@ const changed: Changed[] = [
   { status: "M", path: "src/routes.ts" },
   { status: "M", path: "test/routes.test.ts" },
 ];
+const subject: ReviewSubject = {
+  baseSha: base,
+  headSha: head,
+  changed,
+  changedDigest: changedManifestDigest(changed),
+};
+
+function reviewerResult(
+  input: ReviewSubject = subject,
+  overrides: Partial<ReviewerResult> = {},
+): ReviewerResult {
+  return {
+    schemaVersion: REVIEWER_RESULT_AUTHORITY.schemaVersion,
+    ...input,
+    status: REVIEWER_RESULT_AUTHORITY.passedStatus,
+    exitCode: 0,
+    timedOut: false,
+    findings: [],
+    ...overrides,
+  };
+}
 const git =
   (answers: Record<string, { status: number; stdout: string }>) =>
   (_repo: string, args: string[]) =>
@@ -48,6 +84,13 @@ function record() {
 }
 
 describe("review evidence primitives", () => {
+  test("reviewer result authority is frozen and its manifest digest is deterministic", () => {
+    expect(Object.isFrozen(REVIEWER_RESULT_AUTHORITY)).toBe(true);
+    expect(subject.changedDigest).toBe(
+      "95b9438cc8d7c8be8209ac067a32867d29847ec4b2e9b707abaf501ab20a3172",
+    );
+  });
+
   test("validates SHA and repository paths", () => {
     expect(isSha(base)).toBe(true);
     expect(isSha("ABC".repeat(14))).toBe(false);
@@ -355,14 +398,25 @@ describe("review evidence primitives", () => {
       path,
       JSON.stringify({ status: "passed", exitCode: 0, timedOut: false, findings: [] }),
     );
+    expect(reviewerFromResult(path)).toBeNull();
+    writeFileSync(path, JSON.stringify(reviewerResult()));
     const parsedReviewer = reviewerFromResult(path);
     expect(parsedReviewer).not.toBeNull();
-    expect(parsedReviewer?.({ baseSha: base, headSha: head, changed })).toEqual({
-      status: "passed",
-      exitCode: 0,
-      timedOut: false,
-      findings: [],
-    });
+    expect(parsedReviewer?.(subject)).toEqual(reviewerResult());
+    writeFileSync(path, JSON.stringify(reviewerResult(subject, { changedDigest: "0".repeat(64) })));
+    expect(reviewerFromResult(path)).toBeNull();
+    const reversed = [...changed].reverse();
+    writeFileSync(
+      path,
+      JSON.stringify({
+        ...reviewerResult(),
+        changed: reversed,
+        changedDigest: changedManifestDigest(reversed),
+      }),
+    );
+    expect(reviewerFromResult(path)).toBeNull();
+    writeFileSync(path, JSON.stringify({ ...reviewerResult(), changed: [null] }));
+    expect(reviewerFromResult(path)).toBeNull();
     writeFileSync(path, "prose");
     expect(reviewerFromResult(path)).toBeNull();
     rmSync(dir, { recursive: true, force: true });
@@ -382,18 +436,98 @@ describe("review evidence producer command", () => {
         stdout: "M\ttest/routes.test.ts\nM\tsrc/routes.ts\n",
       },
     });
-    expect(
-      reviewEvidence(repo, ["--base", base], read, () => ({
-        status: "passed",
-        exitCode: 0,
-        timedOut: false,
-        findings: [],
-      })),
-    ).toBe(0);
+    expect(reviewEvidence(repo, ["--base", base], read, (input) => reviewerResult(input))).toBe(0);
     expect(JSON.parse(readFileSync(recordPath(repo, head), "utf8"))).toMatchObject({
       baseSha: base,
       headSha: head,
     });
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("fails closed when the initial git status command fails", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-review-status-failure-"));
+    let reviewed = false;
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      "status --porcelain": { status: 1, stdout: "" },
+    });
+    expect(
+      reviewEvidence(repo, ["--base", base], read, (input) => {
+        reviewed = true;
+        return reviewerResult(input);
+      }),
+    ).toBe(1);
+    expect(reviewed).toBe(false);
+    expect(existsSync(recordPath(repo, head))).toBe(false);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("rejects untracked drift introduced after the reviewer result", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-review-final-status-drift-"));
+    const stable = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: {
+        status: 0,
+        stdout: "M\ttest/routes.test.ts\nM\tsrc/routes.ts\n",
+      },
+    });
+    let statusChecks = 0;
+    let reviewed = false;
+    const read = (target: string, args: string[]) => {
+      if (args.join(" ") === "status --porcelain") {
+        statusChecks++;
+        return {
+          status: 0,
+          stdout: statusChecks === 1 ? "" : "?? after-review.ts\n",
+        };
+      }
+      return stable(target, args);
+    };
+    expect(
+      reviewEvidence(repo, ["--base", base], read, (input) => {
+        reviewed = true;
+        return reviewerResult(input);
+      }),
+    ).toBe(1);
+    expect(reviewed).toBe(true);
+    expect(statusChecks).toBe(2);
+    expect(existsSync(recordPath(repo, head))).toBe(false);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("rejects stale reviewer SHA and changed-manifest bindings", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-review-bound-result-"));
+    const read = git({
+      "rev-parse --verify HEAD": { status: 0, stdout: `${head}\n` },
+      [`merge-base --is-ancestor ${base} ${head}`]: { status: 0, stdout: "" },
+      "status --porcelain": { status: 0, stdout: "" },
+      [`diff --name-status -M ${base}..${head}`]: {
+        status: 0,
+        stdout: "M\ttest/routes.test.ts\nM\tsrc/routes.ts\n",
+      },
+    });
+    const staleChanged = [{ status: "M", path: "src/stale-route.ts" }];
+    const staleSubjects: ReviewSubject[] = [
+      { ...subject, baseSha: "c".repeat(40) },
+      { ...subject, headSha: "d".repeat(40) },
+      {
+        ...subject,
+        changed: staleChanged,
+        changedDigest: changedManifestDigest(staleChanged),
+      },
+    ];
+    for (const stale of staleSubjects) {
+      expect(reviewEvidence(repo, ["--base", base], read, () => reviewerResult(stale))).toBe(1);
+    }
+    expect(
+      reviewEvidence(repo, ["--base", base], read, () => {
+        throw new Error("review result unavailable");
+      }),
+    ).toBe(1);
+    expect(reviewEvidence(repo, ["--base", base], read, (() => null) as never)).toBe(1);
+    expect(existsSync(recordPath(repo, head))).toBe(false);
     rmSync(repo, { recursive: true, force: true });
   });
 
@@ -410,14 +544,7 @@ describe("review evidence producer command", () => {
         stdout: "test/routes.test.ts\ntest/util.spec.ts\n",
       },
     });
-    expect(
-      reviewEvidence(repo, ["--base", base], read, () => ({
-        status: "passed",
-        exitCode: 0,
-        timedOut: false,
-        findings: [],
-      })),
-    ).toBe(0);
+    expect(reviewEvidence(repo, ["--base", base], read, (input) => reviewerResult(input))).toBe(0);
     const [item] = (
       JSON.parse(readFileSync(recordPath(repo, head), "utf8")) as {
         required: { anchors: { path: string }[] }[];
@@ -439,14 +566,9 @@ describe("review evidence producer command", () => {
       [`diff --name-status -M ${base}..${head}`]: { status: 0, stdout: "M\tsrc/routes.ts\n" },
       "ls-files :(glob)**/*.test.* :(glob)**/*.spec.*": { status: 0, stdout: "" },
     });
-    expect(
-      reviewEvidence("repo", ["--base", base], read, () => ({
-        status: "passed",
-        exitCode: 0,
-        timedOut: false,
-        findings: [],
-      })),
-    ).toBe(1);
+    expect(reviewEvidence("repo", ["--base", base], read, (input) => reviewerResult(input))).toBe(
+      1,
+    );
   });
 
   test("rejects invalid grammar and failed reviewer", () => {
@@ -460,29 +582,16 @@ describe("review evidence producer command", () => {
         stdout: "M\ttest/routes.test.ts\nM\tsrc/routes.ts\n",
       },
     });
+    expect(reviewEvidence("repo", [], read, (input) => reviewerResult(input))).toBe(2);
     expect(
-      reviewEvidence("repo", [], read, () => ({
-        status: "passed",
-        exitCode: 0,
-        timedOut: false,
-        findings: [],
-      })),
-    ).toBe(2);
-    expect(
-      reviewEvidence("repo", ["--base", base], read, () => ({
-        status: "failed",
-        exitCode: 1,
-        timedOut: false,
-        findings: [],
-      })),
+      reviewEvidence("repo", ["--base", base], read, (input) =>
+        reviewerResult(input, { status: "failed", exitCode: 1 }),
+      ),
     ).toBe(1);
     expect(
-      reviewEvidence("repo", ["--base", base], read, () => ({
-        status: "passed",
-        exitCode: 0,
-        timedOut: true,
-        findings: [],
-      })),
+      reviewEvidence("repo", ["--base", base], read, (input) =>
+        reviewerResult(input, { timedOut: true }),
+      ),
     ).toBe(1);
   });
 

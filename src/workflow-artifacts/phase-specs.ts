@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { AgentEngine } from "../agents/render.js";
 import { agentFilePath } from "../agents/render.js";
-import type { RoleModel, RoleSpec, ToolIntent } from "../agents/role.js";
+import type { RoleSpec } from "../agents/role.js";
 import type { WorkflowPhase } from "../ai-init-workflow.js";
 import { VERSION } from "../core.js";
+import { ROLE_MODEL, ROLE_WORKFLOW_TOOL_INTENTS, type ToolIntent } from "../core/role-contract.js";
 import { VF_BLOCK_END, VF_BLOCK_START, mergeManagedBlock } from "../workflow/merge.js";
 import { skillFilePath } from "./common-template.js";
 import { phaseSlug } from "./types.js";
@@ -103,15 +104,15 @@ export function buildOrchestratorSpec(
     name: orchestratorAgentName(),
     description: `Coordinate ${projectName} workflow phases and dispatch phase agents in order`,
     body: renderWorkflowBody(phases, engines, projectName),
-    tools: ["read", "write", "edit", "bash", "grep", "glob"],
-    model: "sonnet" as RoleModel,
+    tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+    model: ROLE_MODEL.SONNET,
   };
 }
 
 // ── Per-phase agent files ──────────────────────────────────────────────────
 
 function inferPhaseTools(_phase: WorkflowPhase): ToolIntent[] {
-  return ["read", "write", "edit", "bash", "grep", "glob"];
+  return [...ROLE_WORKFLOW_TOOL_INTENTS];
 }
 
 export function buildPhaseSpec(
@@ -145,7 +146,7 @@ export function buildPhaseSpec(
     description: phase.description || `Execute ${phase.name} phase`,
     body,
     tools: inferPhaseTools(phase),
-    model: "sonnet" as RoleModel,
+    model: ROLE_MODEL.SONNET,
   };
 }
 

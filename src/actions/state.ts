@@ -1,10 +1,14 @@
 import { digestV1 } from "../durability/index.js";
+import {
+  ACTION_AUTHORITY_EVENT_KIND,
+  ACTION_OPERATION_STATE,
+  type ActionOperationState,
+  isActionOperationTerminalResolutionState,
+  isActionOperationTransition,
+} from "./protocol-contract.js";
+import { ACTION_DECISION } from "./public-action-contract.js";
 import { assertApproval, assertProposal, deriveOperationId } from "./records.js";
-import type {
-  ActionAuthorityEventV1,
-  ActionAuthoritySnapshotV1,
-  ActionOperationState,
-} from "./types.js";
+import type { ActionAuthorityEventV1, ActionAuthoritySnapshotV1 } from "./types.js";
 
 export class ActionStateError extends Error {
   constructor(message: string) {
@@ -12,19 +16,6 @@ export class ActionStateError extends Error {
     this.name = "ActionStateError";
   }
 }
-
-const EDGES: Readonly<Record<ActionOperationState, ReadonlySet<ActionOperationState>>> = {
-  pending_review: new Set(["approved", "denied", "canceled", "expired", "stale"]),
-  approved: new Set(["committing", "canceled", "expired", "stale"]),
-  committing: new Set(["succeeded", "failed", "needs_recovery"]),
-  needs_recovery: new Set(["succeeded", "failed"]),
-  succeeded: new Set(),
-  failed: new Set(),
-  denied: new Set(),
-  canceled: new Set(),
-  expired: new Set(),
-  stale: new Set(),
-};
 
 function fail(message: string): never {
   throw new ActionStateError(message);
@@ -43,7 +34,8 @@ export function foldActionAuthority(
   const first = events[0];
   if (!first || first.sequence !== 0 || first.previous_event_digest !== null)
     fail("sequence zero is malformed");
-  if (first.payload.kind !== "proposal-created") fail("sequence zero is not proposal-created");
+  if (first.payload.kind !== ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED)
+    fail("sequence zero is not proposal-created");
   assertEventDigest(first);
   const proposal = first.payload.proposal;
   assertProposal(proposal);
@@ -51,7 +43,7 @@ export function foldActionAuthority(
   if (first.recorded_at !== proposal.created_at)
     fail("proposal-created timestamp does not match immutable proposal");
 
-  let state: ActionOperationState = "pending_review";
+  let state: ActionOperationState = ACTION_OPERATION_STATE.PENDING_REVIEW;
   let approval: ActionAuthoritySnapshotV1["approval"] = null;
   let operationId: string | null = null;
   let dispatchDigest: string | null = null;
@@ -73,12 +65,19 @@ export function foldActionAuthority(
     previousTime = eventTime;
     previous = event;
 
-    if (event.payload.kind === "proposal-created") fail("duplicate proposal-created event");
-    if (event.payload.kind === "approval-decision") {
-      if (state !== "pending_review" || event.payload.from !== "pending_review")
+    if (event.payload.kind === ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED)
+      fail("duplicate proposal-created event");
+    if (event.payload.kind === ACTION_AUTHORITY_EVENT_KIND.APPROVAL_DECISION) {
+      if (
+        state !== ACTION_OPERATION_STATE.PENDING_REVIEW ||
+        event.payload.from !== ACTION_OPERATION_STATE.PENDING_REVIEW
+      )
         fail("approval decision does not start at pending_review");
       assertApproval(proposal, event.payload.approval);
-      const expected = event.payload.approval.decision === "approved" ? "approved" : "denied";
+      const expected: ActionOperationState =
+        event.payload.approval.decision === ACTION_DECISION.APPROVED
+          ? ACTION_OPERATION_STATE.APPROVED
+          : ACTION_OPERATION_STATE.DENIED;
       if (event.payload.to !== expected) fail("approval decision and transition disagree");
       if (event.recorded_at !== event.payload.approval.decided_at)
         fail("approval decision timestamp mismatch");
@@ -88,12 +87,19 @@ export function foldActionAuthority(
     }
 
     const transition = event.payload;
-    if (transition.from !== state || !EDGES[state].has(transition.to))
+    if (transition.from !== state || !isActionOperationTransition(state, transition.to))
       fail(`illegal transition ${state} to ${transition.to}`);
-    if (transition.to === "approved" || transition.to === "denied")
+    if (
+      transition.to === ACTION_OPERATION_STATE.APPROVED ||
+      transition.to === ACTION_OPERATION_STATE.DENIED
+    )
       fail("approval states require an approval-decision payload");
-    if (transition.from === "approved" && transition.to === "committing") {
-      if (!approval || approval.decision !== "approved") fail("dispatch lacks approved decision");
+    if (
+      transition.from === ACTION_OPERATION_STATE.APPROVED &&
+      transition.to === ACTION_OPERATION_STATE.COMMITTING
+    ) {
+      if (!approval || approval.decision !== ACTION_DECISION.APPROVED)
+        fail("dispatch lacks approved decision");
       if (
         !transition.operation_id ||
         !transition.dispatch_record_digest ||
@@ -106,7 +112,7 @@ export function foldActionAuthority(
       if (transition.reason_code !== null) fail("dispatch transition carries a reason code");
       operationId = transition.operation_id;
       dispatchDigest = transition.dispatch_record_digest;
-    } else if (transition.from === "committing" || transition.from === "needs_recovery") {
+    } else if (isActionOperationTerminalResolutionState(transition.from)) {
       if (
         !operationId ||
         transition.operation_id !== operationId ||

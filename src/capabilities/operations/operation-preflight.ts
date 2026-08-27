@@ -1,12 +1,24 @@
 import { existsSync } from "node:fs";
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
+import {
+  CAPABILITY_PLAN_STATUS,
+  CAPABILITY_RUNTIME_ERROR_CODE,
+} from "../../core/capability-contract.js";
 import type {
   CapabilityDurablePlanningGraphV1,
   CapabilityFabricPlanV1,
 } from "../planning/types.js";
-import { foldCapabilityWal, readCapabilityWal } from "../storage/operation-store.js";
+import { readCapabilityWal } from "../storage/operation-store.js";
 import { capabilityOperationPaths } from "../storage/paths.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
+import {
+  CAPABILITY_OPERATION_STATUS,
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_PRE_EFFECT_REFUSAL_REASON,
+  CAPABILITY_WAL_OPERATION_TRANSITION_ORIGIN,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+} from "../wire/operation.js";
 import { requireCapabilityActionAuthority } from "./action-authority.js";
 import { capabilityAuthorityFrontier } from "./authority-frontier.js";
 import { CapabilityRuntimeError } from "./errors.js";
@@ -36,12 +48,17 @@ export function runCapabilityOperationPreflight(input: {
   if (events.length !== 1) return null;
   const current = input.storage.readStatus();
   if (current.state === "corrupt") {
-    input.journal.terminal(input.operationId, "needs_recovery", "scope-needs-recovery", input.held);
+    input.journal.terminal(
+      input.operationId,
+      ACTION_OPERATION_STATE.NEEDS_RECOVERY,
+      CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+      input.held,
+    );
     return foldCapabilityOperation(input.storage, input.operationId, input.actionAuthority);
   }
   const currentDigest = current.lock?.content_digest ?? null;
   if (currentDigest !== input.plan.base_lock_digest) {
-    const reason = "scope-base-stale" as const;
+    const reason = CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SCOPE_BASE_STALE;
     input.journal.appendRefusal({
       operationId: input.operationId,
       plan: input.plan,
@@ -50,9 +67,9 @@ export function runCapabilityOperationPreflight(input: {
       stepId: null,
       targetIds: capabilityHostTargetIds(input.plan),
       held: input.held,
-      frontier: "operation",
+      frontier: CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION,
     });
-    input.journal.terminal(input.operationId, "failed", reason, input.held);
+    input.journal.terminal(input.operationId, ACTION_OPERATION_STATE.FAILED, reason, input.held);
     return foldCapabilityOperation(input.storage, input.operationId, input.actionAuthority);
   }
   const authority = capabilityAuthorityFrontier({
@@ -72,13 +89,18 @@ export function runCapabilityOperationPreflight(input: {
         stepId: null,
         targetIds: capabilityHostTargetIds(input.plan),
         held: input.held,
-        frontier: "operation",
+        frontier: CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION,
         authorityCheck,
       }),
     effect: () => null,
   });
   if (authority.authorized) return null;
-  input.journal.terminal(input.operationId, "failed", authority.reason, input.held);
+  input.journal.terminal(
+    input.operationId,
+    ACTION_OPERATION_STATE.FAILED,
+    authority.reason,
+    input.held,
+  );
   return foldCapabilityOperation(input.storage, input.operationId, input.actionAuthority);
 }
 
@@ -101,28 +123,34 @@ export function beginCapabilityOperationRecovery(input: {
     input.journal.append(
       input.operationId,
       {
-        kind: "operation-transition",
-        from: "created",
-        to: "committing",
+        kind: CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION,
+        from: CAPABILITY_WAL_OPERATION_TRANSITION_ORIGIN.CREATED,
+        to: ACTION_OPERATION_STATE.COMMITTING,
         reason_code: null,
       },
       input.held,
     );
   }
   const events = readCapabilityWal(input.options.storage.paths, input.operationId);
-  const structuralState = foldCapabilityWal(events).state;
-  if (
-    structuralState === "committing" &&
-    events.some((event) => event.payload.kind === "health-inventory-prepared")
-  )
-    return null;
   const current = foldCapabilityOperation(
     input.options.storage,
     input.operationId,
     actionAuthority,
+    { deferPreparedPublicationEvidence: true },
   );
-  if (current.status !== "committing" && current.status !== "needs-recovery") return current;
-  if (current.status === "needs-recovery") return null;
+  if (
+    current.status === CAPABILITY_OPERATION_STATUS.COMMITTING &&
+    events.some(
+      (event) => event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED,
+    )
+  )
+    return null;
+  if (
+    current.status !== CAPABILITY_OPERATION_STATUS.COMMITTING &&
+    current.status !== CAPABILITY_OPERATION_STATUS.NEEDS_RECOVERY
+  )
+    return current;
+  if (current.status === CAPABILITY_OPERATION_STATUS.NEEDS_RECOVERY) return null;
   return runCapabilityOperationPreflight({
     plan: input.plan,
     graph: input.graph,
@@ -137,9 +165,9 @@ export function beginCapabilityOperationRecovery(input: {
 }
 
 export function assertNoOpInspectionOnly(plan: CapabilityFabricPlanV1): void {
-  if (plan.status === "no-op")
+  if (plan.status === CAPABILITY_PLAN_STATUS.NO_OP)
     throw new CapabilityRuntimeError(
       "proved no-op plans are inspection-only and cannot be dispatched",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
 }

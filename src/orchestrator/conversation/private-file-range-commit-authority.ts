@@ -3,11 +3,16 @@ import type { TraceStore } from "../trace/store.js";
 import type { TraceEvent } from "../trace/types.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import type { BindingAuthoritySnapshot } from "./artifact-validation.js";
+import {
+  CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY,
+  type DurableTraceEventAuthority,
+} from "./conversation-durable-authority-contract.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { PrivateFileRangeHandoffBindingV1 } from "./private-file-range-staging-store.js";
 import type { ConversationManifest } from "./types.js";
 
-export type DurableTraceEventAuthority = "committed" | "proven-absent" | "unknown";
+export type { DurableTraceEventAuthority } from "./conversation-durable-authority-contract.js";
 
 /** Resolves one exact public effect without treating a failed authority read as absence. */
 export async function durableTraceEventAuthority(
@@ -23,10 +28,10 @@ export async function durableTraceEventAuthority(
       ({ stored_event: stored }) =>
         stored.idempotency_key === idempotencyKey && stored.event.type === eventType,
     )
-      ? "committed"
-      : "proven-absent";
+      ? CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.COMMITTED
+      : CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.PROVEN_ABSENT;
   } catch {
-    return "unknown";
+    return CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.UNKNOWN;
   }
 }
 
@@ -43,17 +48,17 @@ export async function settleConfiguredPrivateFileRange(
     traceStore,
     conversationId,
     "conversation:configured",
-    "conversation_configured",
+    CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED,
   );
   try {
-    if (authority === "committed")
+    if (authority === CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.COMMITTED)
       home.privateFileRanges.consume(
         binding,
         reservationKey,
         `conversation:${conversationId}:create`,
         recordedAt,
       );
-    else if (authority === "proven-absent")
+    else if (authority === CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.PROVEN_ABSENT)
       home.privateFileRanges.release(binding, reservationKey, recordedAt);
   } catch {
     /* preserve configure failure; committed or unknown state never releases */

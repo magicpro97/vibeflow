@@ -1,3 +1,4 @@
+import { CAPABILITY_TRUST_KEY_STATE_BY_TRANSITION } from "../../actions/capability-security-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import { foldTrustFrames } from "../authority/fold.js";
 import type { AuthorityEpochHeadV1, RegistryTrustKeyFrameV1 } from "../authority/types.js";
@@ -13,11 +14,7 @@ import {
 import type { RegistryTrustKeyV1, RegistryTrustSnapshotV1 } from "./types.js";
 
 function state(frame: RegistryTrustKeyFrameV1): RegistryTrustKeyV1["state"] {
-  return frame.transition === "deprecated"
-    ? "deprecated"
-    : frame.transition === "revoked"
-      ? "revoked"
-      : "active";
+  return CAPABILITY_TRUST_KEY_STATE_BY_TRANSITION[frame.transition];
 }
 
 export function deriveRegistryTrustSnapshot(

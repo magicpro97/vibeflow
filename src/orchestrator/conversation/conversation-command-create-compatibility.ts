@@ -2,6 +2,8 @@ import type { PublicStoredTraceEvent } from "../trace/types.js";
 import type { ConversationBootstrap } from "./bootstrap.js";
 import type { ObservedConversationResultV1 } from "./conversation-command-compatibility.js";
 import { ConversationHomeCreateBrokerV1 } from "./conversation-home-create-authority.js";
+import { CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION } from "./conversation-private-context-broker-wire.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { ConversationCreateParticipant, ConversationInvocationOptions } from "./types.js";
 
 export interface DurableConversationCreateV1 {
@@ -58,7 +60,7 @@ function observe(
     if (event.seq <= lastSeq) return;
     lastSeq = event.seq;
     events.push(event);
-    if (event.event.type !== "agent_response_delta") return;
+    if (event.event.type !== CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) return;
     const delta = String(event.event.payload.content_delta ?? "");
     if (!delta) return;
     output += delta;
@@ -86,7 +88,7 @@ export async function executeDurableConversationCreateV1(
   ).prepare({
     principal_digest: input.principal_digest,
     request: {
-      schema_version: "1.0",
+      schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
       idempotency_key: input.idempotency_key,
       topic: input.request.topic,
       ...(input.request.policy === undefined ? {} : { policy: input.request.policy }),

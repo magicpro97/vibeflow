@@ -1,5 +1,6 @@
 import {
   CONVERSATION_MESSAGE_QUEUE_EVENT_KIND,
+  CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   CONVERSATION_MESSAGE_QUEUE_STATE,
 } from "./conversation-message-queue-contract.js";
@@ -34,15 +35,7 @@ function assertPayload(
     throw new Error("invalid queue event payload");
   if (value.kind === CONVERSATION_MESSAGE_QUEUE_EVENT_KIND.ADMITTED) {
     if (
-      !queueExactKeys(value, [
-        "kind",
-        "item",
-        "owner_principal_digest",
-        "admitted_authority",
-        "private_context_binding_digest",
-        "idempotency_key_digest",
-        "canonical_request_digest",
-      ]) ||
+      !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EVENT_ADMITTED_PAYLOAD) ||
       !isQueueDigest(value.owner_principal_digest) ||
       (value.private_context_binding_digest !== null &&
         !isQueueDigest(value.private_context_binding_digest)) ||
@@ -73,15 +66,7 @@ function assertPayload(
   }
   if (value.kind === CONVERSATION_MESSAGE_QUEUE_EVENT_KIND.EDITED) {
     if (
-      !queueExactKeys(value, [
-        "kind",
-        "item",
-        "expected_item_digest",
-        "owner_principal_digest",
-        "private_context_binding_digest",
-        "idempotency_key_digest",
-        "canonical_request_digest",
-      ]) ||
+      !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EVENT_EDITED_PAYLOAD) ||
       !isQueueDigest(value.expected_item_digest) ||
       !isQueueDigest(value.owner_principal_digest) ||
       (value.private_context_binding_digest !== null &&
@@ -110,13 +95,7 @@ function assertPayload(
   }
   if (value.kind === CONVERSATION_MESSAGE_QUEUE_EVENT_KIND.CLAIMED) {
     if (
-      !queueExactKeys(value, [
-        "kind",
-        "item",
-        "claim_epoch",
-        "claim_owner",
-        "private_context_binding_digest",
-      ]) ||
+      !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EVENT_CLAIMED_PAYLOAD) ||
       !Number.isSafeInteger(value.claim_epoch) ||
       (value.claim_epoch as number) < 1 ||
       (value.private_context_binding_digest !== null &&
@@ -134,15 +113,7 @@ function assertPayload(
   }
   if (value.kind === CONVERSATION_MESSAGE_QUEUE_EVENT_KIND.DELIVERED) {
     if (
-      !queueExactKeys(value, [
-        "kind",
-        "item",
-        "claim_epoch",
-        "claim_owner_digest",
-        "private_context_binding_digest",
-        "private_context_disposition",
-        "delivery_proof",
-      ]) ||
+      !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EVENT_DELIVERED_PAYLOAD) ||
       !Number.isSafeInteger(value.claim_epoch) ||
       (value.claim_epoch as number) < 1 ||
       !isQueueDigest(value.claim_owner_digest) ||
@@ -163,15 +134,7 @@ function assertPayload(
   }
   if (value.kind === CONVERSATION_MESSAGE_QUEUE_EVENT_KIND.STALE) {
     if (
-      !queueExactKeys(value, [
-        "kind",
-        "item",
-        "prior_state",
-        "claim_epoch",
-        "claim_owner_digest",
-        "private_context_binding_digest",
-        "private_context_disposition",
-      ]) ||
+      !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EVENT_STALE_PAYLOAD) ||
       (value.prior_state !== CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED &&
         value.prior_state !== CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED) ||
       (value.claim_epoch !== null &&
@@ -199,15 +162,7 @@ export function assertConversationMessageQueueEventV1(
 ): asserts value is PrivateConversationMessageQueueEventV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "root_session_id",
-      "journal_sequence",
-      "payload",
-      "previous_event_digest",
-      "recorded_at",
-      "event_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EVENT) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueReference(value.root_session_id) ||
     !Number.isSafeInteger(value.journal_sequence) ||

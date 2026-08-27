@@ -1,3 +1,5 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+import { CAPABILITY_SCOPE } from "../../core/capability-contract.js";
 import type { BrowserActionCandidate } from "./conversation-home-api.js";
 import type { HomeActionView, HomeCapabilityItem } from "./conversation-home-types.js";
 
@@ -12,9 +14,9 @@ export function capabilityRepairCandidate(
   item: Pick<HomeCapabilityItem, "package_id" | "scope">,
 ): BrowserActionCandidate {
   return {
-    type: "capability.repair" as const,
+    type: HOST_ACTION_KIND.CAPABILITY_REPAIR,
     package_id: item.package_id,
-    scope: item.scope === "user" ? "user" : "project",
+    scope: item.scope === CAPABILITY_SCOPE.USER ? CAPABILITY_SCOPE.USER : CAPABILITY_SCOPE.PROJECT,
   };
 }
 
@@ -24,9 +26,12 @@ export function planHomeRecovery(view: HomeActionView, action: string): HomeReco
       action,
       label: "Prepare repair",
       candidate: {
-        type: "capability.repair",
+        type: HOST_ACTION_KIND.CAPABILITY_REPAIR,
         package_id: view.proposal.package_pins[0]?.id ?? null,
-        scope: view.proposal.scope === "user" ? "user" : "project",
+        scope:
+          view.proposal.scope === CAPABILITY_SCOPE.USER
+            ? CAPABILITY_SCOPE.USER
+            : CAPABILITY_SCOPE.PROJECT,
       },
       blockedReason: null,
     };

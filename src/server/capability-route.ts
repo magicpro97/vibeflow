@@ -1,5 +1,13 @@
+import {
+  PUBLIC_ERROR_CANONICAL_MESSAGE,
+  PUBLIC_ERROR_CODE,
+  PUBLIC_RECOVERY_ACTION,
+} from "../actions/public-error-contract.js";
 import type { EngineName } from "../actions/types.js";
-import { CapabilityRuntimeError } from "../capabilities/operations/errors.js";
+import {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  CapabilityRuntimeError,
+} from "../capabilities/operations/errors.js";
 import {
   CapabilityCursorErrorV1,
   StaleCapabilityCursorErrorV1,
@@ -8,7 +16,13 @@ import type { CapabilityQueryRequestV1 } from "../capabilities/query/types.js";
 import type { CapabilityFabricServiceV1 } from "../capabilities/service.js";
 import { parseSemver } from "../capabilities/source/semver.js";
 import { DIGEST_PATTERN, packageId, rawSha256 } from "../capabilities/wire/primitives.js";
-import type { CapabilityStatusV1 } from "../capabilities/wire/query.js";
+import { ENGINES as AGENT_ENGINES } from "../core/agent-contract.js";
+import {
+  CAPABILITY_STATUSES,
+  type CapabilityScope,
+  type CapabilityStatusV1,
+  isCapabilityScope,
+} from "../core/capability-contract.js";
 import type { ConversationSessionAuthority } from "./conversation-auth.js";
 import { conversationReadError } from "./conversation-list-route.js";
 
@@ -23,22 +37,8 @@ const QUERY_KEYS = new Set([
   "limit",
 ]);
 const DETAIL_KEYS = new Set(["scope", "package_pin_digest", "version", "content_sha256"]);
-const ENGINES = new Set<EngineName>(["claude", "codex", "copilot", "opencode", "antigravity"]);
-const STATUSES = new Set<CapabilityStatusV1>([
-  "absent",
-  "ready",
-  "degraded",
-  "blocked",
-  "failed",
-  "unknown",
-  "stale",
-  "drifted",
-  "orphaned",
-  "unmanaged",
-  "manual",
-  "unsupported",
-  "needs-recovery",
-]);
+const ENGINE_NAMES: ReadonlySet<EngineName> = new Set(AGENT_ENGINES);
+const STATUSES: ReadonlySet<CapabilityStatusV1> = new Set(CAPABILITY_STATUSES);
 
 export interface CapabilityRouteAuthorityV1 {
   sessions: Pick<ConversationSessionAuthority, "authorize">;
@@ -91,9 +91,9 @@ function boundedText(
   return value.normalize("NFC");
 }
 
-function parseScope(search: URLSearchParams): "project" | "user" {
+function parseScope(search: URLSearchParams): CapabilityScope {
   const scope = required(search, "scope");
-  if (scope !== "project" && scope !== "user") throw new Error("invalid capability scope");
+  if (!isCapabilityScope(scope)) throw new Error("invalid capability scope");
   return scope;
 }
 
@@ -111,7 +111,7 @@ function parseQuery(url: URL): CapabilityQueryRequestV1 {
   const package_id = rawPackageId === undefined ? undefined : packageId(rawPackageId, "package_id");
   const query = boundedText(singleton(url.searchParams, "q"), "q", 512);
   const cursor = boundedText(singleton(url.searchParams, "cursor"), "cursor", 4096);
-  const engines = commaList(singleton(url.searchParams, "engine"), ENGINES, "engine");
+  const engines = commaList(singleton(url.searchParams, "engine"), ENGINE_NAMES, "engine");
   const statuses = commaList(singleton(url.searchParams, "status"), STATUSES, "status");
   const pageLimit = limit(singleton(url.searchParams, "limit"));
   return {
@@ -147,39 +147,40 @@ function parseDetail(url: URL, rawPackageId: string) {
 
 function mapCapabilityRouteError(error: unknown): Response {
   if (error instanceof StaleCapabilityCursorErrorV1)
-    return conversationReadError("stale_capability_cursor", {
+    return conversationReadError(PUBLIC_ERROR_CODE.STALE_CAPABILITY_CURSOR, {
       message: "The capability catalog changed during pagination.",
-      recoveryAction: "restart-pagination",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
       details: { restart_cursor: error.restart_cursor, source_watermark: error.source_watermark },
     });
   if (error instanceof CapabilityCursorErrorV1)
-    return conversationReadError("invalid_request", {
+    return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
       message: "The capability cursor is invalid.",
     });
   if (error instanceof CapabilityRuntimeError) {
-    if (error.runtime_code === "package-not-found")
-      return conversationReadError("not_found", {
+    if (error.runtime_code === CAPABILITY_RUNTIME_ERROR_CODE.PACKAGE_NOT_FOUND)
+      return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
         message: "The capability package was not found.",
       });
-    if (error.runtime_code === "scope-needs-recovery")
-      return conversationReadError("scope_needs_recovery", {
-        message: "The capability scope needs recovery.",
-        recoveryAction: "repair",
+    if (error.runtime_code === CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY)
+      return conversationReadError(PUBLIC_ERROR_CODE.SCOPE_NEEDS_RECOVERY, {
+        message: PUBLIC_ERROR_CANONICAL_MESSAGE[PUBLIC_ERROR_CODE.SCOPE_NEEDS_RECOVERY],
+        recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR,
+        details: { operation_id: null },
       });
-    if (error.runtime_code === "integrity-failure")
-      return conversationReadError("authority_corrupt", {
+    if (error.runtime_code === CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE)
+      return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
         message: "Capability browser authority is corrupt.",
-        recoveryAction: "repair-authority",
+        recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
       });
-    if (error.runtime_code === "ambiguous-package")
-      return conversationReadError("invalid_request", {
+    if (error.runtime_code === CAPABILITY_RUNTIME_ERROR_CODE.AMBIGUOUS_PACKAGE)
+      return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
         message: "The capability package selector is ambiguous.",
       });
   }
-  return conversationReadError("service_unavailable", {
+  return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
     message: "The capability browser is unavailable.",
     retryable: true,
-    recoveryAction: "retry",
+    recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
   });
 }
 
@@ -190,14 +191,18 @@ export async function handleCapabilityRoute(
   packageIdFromPath?: string,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "GET")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   let input: ReturnType<typeof parseQuery> | ReturnType<typeof parseDetail>;
   try {
     input = packageIdFromPath === undefined ? parseQuery(url) : parseDetail(url, packageIdFromPath);
   } catch {
-    return conversationReadError("invalid_request", {
+    return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
       message: "The capability query is invalid.",
     });
   }

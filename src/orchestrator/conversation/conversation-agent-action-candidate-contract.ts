@@ -1,8 +1,24 @@
+import { HOST_ACTION_KIND, type HostActionKind } from "../../actions/host-action-contract.js";
+import {
+  ACTION_DOMAIN,
+  ACTION_EXPECTED_SOURCE_MODE,
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  ACTOR_KIND,
+  CREDENTIAL_CLASS,
+} from "../../actions/public-action-contract.js";
+import { AGENT_HOST_TOOL, type AgentHostToolV1 } from "../../core/agent-contract.js";
+import {
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
+
 /**
- * Dependency-free runtime contract for durable agent action candidates.
+ * Platform-independent runtime contract for durable agent action candidates.
  *
  * Persisted and cross-boundary vocabulary belongs here so validators, recovery, review, and
- * projections cannot silently drift apart through duplicated string literals.
+ * projections cannot silently drift apart through duplicated string literals. Its imports are the
+ * dependency-free shared agent and host-action vocabularies.
  */
 export const AGENT_ACTION_CANDIDATE_SCHEMA_VERSION = "1.0" as const;
 
@@ -170,22 +186,19 @@ export const AGENT_ACTION_CANDIDATE_BARRIER_POINT = Object.freeze({
 export type AgentActionCandidateBarrierPointV1 =
   (typeof AGENT_ACTION_CANDIDATE_BARRIER_POINT)[keyof typeof AGENT_ACTION_CANDIDATE_BARRIER_POINT];
 
-export const AGENT_ACTION_CANDIDATE_HOST_TOOL = Object.freeze({
-  PROPOSE_ACTION: "propose_action",
-} as const);
+export const AGENT_ACTION_CANDIDATE_HOST_TOOL = AGENT_HOST_TOOL;
 
-export type AgentActionCandidateHostToolV1 =
-  (typeof AGENT_ACTION_CANDIDATE_HOST_TOOL)[keyof typeof AGENT_ACTION_CANDIDATE_HOST_TOOL];
+export type AgentActionCandidateHostToolV1 = AgentHostToolV1;
 
 export const AGENT_ACTION_CANDIDATE_EVENT_TYPE = Object.freeze({
-  AGENT_RESPONSE_DELTA: "agent_response_delta",
+  AGENT_RESPONSE_DELTA: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
 } as const);
 
 export type AgentActionCandidateEventTypeV1 =
   (typeof AGENT_ACTION_CANDIDATE_EVENT_TYPE)[keyof typeof AGENT_ACTION_CANDIDATE_EVENT_TYPE];
 
 export const AGENT_ACTION_CANDIDATE_SOURCE_LIFECYCLE = Object.freeze({
-  COMPLETED: "COMPLETED",
+  COMPLETED: CONVERSATION_LIFECYCLE.COMPLETED,
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_ROLE = Object.freeze({
@@ -193,27 +206,27 @@ export const AGENT_ACTION_CANDIDATE_ROLE = Object.freeze({
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_REQUEST_ORIGIN = Object.freeze({
-  CONVERSATION: "conversation",
+  CONVERSATION: ACTION_DOMAIN.CONVERSATION,
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_ACTOR_KIND = Object.freeze({
-  AGENT: "agent",
+  AGENT: ACTOR_KIND.AGENT,
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_CREDENTIAL_CLASS = Object.freeze({
-  LOOPBACK_SESSION: "loopback-session",
+  LOOPBACK_SESSION: CREDENTIAL_CLASS.LOOPBACK_SESSION,
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_PLANNING_MODE = Object.freeze({
-  DURABLE: "durable",
+  DURABLE: ACTION_PLANNING_MODE.DURABLE,
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_NETWORK_READ_POLICY = Object.freeze({
-  ORDINARY_HOST_POLICY: "ordinary-host-policy",
+  ORDINARY_HOST_POLICY: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_EXPECTED_SOURCE_MODE = Object.freeze({
-  WRITABLE_REVISION: "writable-revision",
+  WRITABLE_REVISION: ACTION_EXPECTED_SOURCE_MODE.WRITABLE_REVISION,
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_RESERVATION_STATE = Object.freeze({
@@ -225,16 +238,16 @@ export const AGENT_ACTION_CANDIDATE_FAILURE_DISPOSITION = Object.freeze({
 } as const);
 
 export const AGENT_ACTION_CANDIDATE_PRIVATE_OR_STAGED_ACTION_TYPE = Object.freeze({
-  SELECT_LINEAGE_HEAD: "conversation.select_lineage_head",
-  PUBLISH_SUSPECTED_LITERAL: "conversation.publish_suspected_literal",
-  ABANDON_REVISION_OPERATION: "conversation.abandon_revision_operation",
-  RETRY_REVISION_OPERATION: "conversation.retry_revision_operation",
-  RECONCILE_REVISION_OPERATION: "conversation.reconcile_revision_operation",
-  COMPACT_CONTEXT: "context.compact",
-  ADOPT_CAPABILITY: "capability.adopt",
-  UPDATE_POLICY_AUTHORITY: "policy.update_authority",
-  REVOKE_SECRET: "secret.revoke",
-} as const);
+  SELECT_LINEAGE_HEAD: HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD,
+  PUBLISH_SUSPECTED_LITERAL: HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
+  ABANDON_REVISION_OPERATION: HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION,
+  RETRY_REVISION_OPERATION: HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION,
+  RECONCILE_REVISION_OPERATION: HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION,
+  COMPACT_CONTEXT: HOST_ACTION_KIND.CONTEXT_COMPACT,
+  ADOPT_CAPABILITY: HOST_ACTION_KIND.CAPABILITY_ADOPT,
+  UPDATE_POLICY_AUTHORITY: HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY,
+  REVOKE_SECRET: HOST_ACTION_KIND.SECRET_REVOKE,
+} as const satisfies Readonly<Record<string, HostActionKind>>);
 
 export type AgentActionCandidatePrivateOrStagedActionTypeV1 =
   (typeof AGENT_ACTION_CANDIDATE_PRIVATE_OR_STAGED_ACTION_TYPE)[keyof typeof AGENT_ACTION_CANDIDATE_PRIVATE_OR_STAGED_ACTION_TYPE];
@@ -244,10 +257,10 @@ export const AGENT_ACTION_CANDIDATE_PRIVATE_OR_STAGED_ACTION_TYPES = Object.free
 ) as readonly AgentActionCandidatePrivateOrStagedActionTypeV1[];
 
 export const AGENT_ACTION_CANDIDATE_CAPABILITY_INPUT_ACTION_TYPE = Object.freeze({
-  INSTALL: "capability.install",
-  CONFIGURE: "capability.configure",
-  UPDATE: "capability.update",
-} as const);
+  INSTALL: HOST_ACTION_KIND.CAPABILITY_INSTALL,
+  CONFIGURE: HOST_ACTION_KIND.CAPABILITY_CONFIGURE,
+  UPDATE: HOST_ACTION_KIND.CAPABILITY_UPDATE,
+} as const satisfies Readonly<Record<string, HostActionKind>>);
 
 export type AgentActionCandidateCapabilityInputActionTypeV1 =
   (typeof AGENT_ACTION_CANDIDATE_CAPABILITY_INPUT_ACTION_TYPE)[keyof typeof AGENT_ACTION_CANDIDATE_CAPABILITY_INPUT_ACTION_TYPE];

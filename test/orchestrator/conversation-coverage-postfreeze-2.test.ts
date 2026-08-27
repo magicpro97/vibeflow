@@ -14,6 +14,7 @@ import { digestV1 } from "../../src/durability/index.js";
 import { ConversationArtifactStore } from "../../src/orchestrator/conversation/artifact-store.js";
 import { createConversationBrowserAuthorities } from "../../src/orchestrator/conversation/conversation-browser-authorities.js";
 import { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
+import { conversationRevisionActionPlanDigest } from "../../src/orchestrator/conversation/conversation-revision-action-plan.js";
 import {
   type LineageAssociationPlanV1,
   deriveLineageAssociations,
@@ -100,22 +101,22 @@ function revisionClosure(seed = 1) {
     proposal_digest: proposal.proposal_digest,
     approval_id: approval.approval_id,
     approval_digest: approval.approval_digest,
-    plan_digest: digest("action-plan"),
+    plan_digest: conversationRevisionActionPlanDigest(plan.root_session_id, plan),
     authority_epoch: 0,
     authority_head_digest: digest("authority-head"),
-    root_session_id: "conversation-root",
+    root_session_id: plan.root_session_id,
     parent,
     child,
-    expected_head_digest: priorHead.content_digest,
-    expected_reservation_digest: null,
-    expected_reservation_epoch: 0,
-    revision_claim_epoch: 1,
-    expected_parent_last_seq: 3,
-    expected_parent_lock_digest: digest("parent-lock"),
-    permission_digest: digest("permission"),
-    binding_set_digest: digest("binding-set"),
+    expected_head_digest: plan.expected_head_digest,
+    expected_reservation_digest: plan.expected_reservation_digest,
+    expected_reservation_epoch: plan.expected_reservation_epoch,
+    revision_claim_epoch: plan.revision_claim_epoch,
+    expected_parent_last_seq: plan.expected_parent_last_seq,
+    expected_parent_lock_digest: plan.expected_parent_lock_digest,
+    permission_digest: plan.permission_digest,
+    binding_set_digest: plan.resulting_binding_set_digest,
     handoff_digest: digest("handoff"),
-    handoff_selection_digest: digest("handoff-selection"),
+    handoff_selection_digest: plan.handoff_selection_plan_digest,
     prompt_projection_digest: digest("prompt-projection"),
     created_at: NOW,
   });

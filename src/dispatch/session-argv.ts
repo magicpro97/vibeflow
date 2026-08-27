@@ -1,7 +1,11 @@
 import type { Engine } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
+import { ROLE_SANDBOX } from "../core/role-contract.js";
 import { engineCommand, isUnavailable, materializePrompt } from "../dispatch.js";
+import { CONVERSATION_RECONCILIATION_STATUS } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import { loadNativeHistory, reconcileNativeHistory } from "./prompt.js";
 import { captureSafeNativeSessionId, requireSafeNativeSessionId } from "./public-redaction.js";
+import { ENGINE_SESSION_MODE, supportsExactNativeSessionResume } from "./session-contract.js";
 import {
   type HistoryReconcileRequest,
   type HistoryReconcileResult,
@@ -12,18 +16,13 @@ import {
 const MUTATING_TOOLS = new Set(["write", "edit", "bash", "shell"]);
 const CLAUDE_READ_ONLY_TOOLS = new Set(["read", "grep", "glob", "webfetch", "websearch"]);
 
-function appendBeforeDash(args: string[], ...values: string[]): void {
-  const dash = args.lastIndexOf("-");
-  if (dash < 0) args.push(...values);
-  else args.splice(dash, 0, ...values);
-}
-
 function assertReadOnlyTools(spawn: SpawnOptionsProjection): void {
-  if (spawn.sandbox !== "read-only") return;
+  if (spawn.sandbox !== ROLE_SANDBOX.READ_ONLY) return;
   const unsafe = spawn.rendered_tools.filter((tool) => {
     const base = /^[A-Za-z][A-Za-z0-9]*/.exec(tool)?.[0]?.toLowerCase() ?? "";
     return (
-      MUTATING_TOOLS.has(base) || (spawn.engine === "claude" && !CLAUDE_READ_ONLY_TOOLS.has(base))
+      MUTATING_TOOLS.has(base) ||
+      (spawn.engine === AGENT_ENGINE.CLAUDE && !CLAUDE_READ_ONLY_TOOLS.has(base))
     );
   });
   if (unsafe.length) {
@@ -61,18 +60,18 @@ export function assertSpawnProjection(
     throw new Error("skill provenance and trace metadata disagree");
   }
   assertSelectedConversationEngine(spawn);
-  if (spawn.sessionMode === "exact") {
+  if (spawn.sessionMode === ENGINE_SESSION_MODE.EXACT) {
     if (!nativeSessionId) throw new Error("exact session mode requires a native session id");
-    if (spawn.engine !== "claude" && spawn.engine !== "codex" && spawn.engine !== "antigravity") {
+    if (!supportsExactNativeSessionResume(spawn.engine)) {
       throw new Error(`${spawn.engine} exact resume is unavailable for safe admission`);
     }
     requireSafeNativeSessionId(spawn.engine, nativeSessionId);
   }
-  if (spawn.engine === "codex" && spawn.rendered_tools.length > 0) {
+  if (spawn.engine === AGENT_ENGINE.CODEX && spawn.rendered_tools.length > 0) {
     throw new Error("codex cannot enforce rendered tools with the current CLI; launch denied");
   }
   if (
-    (spawn.engine === "opencode" || spawn.engine === "antigravity") &&
+    (spawn.engine === AGENT_ENGINE.OPENCODE || spawn.engine === AGENT_ENGINE.ANTIGRAVITY) &&
     (spawn.rendered_tools.length > 0 || spawn.sandbox !== null)
   ) {
     throw new Error(`${spawn.engine} cannot enforce rendered tools or sandbox; launch denied`);
@@ -85,7 +84,7 @@ export function sessionInvocation(
   nativeSessionId?: string,
   prompt = spawn.rendered_prompt,
 ) {
-  const exactId = spawn.sessionMode === "exact" ? nativeSessionId : undefined;
+  const exactId = spawn.sessionMode === ENGINE_SESSION_MODE.EXACT ? nativeSessionId : undefined;
   const base = engineCommand(
     spawn.engine,
     { has: () => true, version: () => "session-adapter" },
@@ -94,44 +93,45 @@ export function sessionInvocation(
   );
   if (isUnavailable(base)) throw new Error(base.unavailable);
   const args = [...base.args];
-  if (spawn.engine === "copilot") {
+  if (spawn.engine === AGENT_ENGINE.COPILOT) {
     const permissive = args.indexOf("--allow-all");
     if (permissive >= 0) args.splice(permissive, 1);
   }
-  if (spawn.engine === "opencode") {
+  if (spawn.engine === AGENT_ENGINE.OPENCODE) {
     const auto = args.indexOf("--auto");
     if (auto >= 0) args.splice(auto, 1);
   }
   if (spawn.model) {
-    if (spawn.engine === "claude") args.push("--model", spawn.model);
-    else if (spawn.engine === "codex") args.unshift("--model", spawn.model);
-    else if (spawn.engine === "opencode") {
-      appendBeforeDash(args, "--model", spawn.model);
-    } else args.push("--model", spawn.model);
+    if (spawn.engine === AGENT_ENGINE.CLAUDE) args.push("--model", spawn.model);
+    else if (spawn.engine === AGENT_ENGINE.CODEX) args.unshift("--model", spawn.model);
+    else args.push("--model", spawn.model);
   }
-  if (spawn.engine === "claude") {
+  if (spawn.engine === AGENT_ENGINE.CLAUDE) {
     args.unshift("--safe-mode");
     args.push("--tools", spawn.rendered_tools.join(","));
     if (spawn.rendered_tools.length) {
       args.push("--allowedTools", spawn.rendered_tools.join(","));
     }
   }
-  if (spawn.engine === "copilot") {
+  if (spawn.engine === AGENT_ENGINE.COPILOT) {
     args.push(`--available-tools=${spawn.rendered_tools.join(",")}`);
   }
-  if (spawn.sandbox === "read-only") {
-    if (spawn.engine === "claude") {
+  if (spawn.sandbox === ROLE_SANDBOX.READ_ONLY) {
+    if (spawn.engine === AGENT_ENGINE.CLAUDE) {
       args.push("--permission-mode", "plan", "--disallowedTools", "Write,Edit,Bash");
-    } else if (spawn.engine === "codex") args.unshift("--sandbox", "read-only");
-    else if (spawn.engine === "copilot") args.push("--excluded-tools=Write,Edit,Bash");
-  } else if (spawn.sandbox === "workspace-write") {
-    if (spawn.engine === "claude") args.push("--permission-mode", "acceptEdits");
-    else if (spawn.engine === "codex") args.unshift("--sandbox", "workspace-write");
-    else if (spawn.engine === "copilot") args.push("--allow-all-tools");
-  } else if (spawn.sandbox === "danger-full-access") {
-    if (spawn.engine === "claude") args.push("--dangerously-skip-permissions");
-    else if (spawn.engine === "codex") args.unshift("--sandbox", "danger-full-access");
-    else if (spawn.engine === "copilot") args.push("--allow-all");
+    } else if (spawn.engine === AGENT_ENGINE.CODEX)
+      args.unshift("--sandbox", ROLE_SANDBOX.READ_ONLY);
+    else if (spawn.engine === AGENT_ENGINE.COPILOT) args.push("--excluded-tools=Write,Edit,Bash");
+  } else if (spawn.sandbox === ROLE_SANDBOX.WORKSPACE_WRITE) {
+    if (spawn.engine === AGENT_ENGINE.CLAUDE) args.push("--permission-mode", "acceptEdits");
+    else if (spawn.engine === AGENT_ENGINE.CODEX)
+      args.unshift("--sandbox", ROLE_SANDBOX.WORKSPACE_WRITE);
+    else if (spawn.engine === AGENT_ENGINE.COPILOT) args.push("--allow-all-tools");
+  } else if (spawn.sandbox === ROLE_SANDBOX.DANGER_FULL_ACCESS) {
+    if (spawn.engine === AGENT_ENGINE.CLAUDE) args.push("--dangerously-skip-permissions");
+    else if (spawn.engine === AGENT_ENGINE.CODEX)
+      args.unshift("--sandbox", ROLE_SANDBOX.DANGER_FULL_ACCESS);
+    else if (spawn.engine === AGENT_ENGINE.COPILOT) args.push("--allow-all");
   }
   return materializePrompt({ ...base, args }, prompt);
 }
@@ -152,15 +152,23 @@ function hasJsonLine(
   return false;
 }
 
-export function stdoutAcknowledges(engine: Engine, stdout: string): boolean {
-  if (engine === "claude") return captureSafeNativeSessionId(engine, stdout) !== undefined;
-  if (engine === "codex") {
+export function stdoutAcknowledges(
+  engine: Engine,
+  stdout: string,
+  expectedNativeSessionId?: string,
+): boolean {
+  const observedNativeSessionId = captureSafeNativeSessionId(engine, stdout);
+  if (expectedNativeSessionId !== undefined) {
+    return observedNativeSessionId === expectedNativeSessionId;
+  }
+  if (engine === AGENT_ENGINE.CLAUDE) return observedNativeSessionId !== undefined;
+  if (engine === AGENT_ENGINE.CODEX) {
     return (
-      captureSafeNativeSessionId(engine, stdout) !== undefined ||
+      observedNativeSessionId !== undefined ||
       hasJsonLine(stdout, (value) => value.type === "turn.started")
     );
   }
-  if (engine === "opencode") return captureSafeNativeSessionId(engine, stdout) !== undefined;
+  if (engine === AGENT_ENGINE.OPENCODE) return observedNativeSessionId !== undefined;
   return stdout.trim().length > 0;
 }
 
@@ -168,19 +176,24 @@ export async function reconcileSessionHistory(
   request: HistoryReconcileRequest,
   historyRoots?: Partial<Record<Engine, readonly string[]>>,
 ): Promise<HistoryReconcileResult> {
-  if (request.engine === "claude" || request.engine === "codex") {
+  if (request.engine === AGENT_ENGINE.CLAUDE || request.engine === AGENT_ENGINE.CODEX) {
     requireSafeNativeSessionId(request.engine, request.nativeSessionId);
   }
-  if (request.history || (request.engine !== "claude" && request.engine !== "codex")) {
+  if (
+    request.history ||
+    (request.engine !== AGENT_ENGINE.CLAUDE && request.engine !== AGENT_ENGINE.CODEX)
+  ) {
     return reconcileNativeHistory(request);
   }
   const loaded = loadNativeHistory(request, historyRoots?.[request.engine]);
   if (!loaded) return reconcileNativeHistory(request);
   const result = reconcileNativeHistory({ ...request, history: loaded.records });
-  if (result.status !== "reconciled") return result;
+  if (result.status !== CONVERSATION_RECONCILIATION_STATUS.RECONCILED) return result;
   return {
     ...result,
-    status: loaded.complete ? "reconciled" : "partial",
+    status: loaded.complete
+      ? CONVERSATION_RECONCILIATION_STATUS.RECONCILED
+      : CONVERSATION_RECONCILIATION_STATUS.PARTIAL,
     completeness_reason: loaded.complete
       ? "supported native history loaded"
       : "native history contained malformed records",

@@ -1,3 +1,4 @@
+import { CAPABILITY_MANIFEST_INPUT_TYPE } from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { JsonScalar } from "../../actions/types.js";
 import type { CapabilityInputDeclarationV1, CapabilityManifestV1 } from "../manifest/types.js";
 import { patternMatches } from "../manifest/validation-helpers.js";
@@ -14,11 +15,11 @@ function fail(inputId: string, message: string): never {
 }
 
 function validatePublicValue(declaration: CapabilityInputDeclarationV1, value: JsonScalar): void {
-  if (declaration.type === "boolean") {
+  if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.BOOLEAN) {
     if (typeof value !== "boolean") fail(declaration.input_id, "requires a boolean");
     return;
   }
-  if (declaration.type === "integer") {
+  if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.INTEGER) {
     if (!Number.isSafeInteger(value)) fail(declaration.input_id, "requires an integer");
     const integer = value as number;
     if (declaration.min !== null && integer < declaration.min)
@@ -28,11 +29,14 @@ function validatePublicValue(declaration: CapabilityInputDeclarationV1, value: J
     return;
   }
   if (typeof value !== "string") fail(declaration.input_id, "requires a string");
-  if (declaration.type === "enum" && !declaration.enum_values.includes(value))
+  if (
+    declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.ENUM &&
+    !declaration.enum_values.includes(value)
+  )
     fail(declaration.input_id, "is outside its retained-manifest enum");
   if (declaration.pattern !== null && !patternMatches(declaration.pattern, value))
     fail(declaration.input_id, "does not match its retained-manifest pattern");
-  if (declaration.type === "project-path")
+  if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.PROJECT_PATH)
     canonicalRelativePrefix(value, `lock.inputs.${declaration.input_id}`, false);
 }
 
@@ -45,14 +49,14 @@ export function validateLockInputsAgainstManifest(
   for (const row of entry.public_inputs) {
     const declaration = declarations.get(row.input_id);
     if (!declaration) fail(row.input_id, "is absent from the retained manifest");
-    if (declaration.type === "secret-handle")
+    if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE)
       fail(row.input_id, "is secret-declared and cannot appear in public_inputs");
     validatePublicValue(declaration, row.value);
     present.add(row.input_id);
   }
   for (const inputId of entry.secret_input_ids) {
     const declaration = declarations.get(inputId);
-    if (!declaration || declaration.type !== "secret-handle")
+    if (!declaration || declaration.type !== CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE)
       fail(inputId, "is not a secret-handle in the retained manifest");
     if (present.has(inputId)) fail(inputId, "appears in both public and secret input sets");
     present.add(inputId);

@@ -1,21 +1,26 @@
 import {
+  type CapabilityHostActionKind,
+  HOST_ACTION_KIND,
+  isCapabilityHostActionKind,
+} from "../../actions/host-action-contract.js";
+import {
   type BrowserHostActionRequestV1,
   validateInternalHostAction,
 } from "../../actions/index.js";
 import { ConversationActionTargetUnsupportedError } from "../../orchestrator/conversation/conversation-action-domain.js";
 import type { CapabilityConversationProposalBaseV1 } from "../../orchestrator/conversation/conversation-action-service.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { CapabilityHostActionV1 } from "../planning/types.js";
 
 export type BrowserCapabilityActionV1 = Extract<
   BrowserHostActionRequestV1,
-  { type: `capability.${string}` }
+  { type: CapabilityHostActionKind }
 >;
 
 export function isCapabilityAction(
   candidate: BrowserHostActionRequestV1,
 ): candidate is BrowserCapabilityActionV1 {
-  return candidate.type.startsWith("capability.");
+  return isCapabilityHostActionKind(candidate.type);
 }
 
 function directAction(candidate: BrowserHostActionRequestV1): CapabilityHostActionV1 {
@@ -25,9 +30,10 @@ function directAction(candidate: BrowserHostActionRequestV1): CapabilityHostActi
 }
 
 function targetSelectors(candidate: BrowserCapabilityActionV1) {
-  return candidate.type === "capability.install" || candidate.type === "capability.retarget"
+  return candidate.type === HOST_ACTION_KIND.CAPABILITY_INSTALL ||
+    candidate.type === HOST_ACTION_KIND.CAPABILITY_RETARGET
     ? candidate.requested_targets
-    : candidate.type === "capability.update"
+    : candidate.type === HOST_ACTION_KIND.CAPABILITY_UPDATE
       ? candidate.requested_targets
       : null;
 }
@@ -41,7 +47,7 @@ export function assertConversationCapabilityTargets(
   if (!conversation.participants)
     throw new CapabilityRuntimeError(
       "conversation capability participant authority is unavailable",
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     );
   const participants = new Map(
     conversation.participants.map((participant) => [participant.participant_id, participant]),
@@ -51,19 +57,19 @@ export function assertConversationCapabilityTargets(
     if (selector.participant_id === null)
       throw new CapabilityRuntimeError(
         "conversation capability targets must name a current participant",
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     const participant = participants.get(selector.participant_id);
     if (!participant || participant.engine !== selector.engine)
       throw new CapabilityRuntimeError(
         "conversation capability target participant or engine is stale",
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     const key = `${selector.engine}\0${selector.participant_id}`;
     if (keys.has(key))
       throw new CapabilityRuntimeError(
         "conversation capability target selectors are duplicated",
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     keys.add(key);
   }

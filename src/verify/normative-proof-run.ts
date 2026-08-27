@@ -22,6 +22,7 @@ import {
   parseBunJunit,
   parsePlaywrightJson,
 } from "./normative-proof-report.js";
+import { VERIFY_RUNTIME_AUTHORITY } from "./runtime-authority.js";
 
 export { type ObservedCase, parseBunJunit, parsePlaywrightJson } from "./normative-proof-report.js";
 
@@ -257,7 +258,7 @@ export function runNormativeProofs(
         result = spawner(command.command, command.args, {
           cwd: base,
           encoding: "utf8",
-          timeout: 300_000,
+          timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
           maxBuffer: 64 * 1024 * 1024,
         });
         stdout = outputText(result.stdout);

@@ -1,3 +1,4 @@
+import { CAPABILITY_MANIFEST_PERMISSION_KIND } from "../../actions/capability-manifest-vocabulary-contract.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import type { CapabilityPermissionKindScopeV1 } from "../manifest/types.js";
 import { CapabilityValidationError, assertSortedUnique, bytewise } from "../wire/primitives.js";
@@ -16,20 +17,20 @@ function permissionKindScope(
   value: CapabilityPermissionKindScopeV1,
 ): CapabilityPermissionKindScopeV1 {
   switch (value.kind) {
-    case "filesystem":
-      return { kind: "filesystem", scope: value.scope };
-    case "network":
-      return { kind: "network", scope: value.scope };
-    case "process":
-      return { kind: "process", scope: value.scope };
-    case "shell":
-      return { kind: "shell", scope: value.scope };
-    case "config":
-      return { kind: "config", scope: value.scope };
-    case "secret":
-      return { kind: "secret", scope: value.scope };
-    case "hook":
-      return { kind: "hook", scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK, scope: value.scope };
   }
 }
 
@@ -41,24 +42,24 @@ export function permissionContains(
   validatePermissionKindScope(permissionKindScope(request), "request");
   if (grant.kind !== request.kind) return false;
   switch (grant.kind) {
-    case "filesystem":
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM:
       return (
-        request.kind === "filesystem" &&
+        request.kind === CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM &&
         grant.scope.root === request.scope.root &&
         grant.scope.access === request.scope.access &&
         segmentContains(grant.scope.path_prefix, request.scope.path_prefix, "/")
       );
-    case "network":
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK:
       return (
-        request.kind === "network" &&
+        request.kind === CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK &&
         grant.scope.transport === request.scope.transport &&
         grant.scope.host === request.scope.host &&
         (grant.scope.port ?? 443) === (request.scope.port ?? 443) &&
         segmentContains(grant.scope.path_prefix, request.scope.path_prefix, "/")
       );
-    case "process":
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS:
       return (
-        request.kind === "process" &&
+        request.kind === CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS &&
         grant.scope.executable_class === request.scope.executable_class &&
         arrayPrefix(grant.scope.argv_prefix, request.scope.argv_prefix) &&
         (!request.scope.allow_additional_args || grant.scope.allow_additional_args) &&
@@ -66,26 +67,27 @@ export function permissionContains(
           grant.scope.allow_additional_args ||
           grant.scope.argv_prefix.length === request.scope.argv_prefix.length)
       );
-    case "shell":
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL:
       return (
-        request.kind === "shell" && canonicalJson(grant.scope) === canonicalJson(request.scope)
+        request.kind === CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL &&
+        canonicalJson(grant.scope) === canonicalJson(request.scope)
       );
-    case "config":
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG:
       return (
-        request.kind === "config" &&
+        request.kind === CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG &&
         grant.scope.engine === request.scope.engine &&
         grant.scope.namespace === request.scope.namespace &&
         grant.scope.access === request.scope.access &&
         segmentContains(grant.scope.key_prefix, request.scope.key_prefix, ".")
       );
-    case "secret":
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET:
       return (
-        request.kind === "secret" &&
+        request.kind === CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET &&
         request.scope.input_ids.every((input) => grant.scope.input_ids.includes(input))
       );
-    case "hook":
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK:
       return (
-        request.kind === "hook" &&
+        request.kind === CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK &&
         grant.scope.engine === request.scope.engine &&
         grant.scope.hook_point === request.scope.hook_point &&
         (grant.scope.participant_id === null ||

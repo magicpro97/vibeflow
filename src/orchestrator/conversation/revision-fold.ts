@@ -1,42 +1,106 @@
 import type { DurableActionAuthorityReaderV1 } from "../../actions/index.js";
+import { PUBLIC_OPERATION_REVISION_PHASE } from "../../actions/protocol-contract.js";
 import { digestV1 } from "../../durability/index.js";
-import type { RevisionOperationV1 } from "./lineage-revision-operation.js";
+import type {
+  RevisionOperationV1,
+  RevisionPreparationPlanV1,
+} from "./lineage-revision-operation.js";
 import { validateRevisionActionAuthorityChain } from "./revision-action-authority.js";
 import {
   validateRevisionAuxiliaryAuthority,
   validateRevisionTransitionAuthority,
 } from "./revision-fold-validation.js";
 import {
+  REVISION_OPERATION_EVENT_PAYLOAD_KIND,
+  REVISION_OPERATION_EVENT_STORAGE,
+  REVISION_OPERATION_INITIAL_PHASE,
+  type RevisionOperationEventSourceStateV1,
+} from "./revision-operation-event-contract.js";
+import {
+  assertParticipantStartReceiptPlanBinding,
+  assertRevisionOperationPlanBinding,
+} from "./revision-participant-plan-binding.js";
+import {
   type ParticipantStartReceiptV1,
   advanceParticipantReceipt,
 } from "./revision-participant-receipt.js";
 import type { RevisionOperationEventV1, RevisionOperationStateV1 } from "./revision-planner.js";
 
+const revisionEdge = (
+  from: RevisionOperationEventSourceStateV1,
+  to: RevisionOperationStateV1,
+): string => `${from}\0${to}`;
+
 const EDGES = new Set([
-  "created\0preparing",
-  "preparing\0prepared",
-  "preparing\0abandoned",
-  "preparing\0needs_recovery",
-  "prepared\0abandoned",
-  "prepared\0needs_recovery",
-  "published\0starting",
-  "published\0needs_recovery",
-  "starting\0started",
-  "starting\0start_failed",
-  "starting\0needs_recovery",
-  "start_failed\0starting",
-  "start_failed\0needs_recovery",
-  "needs_recovery\0preparing",
-  "needs_recovery\0prepared",
-  "needs_recovery\0published",
-  "needs_recovery\0starting",
-  "needs_recovery\0started",
-  "needs_recovery\0start_failed",
-  "needs_recovery\0abandoned",
+  revisionEdge(REVISION_OPERATION_INITIAL_PHASE.CREATED, PUBLIC_OPERATION_REVISION_PHASE.PREPARING),
+  revisionEdge(PUBLIC_OPERATION_REVISION_PHASE.PREPARING, PUBLIC_OPERATION_REVISION_PHASE.PREPARED),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.PREPARING,
+    PUBLIC_OPERATION_REVISION_PHASE.ABANDONED,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.PREPARING,
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+  ),
+  revisionEdge(PUBLIC_OPERATION_REVISION_PHASE.PREPARED, PUBLIC_OPERATION_REVISION_PHASE.ABANDONED),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.PREPARED,
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+  ),
+  revisionEdge(PUBLIC_OPERATION_REVISION_PHASE.PUBLISHED, PUBLIC_OPERATION_REVISION_PHASE.STARTING),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.PUBLISHED,
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+  ),
+  revisionEdge(PUBLIC_OPERATION_REVISION_PHASE.STARTING, PUBLIC_OPERATION_REVISION_PHASE.STARTED),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.STARTING,
+    PUBLIC_OPERATION_REVISION_PHASE.START_FAILED,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.STARTING,
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.START_FAILED,
+    PUBLIC_OPERATION_REVISION_PHASE.STARTING,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.START_FAILED,
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+    PUBLIC_OPERATION_REVISION_PHASE.PREPARING,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+    PUBLIC_OPERATION_REVISION_PHASE.PREPARED,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+    PUBLIC_OPERATION_REVISION_PHASE.PUBLISHED,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+    PUBLIC_OPERATION_REVISION_PHASE.STARTING,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+    PUBLIC_OPERATION_REVISION_PHASE.STARTED,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+    PUBLIC_OPERATION_REVISION_PHASE.START_FAILED,
+  ),
+  revisionEdge(
+    PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY,
+    PUBLIC_OPERATION_REVISION_PHASE.ABANDONED,
+  ),
 ]);
 
 export interface FoldedRevisionOperationV1 {
-  state: RevisionOperationStateV1 | "created";
+  state: RevisionOperationStateV1 | typeof REVISION_OPERATION_INITIAL_PHASE.CREATED;
   last_sequence: number;
   last_event_digest: string | null;
   effect_action_operation_id: string;
@@ -46,9 +110,15 @@ export interface FoldedRevisionOperationV1 {
 export function foldRevisionOperation(
   operation: RevisionOperationV1,
   events: readonly RevisionOperationEventV1[],
-  options: { actionAuthority?: DurableActionAuthorityReaderV1 } = {},
+  options: {
+    actionAuthority?: DurableActionAuthorityReaderV1;
+    preparationPlan?: RevisionPreparationPlanV1;
+  } = {},
 ): FoldedRevisionOperationV1 {
-  let state: RevisionOperationStateV1 | "created" = "created";
+  if (options.preparationPlan)
+    assertRevisionOperationPlanBinding(operation, options.preparationPlan);
+  let state: RevisionOperationStateV1 | typeof REVISION_OPERATION_INITIAL_PHASE.CREATED =
+    REVISION_OPERATION_INITIAL_PHASE.CREATED;
   let priorDigest: string | null = null;
   let priorTime: string | null = null;
   let effectActionOperationId = operation.operation_id;
@@ -59,12 +129,15 @@ export function foldRevisionOperation(
       event.operation_id !== operation.operation_id ||
       event.sequence !== index ||
       event.previous_event_digest !== priorDigest ||
-      digestV1("VF-REVISION-OPERATION-EVENT\0v1\0", preimage) !== event.event_digest ||
+      digestV1(REVISION_OPERATION_EVENT_STORAGE.DIGEST_DOMAIN, preimage) !== event.event_digest ||
       (priorTime !== null && event.recorded_at < priorTime)
     )
       throw new Error("revision operation event sequence is invalid");
-    if (event.payload.kind === "state-transition") {
-      if (event.payload.from !== state || !EDGES.has(`${event.payload.from}\0${event.payload.to}`))
+    if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION) {
+      if (
+        event.payload.from !== state ||
+        !EDGES.has(revisionEdge(event.payload.from, event.payload.to))
+      )
         throw new Error("illegal revision operation state transition");
       effectActionOperationId = validateRevisionTransitionAuthority(
         event.payload,
@@ -80,12 +153,16 @@ export function foldRevisionOperation(
         effectActionOperationId,
         prefixDigest,
       );
-      if (event.payload.kind === "head-commit") state = "published";
-      if (event.payload.kind === "participant-start") {
+      if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.HEAD_COMMIT)
+        state = PUBLIC_OPERATION_REVISION_PHASE.PUBLISHED;
+      if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.PARTICIPANT_START) {
         const receipt = event.payload.receipt;
         if (receipt.operation_id !== operation.operation_id)
           throw new Error("participant receipt operation mismatch");
         advanceParticipantReceipt(participantReceipts.get(receipt.participant_id), receipt);
+        if (!options.preparationPlan)
+          throw new Error("participant receipt preparation plan authority is absent");
+        assertParticipantStartReceiptPlanBinding(operation, options.preparationPlan, receipt);
         participantReceipts.set(receipt.participant_id, receipt);
       }
     }

@@ -3,11 +3,17 @@ import {
   ActionAuthorityStore,
   type ActionAuthorityStoreOptions,
   type ActionDispatchRecordV1,
+  type ActionOperationDomainTerminalState,
   type ActionProposalResponseV1,
   type ActionRequestAuthorityV1,
   type ExpectedActionSourceV1,
   createDurableActionAuthorityReaderV1,
 } from "../../actions/index.js";
+import {
+  ACTION_DECISION,
+  type ActionApprovalChallengeClass,
+  type ActionDecision,
+} from "../../actions/public-action-contract.js";
 import {
   ConversationActionAuthorityResolverV1,
   multiplexActionAuthorityResolvers,
@@ -25,6 +31,7 @@ import type {
   CapabilityConversationProposalBaseV1,
   SharedActionAuthorityFacadeV1,
 } from "./conversation-action-service-types.js";
+import type { AgentActionCandidateReviewPhaseV1 } from "./conversation-agent-action-candidate-contract.js";
 import { ConversationCapabilityDispatchReservationStoreV1 } from "./conversation-capability-dispatch-reservation.js";
 import type { ConversationRevisionStore } from "./revision-store.js";
 export type {
@@ -38,7 +45,7 @@ interface DomainPreparedAuthorityV1 {
 }
 
 interface DomainTerminalAuthorityV1 extends DomainPreparedAuthorityV1 {
-  outcome: "succeeded" | "failed" | "needs_recovery";
+  outcome: ActionOperationDomainTerminalState;
 }
 export class ConversationActionService {
   private readonly store: ActionAuthorityStore;
@@ -54,7 +61,7 @@ export class ConversationActionService {
   private agentProposalReviewValidator?: (input: {
     proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
     now: string;
-    phase: "review" | "dispatch";
+    phase: AgentActionCandidateReviewPhaseV1;
     approval_id: string | null;
   }) => string;
   private readonly listeners = new Map<string, Set<() => void>>();
@@ -165,7 +172,7 @@ export class ConversationActionService {
     validator: (input: {
       proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
       now: string;
-      phase: "review" | "dispatch";
+      phase: AgentActionCandidateReviewPhaseV1;
       approval_id: string | null;
     }) => string,
   ): void {
@@ -243,7 +250,7 @@ export class ConversationActionService {
         proposal_id: created.proposal.proposal_id,
         proposal_digest: created.proposal.proposal_digest,
         authority,
-        decision: "approved",
+        decision: ACTION_DECISION.APPROVED,
         challenge_id: null,
         challenge_response: null,
       });
@@ -325,7 +332,7 @@ export class ConversationActionService {
   challenge(input: {
     proposal_id: string;
     proposal_digest: string;
-    challenge_class: "fresh-user-scope" | "public-literal";
+    challenge_class: ActionApprovalChallengeClass;
     authority: ActionRequestAuthorityV1;
   }) {
     return this.authority.issueChallenge(input);
@@ -334,7 +341,7 @@ export class ConversationActionService {
     proposal_id: string;
     proposal_digest: string;
     authority: ActionRequestAuthorityV1;
-    decision: "approved" | "denied";
+    decision: ActionDecision;
     challenge_id: string | null;
     challenge_response: string | null;
   }) {

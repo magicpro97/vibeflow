@@ -1,4 +1,5 @@
 import { digestV1 } from "../../durability/index.js";
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import type { ConversationLineageReadV1 } from "./lineage-reader.js";
 import {
   type LineageHeadRecordV1,
@@ -163,7 +164,10 @@ export function deriveRevisionClaimEpoch(
     current.revision_claim_epoch !== 1
   )
     throw new Error("invalid initial revision reservation");
-  if (input.root_session_id !== lineage.root_session_id || head.head_status !== "committed")
+  if (
+    input.root_session_id !== lineage.root_session_id ||
+    head.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED
+  )
     throw new Error("revision reservation root is not committed");
   const nodes = new Map(lineage.nodes.map((node) => [key(node.node), node]));
   const parent = nodes.get(key(input.parent));

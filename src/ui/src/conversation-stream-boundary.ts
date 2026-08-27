@@ -1,0 +1,30 @@
+import { parseConversationSseRecord, parseConversationSseSnapshot } from "./conversation-api.js";
+import type { ConversationSnapshot, ConversationTraceRecord } from "./conversation-types.js";
+
+export function acceptConversationSnapshotFrame(
+  raw: string,
+  conversationId: string,
+  apply: (snapshot: ConversationSnapshot) => boolean,
+): boolean {
+  try {
+    apply(parseConversationSseSnapshot(raw, conversationId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function acceptConversationTraceFrame(
+  raw: string,
+  conversationId: string,
+  apply: (record: ConversationTraceRecord) => boolean,
+): boolean {
+  try {
+    const record = parseConversationSseRecord(raw);
+    if (record.conversation_id !== conversationId) return false;
+    apply(record);
+    return true;
+  } catch {
+    return false;
+  }
+}

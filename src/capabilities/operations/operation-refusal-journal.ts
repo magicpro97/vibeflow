@@ -2,18 +2,22 @@ import { digestV1 } from "../../durability/index.js";
 import type { CapabilityFabricPlanV1, CapabilityRuntimeAuthorityV1 } from "../planning/types.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
-import type {
-  CapabilityPreEffectRefusalReasonV1,
-  CapabilityWalEventV1,
-  CapabilityWalPayloadV1,
+import {
+  CAPABILITY_PRE_EFFECT_AUTHORITY_REFUSAL_REASONS,
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_PRE_EFFECT_OBSERVED_STATE,
+  CAPABILITY_PRE_EFFECT_REFUSAL_REASON,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityPreEffectFrontierV1,
+  type CapabilityPreEffectObservedStateV1,
+  type CapabilityPreEffectRefusalReasonV1,
+  type CapabilityWalEventV1,
+  type CapabilityWalPayloadV1,
 } from "../wire/operation.js";
 import { bytewise } from "../wire/primitives.js";
 import type { CapabilityAuthorityRefusalCheckV1 } from "./authority-frontier.js";
-import { CapabilityRuntimeError } from "./errors.js";
-import {
-  type CapabilityPreEffectObservedStateV1,
-  persistCapabilityPreEffectObservation,
-} from "./refusal-evidence.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
+import { persistCapabilityPreEffectObservation } from "./refusal-evidence.js";
 import type { CapabilityRuntimeFaultPointV1 } from "./types.js";
 
 export interface CapabilityRefusalAppendInputV1 {
@@ -24,7 +28,7 @@ export interface CapabilityRefusalAppendInputV1 {
   stepId: string | null;
   targetIds: string[];
   held: CapabilityScopeLockV1;
-  frontier?: "operation" | "adapter-step" | "health-batch" | "lock-publication";
+  frontier?: CapabilityPreEffectFrontierV1;
   bindingKey?: string;
   expectedDigest?: string | null;
   observedDigest?: string | null;
@@ -54,21 +58,21 @@ const authorityPair = (value: CapabilityRuntimeAuthorityV1): string =>
     authority_head_digest: value.authority_head_digest,
   });
 
+const DEFAULT_BINDING_KEY_BY_REASON = Object.freeze({
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SCOPE_BASE_STALE]: "scope",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.AUTHORITY_HEAD_STALE]: "general-authority",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.POLICY_STALE]: "policy",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.GRANT_STALE]: "grant:aggregate",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PERMISSION_STALE]: "permission:aggregate",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.USER_PREREQUISITE_STALE]: "prerequisite:aggregate",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SOURCE_AUTHORITY_STALE]: "source:aggregate",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PRIVATE_INPUT_STALE]: "private-input:aggregate",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.ENFORCEMENT_STALE]: "enforcement:aggregate",
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.OWNED_PREIMAGE_STALE]: "ownership:aggregate",
+} satisfies Record<CapabilityPreEffectRefusalReasonV1, string>);
+
 function defaultBindingKey(reason: CapabilityPreEffectRefusalReasonV1): string {
-  return (
-    {
-      "scope-base-stale": "scope",
-      "authority-head-stale": "general-authority",
-      "policy-stale": "policy",
-      "grant-stale": "grant:aggregate",
-      "permission-stale": "permission:aggregate",
-      "user-prerequisite-stale": "prerequisite:aggregate",
-      "source-authority-stale": "source:aggregate",
-      "private-input-stale": "private-input:aggregate",
-      "enforcement-stale": "enforcement:aggregate",
-      "owned-preimage-stale": "ownership:aggregate",
-    } satisfies Record<CapabilityPreEffectRefusalReasonV1, string>
-  )[reason];
+  return DEFAULT_BINDING_KEY_BY_REASON[reason];
 }
 
 export function appendCapabilityRefusal(
@@ -78,36 +82,31 @@ export function appendCapabilityRefusal(
 ): void {
   const { operationId, plan, reason, planId, stepId, targetIds, held } = input;
   const expectedAuthority = plan.runtime_closure.authority;
-  const authorityReasons: readonly CapabilityPreEffectRefusalReasonV1[] = [
-    "authority-head-stale",
-    "policy-stale",
-    "grant-stale",
-    "permission-stale",
-    "source-authority-stale",
-  ];
-  const authorityReason = authorityReasons.includes(reason);
+  const authorityReason = CAPABILITY_PRE_EFFECT_AUTHORITY_REFUSAL_REASONS.some(
+    (candidate) => candidate === reason,
+  );
   if (
     authorityReason !== Boolean(input.authorityCheck) ||
     (input.authorityCheck && input.authorityCheck.reason !== reason)
   )
     throw new CapabilityRuntimeError(
       "pre-effect refusal lacks its exact authority decision snapshot",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   const observed = input.authorityCheck?.observed;
   const currentLock = options.storage.readStatus().lock;
   const defaultDigests: [string | null, string | null] =
-    reason === "scope-base-stale"
+    reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SCOPE_BASE_STALE
       ? [plan.base_lock_digest, currentLock?.content_digest ?? null]
-      : reason === "authority-head-stale"
+      : reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.AUTHORITY_HEAD_STALE
         ? [authorityPair(expectedAuthority), authorityPair(observed as typeof expectedAuthority)]
-        : reason === "policy-stale"
+        : reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.POLICY_STALE
           ? [expectedAuthority.policy_digest, observed?.policy_digest ?? null]
-          : reason === "grant-stale"
+          : reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.GRANT_STALE
             ? [expectedAuthority.grant_digest, observed?.grant_digest ?? null]
-            : reason === "permission-stale"
+            : reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PERMISSION_STALE
               ? [expectedAuthority.permission_digest, observed?.permission_digest ?? null]
-              : reason === "source-authority-stale"
+              : reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SOURCE_AUTHORITY_STALE
                 ? [plan.source_authority_set_digest, observed?.source_authority_set_digest ?? null]
                 : [null, null];
   const expectedDigest =
@@ -115,7 +114,7 @@ export function appendCapabilityRefusal(
   const observedDigest =
     input.observedDigest === undefined ? defaultDigests[1] : input.observedDigest;
   const checkedAt = input.authorityCheck?.checked_at ?? options.now();
-  const frontier = input.frontier ?? "adapter-step";
+  const frontier = input.frontier ?? CAPABILITY_PRE_EFFECT_FRONTIER.ADAPTER_STEP;
   const adapterPlan = planId
     ? plan.adapter_plans.find((candidate) => candidate.plan_id === planId)
     : null;
@@ -139,37 +138,49 @@ export function appendCapabilityRefusal(
         target_ids: [...targetIds].sort(bytewise),
         expected_digest: expectedDigest,
         observed_digest: observedDigest,
-        observed_state: input.observedState ?? (observedDigest === null ? "absent" : "changed"),
+        observed_state:
+          input.observedState ??
+          (observedDigest === null
+            ? CAPABILITY_PRE_EFFECT_OBSERVED_STATE.ABSENT
+            : CAPABILITY_PRE_EFFECT_OBSERVED_STATE.CHANGED),
       },
       expected_source_support:
-        reason === "source-authority-stale"
+        reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SOURCE_AUTHORITY_STALE
           ? (input.expectedSupport ?? {
               schema_version: "1.0",
               source_authority_set_digest: plan.source_authority_set_digest,
             })
           : null,
       observed_source_support:
-        reason === "source-authority-stale"
+        reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SOURCE_AUTHORITY_STALE
           ? (input.observedSupport ?? {
               schema_version: "1.0",
               source_authority_set_digest: observed?.source_authority_set_digest ?? null,
             })
           : null,
       expected_user_prerequisite_support:
-        reason === "user-prerequisite-stale" ? (input.expectedSupport ?? null) : null,
+        reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.USER_PREREQUISITE_STALE
+          ? (input.expectedSupport ?? null)
+          : null,
       observed_user_prerequisite_support:
-        reason === "user-prerequisite-stale" ? (input.observedSupport ?? null) : null,
+        reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.USER_PREREQUISITE_STALE
+          ? (input.observedSupport ?? null)
+          : null,
       expected_private_broker_state:
-        reason === "private-input-stale" ? (input.expectedSupport ?? null) : null,
+        reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PRIVATE_INPUT_STALE
+          ? (input.expectedSupport ?? null)
+          : null,
       observed_private_broker_state:
-        reason === "private-input-stale" ? (input.observedSupport ?? null) : null,
+        reason === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PRIVATE_INPUT_STALE
+          ? (input.observedSupport ?? null)
+          : null,
     },
   });
   options.fault?.("after-refusal-observation");
   append(
     operationId,
     {
-      kind: "pre-effect-refusal",
+      kind: CAPABILITY_WAL_PAYLOAD_KIND.PRE_EFFECT_REFUSAL,
       refusal: {
         schema_version: "1.0",
         operation_id: observation.operation_id,

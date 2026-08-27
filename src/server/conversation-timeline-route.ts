@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import { CatalogCursorError } from "../orchestrator/conversation/catalog-cursor.js";
 import { StaleTimelineCursorError } from "../orchestrator/conversation/catalog-timeline-cursor.js";
 import { ConversationLineageNotFoundError } from "../orchestrator/conversation/lineage-service.js";
@@ -38,9 +39,9 @@ function parseTimelineQuery(url: URL): { cursor?: string; limit?: number } {
 
 function mapTimelineError(error: unknown): Response {
   if (error instanceof StaleTimelineCursorError)
-    return conversationReadError("stale_timeline_cursor", {
+    return conversationReadError(PUBLIC_ERROR_CODE.STALE_TIMELINE_CURSOR, {
       message: "The selected conversation timeline changed during pagination.",
-      recoveryAction: "restart-pagination",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
       details: {
         restart_cursor: error.restart_cursor,
         head: error.head,
@@ -49,9 +50,9 @@ function mapTimelineError(error: unknown): Response {
       },
     });
   if (error instanceof TimelineHeadUnresolvedError)
-    return conversationReadError("lineage_head_unresolved", {
+    return conversationReadError(PUBLIC_ERROR_CODE.LINEAGE_HEAD_UNRESOLVED, {
       message: "The conversation lineage needs a head selection.",
-      recoveryAction: "select-lineage-head",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.SELECT_LINEAGE_HEAD,
       details: {
         root_session_id: error.root_session_id,
         head_status: error.head_status,
@@ -62,24 +63,24 @@ function mapTimelineError(error: unknown): Response {
     });
   if (error instanceof CatalogCursorError)
     return conversationReadError(
-      error.code === "unsupported_schema_version"
-        ? "unsupported_schema_version"
-        : "invalid_request",
+      error.code === PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION
+        ? PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION
+        : PUBLIC_ERROR_CODE.INVALID_REQUEST,
       { message: "The conversation timeline cursor is invalid." },
     );
   if (error instanceof ConversationLineageNotFoundError)
-    return conversationReadError("not_found", {
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
       message: "The conversation timeline was not found.",
     });
   if (error instanceof LineageAuthorityCorruptError)
-    return conversationReadError("authority_corrupt", {
+    return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
       message: "Conversation timeline authority is corrupt.",
-      recoveryAction: "repair-authority",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
     });
-  return conversationReadError("service_unavailable", {
+  return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
     message: "The conversation timeline is unavailable.",
     retryable: true,
-    recoveryAction: "retry",
+    recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
   });
 }
 
@@ -90,14 +91,20 @@ export async function handleConversationTimelineRoute(
   rootSessionId: string,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "GET")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   let input: { cursor?: string; limit?: number };
   try {
     input = parseTimelineQuery(url);
   } catch {
-    return conversationReadError("invalid_request", { message: "The timeline query is invalid." });
+    return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
+      message: "The timeline query is invalid.",
+    });
   }
   try {
     const recipient = deriveBrowserActionAuthority(request, rootSessionId).actor.public_actor_id;

@@ -1,4 +1,9 @@
-import type { ActionAuthorityStore } from "../../actions/index.js";
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+import {
+  type ActionAuthorityStore,
+  isActionOperationProposalOpenState,
+} from "../../actions/index.js";
+import { ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import {
   projectConversationActionSnapshot,
   projectConversationReceiptEvents,
@@ -20,10 +25,10 @@ export class ConversationActionServiceProjectionV1 {
     const target =
       action &&
       [
-        "conversation.abandon_revision_operation",
-        "conversation.retry_revision_operation",
-        "conversation.reconcile_revision_operation",
-      ].includes(action.type) &&
+        HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION,
+        HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION,
+        HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION,
+      ].some((candidate) => candidate === action.type) &&
       "revision_operation_id" in action
         ? action.revision_operation_id
         : operationId;
@@ -52,8 +57,8 @@ export class ConversationActionServiceProjectionV1 {
       .list()
       .filter(
         (snapshot) =>
-          (snapshot.state === "pending_review" || snapshot.state === "approved") &&
-          snapshot.proposal.domain === "conversation" &&
+          isActionOperationProposalOpenState(snapshot.state) &&
+          snapshot.proposal.domain === ACTION_DOMAIN.CONVERSATION &&
           snapshot.proposal.base.conversation_id === conversationId,
       )
       .map((snapshot) =>
@@ -74,7 +79,7 @@ export class ConversationActionServiceProjectionV1 {
       .list()
       .filter(
         ({ proposal }) =>
-          proposal.domain === "conversation" &&
+          proposal.domain === ACTION_DOMAIN.CONVERSATION &&
           proposal.base.conversation_id === input.conversation_id &&
           proposal.base.revision_id === input.revision_id &&
           proposal.origin_event_id === input.origin_event_id,

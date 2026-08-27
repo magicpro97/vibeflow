@@ -1,3 +1,15 @@
+import {
+  CAPABILITY_AUTHORITY_CHANGES,
+  CAPABILITY_GRANT_TRANSITION,
+  CAPABILITY_GRANT_TRANSITIONS,
+} from "../../actions/capability-security-contract.js";
+import {
+  AUTHORIZABLE_ACTION_KINDS,
+  CAPABILITY_AUTHORIZATION_ACTION_KIND,
+} from "../../actions/host-action-contract.js";
+import { CREDENTIAL_CLASSES } from "../../actions/public-action-vocabulary-contract.js";
+import { ENGINES } from "../../core/agent-contract.js";
+import { CAPABILITY_SCOPE, CAPABILITY_SCOPES } from "../../core/capability-contract.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import {
   CapabilityValidationError,
@@ -20,7 +32,6 @@ import {
   grantFrameDigest,
 } from "./digests.js";
 import {
-  AUTHORITY_SCOPES as SCOPES,
   validateCommonAuthorityFrame as commonFrame,
   nullableAuthorityDigest as nullableDigest,
 } from "./record-validation.js";
@@ -44,52 +55,31 @@ export {
   validateTrustFrame,
 } from "./frame-validation.js";
 
-const ENGINES = ["claude", "codex", "copilot", "opencode", "antigravity"] as const;
-const CREDENTIALS = [
-  "loopback-session",
-  "interactive-tty",
-  "automation-grant",
-  "recovery",
-] as const;
-const ACTION_TYPES = [
-  "conversation.add_participant",
-  "conversation.remove_participant",
-  "conversation.update_participant",
-  "conversation.update_settings",
-  "conversation.continue_message",
-  "conversation.select_lineage_head",
-  "conversation.associate_lineages",
-  "conversation.publish_suspected_literal",
-  "conversation.stop_operation",
-  "conversation.abandon_revision_operation",
-  "conversation.retry_revision_operation",
-  "conversation.reconcile_revision_operation",
-  "context.compact",
-  "capability.install",
-  "capability.update",
-  "capability.configure",
-  "capability.retarget",
-  "capability.remove",
-  "capability.rollback_scope",
-  "capability.restore_package",
-  "capability.repair",
-  "capability.adopt",
-  "grant.create",
-  "grant.renew",
-  "grant.revoke",
-  "policy.update_authority",
-  "secret.revoke",
-  "registry.trust_key",
-  "authority.repair",
-  "capability.discover",
-] as const;
+type SameUnion<Left, Right> = Exclude<Left, Right> extends never
+  ? Exclude<Right, Left> extends never
+    ? true
+    : false
+  : false;
+
+export { CAPABILITY_AUTHORIZATION_ACTION_KIND };
+
+export const GRANT_FRAME_ACTION_TYPES =
+  AUTHORIZABLE_ACTION_KINDS satisfies readonly GrantFrameV1["action_types"][number][];
+
+const _grantActionTypeParity = true satisfies SameUnion<
+  (typeof GRANT_FRAME_ACTION_TYPES)[number],
+  GrantFrameV1["action_types"][number]
+>;
+void _grantActionTypeParity;
 
 export function validateAuthorityIdentity(value: AuthorityScopeIdentityRecordV1): void {
   assertAuthorityIdentityShape(value);
-  if (value.schema_version !== "1.0" || !SCOPES.includes(value.scope))
+  if (value.schema_version !== "1.0" || !CAPABILITY_SCOPES.includes(value.scope))
     throw new CapabilityValidationError("invalid authority identity schema/scope", "identity");
   const pattern =
-    value.scope === "project" ? /^vf-project-[a-f0-9]{64}$/ : /^vf-user-authority-[a-f0-9]{64}$/;
+    value.scope === CAPABILITY_SCOPE.PROJECT
+      ? /^vf-project-[a-f0-9]{64}$/
+      : /^vf-user-authority-[a-f0-9]{64}$/;
   if (!pattern.test(value.identity_id))
     throw new CapabilityValidationError(
       "authority identity ID does not match scope",
@@ -108,7 +98,7 @@ export function validateAuthorityHead(value: AuthorityEpochHeadV1): void {
   assertAuthorityHeadShape(value);
   if (value.schema_version !== "1.0")
     throw new CapabilityValidationError("invalid authority head schema", "head.schema_version");
-  enumeration(value.scope, SCOPES, "head.scope");
+  enumeration(value.scope, CAPABILITY_SCOPES, "head.scope");
   integer(value.authority_epoch, "head.authority_epoch");
   integer(value.trust_epoch, "head.trust_epoch");
   digest(value.scope_identity_digest, "head.scope_identity_digest");
@@ -153,14 +143,14 @@ export function validateAuthorityHead(value: AuthorityEpochHeadV1): void {
 export function validateGrantFrame(frame: GrantFrameV1): void {
   assertGrantFrameShape(frame);
   commonFrame(frame);
-  enumeration(frame.scope, SCOPES, "grant.scope");
+  enumeration(frame.scope, CAPABILITY_SCOPES, "grant.scope");
   assertAuthorityLocatorScope(
     frame.action_root_locator,
     frame.scope,
     frame.scope_identity_digest,
     "grant.action_root_locator",
   );
-  enumeration(frame.transition, ["issued", "renewed", "revoked"] as const, "grant.transition");
+  enumeration(frame.transition, CAPABILITY_GRANT_TRANSITIONS, "grant.transition");
   integer(frame.grant_sequence, "grant.grant_sequence", 1);
   nullableDigest(frame.previous_frame_digest, "grant.previous_frame_digest");
   digest(frame.scope_identity_digest, "grant.scope_identity_digest");
@@ -168,7 +158,7 @@ export function validateGrantFrame(frame: GrantFrameV1): void {
     throw new CapabilityValidationError("invalid grant ID", "grant.grant_id");
   assertSortedUnique(frame.action_types, bytewise, "grant.action_types");
   frame.action_types.forEach((value, index) =>
-    enumeration(value, ACTION_TYPES, `grant.action_types[${index}]`),
+    enumeration(value, GRANT_FRAME_ACTION_TYPES, `grant.action_types[${index}]`),
   );
   assertSortedUnique(frame.target_engines, bytewise, "grant.target_engines");
   frame.target_engines.forEach((value, index) =>
@@ -191,13 +181,17 @@ export function validateGrantFrame(frame: GrantFrameV1): void {
     max: 512,
     ascii: true,
   });
-  enumeration(frame.principal.credential_class, CREDENTIALS, "grant.principal.credential_class");
+  enumeration(
+    frame.principal.credential_class,
+    CREDENTIAL_CLASSES,
+    "grant.principal.credential_class",
+  );
   validatePublicActor(frame.acted_by, "grant.acted_by");
   const notBefore = timestamp(frame.not_before, "grant.not_before");
   const expires = timestamp(frame.expires_at, "grant.expires_at");
   if (expires <= notBefore)
     throw new CapabilityValidationError("grant expiry must follow not-before", "grant.expires_at");
-  if ((frame.transition === "revoked") !== (frame.revoked_at !== null))
+  if ((frame.transition === CAPABILITY_GRANT_TRANSITION.REVOKED) !== (frame.revoked_at !== null))
     throw new CapabilityValidationError(
       "grant revoked timestamp nullability mismatch",
       "grant.revoked_at",
@@ -218,24 +212,14 @@ export function validateGrantFrame(frame: GrantFrameV1): void {
 export function validateAuthorityEvent(event: AuthorityEpochEventV1): void {
   assertAuthorityEventShape(event);
   commonFrame(event);
-  enumeration(event.scope, SCOPES, "event.scope");
+  enumeration(event.scope, CAPABILITY_SCOPES, "event.scope");
   assertAuthorityLocatorScope(
     event.action_root_locator,
     event.scope,
     event.scope_identity_digest,
     "event.action_root_locator",
   );
-  enumeration(
-    event.change,
-    [
-      "grant-changed",
-      "policy-changed",
-      "secret-revoked",
-      "registry-trust-changed",
-      "authority-repaired",
-    ] as const,
-    "event.change",
-  );
+  enumeration(event.change, CAPABILITY_AUTHORITY_CHANGES, "event.change");
   integer(event.authority_epoch, "event.authority_epoch", 1);
   nullableDigest(event.previous_event_digest, "event.previous_event_digest");
   digest(event.scope_identity_digest, "event.scope_identity_digest");

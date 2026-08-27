@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import {
   type ConversationActionRouteAuthorityV1,
   handleConversationActionRoute,
@@ -152,10 +153,10 @@ export async function handleConversationBrowserRoute(
           request,
           conversationId,
         )
-      : conversationReadError("service_unavailable", {
+      : conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
           message: "Legacy adoption inspection is unavailable.",
           retryable: true,
-          recoveryAction: "retry",
+          recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
         });
   if (path.length === 4 && resource === "events" && path[2] && path[3] === "reactions")
     return handleConversationReactionRoute(

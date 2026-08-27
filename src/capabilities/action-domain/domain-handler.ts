@@ -1,4 +1,6 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_ROOT_LOCATOR_KIND,
   type ActionApprovalChallengeRequestV1,
   type ActionApprovalRequestV1,
   type ActionCancelRequestV1,
@@ -6,8 +8,21 @@ import {
   ActionConflictError,
   type ActionProposalResponseV1,
   type BrowserHostActionRequestV1,
+  isActionOperationDispatchBeginState,
+  isActionOperationDomainTerminalState,
+  isActionOperationProposalOpenState,
   projectActionSnapshot,
 } from "../../actions/index.js";
+import {
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+} from "../../actions/public-action-contract.js";
+import {
+  CAPABILITY_PLAN_STATUS,
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  type CapabilityRuntimeErrorCodeV1,
+  type CapabilityScope,
+} from "../../core/capability-contract.js";
 import type {
   ConversationActionDomainPlannerExecutorV1,
   ConversationActionProposalContextV1,
@@ -74,14 +89,14 @@ export class CapabilityConversationActionDomainV1
   }
 
   candidateFailureDisposition(error: unknown): "reject" | "retry" {
-    const deterministic = [
-      "action-required",
-      "package-not-found",
-      "ambiguous-package",
-      "invalid-plan",
-      "scope-base-stale",
-    ];
-    return error instanceof CapabilityRuntimeError && deterministic.includes(error.runtime_code)
+    const deterministic: ReadonlySet<CapabilityRuntimeErrorCodeV1> = new Set([
+      CAPABILITY_RUNTIME_ERROR_CODE.ACTION_REQUIRED,
+      CAPABILITY_RUNTIME_ERROR_CODE.PACKAGE_NOT_FOUND,
+      CAPABILITY_RUNTIME_ERROR_CODE.AMBIGUOUS_PACKAGE,
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+      CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_BASE_STALE,
+    ]);
+    return error instanceof CapabilityRuntimeError && deterministic.has(error.runtime_code)
       ? "reject"
       : "retry";
   }
@@ -93,7 +108,7 @@ export class CapabilityConversationActionDomainV1
   }) {
     const selected = this.actions.resolveCapabilityActionRoot(input.conversation_id);
     const locator = {
-      kind: "conversation" as const,
+      kind: ACTION_ROOT_LOCATOR_KIND.CONVERSATION,
       root_session_id: selected.root_session_id,
     };
     this.runtime.bindActionAuthority(locator, this.actions.authority.reader);
@@ -109,7 +124,7 @@ export class CapabilityConversationActionDomainV1
       expected: context.request.expected,
     });
     const locator = {
-      kind: "conversation" as const,
+      kind: ACTION_ROOT_LOCATOR_KIND.CONVERSATION,
       root_session_id: conversation.root_session_id,
     };
     this.runtime.bindActionAuthority(locator, this.actions.authority.reader);
@@ -118,9 +133,9 @@ export class CapabilityConversationActionDomainV1
       throw new ConversationActionTargetUnsupportedError(candidate.type);
     const service = this.runtime.service(candidate.scope);
     const action: CapabilityHostActionV1 =
-      candidate.type === "capability.adopt"
+      candidate.type === HOST_ACTION_KIND.CAPABILITY_ADOPT
         ? {
-            type: "capability.adopt",
+            type: HOST_ACTION_KIND.CAPABILITY_ADOPT,
             scope: candidate.scope,
             candidate: service.resolveAdoptCandidate(candidate, {
               scope: candidate.scope,
@@ -131,23 +146,26 @@ export class CapabilityConversationActionDomainV1
     const graph = service.prepareIntentGraph({
       schema_version: "1.0",
       action,
-      planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+      planning_options: {
+        mode: ACTION_PLANNING_MODE.DURABLE,
+        network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+      },
       action_root_locator: locator,
       request_authority: context.authority,
     });
     const { plan } = graph;
-    if (plan.status !== "planned")
+    if (plan.status !== CAPABILITY_PLAN_STATUS.PLANNED)
       throw new CapabilityRuntimeError(
-        plan.status === "no-op"
+        plan.status === CAPABILITY_PLAN_STATUS.NO_OP
           ? "capability intent is already satisfied"
           : "capability intent requires user or external action",
-        "action-required",
+        CAPABILITY_RUNTIME_ERROR_CODE.ACTION_REQUIRED,
       );
     const status = service.options.storage.readStatus();
     if ((status.lock?.content_digest ?? null) !== plan.base_lock_digest)
       throw new CapabilityRuntimeError(
         "capability base changed during proposal",
-        "scope-base-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_BASE_STALE,
       );
     const currentConversation = this.actions.resolveCapabilityProposalBase({
       conversation_id: context.conversation_id,
@@ -181,9 +199,7 @@ export class CapabilityConversationActionDomainV1
     return this.actions.authority
       .list()
       .filter(
-        (row) =>
-          (row.state === "pending_review" || row.state === "approved") &&
-          this.owned(row, conversationId),
+        (row) => isActionOperationProposalOpenState(row.state) && this.owned(row, conversationId),
       )
       .map((row) => this.project(row));
   }
@@ -207,11 +223,14 @@ export class CapabilityConversationActionDomainV1
   async events(conversationId: string, proposalId: string) {
     const snapshot = this.snapshot(conversationId, proposalId);
     if (!snapshot) return null;
-    const scope = snapshot.proposal.base.capability_scope as "project" | "user";
+    const scope = snapshot.proposal.base.capability_scope as CapabilityScope;
     const service = this.runtime.service(scope);
     const authority = service.options.actionAuthority;
     if (!authority)
-      throw new CapabilityRuntimeError("action authority is unavailable", "service-unavailable");
+      throw new CapabilityRuntimeError(
+        "action authority is unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
     return projectCapabilityActionEvents(snapshot, service.options.storage, authority);
   }
 
@@ -254,12 +273,12 @@ export class CapabilityConversationActionDomainV1
     if (!snapshot) throw new ConversationActionTargetUnsupportedError(null);
     const locator = snapshot.proposal.action_root_locator;
     if (
-      locator.kind !== "conversation" ||
+      locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
       locator.root_session_id !== snapshot.proposal.base.root_session_id
     )
       throw new CapabilityRuntimeError(
         "conversation capability proposal selected another action root",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     this.runtime.bindActionAuthority(locator, this.actions.authority.reader);
     if (
@@ -276,11 +295,11 @@ export class CapabilityConversationActionDomainV1
       proposal_digest: context.request.proposal_digest,
       authority: context.authority,
     });
-    if (["succeeded", "failed", "needs_recovery"].includes(snapshot.state)) {
+    if (isActionOperationDomainTerminalState(snapshot.state)) {
       this.dispatchRuntime.releaseTerminal(snapshot);
       return { schema_version: "1.0" as const, operation: this.project(snapshot).operation };
     }
-    if (!["approved", "committing"].includes(snapshot.state)) {
+    if (!isActionOperationDispatchBeginState(snapshot.state)) {
       this.dispatchRuntime.releaseAborted(snapshot);
       throw new ActionConflictError(
         "stale_proposal",
@@ -313,13 +332,13 @@ export class CapabilityConversationActionDomainV1
     const locator = snapshot.proposal.action_root_locator;
     const resolved = this.actions.resolveCapabilityActionRoot(conversationId);
     if (
-      locator.kind !== "conversation" ||
+      locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
       locator.root_session_id !== resolved.root_session_id ||
       snapshot.proposal.base.root_session_id !== resolved.root_session_id
     )
       throw new CapabilityRuntimeError(
         "conversation capability proposal selected another action root",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     this.runtime.bindActionAuthority(locator, this.actions.authority.reader);
     return snapshot;
@@ -362,7 +381,10 @@ export class CapabilityConversationActionDomainV1
     const service = this.runtime.service(scope);
     const authority = service.options.actionAuthority;
     if (!authority)
-      throw new CapabilityRuntimeError("action authority is unavailable", "service-unavailable");
+      throw new CapabilityRuntimeError(
+        "action authority is unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
     return projectCapabilityActionSnapshot(snapshot, service.options.storage, authority);
   }
 }

@@ -932,6 +932,47 @@ describe("parseMarketplace", () => {
     const dir = withMarketplace(JSON.stringify({ schemaVersion: 1, skills: ["bad"] }));
     expect(parseMarketplace(dir).errors).toContain("marketplace.json: invalid skill entry");
   });
+
+  test("rejects invented marketplace status and scope values", () => {
+    const dir = withMarketplace(
+      JSON.stringify({
+        schemaVersion: 1,
+        skills: [
+          { name: "bad-status", version: "1.0", status: "invented" },
+          { name: "bad-scope", version: "1.0", status: "verified", scope: "planet" },
+        ],
+      }),
+    );
+    const { skills, errors } = parseMarketplace(dir);
+    expect(skills).toEqual([]);
+    expect(errors).toContain('marketplace.json: skill "bad-status" invalid status');
+    expect(errors).toContain('marketplace.json: skill "bad-scope" invalid scope');
+  });
+
+  test("rejects non-array and non-string marketplace inheritance", () => {
+    const dir = withMarketplace(
+      JSON.stringify({
+        schemaVersion: 1,
+        skills: [
+          { name: "bad-list", version: "1.0", status: "verified", extends: "base" },
+          { name: "bad-item", version: "1.0", status: "verified", extends: ["base", 1] },
+        ],
+      }),
+    );
+    const { skills, errors } = parseMarketplace(dir);
+    expect(skills).toEqual([]);
+    expect(errors).toEqual([
+      'marketplace.json: skill "bad-list" invalid extends',
+      'marketplace.json: skill "bad-item" invalid extends',
+    ]);
+  });
+
+  test("rejects prototype-pollution keys in marketplace entries", () => {
+    const dir = withMarketplace(
+      '{"schemaVersion":1,"skills":[{"name":"bad","version":"1","status":"verified","__proto__":{"scope":"common"}}]}',
+    );
+    expect(parseMarketplace(dir).errors).toContain("marketplace.json: invalid skill entry");
+  });
 });
 
 describe("registryInstall", () => {

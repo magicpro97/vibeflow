@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Skill } from "../core.js";
 import { c } from "../core.js";
+import { SKILL_DOMAIN_ROLE, isSkillDomainRole } from "../core/skill-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import { discoverSkills } from "./registry.js";
@@ -40,10 +41,10 @@ export function validateDomainKeys(data: Record<string, unknown>): string[] {
   if (data["domain.role"] !== undefined) {
     const role =
       typeof data["domain.role"] === "string" ? data["domain.role"].trim().toLowerCase() : "";
-    if (role !== "canonical" && role !== "child") {
+    if (!isSkillDomainRole(role)) {
       warnings.push('frontmatter.domain.role must be "canonical" or "child"');
     }
-    if (role === "canonical" && !data["domain.id"]) {
+    if (role === SKILL_DOMAIN_ROLE.CANONICAL && !data["domain.id"]) {
       warnings.push('frontmatter.domain.role "canonical" requires frontmatter.domain.id');
     }
   }
@@ -95,7 +96,7 @@ export function checkDomainOwnership(skills: SkillValidationResult[]): {
       ? data.dependsOn.filter((x: unknown) => typeof x === "string")
       : [];
 
-    if (domainRole === "canonical" && domainId) {
+    if (domainRole === SKILL_DOMAIN_ROLE.CANONICAL && domainId) {
       const list = canonicalByDomain.get(domainId) ?? [];
       list.push(skill.name);
       canonicalByDomain.set(domainId, list);
@@ -107,7 +108,7 @@ export function checkDomainOwnership(skills: SkillValidationResult[]): {
   const canonicalDomainIds = new Set(canonicalByDomain.keys());
 
   for (const { name, dependsOn, domainRole } of childInfos) {
-    if (domainRole === "child" && dependsOn.length === 0) {
+    if (domainRole === SKILL_DOMAIN_ROLE.CHILD && dependsOn.length === 0) {
       warnings.push(`skill "${name}" has role "child" but no dependsOn entries`);
     }
     if (dependsOn.length > 0) {
@@ -136,6 +137,7 @@ export function parseDomainMeta(
   data: Record<string, unknown>,
 ): Pick<Skill, "domain" | "owns" | "dependsOn"> {
   const domainRaw = data.domain;
+  const domainRoleRaw = (domainRaw as Record<string, unknown> | undefined)?.role;
   let domain: Skill["domain"] =
     domainRaw && typeof domainRaw === "object" && !Array.isArray(domainRaw)
       ? {
@@ -143,12 +145,7 @@ export function parseDomainMeta(
             typeof (domainRaw as Record<string, unknown>).id === "string"
               ? ((domainRaw as Record<string, unknown>).id as string)
               : undefined,
-          role:
-            typeof (domainRaw as Record<string, unknown>).role === "string" &&
-            ((domainRaw as Record<string, unknown>).role === "canonical" ||
-              (domainRaw as Record<string, unknown>).role === "child")
-              ? ((domainRaw as Record<string, unknown>).role as "canonical" | "child")
-              : undefined,
+          role: isSkillDomainRole(domainRoleRaw) ? domainRoleRaw : undefined,
         }
       : undefined;
 
@@ -158,7 +155,7 @@ export function parseDomainMeta(
     if (dotId || dotRole) {
       domain = {
         id: dotId,
-        role: dotRole === "canonical" || dotRole === "child" ? dotRole : undefined,
+        role: isSkillDomainRole(dotRole) ? dotRole : undefined,
       };
     }
   }
@@ -197,8 +194,8 @@ export function handleDomainSubcommand(repo: string, rest: string[]): number {
       return 0;
     }
     for (const [did, skills] of byDomain) {
-      const canonical = skills.find((s) => s.domain?.role === "canonical");
-      const children = skills.filter((s) => s.domain?.role !== "canonical");
+      const canonical = skills.find((s) => s.domain?.role === SKILL_DOMAIN_ROLE.CANONICAL);
+      const children = skills.filter((s) => s.domain?.role !== SKILL_DOMAIN_ROLE.CANONICAL);
       const prefix = canonical ? c.green(`✔ ${did} (canonical)`) : c.yellow(`? ${did}`);
       out("vf", prefix);
       if (canonical) {

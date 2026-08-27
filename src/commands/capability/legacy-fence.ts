@@ -1,6 +1,7 @@
 import { assertLegacyWriterAllowed } from "../../capabilities/legacy/fence.js";
 import { CapabilityRuntimeError } from "../../capabilities/operations/errors.js";
 import { projectCapabilityPaths } from "../../capabilities/storage/paths.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../../core/capability-contract.js";
 import { c, out } from "../_shared.js";
 
 export interface LegacyWriterFenceStatus {
@@ -21,7 +22,10 @@ export function legacyWriterFence(
     assertAllowed(projectCapabilityPaths(base).currentLock);
     return { blocked: false, details: null };
   } catch (error) {
-    if (error instanceof CapabilityRuntimeError && error.runtime_code === "scope-needs-recovery") {
+    if (
+      error instanceof CapabilityRuntimeError &&
+      error.runtime_code === CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY
+    ) {
       return { blocked: true, details: fenceMessage(error) };
     }
     throw error;

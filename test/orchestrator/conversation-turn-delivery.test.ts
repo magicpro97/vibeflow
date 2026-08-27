@@ -3,7 +3,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { digestV1 } from "../../src/durability/index.js";
-import { MAX_CANONICAL_HANDOFF_BYTES } from "../../src/orchestrator/conversation/handoff-limits.js";
+import { ConversationArtifactStore } from "../../src/orchestrator/conversation/artifact-store.js";
+import { publishAttemptResumeBinding } from "../../src/orchestrator/conversation/attempt-resume-publication.js";
+import { CONVERSATION_PUBLIC_RESPONSE_TERMINAL_STATUS } from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
+import {
+  HANDOFF_PROMPT_PREFIX,
+  MAX_CANONICAL_HANDOFF_BYTES,
+} from "../../src/orchestrator/conversation/handoff-limits.js";
+import { buildContextHandoff } from "../../src/orchestrator/conversation/handoff-selection.js";
+import {
+  CONVERSATION_TURN_HISTORY_SUMMARY_KIND,
+  CONVERSATION_TURN_RECIPIENT_HISTORY_LIMIT,
+} from "../../src/orchestrator/conversation/turn-delivery-contract.js";
 import { ConversationTurnDeliveryStore } from "../../src/orchestrator/conversation/turn-delivery-store.js";
 import {
   TURN_PROMPT_PREFIX,
@@ -11,6 +22,8 @@ import {
   bindFullHandoffToTurn,
   prepareConversationTurn,
 } from "../../src/orchestrator/conversation/turn-delivery.js";
+import { recipientTurnHistory } from "../../src/orchestrator/conversation/turn-recipient-history.js";
+import { recipientSafeSharedHandoff } from "../../src/orchestrator/conversation/turn-shared-handoff.js";
 import type { PublicStoredTraceEvent } from "../../src/orchestrator/trace/types.js";
 
 function event(
@@ -91,6 +104,83 @@ const events = [
 
 const interactionDigest = (sequence: number) =>
   digestV1("FIXTURE-INTERACTION-HEAD\0v1\0", { sequence });
+const HANDOFF_SELF_MARKER = "claim p1";
+const HANDOFF_PEER_MARKER = "canonical peer handoff marker";
+const HANDOFF_USER_MARKER = "canonical user handoff marker";
+
+function productionSharedHandoff(topic = "turn delivery recovery") {
+  const source = {
+    conversation_id: "parent-conversation",
+    revision_id: "parent-revision",
+    last_seq: 3,
+    lock_digest: digestV1("FIXTURE-HANDOFF\0v1\0", { lock: true }),
+  };
+  return buildContextHandoff({
+    source,
+    topic,
+    policy_value: "direct",
+    bindings: [
+      {
+        participant_id: "p1",
+        engine: "codex",
+        model: null,
+        role_ref: "builder",
+        continuity: "retained",
+      },
+      {
+        participant_id: "p2",
+        engine: "claude",
+        model: null,
+        role_ref: "skeptic",
+        continuity: "retained",
+      },
+    ],
+    user_messages: [
+      {
+        event_id: "parent-user",
+        conversation_id: source.conversation_id,
+        revision_id: source.revision_id,
+        revision_ordinal: 0,
+        public_seq: 1,
+        author_public_id: "human",
+        text: HANDOFF_USER_MARKER,
+        created_at: "2026-08-25T00:00:00.000Z",
+        redaction_manifest_digest: digestV1("FIXTURE-HANDOFF\0v1\0", { event: "user" }),
+      },
+    ],
+    final_responses: [
+      {
+        event_id: "parent-self",
+        conversation_id: source.conversation_id,
+        revision_id: source.revision_id,
+        revision_ordinal: 0,
+        public_seq: 2,
+        participant_id: "p1",
+        role_ref: "builder",
+        text: HANDOFF_SELF_MARKER,
+        terminal_status: CONVERSATION_PUBLIC_RESPONSE_TERMINAL_STATUS.COMPLETED,
+        created_at: "2026-08-25T00:00:01.000Z",
+        redaction_manifest_digest: digestV1("FIXTURE-HANDOFF\0v1\0", { event: "self" }),
+      },
+      {
+        event_id: "parent-peer",
+        conversation_id: source.conversation_id,
+        revision_id: source.revision_id,
+        revision_ordinal: 0,
+        public_seq: 3,
+        participant_id: "p2",
+        role_ref: "skeptic",
+        text: HANDOFF_PEER_MARKER,
+        terminal_status: CONVERSATION_PUBLIC_RESPONSE_TERMINAL_STATUS.COMPLETED,
+        created_at: "2026-08-25T00:00:02.000Z",
+        redaction_manifest_digest: digestV1("FIXTURE-HANDOFF\0v1\0", { event: "peer" }),
+      },
+    ],
+    artifacts: [],
+    consensus: { score: null, synthesis: null },
+    prompt_budget_bytes: MAX_CANONICAL_HANDOFF_BYTES,
+  }).shared_prompt_bytes.toString("utf8");
+}
 const messageLocator = (eventId: string) => ({
   root_session_id: "conversation",
   conversation_id: "conversation",
@@ -126,6 +216,7 @@ describe("canonical conversation turn delivery", () => {
     const prepared = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision",
+      recipient_engine: "codex",
       request: {
         participant_id: "p1",
         instruction: { kind: "debate-participant", topic: "topic", round: 2 },
@@ -147,6 +238,14 @@ describe("canonical conversation turn delivery", () => {
       interaction_projection: emptyInteractionProjection(),
     });
     expect(prepared.envelope.delivery_mode).toBe("exact-delta");
+    expect(prepared.envelope.native_session_use).toBe("required-exact");
+    expect(prepared.envelope.recipient_history).toEqual({
+      source: "native-session",
+      source_response_count: 1,
+      replayed_response_count: 0,
+      truncated_response_count: 0,
+      entries: [],
+    });
     expect(prepared.envelope.user_messages.map(({ content }) => content)).toEqual(["new for all"]);
     expect(
       prepared.envelope.public_responses.map(({ author_public_id }) => author_public_id),
@@ -184,6 +283,7 @@ describe("canonical conversation turn delivery", () => {
     const prepared = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision",
+      recipient_engine: "codex",
       request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
       events,
       resume: {
@@ -203,6 +303,8 @@ describe("canonical conversation turn delivery", () => {
       },
     });
     expect(prepared.envelope.delivery_mode).toBe("full-history");
+    expect(prepared.envelope.native_session_use).toBe("required-exact");
+    expect(prepared.envelope.recipient_history.source).toBe("native-session");
     expect(prepared.envelope.user_messages.map(({ content }) => content)).toEqual([
       "all",
       "only p1",
@@ -218,10 +320,206 @@ describe("canonical conversation turn delivery", () => {
     ]);
   });
 
+  test("projects a production handoff peer-only for exact recovery and replays fallback self once", () => {
+    const sharedHandoff = productionSharedHandoff();
+    const exactRecovery = prepareConversationTurn({
+      conversation_id: "conversation",
+      revision_id: "revision",
+      recipient_engine: "codex",
+      request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
+      events,
+      resume: {
+        participant_id: "p1",
+        attemptId: "attempt-prior",
+        engine: "codex",
+        nativeSessionId: "00000000-0000-4000-8000-000000000001",
+        delivery_public_seq: 3,
+        delivery_digest: digestV1("FIXTURE\0v1\0", { unavailable_cursor: true }),
+      },
+      prior_delivery: undefined,
+      observed_after_public_seq: 0,
+      shared_handoff: sharedHandoff,
+      interaction_projection: emptyInteractionProjection(),
+    });
+    const exactPrompt = bindFullHandoffToTurn(sharedHandoff, exactRecovery);
+    expect(exactRecovery.envelope).toMatchObject({
+      delivery_mode: "full-history",
+      native_session_use: "required-exact",
+      after_public_seq: 0,
+      through_public_seq: 8,
+      prior_delivery_digest: null,
+      recipient_history: {
+        source: "native-session",
+        source_response_count: 1,
+        replayed_response_count: 0,
+        entries: [],
+      },
+    });
+    expect(exactPrompt).not.toContain(HANDOFF_SELF_MARKER);
+    expect(exactPrompt).toContain(HANDOFF_PEER_MARKER);
+    expect(exactPrompt).toContain(HANDOFF_USER_MARKER);
+
+    const fallback = prepareConversationTurn({
+      conversation_id: "conversation",
+      revision_id: "revision",
+      recipient_engine: "antigravity",
+      request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
+      events,
+      resume: null,
+      prior_delivery: undefined,
+      observed_after_public_seq: 0,
+      shared_handoff: sharedHandoff,
+      interaction_projection: emptyInteractionProjection(),
+    });
+    const fallbackPrompt = bindFullHandoffToTurn(sharedHandoff, fallback);
+    expect(fallback.envelope).toMatchObject({
+      native_session_use: "not-used",
+      recipient_engine: "antigravity",
+      recipient_history: {
+        source: "bounded-public-replay",
+        source_response_count: 1,
+        replayed_response_count: 1,
+      },
+    });
+    expect(fallbackPrompt.split(HANDOFF_SELF_MARKER)).toHaveLength(2);
+    expect(fallbackPrompt).toContain(HANDOFF_PEER_MARKER);
+    expect(fallbackPrompt).toContain(HANDOFF_USER_MARKER);
+  });
+
+  test("invalidates an unproved exact binding so the next supported-engine turn replays self", () => {
+    const requested = {
+      attemptId: "attempt-prior",
+      engine: "codex" as const,
+      nativeSessionId: "00000000-0000-4000-8000-000000000001",
+    };
+    const resumeBindings = new Map([["p1", { participant_id: "p1", ...requested }]]);
+    const resumeOrdinals = new Map<string, number>();
+    const removed: unknown[] = [];
+    publishAttemptResumeBinding({
+      live: {
+        manifest: { conversation_id: "conversation" },
+        resumeBindings,
+        resumeOrdinals,
+      } as never,
+      operation: { isLive: () => true } as never,
+      store: {
+        removeResumeBinding: (...args: unknown[]) => {
+          removed.push(args);
+          return true;
+        },
+      } as never,
+      participantId: "p1",
+      attemptId: "attempt-current",
+      resumeOrdinal: 1,
+      captured: undefined,
+      requestedExactResume: requested,
+      isolatedHistory: false,
+      retained: true,
+    });
+
+    expect(resumeBindings.has("p1")).toBe(false);
+    expect(resumeOrdinals.get("p1")).toBe(1);
+    expect(removed).toHaveLength(1);
+    const sharedHandoff = productionSharedHandoff();
+    const fallback = prepareConversationTurn({
+      conversation_id: "conversation",
+      revision_id: "revision",
+      recipient_engine: "codex",
+      request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
+      events,
+      resume: resumeBindings.get("p1"),
+      prior_delivery: undefined,
+      observed_after_public_seq: 0,
+      shared_handoff: sharedHandoff,
+      interaction_projection: emptyInteractionProjection(),
+    });
+    const prompt = bindFullHandoffToTurn(sharedHandoff, fallback);
+    expect(fallback.envelope.native_session_use).toBe("not-used");
+    expect(fallback.envelope.recipient_history.source).toBe("bounded-public-replay");
+    expect(prompt.split(HANDOFF_SELF_MARKER)).toHaveLength(2);
+    expect(prompt).toContain(HANDOFF_PEER_MARKER);
+  });
+
+  test("rejects unsupported and mismatched captured exact-resume authority", () => {
+    const base = {
+      live: {
+        manifest: { conversation_id: "conversation" },
+        resumeBindings: new Map(),
+        resumeOrdinals: new Map(),
+      } as never,
+      operation: { isLive: () => true } as never,
+      store: {} as never,
+      participantId: "p1",
+      attemptId: "attempt-current",
+      resumeOrdinal: 1,
+      isolatedHistory: false,
+      retained: true,
+    };
+    expect(() =>
+      publishAttemptResumeBinding({
+        ...base,
+        captured: {
+          attemptId: "attempt-current",
+          engine: "antigravity",
+          nativeSessionId: "antigravity-session",
+        },
+      }),
+    ).toThrow("captured native session cannot satisfy exact resume authority");
+    expect(() =>
+      publishAttemptResumeBinding({
+        ...base,
+        captured: {
+          attemptId: "attempt-current",
+          engine: "codex",
+          nativeSessionId: "00000000-0000-4000-8000-000000000002",
+        },
+        requestedExactResume: {
+          attemptId: "attempt-prior",
+          engine: "codex",
+          nativeSessionId: "00000000-0000-4000-8000-000000000001",
+        },
+      }),
+    ).toThrow("captured native session does not match requested exact resume authority");
+  });
+
+  test("durable resume invalidation is compare-and-remove, never participant-only", () => {
+    const expected = {
+      participant_id: "p1",
+      attemptId: "attempt-prior",
+      engine: "codex" as const,
+      nativeSessionId: "00000000-0000-4000-8000-000000000001",
+    };
+    const newer = {
+      participant_id: "p2",
+      attemptId: "attempt-newer",
+      engine: "claude" as const,
+      nativeSessionId: "00000000-0000-4000-8000-000000000002",
+    };
+    let record = { resume_bindings: [expected, newer] };
+    const receiver = {
+      updateRecord: (
+        _conversationId: string,
+        transform: (value: typeof record) => typeof record,
+      ) => {
+        record = transform(record);
+        return record;
+      },
+    };
+    const remove = ConversationArtifactStore.prototype.removeResumeBinding.bind(receiver as never);
+
+    expect(
+      remove("conversation", "p1", { ...expected, nativeSessionId: newer.nativeSessionId }),
+    ).toBe(false);
+    expect(record.resume_bindings).toEqual([expected, newer]);
+    expect(remove("conversation", "p1", expected)).toBe(true);
+    expect(record.resume_bindings).toEqual([newer]);
+  });
+
   test("includes recipient history only when native resume proof is unavailable", () => {
     const prepared = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision",
+      recipient_engine: "copilot",
       request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
       events,
       resume: null,
@@ -234,8 +532,79 @@ describe("canonical conversation turn delivery", () => {
     expect(prepared.envelope.delivery_mode).toBe("full-history");
     expect(
       prepared.envelope.public_responses.map(({ author_public_id }) => author_public_id),
-    ).toEqual(["p1", "p2"]);
+    ).toEqual(["p2"]);
+    expect(prepared.envelope).toMatchObject({
+      native_session_use: "not-used",
+      recipient_history: {
+        source: "bounded-public-replay",
+        source_response_count: 1,
+        replayed_response_count: 1,
+        truncated_response_count: 0,
+        entries: [
+          {
+            message_id: "event-5",
+            role_ref: "builder",
+            summary_kind: "claim",
+            summary: "claim p1",
+            summary_truncated: false,
+          },
+        ],
+      },
+    });
   });
+
+  test.each([
+    ["unsupported recipient", "copilot", "copilot", "copilot-cannot-resume-this-id"],
+    ["cross-engine recipient", "claude", "codex", "00000000-0000-4000-8000-000000000001"],
+  ] as const)(
+    "rejects a false exact binding for %s and replays bounded self context",
+    (_case, recipientEngine, bindingEngine, nativeSessionId) => {
+      const prior = {
+        participant_id: "p1",
+        attempt_id: "attempt-prior",
+        through_public_seq: 3,
+        envelope_digest: digestV1("FIXTURE\0v1\0", { prior: "false-binding" }),
+      };
+      const prepared = prepareConversationTurn({
+        conversation_id: "conversation",
+        revision_id: "revision",
+        recipient_engine: recipientEngine,
+        request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
+        events,
+        resume: {
+          participant_id: "p1",
+          attemptId: prior.attempt_id,
+          engine: bindingEngine,
+          nativeSessionId,
+          delivery_public_seq: prior.through_public_seq,
+          delivery_digest: prior.envelope_digest,
+        },
+        prior_delivery: prior,
+        observed_after_public_seq: prior.through_public_seq,
+        shared_handoff: null,
+        interaction_projection: emptyInteractionProjection(),
+      });
+
+      expect(prepared.envelope).toMatchObject({
+        delivery_mode: "full-history",
+        native_session_use: "not-used",
+        after_public_seq: 0,
+        prior_delivery_digest: null,
+        recipient_history: {
+          source: "bounded-public-replay",
+          source_response_count: 1,
+          replayed_response_count: 1,
+        },
+      });
+      expect(prepared.envelope.user_messages.map(({ content }) => content)).toEqual([
+        "all",
+        "only p1",
+        "new for all",
+      ]);
+      expect(prepared.envelope.recipient_history.entries[0]?.summary).toBe("claim p1");
+      expect(JSON.stringify(prepared.envelope)).toContain("claim p1");
+    },
+  );
 
   test("degraded interaction authority cannot claim an exact native delivery delta", () => {
     const prior = {
@@ -247,6 +616,7 @@ describe("canonical conversation turn delivery", () => {
     const prepared = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision",
+      recipient_engine: "codex",
       request: { participant_id: "p1", instruction: { kind: "direct", topic: null } },
       events,
       resume: {
@@ -290,6 +660,7 @@ describe("canonical conversation turn delivery", () => {
     const prepared = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision",
+      recipient_engine: "codex",
       request: { participant_id: "p1", instruction: { kind: "direct", topic: null } },
       events,
       resume: {
@@ -357,6 +728,7 @@ describe("canonical conversation turn delivery", () => {
     const base = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision",
+      recipient_engine: "copilot",
       request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
       events: [],
       resume: null,
@@ -364,14 +736,14 @@ describe("canonical conversation turn delivery", () => {
       observed_after_public_seq: 0,
       shared_handoff: null,
     });
-    const separatorBytes = Buffer.byteLength("\n\n", "utf8");
-    const prefix = "VF-HANDOFF/1\n";
-    const sharedLength =
-      MAX_CANONICAL_HANDOFF_BYTES - separatorBytes - Buffer.byteLength(base.prompt_input, "utf8");
-    const shared = `${prefix}${"x".repeat(sharedLength - Buffer.byteLength(prefix, "utf8"))}`;
+    const emptyShared = productionSharedHandoff("");
+    const emptyCombinedBytes = Buffer.byteLength(bindFullHandoffToTurn(emptyShared, base), "utf8");
+    const topicBytes = MAX_CANONICAL_HANDOFF_BYTES - emptyCombinedBytes;
+    const shared = productionSharedHandoff("x".repeat(topicBytes));
     const exact = prepareConversationTurn({
       conversation_id: "conversation",
       revision_id: "revision",
+      recipient_engine: "copilot",
       request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
       events: [],
       resume: null,
@@ -386,14 +758,77 @@ describe("canonical conversation turn delivery", () => {
       prepareConversationTurn({
         conversation_id: "conversation",
         revision_id: "revision",
+        recipient_engine: "copilot",
         request: { participant_id: "p1", instruction: { kind: "direct", topic: "topic" } },
         events: [],
         resume: null,
         prior_delivery: undefined,
         observed_after_public_seq: 0,
-        shared_handoff: `${shared}x`,
+        shared_handoff: productionSharedHandoff("x".repeat(topicBytes + 1)),
       }),
     ).toThrow();
+  });
+
+  test("bounds and condenses fallback self history without splitting UTF-8", () => {
+    const responses = Array.from({ length: 10 }, (_, index) => ({
+      message_id: `self-${index}`,
+      public_seq: index + 1,
+      author_public_id: "p1",
+      role_ref: "builder",
+      round_id: `round-${index}`,
+      answer: null,
+      claim: `${"🧠".repeat(800)}-${index}`,
+      evidence: [],
+      artifact_refs: [],
+      content_digest: digestV1("FIXTURE-SELF-HISTORY\0v1\0", { index }),
+    }));
+    const history = recipientTurnHistory(responses, false);
+
+    expect(history.source_response_count).toBe(10);
+    expect(history.replayed_response_count).toBe(
+      CONVERSATION_TURN_RECIPIENT_HISTORY_LIMIT.MAX_ENTRIES,
+    );
+    expect(history.truncated_response_count).toBe(2);
+    expect(history.entries[0]?.message_id).toBe("self-2");
+    for (const entry of history.entries) {
+      expect(entry.summary_truncated).toBe(true);
+      expect(Buffer.byteLength(entry.summary ?? "", "utf8")).toBeLessThanOrEqual(
+        CONVERSATION_TURN_RECIPIENT_HISTORY_LIMIT.MAX_SUMMARY_BYTES,
+      );
+      expect(entry.summary).toEndWith("…");
+    }
+  });
+
+  test("labels answer-only fallback history without promoting it to a claim", () => {
+    const history = recipientTurnHistory(
+      [
+        {
+          message_id: "answer-only",
+          public_seq: 1,
+          author_public_id: "p1",
+          role_ref: "builder",
+          round_id: "round-1",
+          answer: "bounded answer",
+          claim: null,
+          evidence: [],
+          artifact_refs: [],
+          content_digest: digestV1("FIXTURE-SELF-HISTORY\0v1\0", { kind: "answer" }),
+        },
+      ],
+      false,
+    );
+
+    expect(history.entries[0]).toMatchObject({
+      summary_kind: CONVERSATION_TURN_HISTORY_SUMMARY_KIND.ANSWER,
+      summary: "bounded answer",
+      summary_truncated: false,
+    });
+  });
+
+  test("fails closed when a prefixed shared handoff is not canonical JSON", () => {
+    expect(() => recipientSafeSharedHandoff(`${HANDOFF_PROMPT_PREFIX}{`, "p1")).toThrow(
+      "shared handoff prompt authority is invalid",
+    );
   });
 
   test("persists the exact delivery cursor and digest across restart", async () => {

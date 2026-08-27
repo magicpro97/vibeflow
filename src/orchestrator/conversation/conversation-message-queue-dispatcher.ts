@@ -7,6 +7,7 @@ import {
 import {
   CONVERSATION_MESSAGE_QUEUE_CLAIM_RESULT_STATUS,
   CONVERSATION_MESSAGE_QUEUE_STATE,
+  type ConversationMessageQueueTargetParticipantsV1,
 } from "./conversation-message-queue-contract.js";
 import type {
   PrivateConversationMessageQueueContextBindingV1,
@@ -16,6 +17,7 @@ import type { ConversationMessageQueueRuntimeV1 } from "./conversation-message-q
 import type { PrivateConversationMessageQueueClaimV1 } from "./conversation-message-queue-store.js";
 import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-trace-authority.js";
 import type { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type {
   ConversationUserMessageAuthorityV1,
   ResolvedConversationUserMessageAuthorityV1,
@@ -26,7 +28,9 @@ export interface ConversationQueuedMessageDeliveryHostV1 {
   queuedMessageReady(conversationId: string, revisionOperationId: string | null): boolean;
   deliverQueuedMessage(input: {
     conversation_id: string;
-    request: MessageRequest & { target_participants: "all" | string[] };
+    request: MessageRequest & {
+      target_participants: ConversationMessageQueueTargetParticipantsV1;
+    };
     message_key: string;
     authority: ConversationQueuedMessageDeliveryAuthorityV1;
   }): Promise<{ childId: string }>;
@@ -290,7 +294,7 @@ export class ConversationMessageQueueDispatcherV1 {
     if (
       event.operation_id !== claim.durable_operation_id ||
       event.idempotency_key !== `queue-message.${claim.item.queue_item_id}` ||
-      event.event.type !== "user_message" ||
+      event.event.type !== CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE ||
       event.event.payload.content !== claim.item.content ||
       !same(event.event.payload.target_participants, claim.item.target_participants) ||
       !same(event.event.payload.quote_refs ?? [], claim.item.quote_refs)

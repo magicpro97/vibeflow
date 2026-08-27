@@ -7,8 +7,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { c, writeFileSafe } from "../core.js";
+import { SKILL_STATUS, SKILL_TYPE } from "../core/skill-contract.js";
 import { ENGINES, type Engine, type Skill } from "../core/types.js";
 import { type AsyncSpawner, runDispatchAsync } from "../dispatch.js";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import {
@@ -41,10 +43,10 @@ function loadSingleSkill(skillDir: string): { skill: Skill; text: string } {
       name,
       description,
       version: typeof data.version === "string" ? data.version : undefined,
-      status: "unverified",
+      status: SKILL_STATUS.UNVERIFIED,
       capabilities: asStrArr(data.capabilities),
       triggers: asStrArr(data.triggers),
-      type: data.type === "repo" ? "repo" : undefined,
+      type: data.type === SKILL_TYPE.REPO ? SKILL_TYPE.REPO : undefined,
       dir: skillDir,
       path: skillMd,
     } as Skill,
@@ -249,7 +251,7 @@ export async function skillsEvalCmd(
         const dispatched = await runDispatchAsync({
           engine,
           prompt: fullPrompt,
-          mode: "cli",
+          mode: DISPATCH_MODE.CLI,
           spawner: inject.spawner,
           base: _repo,
         });

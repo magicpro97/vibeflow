@@ -1,6 +1,8 @@
+import { CAPABILITY_MANIFEST_INPUT_TYPE } from "../../actions/capability-manifest-vocabulary-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import { validateCapabilityManifest } from "../manifest/validation.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { validateImmutablePackagePin } from "../source/pins.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
 import type {
@@ -29,18 +31,18 @@ function selectItem(
   if (matches.length === 0)
     throw new CapabilityRuntimeError(
       "capability package detail was not found",
-      "package-not-found",
+      CAPABILITY_RUNTIME_ERROR_CODE.PACKAGE_NOT_FOUND,
     );
   if (matches.length !== 1)
     throw new CapabilityRuntimeError(
       "capability package detail selector is ambiguous",
-      "ambiguous-package",
+      CAPABILITY_RUNTIME_ERROR_CODE.AMBIGUOUS_PACKAGE,
     );
   const item = matches[0] as CapabilityQueryItemV1;
   if (item.package_pin_digest === null || item.content_sha256 === null)
     throw new CapabilityRuntimeError(
       "capability package has no retained immutable identity",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   return item;
 }
@@ -50,13 +52,13 @@ function inputState(
   publicInputs: ReadonlyMap<string, string | number | boolean | null>,
   privateInputs: CapabilityPrivateInputPresenceReaderV1 | undefined,
   identity: {
-    scope: "project" | "user";
+    scope: CapabilityScope;
     package_id: string;
     package_pin_digest: string;
     manifest_digest: string;
   },
 ): PublicCapabilityInputStateV1 {
-  if (declaration.type === "secret-handle") {
+  if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE) {
     const current = privateInputs?.readValidatedPresence({
       ...identity,
       input_id: declaration.input_id,
@@ -87,7 +89,7 @@ export function projectCapabilityDetail(input: {
   if (!input.packages)
     throw new CapabilityRuntimeError(
       "capability detail package reader is unavailable",
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     );
   const pkg = input.packages.read({
     package_id: item.package_id,
@@ -98,7 +100,7 @@ export function projectCapabilityDetail(input: {
   if (!pkg)
     throw new CapabilityRuntimeError(
       "capability detail package is absent from the validated cache",
-      "package-not-found",
+      CAPABILITY_RUNTIME_ERROR_CODE.PACKAGE_NOT_FOUND,
     );
   validateImmutablePackagePin(pkg.pin);
   validateCapabilityManifest(pkg.manifest, pkg.files);
@@ -113,7 +115,7 @@ export function projectCapabilityDetail(input: {
   )
     throw new CapabilityRuntimeError(
       "capability detail identity closure is inconsistent",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   const installed = input.lock?.packages.find(
     (entry) =>

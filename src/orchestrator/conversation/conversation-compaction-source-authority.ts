@@ -3,6 +3,10 @@ import type { OversizedHandoffCandidateV1 } from "../../actions/index.js";
 import { digestV1 } from "../../durability/index.js";
 import { conversationLockDigest } from "./catalog-lock.js";
 import type { constructContextCompaction } from "./conversation-compaction-plan.js";
+import {
+  CONVERSATION_ARTIFACT_TYPE,
+  type ConversationArtifactTypeV1,
+} from "./conversation-public-wire-contract.js";
 import type { ResolvedConversationLineageV1 } from "./lineage-service.js";
 
 const sha = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
@@ -15,19 +19,22 @@ export function compactionSourceAuthorityMatches(input: {
   resolved: ResolvedConversationLineageV1;
 }): boolean {
   const suffix = input.proposalId.slice(-32);
-  const expected = new Map(
+  const expected = new Map<
+    string,
+    { artifact_id: string; artifact_type: ConversationArtifactTypeV1; content_hash: string }
+  >(
     input.construction.omitted.map((omitted, index) => [
       `compaction-omitted-${suffix}-${index}`,
       {
         artifact_id: omitted.range.artifact.artifact_id,
-        artifact_type: "transcript",
+        artifact_type: CONVERSATION_ARTIFACT_TYPE.TRANSCRIPT,
         content_hash: sha(omitted.bytes),
       },
     ]),
   );
   expected.set(`compaction-artifact-${suffix}`, {
     artifact_id: input.construction.artifact_id,
-    artifact_type: "compaction",
+    artifact_type: CONVERSATION_ARTIFACT_TYPE.COMPACTION,
     content_hash: sha(input.construction.artifact_bytes),
   });
   const matchedRefs = new Set<string>();

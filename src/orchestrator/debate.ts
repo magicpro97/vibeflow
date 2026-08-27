@@ -1,6 +1,8 @@
 import type { WorkUnit } from "../core.js";
+import { AGENT_HOST_TOOL } from "../core/agent-contract.js";
 import { type EvaluatorOutput, decideRound } from "./consensus.js";
 import type { AgentSocialIntentRequestV1 } from "./conversation/conversation-interaction-types.js";
+import { CONVERSATION_DECISION_OUTCOME } from "./conversation/conversation-public-wire-contract.js";
 
 export interface DebateParticipantResult {
   answer: string;
@@ -58,8 +60,13 @@ export function parseAgentTurnOutput(output: string): {
         answer: record.answer,
         structured: true,
         social_intent: parseAgentSocialIntent(record),
-        ...(Object.hasOwn(record, "propose_action")
-          ? { action_candidate: { present: true as const, value: record.propose_action } }
+        ...(Object.hasOwn(record, AGENT_HOST_TOOL.PROPOSE_ACTION)
+          ? {
+              action_candidate: {
+                present: true as const,
+                value: record[AGENT_HOST_TOOL.PROPOSE_ACTION],
+              },
+            }
           : {}),
       };
   }
@@ -85,8 +92,13 @@ export function parseDebateParticipantOutput(output: string): DebateParticipantR
         claim,
         evidence,
         social_intent: parseAgentSocialIntent(record),
-        ...(Object.hasOwn(record, "propose_action")
-          ? { action_candidate: { present: true as const, value: record.propose_action } }
+        ...(Object.hasOwn(record, AGENT_HOST_TOOL.PROPOSE_ACTION)
+          ? {
+              action_candidate: {
+                present: true as const,
+                value: record[AGENT_HOST_TOOL.PROPOSE_ACTION],
+              },
+            }
           : {}),
       };
     }
@@ -106,7 +118,7 @@ export function parseDebateEvaluatorOutput(
   maxRounds: number,
 ): EvaluatorOutput | null {
   const parsed = parseJson(output);
-  return decideRound(parsed, round, maxRounds).outcome === "abort"
+  return decideRound(parsed, round, maxRounds).outcome === CONVERSATION_DECISION_OUTCOME.ABORT
     ? null
     : (parsed as EvaluatorOutput);
 }

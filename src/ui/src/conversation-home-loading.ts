@@ -1,3 +1,9 @@
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
+import {
+  CONVERSATION_CATALOG_HEALTH,
+  type ConversationCatalogHealth,
+} from "../../orchestrator/conversation/conversation-catalog-contract.js";
+import { CONVERSATION_CLIENT_STREAM_STATE } from "../../orchestrator/conversation/conversation-sse-contract.js";
 import type { HomeConversationStreamStatus } from "./conversation-home-types.js";
 
 interface HomeLoadingCopy {
@@ -25,7 +31,7 @@ export interface HomeCapabilityTargetBusyCopy {
 
 export function describeHomeCatalogLoading(input: {
   query: string;
-  health: "ready" | "rebuilding" | "degraded";
+  health: ConversationCatalogHealth;
 }): HomeCatalogLoadingCopy {
   const query = input.query.trim();
   if (query) {
@@ -38,7 +44,7 @@ export function describeHomeCatalogLoading(input: {
       searchLabel: "Searching",
     };
   }
-  if (input.health === "rebuilding") {
+  if (input.health === CONVERSATION_CATALOG_HEALTH.REBUILDING) {
     return {
       eyebrow: "Conversation index",
       title: "Rebuilding recent conversations",
@@ -48,7 +54,7 @@ export function describeHomeCatalogLoading(input: {
       searchLabel: "Refreshing rail",
     };
   }
-  if (input.health === "degraded") {
+  if (input.health === CONVERSATION_CATALOG_HEALTH.DEGRADED) {
     return {
       eyebrow: "Conversation index",
       title: "Refreshing from partial index",
@@ -73,7 +79,10 @@ export function describeHomeActivationLoading(input: {
   streamStatus: HomeConversationStreamStatus;
 }): HomeLoadingCopy {
   const title = input.topic ? `Restoring ${input.topic}` : "Restoring conversation";
-  if (input.streamStatus === "connecting" || input.streamStatus === "reconnecting") {
+  if (
+    input.streamStatus === CONVERSATION_CLIENT_STREAM_STATE.CONNECTING ||
+    input.streamStatus === CONVERSATION_CLIENT_STREAM_STATE.RECONNECTING
+  ) {
     return {
       eyebrow: "Conversation restore",
       title,
@@ -113,14 +122,17 @@ export function describeHomeTraceLoading(topic: string | null): HomeLoadingCopy 
 
 export function describeHomeCapabilityLoading(input: {
   query: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
 }): HomeLoadingCopy {
   const query = input.query.trim();
   return {
-    eyebrow: input.scope === "user" ? "Shared capability index" : "Project capability index",
+    eyebrow:
+      input.scope === CAPABILITY_SCOPE.USER
+        ? "Shared capability index"
+        : "Project capability index",
     title: query
       ? `Scanning "${query}"`
-      : input.scope === "user"
+      : input.scope === CAPABILITY_SCOPE.USER
         ? "Loading shared capabilities"
         : "Loading project capabilities",
     detail:

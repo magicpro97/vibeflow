@@ -1,17 +1,25 @@
 import { ENGINES, type Engine, cwd } from "./core.js";
+import { AGENT_ENGINE } from "./core/agent-contract.js";
 import { type OwnedAiRouteRunner, runOwnedAiRoute } from "./dispatch/owned-ai-route.js";
 import { ENGINE_ARG_PROMPT_LIMIT_BYTES } from "./dispatch/prompt-limits.js";
+import { ENGINE_PROMPT_MODE, type EnginePromptMode } from "./dispatch/session-contract.js";
 import type { AsyncSpawner } from "./dispatch/types.js";
 import type { EngineReadiness } from "./preflight/types.js";
 import { readSettings } from "./settings.js";
 
-type PromptMode = "stdin" | "arg";
-
 export interface AskInvocation {
   cmd: string;
   args: string[];
-  promptMode: PromptMode;
+  promptMode: EnginePromptMode;
 }
+
+const ASK_COMMAND_ENGINE: Readonly<Record<string, Engine>> = Object.freeze({
+  [AGENT_ENGINE.CLAUDE]: AGENT_ENGINE.CLAUDE,
+  [AGENT_ENGINE.CODEX]: AGENT_ENGINE.CODEX,
+  [AGENT_ENGINE.COPILOT]: AGENT_ENGINE.COPILOT,
+  [AGENT_ENGINE.OPENCODE]: AGENT_ENGINE.OPENCODE,
+  agy: AGENT_ENGINE.ANTIGRAVITY,
+});
 
 export interface ParsedTarget {
   path: string;
@@ -93,36 +101,44 @@ export function framePrompt(
 
 export function askInvocation(engine: Engine): AskInvocation {
   switch (engine) {
-    case "claude":
-      return { cmd: "claude", args: ["-p"], promptMode: "stdin" };
-    case "codex":
-      return { cmd: "codex", args: ["exec", "-"], promptMode: "stdin" };
-    case "copilot":
-      return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" };
-    case "opencode":
-      return { cmd: "opencode", args: ["run", "--format", "json", "-"], promptMode: "stdin" };
-    case "antigravity":
-      return { cmd: "agy", args: ["-p"], promptMode: "arg" };
+    case AGENT_ENGINE.CLAUDE:
+      return { cmd: "claude", args: ["-p"], promptMode: ENGINE_PROMPT_MODE.STDIN };
+    case AGENT_ENGINE.CODEX:
+      return { cmd: "codex", args: ["exec", "-"], promptMode: ENGINE_PROMPT_MODE.STDIN };
+    case AGENT_ENGINE.COPILOT:
+      return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: ENGINE_PROMPT_MODE.ARG };
+    case AGENT_ENGINE.OPENCODE:
+      return {
+        cmd: "opencode",
+        args: ["run", "--format", "json"],
+        promptMode: ENGINE_PROMPT_MODE.STDIN,
+      };
+    case AGENT_ENGINE.ANTIGRAVITY:
+      return { cmd: "agy", args: ["-p"], promptMode: ENGINE_PROMPT_MODE.ARG };
   }
   throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
 }
 
 export function resumeInvocation(engine: Engine): AskInvocation | string {
   switch (engine) {
-    case "claude":
-      return { cmd: "claude", args: ["-c", "-p"], promptMode: "stdin" };
-    case "codex":
-      return { cmd: "codex", args: ["exec", "resume", "--last", "-"], promptMode: "stdin" };
-    case "copilot":
+    case AGENT_ENGINE.CLAUDE:
+      return { cmd: "claude", args: ["-c", "-p"], promptMode: ENGINE_PROMPT_MODE.STDIN };
+    case AGENT_ENGINE.CODEX:
+      return {
+        cmd: "codex",
+        args: ["exec", "resume", "--last", "-"],
+        promptMode: ENGINE_PROMPT_MODE.STDIN,
+      };
+    case AGENT_ENGINE.COPILOT:
       return "resume is not supported for copilot — omit --resume to ask a fresh question";
-    case "opencode":
+    case AGENT_ENGINE.OPENCODE:
       return {
         cmd: "opencode",
-        args: ["run", "--continue", "--format", "json", "-"],
-        promptMode: "stdin",
+        args: ["run", "--continue", "--format", "json"],
+        promptMode: ENGINE_PROMPT_MODE.STDIN,
       };
-    case "antigravity":
-      return { cmd: "agy", args: ["--continue", "-p"], promptMode: "arg" };
+    case AGENT_ENGINE.ANTIGRAVITY:
+      return { cmd: "agy", args: ["--continue", "-p"], promptMode: ENGINE_PROMPT_MODE.ARG };
   }
   throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
 }
@@ -148,11 +164,11 @@ export function pickEngine(
 export function materializeArgs(inv: AskInvocation, prompt: string): string[] {
   if (
     inv.cmd === "agy" &&
-    inv.promptMode === "arg" &&
+    inv.promptMode === ENGINE_PROMPT_MODE.ARG &&
     Buffer.byteLength(prompt, "utf8") >= ENGINE_ARG_PROMPT_LIMIT_BYTES
   )
     throw new Error("Antigravity prompt too large for agy argv; shorten or split the task");
-  if (inv.promptMode !== "arg") return inv.args;
+  if (inv.promptMode !== ENGINE_PROMPT_MODE.ARG) return inv.args;
   const flag = inv.args.findIndex((value) => value === "-p" || value === "--prompt");
   if (flag === -1) return [...inv.args, prompt];
   const args = [...inv.args];
@@ -161,20 +177,10 @@ export function materializeArgs(inv: AskInvocation, prompt: string): string[] {
 }
 
 function invocationEngine(inv: AskInvocation): Engine {
-  switch (inv.cmd) {
-    case "claude":
-      return "claude";
-    case "codex":
-      return "codex";
-    case "copilot":
-      return "copilot";
-    case "opencode":
-      return "opencode";
-    case "agy":
-      return "antigravity";
-    default:
-      throw new Error(`unsupported ask engine command: ${inv.cmd}`);
+  if (Object.prototype.hasOwnProperty.call(ASK_COMMAND_ENGINE, inv.cmd)) {
+    return ASK_COMMAND_ENGINE[inv.cmd] as Engine;
   }
+  throw new Error(`unsupported ask engine command: ${inv.cmd}`);
 }
 
 async function ownedAskSpawn(
@@ -191,7 +197,7 @@ async function ownedAskSpawn(
     engine: invocationEngine(inv),
     command: inv.cmd,
     args: materializeArgs(inv, prompt),
-    input: inv.promptMode === "stdin" ? prompt : "",
+    input: inv.promptMode === ENGINE_PROMPT_MODE.STDIN ? prompt : "",
     cwd: base,
     sourceEnv: { ...process.env },
     envPolicy: readSettings(base).envPolicy ?? {},
@@ -231,7 +237,11 @@ export async function captureSpawnAsync(
   ownedRoute: OwnedAiRouteRunner = runOwnedAiRoute,
 ): Promise<{ code: number; text: string }> {
   const result = spawner
-    ? await spawner(inv.cmd, materializeArgs(inv, prompt), inv.promptMode === "stdin" ? prompt : "")
+    ? await spawner(
+        inv.cmd,
+        materializeArgs(inv, prompt),
+        inv.promptMode === ENGINE_PROMPT_MODE.STDIN ? prompt : "",
+      )
     : await ownedAskSpawn(inv, prompt, ownedRoute);
   return { code: result.status, text: result.stdout || result.stderr || "" };
 }
@@ -244,7 +254,11 @@ export async function streamSpawnAsync(
   ownedRoute: OwnedAiRouteRunner = runOwnedAiRoute,
 ): Promise<{ code: number; text: string }> {
   const result = spawner
-    ? await spawner(inv.cmd, materializeArgs(inv, prompt), inv.promptMode === "stdin" ? prompt : "")
+    ? await spawner(
+        inv.cmd,
+        materializeArgs(inv, prompt),
+        inv.promptMode === ENGINE_PROMPT_MODE.STDIN ? prompt : "",
+      )
     : await ownedAskSpawn(inv, prompt, ownedRoute, { onChunk });
   return { code: result.status, text: result.stdout || result.stderr || "" };
 }

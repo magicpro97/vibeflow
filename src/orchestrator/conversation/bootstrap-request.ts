@@ -1,5 +1,6 @@
 import type { AgentBinding } from "../../agents/binding.js";
 import { ENGINES, type Engine } from "../../core.js";
+import { ENGINE_SESSION_MODE } from "../../dispatch/session-contract.js";
 import { TRACE_LIMITS, utf8Bytes } from "../trace/limits.js";
 import type { ConversationCreateRequest } from "./types.js";
 
@@ -30,7 +31,7 @@ export function conversationBindingInput(participant: {
   return {
     roleRef: participant.roleRef,
     engine: engine as Engine,
-    sessionMode: "fresh",
+    sessionMode: ENGINE_SESSION_MODE.FRESH,
     ...(participant.model === undefined ? {} : { modelOverride: participant.model }),
   };
 }

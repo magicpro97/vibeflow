@@ -1,22 +1,41 @@
 import { canonicalJsonBytes, digestHex, digestV1, sha256Digest } from "../../durability/index.js";
 import type {
   ConversationInteractionFoldV1,
-  ConversationReactionOperationV1,
   PublicQuoteReferenceV1,
-  PublicReactionProjectionV1,
 } from "./conversation-interaction-types.js";
 import { assertPublicQuoteReferenceV1 } from "./conversation-interaction-validation.js";
-import { publicReactionProjection } from "./conversation-reaction-projection.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND,
+} from "./conversation-message-queue-contract.js";
+import {
+  CONVERSATION_PUBLIC_ARTIFACT_DELIVERY,
+  CONVERSATION_PUBLIC_ARTIFACT_KIND,
+  CONVERSATION_PUBLIC_ARTIFACT_RESOLVER,
+  CONVERSATION_TRACE_EVENT_KIND,
+  conversationPublicResponseTerminalStatus,
+} from "./conversation-public-wire-contract.js";
 import type { PromptArtifactSelectionV1 } from "./handoff-types.js";
 import type { PublicHandoffMessageV1, PublicHandoffResponseV1 } from "./handoff-types.js";
 import type { ConversationLineageReadV1, ValidatedLineageNodeV1 } from "./lineage-reader.js";
 import { type LineageNodeIdentityV1, assertLineageNodeIdentityV1 } from "./lineage-types.js";
 import { ConversationRevisionCorruptError } from "./revision-errors.js";
+import {
+  REVISION_INTERACTION_CURSOR_MEDIA_TYPE,
+  REVISION_QUOTE_GRAPH_MEDIA_TYPE,
+  REVISION_QUOTE_GRAPH_PROFILE,
+} from "./revision-handoff-contract.js";
+import { selectedRevisionReactionProjection } from "./revision-handoff-reaction-projection.js";
+import type {
+  RevisionPublicTranscriptV1,
+  RevisionQuoteSourceV1,
+} from "./revision-handoff-transcript-types.js";
 
-export const REVISION_QUOTE_GRAPH_PROFILE = "vf-public-quote-graph/1" as const;
-export const REVISION_QUOTE_GRAPH_MEDIA_TYPE =
-  "application/vnd.vibeflow.public-quote-graph+json" as const;
-export const REVISION_INTERACTION_CURSOR_MEDIA_TYPE = "text/vnd.vf.ic1" as const;
+export type {
+  RevisionPublicTranscriptV1,
+  RevisionQuoteSourceV1,
+} from "./revision-handoff-transcript-types.js";
+
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const nodeKey = (node: LineageNodeIdentityV1): string =>
   `${node.conversation_id}\0${node.revision_id}\0${node.revision_ordinal}`;
@@ -41,26 +60,6 @@ function redactionDigest(kind: string, value: unknown): string {
     value,
   });
 }
-function terminalStatus(lifecycle: string): PublicHandoffResponseV1["terminal_status"] {
-  if (lifecycle === "FAILED") return "failed";
-  if (lifecycle === "COMPLETED") return "completed";
-  return "stopped";
-}
-
-export interface RevisionQuoteSourceV1 {
-  quoting_message_id: string;
-  revision_ordinal: number;
-  public_seq: number;
-  quote_refs: PublicQuoteReferenceV1[];
-}
-
-export interface RevisionPublicTranscriptV1 {
-  selected_ancestry: LineageNodeIdentityV1[];
-  messages: PublicHandoffMessageV1[];
-  responses: PublicHandoffResponseV1[];
-  quote_sources: RevisionQuoteSourceV1[];
-}
-
 export function revisionPublicTranscript(
   lineage: ConversationLineageReadV1,
   parent: ValidatedLineageNodeV1,
@@ -72,7 +71,7 @@ export function revisionPublicTranscript(
   for (const revision of selectedAncestry) {
     const partial = new Map<string, string>();
     for (const { stored_event: stored } of revision.source.journal_records) {
-      if (stored.event.type === "user_message") {
+      if (stored.event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE) {
         const quoteRefs = (stored.event.payload.quote_refs ?? []).map((quote) => {
           try {
             assertPublicQuoteReferenceV1(quote);
@@ -89,10 +88,13 @@ export function revisionPublicTranscript(
           revision_id: revision.node.revision_id,
           revision_ordinal: revision.node.revision_ordinal,
           public_seq: stored.seq,
-          author_public_id: "human",
+          author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
           text: stored.event.payload.content,
           created_at: stored.ts,
-          redaction_manifest_digest: redactionDigest("user-message", stored.event.payload),
+          redaction_manifest_digest: redactionDigest(
+            CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.USER_MESSAGE,
+            stored.event.payload,
+          ),
         });
         if (quoteRefs.length)
           quote_sources.push({
@@ -102,7 +104,7 @@ export function revisionPublicTranscript(
             quote_refs: quoteRefs,
           });
       }
-      if (stored.event.type !== "agent_response_delta") continue;
+      if (stored.event.type !== CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) continue;
       const payload = stored.event.payload;
       const responseKey = `${payload.round_id}\0${payload.participant_id}`;
       const content = `${partial.get(responseKey) ?? ""}${payload.content_delta}`;
@@ -121,7 +123,9 @@ export function revisionPublicTranscript(
         participant_id: payload.participant_id,
         role_ref: role,
         text: content,
-        terminal_status: terminalStatus(revision.source.journal_head.lifecycle),
+        terminal_status: conversationPublicResponseTerminalStatus(
+          revision.source.journal_head.lifecycle,
+        ),
         created_at: stored.ts,
         redaction_manifest_digest: redactionDigest("participant-response", {
           participant_id: payload.participant_id,
@@ -144,43 +148,6 @@ interface RevisionQuoteOccurrenceV1 {
   target: PublicQuoteReferenceV1;
 }
 
-function selectedReactionProjection(input: {
-  root_session_id: string;
-  interaction_fold: ConversationInteractionFoldV1 | null;
-  selected_by_revision: ReadonlyMap<string, LineageNodeIdentityV1>;
-  events_by_id: ReadonlyMap<
-    string,
-    {
-      event_id: string;
-      conversation_id: string;
-      revision_id: string;
-      target_kind: "user-message" | "completed-agent-response";
-    }
-  >;
-}): PublicReactionProjectionV1[] {
-  const selectedOperations: ConversationReactionOperationV1[] = [];
-  for (const operation of input.interaction_fold?.reactions ?? []) {
-    const locator = operation.target;
-    const target = input.events_by_id.get(locator.target_event_id);
-    const selected = input.selected_by_revision.get(
-      `${locator.conversation_id}\0${locator.revision_id}`,
-    );
-    if (!target && !selected) continue;
-    if (
-      !target ||
-      !selected ||
-      operation.root_session_id !== input.root_session_id ||
-      locator.root_session_id !== input.root_session_id ||
-      target.conversation_id !== locator.conversation_id ||
-      target.revision_id !== locator.revision_id ||
-      target.target_kind !== locator.target_kind
-    )
-      throw new ConversationRevisionCorruptError("reaction projection target changed");
-    selectedOperations.push(structuredClone(operation));
-  }
-  return publicReactionProjection(selectedOperations, null);
-}
-
 function compareQuotePosition(
   left: { revision_ordinal: number; public_seq: number },
   right: { revision_ordinal: number; public_seq: number },
@@ -197,13 +164,13 @@ function buildInteractionCursorArtifact(
   return {
     artifact: {
       artifact_id: `vf-ic-${contentSha}`,
-      artifact_kind: "conversation-artifact",
+      artifact_kind: CONVERSATION_PUBLIC_ARTIFACT_KIND.CONVERSATION,
       media_type: REVISION_INTERACTION_CURSOR_MEDIA_TYPE,
       byte_length: bytes.byteLength,
       content_sha256: contentSha,
-      resolver: "conversation-artifact-v1",
+      resolver: CONVERSATION_PUBLIC_ARTIFACT_RESOLVER.CONVERSATION,
     },
-    delivery: "inline-public-text",
+    delivery: CONVERSATION_PUBLIC_ARTIFACT_DELIVERY.INLINE_PUBLIC_TEXT,
     public_text: publicText,
   };
 }
@@ -253,7 +220,7 @@ export function buildRevisionQuoteGraphArtifact(input: {
       revision_id: event.revision_id,
       revision_ordinal: event.revision_ordinal,
       public_seq: event.public_seq,
-      target_kind: "user-message" as const,
+      target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.USER_MESSAGE,
       author_public_id: event.author_public_id,
     })),
     ...input.transcript.responses.map((event) => ({
@@ -262,7 +229,7 @@ export function buildRevisionQuoteGraphArtifact(input: {
       revision_id: event.revision_id,
       revision_ordinal: event.revision_ordinal,
       public_seq: event.public_seq,
-      target_kind: "completed-agent-response" as const,
+      target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
       author_public_id: event.participant_id,
     })),
   ];
@@ -276,7 +243,7 @@ export function buildRevisionQuoteGraphArtifact(input: {
   const byEventId = new Map(events.map((event) => [event.event_id, event]));
   if (byEventId.size !== events.length)
     throw new ConversationRevisionCorruptError("quote graph event identity is ambiguous");
-  const reactionProjections = selectedReactionProjection({
+  const reactionProjections = selectedRevisionReactionProjection({
     root_session_id: input.root_session_id,
     interaction_fold: input.interaction_fold,
     selected_by_revision: selectedByRevision,
@@ -285,7 +252,7 @@ export function buildRevisionQuoteGraphArtifact(input: {
   const sources = [
     ...input.transcript.quote_sources.map((source) => ({
       ...structuredClone(source),
-      author_public_id: "human",
+      author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
       source_locator: null,
     })),
     ...(input.interaction_fold?.participant_intents.flatMap((intent) => {
@@ -321,13 +288,15 @@ export function buildRevisionQuoteGraphArtifact(input: {
       quoting.revision_ordinal !== source.revision_ordinal ||
       quoting.public_seq !== source.public_seq ||
       quoting.author_public_id !== source.author_public_id ||
-      (source.source_locator === null && quoting.target_kind !== "user-message") ||
+      (source.source_locator === null &&
+        quoting.target_kind !== CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.USER_MESSAGE) ||
       (source.source_locator !== null &&
         (source.source_locator.root_session_id !== input.root_session_id ||
           source.source_locator.conversation_id !== quoting.conversation_id ||
           source.source_locator.revision_id !== quoting.revision_id ||
           source.source_locator.target_event_id !== quoting.event_id ||
-          source.source_locator.target_kind !== "completed-agent-response"))
+          source.source_locator.target_kind !==
+            CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE))
     )
       throw new ConversationRevisionCorruptError("quote occurrence source changed");
     quotingMessageIds.add(source.quoting_message_id);
@@ -387,13 +356,13 @@ export function buildRevisionQuoteGraphArtifact(input: {
   return {
     artifact: {
       artifact_id: `vf-public-quote-graph-${contentSha}`,
-      artifact_kind: "conversation-artifact",
+      artifact_kind: CONVERSATION_PUBLIC_ARTIFACT_KIND.CONVERSATION,
       media_type: REVISION_QUOTE_GRAPH_MEDIA_TYPE,
       byte_length: bytes.byteLength,
       content_sha256: contentSha,
-      resolver: "conversation-artifact-v1",
+      resolver: CONVERSATION_PUBLIC_ARTIFACT_RESOLVER.CONVERSATION,
     },
-    delivery: "inline-public-text",
+    delivery: CONVERSATION_PUBLIC_ARTIFACT_DELIVERY.INLINE_PUBLIC_TEXT,
     public_text: bytes.toString("utf8"),
   };
 }

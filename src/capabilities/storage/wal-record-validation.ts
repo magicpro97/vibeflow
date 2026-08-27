@@ -1,5 +1,17 @@
 import { digestV1 } from "../../durability/index.js";
-import type { AdapterReceiptV1, CapabilityPreEffectRefusalV1 } from "../wire/operation.js";
+import {
+  type AdapterReceiptV1,
+  CAPABILITY_ADAPTER_RECEIPT_ERROR_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_ADAPTER_RECEIPT_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_UNOBSERVED_STATES,
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_PRE_EFFECT_FRONTIERS,
+  CAPABILITY_PRE_EFFECT_OBSERVED_STATES,
+  CAPABILITY_PRE_EFFECT_REFUSAL_REASONS,
+  type CapabilityPreEffectRefusalV1,
+  isCapabilityAdapterReceiptStateIn,
+} from "../wire/operation.js";
 import {
   CapabilityValidationError,
   assertSortedUnique,
@@ -13,16 +25,6 @@ import {
   timestamp,
 } from "../wire/primitives.js";
 
-const RECEIPT_STATES = [
-  "prepared",
-  "effect_in_progress",
-  "applied",
-  "reverse_in_progress",
-  "reversed",
-  "failed",
-  "uncertain",
-] as const;
-
 export function nullableWalDigest(value: unknown, path: string): void {
   if (value !== null) digest(value, path);
 }
@@ -31,7 +33,21 @@ export function boundedWalId(value: unknown, path: string): string {
   return text(value, path, { min: 1, max: 512, ascii: true });
 }
 
-export function validateAdapterReceipt(receipt: AdapterReceiptV1, path: string): void {
+function validateEmbeddedOperationId(
+  value: unknown,
+  expectedOperationId: string,
+  path: string,
+): void {
+  const operationId = boundedWalId(value, path);
+  if (operationId !== expectedOperationId)
+    throw new CapabilityValidationError("embedded operation identity mismatch", path);
+}
+
+export function validateAdapterReceipt(
+  receipt: AdapterReceiptV1,
+  path: string,
+  expectedOperationId: string,
+): void {
   exactKeys(
     receipt,
     [
@@ -64,7 +80,7 @@ export function validateAdapterReceipt(receipt: AdapterReceiptV1, path: string):
   );
   if (receipt.schema_version !== "1.0")
     throw new CapabilityValidationError("unsupported adapter receipt schema", path);
-  boundedWalId(receipt.operation_id, `${path}.operation_id`);
+  validateEmbeddedOperationId(receipt.operation_id, expectedOperationId, `${path}.operation_id`);
   boundedWalId(receipt.plan_id, `${path}.plan_id`);
   boundedWalId(receipt.step_id, `${path}.step_id`);
   if (!Array.isArray(receipt.target_ids) || receipt.target_ids.length === 0)
@@ -85,7 +101,7 @@ export function validateAdapterReceipt(receipt: AdapterReceiptV1, path: string):
       "only receipt attempt zero is supported",
       `${path}.attempt`,
     );
-  enumeration(receipt.state, RECEIPT_STATES, `${path}.state`);
+  enumeration(receipt.state, CAPABILITY_ADAPTER_RECEIPT_STATES, `${path}.state`);
   integer(receipt.authority_epoch, `${path}.authority_epoch`);
   rawSha256(receipt.observed_preimage_sha256, `${path}.observed_preimage_sha256`);
   if (receipt.observed_postimage_sha256 !== null)
@@ -114,8 +130,14 @@ export function validateAdapterReceipt(receipt: AdapterReceiptV1, path: string):
     text(receipt.error_code, `${path}.error_code`, { min: 1, max: 256, ascii: true });
   timestamp(receipt.prepared_at, `${path}.prepared_at`);
   if (receipt.observed_at !== null) timestamp(receipt.observed_at, `${path}.observed_at`);
-  const unobserved = receipt.state === "prepared" || receipt.state === "effect_in_progress";
-  const requiresError = receipt.state === "failed" || receipt.state === "uncertain";
+  const unobserved = isCapabilityAdapterReceiptStateIn(
+    CAPABILITY_ADAPTER_RECEIPT_UNOBSERVED_STATES,
+    receipt.state,
+  );
+  const requiresError = isCapabilityAdapterReceiptStateIn(
+    CAPABILITY_ADAPTER_RECEIPT_ERROR_STATES,
+    receipt.state,
+  );
   if (
     unobserved !== (receipt.observed_at === null) ||
     (unobserved &&
@@ -123,8 +145,10 @@ export function validateAdapterReceipt(receipt: AdapterReceiptV1, path: string):
         receipt.bounded_evidence_digest !== null ||
         receipt.error_code !== null)) ||
     (!unobserved && receipt.bounded_evidence_digest === null) ||
-    (receipt.state === "applied" && receipt.observed_postimage_sha256 === null) ||
-    (receipt.state === "failed" && receipt.observed_postimage_sha256 !== null) ||
+    (receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED &&
+      receipt.observed_postimage_sha256 === null) ||
+    (receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED &&
+      receipt.observed_postimage_sha256 !== null) ||
     requiresError !== (receipt.error_code !== null)
   )
     throw new CapabilityValidationError("receipt state/nullability mismatch", path);
@@ -140,6 +164,7 @@ export function validateAdapterReceipt(receipt: AdapterReceiptV1, path: string):
 export function validatePreEffectRefusal(
   refusal: CapabilityPreEffectRefusalV1,
   path: string,
+  expectedOperationId: string,
 ): void {
   exactKeys(
     refusal,
@@ -163,64 +188,38 @@ export function validatePreEffectRefusal(
   );
   if (refusal.schema_version !== "1.0")
     throw new CapabilityValidationError("unsupported refusal schema", path);
-  boundedWalId(refusal.operation_id, `${path}.operation_id`);
-  enumeration(
-    refusal.frontier_kind,
-    ["operation", "adapter-step", "health-batch", "lock-publication"] as const,
-    `${path}.frontier_kind`,
-  );
+  validateEmbeddedOperationId(refusal.operation_id, expectedOperationId, `${path}.operation_id`);
+  enumeration(refusal.frontier_kind, CAPABILITY_PRE_EFFECT_FRONTIERS, `${path}.frontier_kind`);
   if (refusal.plan_id !== null) boundedWalId(refusal.plan_id, `${path}.plan_id`);
   if (refusal.step_id !== null) boundedWalId(refusal.step_id, `${path}.step_id`);
   if (!Array.isArray(refusal.target_ids) || refusal.target_ids.length === 0)
     throw new CapabilityValidationError("refusal target set is empty", `${path}.target_ids`);
   refusal.target_ids.forEach((value, index) => boundedWalId(value, `${path}.target_ids[${index}]`));
   assertSortedUnique(refusal.target_ids, bytewise, `${path}.target_ids`);
-  enumeration(
-    refusal.reason_code,
-    [
-      "scope-base-stale",
-      "authority-head-stale",
-      "policy-stale",
-      "grant-stale",
-      "permission-stale",
-      "user-prerequisite-stale",
-      "source-authority-stale",
-      "private-input-stale",
-      "enforcement-stale",
-      "owned-preimage-stale",
-    ] as const,
-    `${path}.reason_code`,
-  );
+  enumeration(refusal.reason_code, CAPABILITY_PRE_EFFECT_REFUSAL_REASONS, `${path}.reason_code`);
   text(refusal.binding_key, `${path}.binding_key`, { min: 1, max: 512, ascii: true });
   nullableWalDigest(refusal.expected_digest, `${path}.expected_digest`);
   nullableWalDigest(refusal.observed_digest, `${path}.observed_digest`);
   enumeration(
     refusal.observed_state,
-    [
-      "absent",
-      "changed",
-      "expired",
-      "revoked",
-      "epoch-drift",
-      "scope-mismatch",
-      "unavailable",
-    ] as const,
+    CAPABILITY_PRE_EFFECT_OBSERVED_STATES,
     `${path}.observed_state`,
   );
   timestamp(refusal.checked_at, `${path}.checked_at`);
   digest(refusal.observation_digest, `${path}.observation_digest`);
   if (
-    (refusal.frontier_kind === "operation" || refusal.frontier_kind === "lock-publication") &&
+    (refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION ||
+      refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION) &&
     (refusal.plan_id !== null || refusal.step_id !== null)
   )
     throw new CapabilityValidationError("refusal frontier IDs are non-canonical", path);
   if (
-    refusal.frontier_kind === "health-batch" &&
+    refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.HEALTH_BATCH &&
     (refusal.plan_id === null || refusal.step_id !== null)
   )
     throw new CapabilityValidationError("health refusal IDs are non-canonical", path);
   if (
-    refusal.frontier_kind === "adapter-step" &&
+    refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.ADAPTER_STEP &&
     (refusal.plan_id === null || refusal.step_id === null)
   )
     throw new CapabilityValidationError("adapter refusal IDs are non-canonical", path);

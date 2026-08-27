@@ -3,12 +3,14 @@ import {
   type ActionRequestAuthorityV1,
   ActionValidationError,
 } from "../actions/index.js";
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import { parseStrictJson } from "../actions/strict-json.js";
 import type { LegacyAdoptInspectionResultV1 } from "../capabilities/legacy/issuance-record.js";
 import { validateLegacyAdoptInspectionRequest } from "../capabilities/legacy/request-validation.js";
 import type { LegacyAdoptInspectionRequestV1 } from "../capabilities/legacy/types.js";
 import { CapabilityRuntimeError } from "../capabilities/operations/errors.js";
 import { CapabilityValidationError } from "../capabilities/wire/primitives.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../core/capability-contract.js";
 import {
   ConversationControlConflictError,
   ConversationNotFoundError,
@@ -44,28 +46,31 @@ function errorResponse(error: unknown): Response {
     error instanceof ActionValidationError ||
     (error instanceof CapabilityValidationError && error.code !== "integrity_failure")
   )
-    return conversationReadError("invalid_request", {
+    return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
       message: "The legacy adoption inspection request is invalid.",
     });
   if (
     error instanceof CapabilityValidationError ||
-    (error instanceof CapabilityRuntimeError && error.runtime_code === "integrity-failure")
+    (error instanceof CapabilityRuntimeError &&
+      error.runtime_code === CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE)
   )
-    return conversationReadError("authority_corrupt", {
+    return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
       message: "Legacy adoption inspection authority is corrupt.",
-      recoveryAction: "repair-authority",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
     });
   if (error instanceof ConversationNotFoundError)
-    return conversationReadError("not_found", { message: "The conversation was not found." });
-  if (error instanceof ConversationControlConflictError)
-    return conversationReadError("stale_conversation", {
-      message: "The writable conversation revision changed.",
-      recoveryAction: "refresh-proposal",
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The conversation was not found.",
     });
-  return conversationReadError("service_unavailable", {
+  if (error instanceof ConversationControlConflictError)
+    return conversationReadError(PUBLIC_ERROR_CODE.STALE_CONVERSATION, {
+      message: "The writable conversation revision changed.",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.REFRESH_PROPOSAL,
+    });
+  return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
     message: "Legacy adoption inspection is unavailable.",
     retryable: true,
-    recoveryAction: "retry",
+    recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
   });
 }
 
@@ -92,11 +97,17 @@ export async function handleConversationLegacyAdoptRoute(
   conversationId: string,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "POST")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   if (authority.csrf && !authority.csrf(request))
-    return conversationReadError("forbidden", { message: "CSRF validation failed." });
+    return conversationReadError(PUBLIC_ERROR_CODE.FORBIDDEN, {
+      message: "CSRF validation failed.",
+    });
   try {
     const root = await authority.rootSessionId(conversationId);
     if (!root) throw new ConversationNotFoundError("conversation not found");

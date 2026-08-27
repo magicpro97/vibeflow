@@ -1,4 +1,6 @@
 import { DIGEST } from "../../actions/record-primitives.js";
+import { isAgentEngine } from "../../core/agent-contract.js";
+import { isCapabilityScope } from "../../core/capability-contract.js";
 import type {
   CapabilityCliUsageError,
   EngineName,
@@ -71,7 +73,6 @@ const SINGLETON_VALUE_FLAGS = new Set<KnownFlag>([
 const KNOWN_FLAGS = [...BOOLEAN_FLAGS, ...REPEATABLE_VALUE_FLAGS, ...SINGLETON_VALUE_FLAGS].map(
   (flag) => `--${flag}`,
 );
-const ENGINE_NAMES = new Set<EngineName>(["antigravity", "claude", "codex", "copilot", "opencode"]);
 
 export function scanRawFlags(argv: string[]): RawFlagState {
   const state: RawFlagState = {
@@ -164,11 +165,10 @@ export function ensureRequestFileExclusive(
 export function parseEngines(values: string[] | undefined): EngineName[] {
   return dedupeSorted(
     (values ?? []).map((value) => {
-      if (!ENGINE_NAMES.has(value as EngineName))
-        usage(`unsupported engine ${JSON.stringify(value)} for --for`);
-      return value as EngineName;
+      if (!isAgentEngine(value)) usage(`unsupported engine ${JSON.stringify(value)} for --for`);
+      return value;
     }),
-  ) as EngineName[];
+  );
 }
 
 export function parseInputId(value: string): string {
@@ -178,7 +178,7 @@ export function parseInputId(value: string): string {
 }
 
 export function parseScope(value: string): Scope {
-  if (value !== "project" && value !== "user")
+  if (!isCapabilityScope(value))
     usage(`--scope must be \"project\" or \"user\", got ${JSON.stringify(value)}`);
   return value;
 }

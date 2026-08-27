@@ -18,15 +18,27 @@ function decodeUtf8(bytes: Uint8Array, label: string): string {
   return text;
 }
 
-export function readStrictJsonFile(path: string): unknown {
-  const stat = lstatSync(path);
+function safeFileOperation<T>(label: string, operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof Error && typeof (error as NodeJS.ErrnoException).code === "string")
+      throw new CapabilityCliUsageError(`${label} could not be read`);
+    throw error;
+  }
+}
+
+export function readStrictJsonFile(path: string, label = "JSON request file"): unknown {
+  const stat = safeFileOperation(label, () => lstatSync(path));
   if (stat.isSymbolicLink())
-    throw new CapabilityCliUsageError(
-      "--request-file must reference a regular file, not a symlink",
-    );
-  if (!stat.isFile())
-    throw new CapabilityCliUsageError("--request-file must reference a regular file");
-  return parseStrictJson(decodeUtf8(readFileSync(path), "JSON request file"));
+    throw new CapabilityCliUsageError(`${label} must reference a regular file, not a symlink`);
+  if (!stat.isFile()) throw new CapabilityCliUsageError(`${label} must reference a regular file`);
+  return parseStrictJson(
+    decodeUtf8(
+      safeFileOperation(label, () => readFileSync(path)),
+      label,
+    ),
+  );
 }
 
 export function readStrictJsonStdin(
@@ -43,5 +55,5 @@ export function readStrictJsonSource(
   reader: (() => Uint8Array | string) | undefined,
   label: string,
 ): unknown {
-  return path === "-" ? readStrictJsonStdin(reader, label) : readStrictJsonFile(path);
+  return path === "-" ? readStrictJsonStdin(reader, label) : readStrictJsonFile(path, label);
 }

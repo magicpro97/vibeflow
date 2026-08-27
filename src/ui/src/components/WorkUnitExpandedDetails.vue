@@ -1,6 +1,6 @@
 <template>
   <div class="grid gap-3" style="font-size: 11px;">
-    <div v-if="unit.status === 'blocked' || (unit.status !== 'done' && Object.values(unit.gates).some((gate)=>gate==='fail'))">
+    <div v-if="unit.status === WORK_UNIT_STATUS.BLOCKED || (unit.status !== WORK_UNIT_STATUS.DONE && Object.values(unit.gates).some((gate) => gate === GATE_STATE.FAIL))">
       <span class="text-[10px] text-neutral-600 font-medium">failed checks</span>
       <div class="flex flex-wrap gap-1 mt-1.5">
         <span
@@ -139,7 +139,7 @@
       <span v-if="unit.resources.cost_usd > 0">${{ fmtCost(unit.resources.cost_usd) }}</span>
     </div>
 
-    <div v-if="unit.status === 'pending'" class="border-t border-neutral-800/40 pt-3">
+    <div v-if="unit.status === WORK_UNIT_STATUS.PENDING" class="border-t border-neutral-800/40 pt-3">
       <label :for="`guidance-${unit.name}`" class="text-[10px] text-neutral-600 font-medium">steer this queued unit</label>
       <textarea
         :id="`guidance-${unit.name}`"
@@ -159,21 +159,27 @@
     </div>
 
     <p v-if="!unit.scope?.length && !unit.evidence?.length && !unit.spec" class="text-neutral-700 italic">
-      {{ unit.status === 'pending' ? 'Waiting to run.' : unit.status === 'running' ? 'Agent working — details appear as it completes steps.' : 'No spec or evidence recorded.' }}
+      {{ unit.status === WORK_UNIT_STATUS.PENDING ? 'Waiting to run.' : unit.status === WORK_UNIT_STATUS.RUNNING ? 'Agent working — details appear as it completes steps.' : 'No spec or evidence recorded.' }}
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
+import {
+  GATE_STATE,
+  REQUIRED_WORK_UNIT_GATES,
+  WORK_UNIT_STATUS,
+} from "../../../core/workflow-contract.js";
 import { api } from "../api.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { type ClassifiedEvidence, classifyEvidence } from "../lib/evidence.js";
+import { workUnitStatusClass } from "../lib/workflow-presentation.js";
 import { useVfStore } from "../store.js";
 import type { TimelineEntry, WorkUnit } from "../types.js";
 
 const props = defineProps<{ unit: WorkUnit; units: WorkUnit[]; timeline?: TimelineEntry[] }>();
-const GATE_KEYS = ["build", "lint", "test", "review"] as const;
+const GATE_KEYS = REQUIRED_WORK_UNIT_GATES;
 const store = useVfStore();
 const homeStore = useConversationHomeStore();
 const guidance = ref("");
@@ -312,15 +318,5 @@ function relativeTime(at: number): string {
 
 const handoffStatus = computed(() => handoffError.value || handoffSuccess.value);
 
-function statusClass(status: WorkUnit["status"]) {
-  return (
-    {
-      pending: "bg-neutral-800/60 text-neutral-500",
-      running: "bg-neutral-800/60 text-neutral-300",
-      verifying: "bg-neutral-800/60 text-neutral-400",
-      done: "bg-neutral-800/40 text-neutral-300",
-      blocked: "bg-neutral-800/40 text-neutral-600",
-    }[status] ?? "bg-neutral-800/60 text-neutral-500"
-  );
-}
+const statusClass = workUnitStatusClass;
 </script>

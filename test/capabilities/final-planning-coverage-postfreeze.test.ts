@@ -911,6 +911,27 @@ describe("source authority closure variants", () => {
     expect(assertClosure(fx)).toHaveLength(1);
   });
 
+  test("closes an exact pinned Git locator", () => {
+    const fx = closureFixture();
+    const source = {
+      kind: "git" as const,
+      canonical_url: "https://github.com/acme/reviewer.git",
+      commit_oid: "a".repeat(40),
+      signature_envelope_digest: null,
+    };
+    const pkg = fx.graph.plan.runtime_closure.effect_packages[0];
+    const plan = fx.plans[0];
+    if (!pkg || !plan) throw new Error("missing source package fixture");
+    pkg.pin.source = source;
+    plan.package_pin.source = source;
+    fx.descriptor.source = {
+      kind: "git",
+      canonical_url: source.canonical_url,
+      commit_oid: source.commit_oid,
+    };
+    expect(assertClosure(fx)).toHaveLength(1);
+  });
+
   test("closes grant authority and rejects a permission digest mismatch", () => {
     const fx = closureFixture();
     fx.descriptor.required_permission_row_digests = [runtimeDigest("source-permission")];

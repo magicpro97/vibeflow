@@ -1,10 +1,20 @@
+import type { CapabilityManifestHealthProbeKind } from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { LegacySourceV1 } from "../../actions/legacy-adopt-types.js";
-import type { EngineName, PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import type {
+  ActionPlanningMode,
+  EngineName,
+  NonRecoveryActionRootLocatorV1,
+} from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { CapabilityComponentV1 } from "../manifest/types.js";
 import type {
   CapabilityPlanningRequestV1,
   ResolvedCapabilityPackageV1,
 } from "../planning/types.js";
+import type {
+  CapabilityHealthOutcomeV1,
+  CapabilityOperationRecoveryPhaseV1,
+} from "../wire/operation-state-contract.js";
 
 export type CapabilityAdapterSupportV1 =
   | "host"
@@ -99,7 +109,7 @@ export type CapabilityPrivateEffectPayloadV1 = CapabilityPrivateEffectPayloadBas
       }
     | {
         payload_kind: "owned-file";
-        root: "project" | "user";
+        root: CapabilityScope;
         canonical_relative_path: string;
         marker_relative_path: string;
         file_mode: 0o600 | 0o644 | 0o755;
@@ -110,7 +120,7 @@ export type CapabilityPrivateEffectPayloadV1 = CapabilityPrivateEffectPayloadBas
       }
     | {
         payload_kind: "json-key-slice";
-        root: "project" | "user";
+        root: CapabilityScope;
         canonical_relative_path: string;
         marker_relative_path: string;
         key_path: string[];
@@ -131,7 +141,7 @@ export type CapabilityPrivateEffectPayloadV1 = CapabilityPrivateEffectPayloadBas
         /** Closed hook adapter payload. It owns one engine hook JSON leaf and,
          * for Codex only, one marked feature block in the user-global TOML. */
         payload_kind: "hook-config-slice";
-        root: "project" | "user";
+        root: CapabilityScope;
         canonical_relative_path: string;
         marker_relative_path: string;
         key_path: string[];
@@ -151,7 +161,7 @@ export type CapabilityPrivateEffectPayloadV1 = CapabilityPrivateEffectPayloadBas
       }
     | {
         payload_kind: "toml-owned-block";
-        root: "project" | "user";
+        root: CapabilityScope;
         canonical_relative_path: string;
         marker_relative_path: string;
         block_id: string;
@@ -162,7 +172,7 @@ export type CapabilityPrivateEffectPayloadV1 = CapabilityPrivateEffectPayloadBas
       }
     | {
         payload_kind: "legacy-claim";
-        root: "project" | "user";
+        root: CapabilityScope;
         legacy_source: LegacySourceV1;
         inspection_evidence_digest: string;
         evidence_record_digest: string;
@@ -184,7 +194,7 @@ export type CapabilityPrivateEffectPayloadV1 = CapabilityPrivateEffectPayloadBas
 export interface CapabilityPrivateEffectBindingV1 {
   schema_version: "1.0";
   descriptor_schema_id: "vf.adapter-owned-projection/1";
-  action_root_locator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>;
+  action_root_locator: NonRecoveryActionRootLocatorV1;
   action_root_binding_digest: string;
   descriptor_digest: string;
   private_descriptor_ref: string;
@@ -197,13 +207,13 @@ export interface CapabilityPrivateEffectBindingV1 {
 export interface CapabilityPrivateEffectOwnerPreimageBindingV1 {
   schema_version: "1.0";
   descriptor_schema_id: "vf.adapter-owned-projection/1";
-  action_root_locator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>;
+  action_root_locator: NonRecoveryActionRootLocatorV1;
   action_root_binding_digest: string;
   descriptor_digest: string;
 }
 
 export interface CapabilityActionRootResolverV1 {
-  resolve(locator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>): string;
+  resolve(locator: NonRecoveryActionRootLocatorV1): string;
 }
 
 export interface FilesystemCapabilityEffectBrokerOptionsV1 {
@@ -222,7 +232,7 @@ export interface CapabilityEffectPreparationRequestV1 {
   component: CapabilityComponentV1;
   target: {
     target_id: string;
-    scope: "project" | "user";
+    scope: CapabilityScope;
     engine: EngineName;
     participant_id: string | null;
   };
@@ -272,13 +282,7 @@ export interface CapabilityEffectDescriptorV1 {
 export interface CapabilityHealthProbeRequestV1 {
   target_id: string;
   probe_id: string;
-  kind:
-    | "binary-version"
-    | "file-hash"
-    | "mcp-handshake"
-    | "hook-selftest"
-    | "role-parse"
-    | "engine-config";
+  kind: CapabilityManifestHealthProbeKind;
   expected_resources: CapabilityOwnedResourceV1[];
 }
 
@@ -288,7 +292,7 @@ export interface CapabilityHealthEvidenceV1 {
   target_id: string;
   probe_id: string;
   kind: CapabilityHealthProbeRequestV1["kind"];
-  outcome: "ready" | "degraded" | "failed" | "unknown" | "stale";
+  outcome: CapabilityHealthOutcomeV1;
   resources: Array<{
     ownership_key: string;
     expected_postimage_sha256: string | null;
@@ -300,17 +304,17 @@ export interface CapabilityHealthEvidenceV1 {
 export interface CapabilityEffectBrokerV1 {
   prepare(
     request: CapabilityEffectPreparationRequestV1,
-    persistence?: "transient" | "durable",
+    persistence?: ActionPlanningMode,
   ): CapabilityPreparedEffectV1;
   prepareRemoval(
     resource: CapabilityOwnedResourceV1,
-    persistence?: "transient" | "durable",
-    actionRootLocator?: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    persistence?: ActionPlanningMode,
+    actionRootLocator?: NonRecoveryActionRootLocatorV1,
   ): CapabilityPreparedEffectV1;
   retainPrivateDescriptor(
     descriptor: CapabilityAdapterPrivateDescriptorV1,
-    persistence: "transient" | "durable",
-    actionRootLocator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    persistence: ActionPlanningMode,
+    actionRootLocator: NonRecoveryActionRootLocatorV1,
   ): CapabilityPrivateEffectBindingV1;
   resolvePrivatePayload(
     binding: CapabilityPrivateEffectBindingV1,
@@ -333,10 +337,10 @@ export interface CapabilityEffectBrokerV1 {
   reconcile(
     descriptor: CapabilityEffectDescriptorV1,
     privatePayload: CapabilityPrivateEffectPayloadV1,
-    direction: "forward" | "rollback",
+    direction: CapabilityOperationRecoveryPhaseV1,
   ): CapabilityProjectionObservationV1;
   health(request: CapabilityHealthProbeRequestV1): {
-    outcome: "ready" | "degraded" | "failed" | "unknown" | "stale";
+    outcome: CapabilityHealthOutcomeV1;
     evidence_digest: string;
     evidence: CapabilityHealthEvidenceV1;
   };

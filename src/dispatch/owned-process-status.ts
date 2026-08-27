@@ -4,6 +4,7 @@ import {
   OWNED_PROCESS_TIMING_MS,
   OWNED_SUPERVISOR_OUTCOME_KIND,
   OWNED_SUPERVISOR_PHASE,
+  OWNED_SUPERVISOR_STATUS_FIELDS,
   OWNED_SUPERVISOR_STATUS_KEY,
   OWNED_SUPERVISOR_TERMINAL_PHASE,
   type OwnedSupervisorPhase,
@@ -51,6 +52,11 @@ function readExitStatus(
     const parsed: unknown = JSON.parse(runtime.readFileSync(path, "utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
+    if (
+      Object.keys(record).length !== OWNED_SUPERVISOR_STATUS_FIELDS.length ||
+      !OWNED_SUPERVISOR_STATUS_FIELDS.every((field) => Object.hasOwn(record, field))
+    )
+      return null;
     const exitCode = record[OWNED_SUPERVISOR_STATUS_KEY.EXIT_CODE];
     const phase = record[OWNED_SUPERVISOR_STATUS_KEY.PHASE];
     if (!Number.isSafeInteger(exitCode) || !isOwnedSupervisorPhase(phase)) return null;

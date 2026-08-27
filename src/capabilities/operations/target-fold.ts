@@ -1,37 +1,60 @@
+import {
+  ACTION_OPERATION_STATE,
+  type ActionOperationDispatchReplayState,
+} from "../../actions/protocol-contract.js";
+import { ACTION_TARGET_DISPOSITION_EXECUTION_VALUE } from "../../actions/public-action-contract.js";
+import {
+  PUBLIC_ACTION_TARGET_HEALTH_FAILURE,
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+  PUBLIC_TARGET_RESULT_OUTCOME,
+  type PublicTargetResultOutcomeV1,
+} from "../../actions/public-operation-contract.js";
 import type { PublicTargetResultV1 } from "../../actions/public-types.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import type { CapabilityAdapterPlanV1, CapabilityFabricPlanV1 } from "../planning/types.js";
-import type { CapabilityLockV1 } from "../wire/lock.js";
-import type { AdapterReceiptV1, CapabilityWalEventV1 } from "../wire/operation.js";
+import { CAPABILITY_LOCK_TARGET_STATE, type CapabilityLockV1 } from "../wire/lock.js";
+import {
+  type AdapterReceiptV1,
+  CAPABILITY_ADAPTER_RECEIPT_EFFECT_UNRESOLVED_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_HEALTH_OUTCOME,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityHealthOutcomeV1,
+  type CapabilityWalEventV1,
+  isCapabilityAdapterReceiptStateIn,
+} from "../wire/operation.js";
 import { bytewise } from "../wire/primitives.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 
-type TerminalState = "committing" | "succeeded" | "failed" | "needs_recovery";
+type TerminalState = ActionOperationDispatchReplayState;
 type ReceiptRow = { sequence: number; receipt: AdapterReceiptV1 };
 type HealthRow = {
   sequence: number;
   planOrder: number;
   probeOrder: number;
   required: boolean;
-  row: Extract<CapabilityWalEventV1["payload"], { kind: "health" }>;
+  row: Extract<
+    CapabilityWalEventV1["payload"],
+    { kind: typeof CAPABILITY_WAL_PAYLOAD_KIND.HEALTH }
+  >;
 };
 
-const HEALTH_SEVERITY = {
-  ready: 0,
-  degraded: 1,
-  unknown: 2,
-  stale: 3,
-  failed: 4,
-} as const;
+const HEALTH_SEVERITY = Object.freeze({
+  [CAPABILITY_HEALTH_OUTCOME.READY]: 0,
+  [CAPABILITY_HEALTH_OUTCOME.DEGRADED]: 1,
+  [CAPABILITY_HEALTH_OUTCOME.UNKNOWN]: 2,
+  [CAPABILITY_HEALTH_OUTCOME.STALE]: 3,
+  [CAPABILITY_HEALTH_OUTCOME.FAILED]: 4,
+} as const satisfies Readonly<Record<CapabilityHealthOutcomeV1, number>>);
 
 function corrupt(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function receiptRows(events: CapabilityWalEventV1[], targetId: string): ReceiptRow[] {
   return events.flatMap((event) => {
     if (
-      event.payload.kind !== "adapter-step" ||
+      event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP ||
       !event.payload.receipt.target_ids.includes(targetId)
     )
       return [];
@@ -52,7 +75,11 @@ function healthRows(
 ): HealthRow[] {
   const selected = new Map<string, HealthRow>();
   for (const event of events) {
-    if (event.payload.kind !== "health" || event.payload.target_id !== targetId) continue;
+    if (
+      event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.HEALTH ||
+      event.payload.target_id !== targetId
+    )
+      continue;
     const payload = event.payload;
     const planOrder = plan.adapter_plans.findIndex((row) => row.plan_id === payload.plan_id);
     const adapterPlan = plan.adapter_plans[planOrder];
@@ -142,7 +169,8 @@ function noOpWitness(
   );
   const state = snapshot?.target_states.find((row) => row.target_id === targetId);
   const target = plan.targets.find((row) => row.target_id === targetId);
-  if (!target || target.subject.kind !== "capability" || !base) return null;
+  if (!target || target.subject.kind !== PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY || !base)
+    return null;
   const subject = target.subject;
   const baseEntry = base.packages.find((row) => row.package_id === subject.package_id);
   const baseTarget = baseEntry?.targets.find((row) => row.target_id === targetId);
@@ -182,7 +210,7 @@ function noOpWitness(
   if (
     canonicalJson(portablePackage) !== canonicalJson(portableBase) ||
     base.permission_digest !== plan.permission_digest ||
-    baseTarget.state !== "installed" ||
+    baseTarget.state !== CAPABILITY_LOCK_TARGET_STATE.INSTALLED ||
     canonicalJson(baseTarget.adapter_fingerprints) !==
       canonicalJson([adapterPlan.adapter.fingerprint]) ||
     baseTarget.enforcement_digest !== expectedEnforcement ||
@@ -194,9 +222,12 @@ function noOpWitness(
   return snapshot?.ownership_evidence_digest ?? null;
 }
 
-function nonHostOutcome(
-  execution: "manual" | "required-user-action" | "unsupported",
-): PublicTargetResultV1["outcome"] {
+type NonHostExecution = Exclude<
+  CapabilityFabricPlanV1["target_dispositions"][number]["execution"],
+  typeof ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST
+>;
+
+function nonHostOutcome(execution: NonHostExecution): PublicTargetResultOutcomeV1 {
   return execution;
 }
 
@@ -213,46 +244,53 @@ export function foldCapabilityTarget(input: {
   if (!target || !disposition) corrupt("operation target closure is incomplete");
   const receipts = receiptRows(events, targetId);
   const health = healthRows(plan, events, targetId);
-  const publicHealth = healthWitness(health)?.row.outcome ?? "unknown";
-  if (disposition.execution !== "host") {
+  const publicHealth = healthWitness(health)?.row.outcome ?? CAPABILITY_HEALTH_OUTCOME.UNKNOWN;
+  if (disposition.execution !== ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST) {
     if (receipts.length > 0 || health.length > 0)
       corrupt("non-host target acquired host runtime evidence");
     return {
       ...target,
       outcome: nonHostOutcome(disposition.execution),
-      health: "unknown",
+      health: CAPABILITY_HEALTH_OUTCOME.UNKNOWN,
       evidence_digest: null,
     };
   }
   const chains = selectedChains(receipts);
   const unresolved = chains.filter((row) =>
-    ["effect_in_progress", "reverse_in_progress", "uncertain"].includes(row.receipt.state),
+    isCapabilityAdapterReceiptStateIn(
+      CAPABILITY_ADAPTER_RECEIPT_EFFECT_UNRESOLVED_STATES,
+      row.receipt.state,
+    ),
   );
   if (unresolved.length > 1) corrupt("target has multiple unresolved receipt chains");
   if (unresolved[0])
     return {
       ...target,
-      outcome: "needs-recovery",
+      outcome: PUBLIC_TARGET_RESULT_OUTCOME.NEEDS_RECOVERY,
       health: publicHealth,
       evidence_digest: unresolved[0].receipt.bounded_evidence_digest,
     };
-  const failed = receipts.find((row) => row.receipt.state === "failed");
+  const failed = receipts.find(
+    (row) => row.receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED,
+  );
   const causalHealth = healthWitness(
-    health.filter((row) => row.required && row.row.outcome !== "ready"),
+    health.filter((row) => row.required && row.row.outcome !== CAPABILITY_HEALTH_OUTCOME.READY),
   );
   if (failed)
     return {
       ...target,
-      outcome: target.target.required ? "failed" : "omitted",
+      outcome: target.target.required
+        ? PUBLIC_TARGET_RESULT_OUTCOME.FAILED
+        : PUBLIC_TARGET_RESULT_OUTCOME.OMITTED,
       health: publicHealth,
       evidence_digest: failed.receipt.bounded_evidence_digest,
     };
   if (causalHealth) {
     const outcome = target.target.required
-      ? "failed"
-      : target.target.on_health_failure === "commit-degraded"
-        ? "degraded"
-        : "omitted";
+      ? PUBLIC_TARGET_RESULT_OUTCOME.FAILED
+      : target.target.on_health_failure === PUBLIC_ACTION_TARGET_HEALTH_FAILURE.COMMIT_DEGRADED
+        ? PUBLIC_TARGET_RESULT_OUTCOME.DEGRADED
+        : PUBLIC_TARGET_RESULT_OUTCOME.OMITTED;
     return {
       ...target,
       outcome,
@@ -260,11 +298,13 @@ export function foldCapabilityTarget(input: {
       evidence_digest: causalHealth.row.evidence_digest,
     };
   }
-  const reversed = [...receipts].reverse().find((row) => row.receipt.state === "reversed");
+  const reversed = [...receipts]
+    .reverse()
+    .find((row) => row.receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSED);
   if (reversed)
     return {
       ...target,
-      outcome: "reversed",
+      outcome: PUBLIC_TARGET_RESULT_OUTCOME.REVERSED,
       health: publicHealth,
       evidence_digest: reversed.receipt.bounded_evidence_digest,
     };
@@ -278,12 +318,16 @@ export function foldCapabilityTarget(input: {
       (row) =>
         row.planOrder === expected.planOrder &&
         row.probeOrder === expected.probeOrder &&
-        row.row.outcome === "ready",
+        row.row.outcome === CAPABILITY_HEALTH_OUTCOME.READY,
     ),
   );
-  const applied = [...receipts].reverse().find((row) => row.receipt.state === "applied");
+  const applied = [...receipts]
+    .reverse()
+    .find((row) => row.receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED);
   const requiredSuccess = requiredComplete
-    ? healthWitness(health.filter((row) => row.required && row.row.outcome === "ready"))
+    ? healthWitness(
+        health.filter((row) => row.required && row.row.outcome === CAPABILITY_HEALTH_OUTCOME.READY),
+      )
     : null;
   const optionalProbeOnly =
     steps.length === 0 && health.length > 0 && health.every((row) => !row.required)
@@ -293,13 +337,13 @@ export function foldCapabilityTarget(input: {
   const allApplied =
     steps.length > 0 &&
     chains.length === steps.length &&
-    chains.every((row) => row.receipt.state === "applied") &&
+    chains.every((row) => row.receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED) &&
     requiredComplete;
   const requiredProbeOnly = steps.length === 0 && requiredDeclared.length > 0 && requiredComplete;
   if (allApplied || requiredProbeOnly || optionalProbeOnly || inspection)
     return {
       ...target,
-      outcome: "applied",
+      outcome: PUBLIC_TARGET_RESULT_OUTCOME.APPLIED,
       health: publicHealth,
       evidence_digest:
         requiredSuccess?.row.evidence_digest ??
@@ -307,7 +351,12 @@ export function foldCapabilityTarget(input: {
         optionalProbeOnly?.row.evidence_digest ??
         inspection,
     };
-  if (terminal !== "succeeded")
-    return { ...target, outcome: "blocked", health: publicHealth, evidence_digest: null };
+  if (terminal !== ACTION_OPERATION_STATE.SUCCEEDED)
+    return {
+      ...target,
+      outcome: PUBLIC_TARGET_RESULT_OUTCOME.BLOCKED,
+      health: publicHealth,
+      evidence_digest: null,
+    };
   return corrupt("successful host target has no causal terminal witness");
 }

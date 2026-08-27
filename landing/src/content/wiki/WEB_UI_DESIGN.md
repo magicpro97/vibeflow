@@ -2,7 +2,7 @@
 title: Web UI Design
 description: Design specification for the web UI — AI-first Home surfaces, UX principles, approval flow, and real-time updates.
 category: explanation
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Web UI Design
@@ -27,9 +27,8 @@ capabilities without forcing a mode switch.
 > AI-first Home shell: searchable session rail, central conversation pane, details inspector,
 > and the composer-driven conversation flow. `HomeSessionRail.vue`, `HomeTimeline.vue`,
 > `HomeComposer.vue`, `HomeCapabilityDrawer.vue`, and `HomeTraceDrawer.vue` provide the
-> rail, timeline, composer, capability, and trace surfaces. The intake wizard remains
-> available for `vf init --interactive` and still writes the canonical context + engine
-> files through `POST /api/init`, `/api/detect`, `/api/units`, and `POST`/`DELETE /api/upload`.
+> rail, timeline, composer, capability, and trace surfaces. Repository intake is not a Home
+> mode: `vf init` asks its questionnaire when stdin is a TTY, and `--no-ask` skips it.
 > All write endpoints are loopback-only and CSRF-protected (see `SECURITY_MODEL.md`).
 > The motion layer is a small inline count-up/entrance animation — no third-party CDN script
 > is loaded, because the page is same-origin with the write API and a compromised CDN must not
@@ -51,7 +50,10 @@ ArrowUp editing for the latest queued human message, private file range capture,
 typed capability selection. Sends made while an agent is busy queue automatically. ArrowUp
 starts an edit only for the latest queued human message; Escape cancels, and a lost
 dispatch/edit race preserves the draft for explicit send-as-new. Sent messages remain
-ordered and reviewable.
+ordered and reviewable. An admission failure that was not acknowledged stays visible as a
+retryable row. Explicit retry reuses the exact request and idempotency key while preserving
+any newer composer draft; offline retry is never implicit. The rejected row is current Home
+state and is not persisted through `localStorage` or promised across a browser restart.
 
 ### 3. Details inspector
 
@@ -73,10 +75,11 @@ Messages accept only 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, and ❗ reaction
 records rather than prompt syntax; an agent may add at most three distinct non-self
 reactions so the affordance does not become noise.
 
-### 6. Intake wizard
+### 6. Repository intake
 
-`vf init --interactive` opens the repo setup wizard for first-run context capture:
-repo path, goal, engines, doc/task sources, attachments, and Definition of Done.
+Run `vf init` in a TTY for first-run repository intake; it asks the goal, engine, sources,
+and Definition of Done before generating canonical context. `vf init --no-ask` is the
+non-interactive path. `vf ui` always stays on AI-first Home.
 
 ### 7. Secondary workflow/review surfaces
 
@@ -188,8 +191,8 @@ remains but is secondary to the active workflow cards.
 
 ## 11. Interactive Plan Review (PR1)
 
-The Plan Review panel (Stage 2 of the intake wizard) is a file-backed plan-markdown
-review surface with three components:
+The Plan Review panel (Stage 2 of the legacy repository workflow surface, not
+AI-first Home) is a file-backed plan-markdown review surface with three components:
 
 **PlanReview.vue** — parent container. Loads revisions via `store.loadRevisions()`
 when `repoPath` resolves (watches `store.repoPath`). Renders a split layout:

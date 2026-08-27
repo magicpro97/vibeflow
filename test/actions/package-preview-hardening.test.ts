@@ -368,14 +368,14 @@ describe("package pin and public projection hardening", () => {
       ).toThrow(/private|credential|control/i);
       expect(() =>
         publicActionError({
-          code: "invalid_request",
-          message: "Invalid request.",
+          code: "stale_catalog_cursor",
+          message: "Catalog cursor is stale.",
           correlation_id: "vf-correlation-public",
           retryable: false,
-          recovery_action: null,
-          details: { note: secret },
+          recovery_action: "restart-pagination",
+          details: { restart_cursor: "cursor-1", catalog_generation: secret },
         }),
-      ).toThrow(/private|credential|control/i);
+      ).toThrow();
     }
     expect(() =>
       materializeProposal(

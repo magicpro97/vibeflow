@@ -1,19 +1,36 @@
+import {
+  type CAPABILITY_HOST_ACTION_KINDS,
+  HOST_ACTION_KIND,
+  isCapabilityHostActionKind,
+} from "../../actions/host-action-contract.js";
 import { exactObject, validateIdempotencyKey } from "../../actions/index.js";
+import {
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  type ActionPlanningTransientNetworkRead,
+} from "../../actions/public-action-contract.js";
 import type { HostActionRequestV1 } from "../../actions/request-types.js";
 import { validateHostActionRequest } from "../../actions/validation.js";
 import { CapabilityRuntimeError } from "../../capabilities/operations/errors.js";
 import type { CapabilityFabricServiceV1 } from "../../capabilities/service.js";
 import type { FabricCliMutationRequestV1 } from "../../capabilities/wire/cli.js";
 import type { CapabilityBrowserDetailResponseV1 } from "../../capabilities/wire/query.js";
+import {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  CAPABILITY_SCOPE,
+  isCapabilityScope,
+} from "../../core/capability-contract.js";
 import { readStrictJsonSource } from "./io.js";
 import { CapabilityCliUsageError, type ParsedCapabilityCliArgvV1 } from "./parser-types.js";
 import type { Scope } from "./parser-types.js";
 import { ephemeralIdempotencyKey } from "./runtime.js";
 
-type CapabilityAction = Extract<HostActionRequestV1, { type: `capability.${string}` }>;
+type CapabilityAction = Extract<
+  HostActionRequestV1,
+  { type: (typeof CAPABILITY_HOST_ACTION_KINDS)[number] }
+>;
 
 function isCapabilityAction(action: HostActionRequestV1): action is CapabilityAction {
-  return action.type.startsWith("capability.");
+  return isCapabilityHostActionKind(action.type);
 }
 
 export function decodeMutationRequest(
@@ -30,16 +47,22 @@ export function decodeMutationRequest(
   if (row.schema_version !== "1.0")
     throw new CapabilityCliUsageError("unsupported request-file schema_version");
   const planning = exactObject(row.planning_options, ["network_read"], [], "$.planning_options");
-  if (planning.network_read !== "forbid" && planning.network_read !== "allow-if-granted")
+  if (
+    planning.network_read !== ACTION_PLANNING_NETWORK_READ_VALUE.FORBID &&
+    planning.network_read !== ACTION_PLANNING_NETWORK_READ_VALUE.ALLOW_IF_GRANTED
+  )
     throw new CapabilityCliUsageError("invalid request-file planning_options.network_read");
   const action = validateHostActionRequest(row.action);
   if (!isCapabilityAction(action))
     throw new CapabilityCliUsageError("request-file action must target the capability domain");
-  if (command === "capability.update") {
-    if (!["capability.update", "capability.restore_package"].includes(action.type))
+  if (command === HOST_ACTION_KIND.CAPABILITY_UPDATE) {
+    if (
+      action.type !== HOST_ACTION_KIND.CAPABILITY_UPDATE &&
+      action.type !== HOST_ACTION_KIND.CAPABILITY_RESTORE_PACKAGE
+    )
       throw new CapabilityCliUsageError("request-file action does not match vf capability update");
-  } else if (command === "capability.rollback") {
-    if (action.type !== "capability.rollback_scope")
+  } else if (command === CAPABILITY_CLI_COMMAND.ROLLBACK) {
+    if (action.type !== HOST_ACTION_KIND.CAPABILITY_ROLLBACK_SCOPE)
       throw new CapabilityCliUsageError(
         "request-file action does not match vf capability rollback",
       );
@@ -47,12 +70,14 @@ export function decodeMutationRequest(
     throw new CapabilityCliUsageError(
       "request-file action does not match the selected capability command",
     );
+  if (!isCapabilityScope(row.scope))
+    throw new CapabilityCliUsageError("request-file scope is invalid");
   if (scopeForCapabilityAction(action) !== row.scope)
     throw new CapabilityCliUsageError("request-file scope does not match request action scope");
   return {
     schema_version: "1.0",
     idempotency_key: validateIdempotencyKey(row.idempotency_key),
-    scope: row.scope === "user" ? "user" : "project",
+    scope: row.scope,
     planning_options: { network_read: planning.network_read },
     action,
   };
@@ -66,7 +91,7 @@ export function commandAction(
     return decodeMutationRequest(command.requestFile, command.command, reader);
   if (command.kind !== "mutation")
     throw new CapabilityCliUsageError("expected a capability mutation command");
-  const scope = (command.scope ?? "project") as Scope;
+  const scope: Scope = command.scope ?? CAPABILITY_SCOPE.PROJECT;
   if (command.mode !== "direct")
     throw new CapabilityCliUsageError("unsupported capability mutation mode");
   const inputs = [
@@ -74,11 +99,11 @@ export function commandAction(
     ...command.privateInputs.map((row) => ({ input_id: row.input_id, value: row.reference })),
   ];
   switch (command.command) {
-    case "capability.install":
+    case HOST_ACTION_KIND.CAPABILITY_INSTALL:
       if (!command.packageId)
         throw new CapabilityCliUsageError("capability install requires a package ID");
       return {
-        type: "capability.install",
+        type: HOST_ACTION_KIND.CAPABILITY_INSTALL,
         package: {
           id: command.packageId,
           ...(command.packagePinDigest ? { package_pin_digest: command.packagePinDigest } : {}),
@@ -87,7 +112,7 @@ export function commandAction(
         requested_targets: command.engines.map((engine) => ({ engine, participant_id: null })),
         inputs,
       };
-    case "capability.update":
+    case HOST_ACTION_KIND.CAPABILITY_UPDATE:
       if (!command.packageId)
         throw new CapabilityCliUsageError("capability update requires a package ID");
       if (command.fromGenerationId) {
@@ -96,14 +121,14 @@ export function commandAction(
             "capability update --from-generation-id cannot combine with target or input selectors",
           );
         return {
-          type: "capability.restore_package",
+          type: HOST_ACTION_KIND.CAPABILITY_RESTORE_PACKAGE,
           package_id: command.packageId,
           scope,
           generation_id: command.fromGenerationId,
         };
       }
       return {
-        type: "capability.update",
+        type: HOST_ACTION_KIND.CAPABILITY_UPDATE,
         package_id: command.packageId,
         selector: {
           id: command.packageId,
@@ -115,41 +140,54 @@ export function commandAction(
           : null,
         inputs: inputs.length ? inputs : null,
       };
-    case "capability.configure":
+    case HOST_ACTION_KIND.CAPABILITY_CONFIGURE:
       if (!command.packageId)
         throw new CapabilityCliUsageError("capability configure requires a package ID");
-      return { type: "capability.configure", package_id: command.packageId, scope, inputs };
-    case "capability.retarget":
+      return {
+        type: HOST_ACTION_KIND.CAPABILITY_CONFIGURE,
+        package_id: command.packageId,
+        scope,
+        inputs,
+      };
+    case HOST_ACTION_KIND.CAPABILITY_RETARGET:
       if (!command.packageId)
         throw new CapabilityCliUsageError("capability retarget requires a package ID");
       return {
-        type: "capability.retarget",
+        type: HOST_ACTION_KIND.CAPABILITY_RETARGET,
         package_id: command.packageId,
         scope,
         requested_targets: command.engines.map((engine) => ({ engine, participant_id: null })),
       };
-    case "capability.remove":
+    case HOST_ACTION_KIND.CAPABILITY_REMOVE:
       if (!command.packageId)
         throw new CapabilityCliUsageError("capability remove requires a package ID");
       return {
-        type: "capability.remove",
+        type: HOST_ACTION_KIND.CAPABILITY_REMOVE,
         package_id: command.packageId,
         scope,
         cascade: command.cascade,
       };
-    case "capability.rollback":
+    case CAPABILITY_CLI_COMMAND.ROLLBACK:
       if (!command.generationId)
         throw new CapabilityCliUsageError("capability rollback requires --generation-id");
-      return { type: "capability.rollback_scope", scope, generation_id: command.generationId };
-    case "capability.repair":
-      return { type: "capability.repair", package_id: command.packageId ?? null, scope };
-    case "capability.adopt":
+      return {
+        type: HOST_ACTION_KIND.CAPABILITY_ROLLBACK_SCOPE,
+        scope,
+        generation_id: command.generationId,
+      };
+    case HOST_ACTION_KIND.CAPABILITY_REPAIR:
+      return {
+        type: HOST_ACTION_KIND.CAPABILITY_REPAIR,
+        package_id: command.packageId ?? null,
+        scope,
+      };
+    case HOST_ACTION_KIND.CAPABILITY_ADOPT:
       if (!command.candidateId || !command.candidateDigest)
         throw new CapabilityCliUsageError(
           "capability adopt requires --candidate-id and --candidate-digest",
         );
       return {
-        type: "capability.adopt",
+        type: HOST_ACTION_KIND.CAPABILITY_ADOPT,
         scope,
         candidate_id: command.candidateId,
         candidate_digest: command.candidateDigest,
@@ -183,7 +221,7 @@ export function detailForBind(
   if (parsed.packagePinDigest && detail.package_pin_digest !== parsed.packagePinDigest)
     throw new CapabilityRuntimeError(
       "selected package pin digest does not match the active capability",
-      "package-not-found",
+      CAPABILITY_RUNTIME_ERROR_CODE.PACKAGE_NOT_FOUND,
     );
   return detail;
 }
@@ -193,11 +231,16 @@ export function enrichLifecycleSelectorHints(
   scope: Scope,
   action: HostActionRequestV1,
 ): HostActionRequestV1 {
-  if (action.type !== "capability.install" && action.type !== "capability.update") return action;
-  const selector = action.type === "capability.install" ? action.package : action.selector;
+  if (
+    action.type !== HOST_ACTION_KIND.CAPABILITY_INSTALL &&
+    action.type !== HOST_ACTION_KIND.CAPABILITY_UPDATE
+  )
+    return action;
+  const selector =
+    action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL ? action.package : action.selector;
   if (selector.source_kind) return action;
   const requestedEngines =
-    action.type === "capability.install"
+    action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL
       ? action.requested_targets.map((target) => target.engine)
       : (action.requested_targets ?? []).map((target) => target.engine);
   const response = service.query({
@@ -236,7 +279,7 @@ export function enrichLifecycleSelectorHints(
       ? { content_sha256: matches[0]?.content_sha256 ?? undefined }
       : {}),
   };
-  return action.type === "capability.install"
+  return action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL
     ? { ...action, package: hinted }
     : { ...action, selector: hinted };
 }
@@ -244,26 +287,26 @@ export function enrichLifecycleSelectorHints(
 export function transientPlanningNetworkRead(
   parsed: Extract<ParsedCapabilityCliArgvV1, { kind: "mutation" }>,
   direct: HostActionRequestV1 | FabricCliMutationRequestV1,
-): "forbid" | "allow-if-granted" {
+): ActionPlanningTransientNetworkRead {
   return "action" in direct
     ? direct.planning_options.network_read
     : parsed.allowNetworkRead
-      ? "allow-if-granted"
-      : "forbid";
+      ? ACTION_PLANNING_NETWORK_READ_VALUE.ALLOW_IF_GRANTED
+      : ACTION_PLANNING_NETWORK_READ_VALUE.FORBID;
 }
 
 export function durableCapabilityRequest(
   parsed: Extract<ParsedCapabilityCliArgvV1, { kind: "mutation" }>,
   scope: Scope,
   direct: HostActionRequestV1 | FabricCliMutationRequestV1,
-  action: Exclude<HostActionRequestV1, { type: "authority.repair" }>,
+  action: Exclude<HostActionRequestV1, { type: typeof HOST_ACTION_KIND.AUTHORITY_REPAIR }>,
 ): FabricCliMutationRequestV1 {
   if ("action" in direct) return direct;
   return {
     schema_version: "1.0",
     idempotency_key: parsed.idempotencyKey ?? ephemeralIdempotencyKey("vf-cli-capability"),
     scope,
-    planning_options: { network_read: "forbid" },
+    planning_options: { network_read: ACTION_PLANNING_NETWORK_READ_VALUE.FORBID },
     action,
   };
 }
@@ -271,3 +314,4 @@ export function durableCapabilityRequest(
 function scopeForCapabilityAction(action: CapabilityAction): Scope {
   return action.scope;
 }
+import { CAPABILITY_CLI_COMMAND } from "../../actions/capability-cli-contract.js";

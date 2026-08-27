@@ -8,6 +8,7 @@ import type {
   ActionProposalV1,
 } from "../../src/actions/index.js";
 import {
+  ACTION_OPERATION_STATE,
   actionIdempotencyScopeDigest,
   materializeApproval,
   materializeProposal,
@@ -15,6 +16,15 @@ import {
 import { expectedOperationStatus } from "../../src/actions/operation-phase-rules.js";
 import { validateProposalOwnership } from "../../src/actions/proposal-ownership-validation.js";
 import { validateProposalDraftShape } from "../../src/actions/proposal-validation.js";
+import {
+  ACTION_DECISION,
+  ACTION_DELIVERY_VALUE,
+} from "../../src/actions/public-action-contract.js";
+import {
+  PUBLIC_ERROR_CANONICAL_MESSAGE,
+  PUBLIC_ERROR_CODE,
+  PUBLIC_RECOVERY_ACTION,
+} from "../../src/actions/public-error-contract.js";
 import {
   assertCapabilityActionPlan,
   capabilityActionPlanDigest,
@@ -29,7 +39,10 @@ import {
   capabilityPreviewRisk,
   materializeCapabilityPreview,
 } from "../../src/capabilities/action-domain/preview.js";
-import { projectCapabilityActionEvents } from "../../src/capabilities/action-domain/projection.js";
+import {
+  projectCapabilityActionEvents,
+  projectCapabilityActionSnapshot,
+} from "../../src/capabilities/action-domain/projection.js";
 import { materializeCapabilityConversationProposal } from "../../src/capabilities/action-domain/proposal.js";
 import {
   InMemoryCapabilityEffectBrokerV1,
@@ -95,8 +108,18 @@ import { CapabilityRuntimeActionRootsV1 } from "../../src/capabilities/runtime-a
 import {
   CapabilityStorageV1,
   projectCapabilityPaths,
+  readCapabilityWal,
   writeCapabilityOperationHeader,
 } from "../../src/capabilities/storage/index.js";
+import {
+  CAPABILITY_OUTBOX_DELIVERY_BY_TRANSITION,
+  CAPABILITY_OUTBOX_PHASE,
+  CAPABILITY_OUTBOX_TRANSITION,
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_PRE_EFFECT_OBSERVED_STATE,
+  CAPABILITY_PRE_EFFECT_REFUSAL_REASON,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+} from "../../src/capabilities/wire/operation.js";
 import { digestHex, digestV1 } from "../../src/durability/index.js";
 import { ConversationActionReceiptStore } from "../../src/orchestrator/conversation/conversation-action-receipt-store.js";
 import { ConversationActionService } from "../../src/orchestrator/conversation/conversation-action-service.js";
@@ -437,7 +460,10 @@ type ProjectionReceiptState =
   | "reverse_in_progress"
   | "reversed";
 
-function projectionOperationFixture(manifestMutator?: Parameters<typeof resolvedRolePackage>[0]) {
+function projectionOperationFixture(
+  manifestMutator?: Parameters<typeof resolvedRolePackage>[0],
+  conversation = false,
+) {
   const root = temporaryRoot("action-projection-coverage");
   mkdirSync(join(root, ".vibeflow"), { recursive: true });
   const authority = runtimeAuthority();
@@ -445,27 +471,12 @@ function projectionOperationFixture(manifestMutator?: Parameters<typeof resolved
     projectCapabilityPaths(root),
     authority.scope_identity_digest,
   );
-  const broker = new InMemoryCapabilityEffectBrokerV1();
   const pkg = resolvedRolePackage(manifestMutator);
-  const action = installAction(pkg);
-  const graph = runtimePlanningGraph(
-    {
-      schema_version: "1.0",
-      intent: { kind: "install" },
-      scope: "project",
-      scope_identity_digest: authority.scope_identity_digest,
-      authority,
-      base_lock: null,
-      desired_packages: [pkg],
-      effect_packages: [pkg],
-      selected_engines: ["codex"],
-      selected_targets: [{ package_id: pkg.pin.id, engine: "codex", participant_id: null }],
-      canonical_action: action,
-    },
-    broker,
-    NOW,
-  );
-  const proposal = standaloneProposal(graph, action);
+  const planned = graphFixture({ packages: [pkg], conversation });
+  const { action, graph } = planned;
+  const proposal = conversation
+    ? conversationProposalFixture(planned).proposal
+    : standaloneProposal(graph, action);
   const approval = materializeApproval(proposal, {
     decision: "approved",
     decided_by: proposal.requested_by,
@@ -481,6 +492,27 @@ function projectionOperationFixture(manifestMutator?: Parameters<typeof resolved
     approval_id: approval.approval_id,
     approval_digest: approval.approval_digest,
     created_at: approval.decided_at,
+    action_root_locator: proposal.action_root_locator,
+    conversation_correlation: conversation
+      ? {
+          schema_version: "1.0" as const,
+          correlation_id: `vf-correlation-${digestHex(
+            digestV1("VF-ACTION-CORRELATION\0v1\0", {
+              proposal_id: proposal.proposal_id,
+              domain: proposal.domain,
+              root_session_id: proposal.base.root_session_id,
+              conversation_id: proposal.base.conversation_id,
+              revision_id: proposal.base.revision_id,
+              origin_event_id: proposal.origin_event_id,
+            }),
+          )}`,
+          root_session_id: proposal.base.root_session_id as string,
+          conversation_id: proposal.base.conversation_id as string,
+          revision_id: proposal.base.revision_id as string,
+          origin_event_id: proposal.origin_event_id,
+          proposal_id: proposal.proposal_id,
+        }
+      : null,
   };
   const operationId = capabilityOperationIdForAuthorization(authorization);
   const journal = new CapabilityOperationJournalV1({
@@ -592,11 +624,62 @@ function projectionOperationFixture(manifestMutator?: Parameters<typeof resolved
     appendScenario,
     approval,
     graph,
+    journal,
     operationId,
     proposal,
     snapshot,
     storage,
   };
+}
+
+function appendProjectionOutbox(
+  fixture: ReturnType<typeof projectionOperationFixture>,
+  input: {
+    idDigit: string;
+    phaseSequence: number;
+    transition: keyof typeof CAPABILITY_OUTBOX_DELIVERY_BY_TRANSITION;
+  },
+): void {
+  const held = fixture.storage.acquire(`projection-outbox:${fixture.operationId}`);
+  try {
+    fixture.journal.append(
+      fixture.operationId,
+      {
+        kind: CAPABILITY_WAL_PAYLOAD_KIND.OUTBOX,
+        outbox_event_id: `vf-outbox-${input.idDigit.repeat(64)}`,
+        payload_ref: `vf-outbox-payload-${input.idDigit.repeat(64)}`,
+        phase: CAPABILITY_OUTBOX_PHASE.OPERATION_FAILED,
+        phase_sequence: input.phaseSequence,
+        public_payload_digest: runtimeDigest(`outbox-payload:${input.idDigit}`),
+        transition: input.transition,
+        delivery: CAPABILITY_OUTBOX_DELIVERY_BY_TRANSITION[input.transition],
+      },
+      held,
+    );
+  } finally {
+    held.release();
+  }
+}
+
+function appendProjectionRefusal(fixture: ReturnType<typeof projectionOperationFixture>): void {
+  const held = fixture.storage.acquire(`projection-refusal:${fixture.operationId}`);
+  try {
+    fixture.journal.appendRefusal({
+      operationId: fixture.operationId,
+      plan: fixture.graph.plan,
+      reason: CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SCOPE_BASE_STALE,
+      planId: null,
+      stepId: null,
+      targetIds: fixture.graph.plan.targets.map((target) => target.target_id),
+      frontier: CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION,
+      observedState: CAPABILITY_PRE_EFFECT_OBSERVED_STATE.CHANGED,
+      expectedDigest: null,
+      observedDigest: runtimeDigest("changed-scope-base"),
+      held,
+    });
+  } finally {
+    held.release();
+  }
 }
 
 function privateFixture(
@@ -885,6 +968,164 @@ describe("action records and Capability action-domain residual behavior", () => 
       authority: fx.authority,
     });
     expect(committed.operation.state).toBe("succeeded");
+  });
+
+  test("folds the latest durable outbox state and rejects outbox rows outside conversation delivery", () => {
+    const conversation = projectionOperationFixture(undefined, true);
+    conversation.appendScenario([{ receipts: [], terminal: ACTION_OPERATION_STATE.FAILED }]);
+    const snapshot = conversation.snapshot(ACTION_OPERATION_STATE.FAILED);
+    const projected = () =>
+      projectCapabilityActionSnapshot(snapshot, conversation.storage, conversation.actionAuthority)
+        .operation;
+
+    expect(projected().delivery).toBe(ACTION_DELIVERY_VALUE.PENDING);
+    appendProjectionOutbox(conversation, {
+      idDigit: "4",
+      phaseSequence: 0,
+      transition: CAPABILITY_OUTBOX_TRANSITION.CREATED,
+    });
+    expect(projected().delivery).toBe(ACTION_DELIVERY_VALUE.PENDING);
+    appendProjectionOutbox(conversation, {
+      idDigit: "4",
+      phaseSequence: 0,
+      transition: CAPABILITY_OUTBOX_TRANSITION.DELIVERED,
+    });
+    expect(projected().delivery).toBe(ACTION_DELIVERY_VALUE.DELIVERED);
+    appendProjectionOutbox(conversation, {
+      idDigit: "5",
+      phaseSequence: 1,
+      transition: CAPABILITY_OUTBOX_TRANSITION.CREATED,
+    });
+    expect(projected().delivery).toBe(ACTION_DELIVERY_VALUE.PENDING);
+    appendProjectionOutbox(conversation, {
+      idDigit: "5",
+      phaseSequence: 1,
+      transition: CAPABILITY_OUTBOX_TRANSITION.DELIVERY_FAILED,
+    });
+    expect(projected().delivery).toBe(ACTION_DELIVERY_VALUE.FAILED);
+    appendProjectionOutbox(conversation, {
+      idDigit: "5",
+      phaseSequence: 1,
+      transition: CAPABILITY_OUTBOX_TRANSITION.DELIVERED,
+    });
+    const latestProjection = projected();
+    const latestOutboxEvent = readCapabilityWal(
+      conversation.storage.paths,
+      conversation.operationId,
+    ).at(-1);
+    if (!latestOutboxEvent) throw new Error("latest outbox event should exist");
+    expect(latestProjection.delivery).toBe(ACTION_DELIVERY_VALUE.DELIVERED);
+    expect(latestProjection.updated_at).toBe(latestOutboxEvent.recorded_at);
+
+    const standalone = projectionOperationFixture();
+    standalone.appendScenario([{ receipts: [], terminal: ACTION_OPERATION_STATE.FAILED }]);
+    appendProjectionOutbox(standalone, {
+      idDigit: "6",
+      phaseSequence: 0,
+      transition: CAPABILITY_OUTBOX_TRANSITION.CREATED,
+    });
+    expect(() =>
+      projectCapabilityActionSnapshot(
+        standalone.snapshot(ACTION_OPERATION_STATE.FAILED),
+        standalone.storage,
+        standalone.actionAuthority,
+      ),
+    ).toThrow(/non-applicable.*outbox/i);
+  });
+
+  test("marks pre-dispatch terminal conversation delivery not applicable", () => {
+    const fixture = projectionOperationFixture(undefined, true);
+    const deniedApproval = materializeApproval(fixture.proposal, {
+      decision: ACTION_DECISION.DENIED,
+      decided_by: fixture.proposal.requested_by,
+      challenge_class: "normal-confirm",
+      challenge_digest: null,
+      decided_at: NOW,
+      expires_at: "2026-08-25T12:30:00.000Z",
+    });
+    const states = [
+      { state: ACTION_OPERATION_STATE.DENIED, approval: deniedApproval },
+      { state: ACTION_OPERATION_STATE.CANCELED, approval: fixture.approval },
+      { state: ACTION_OPERATION_STATE.EXPIRED, approval: fixture.approval },
+      { state: ACTION_OPERATION_STATE.STALE, approval: fixture.approval },
+    ] as const;
+    for (const row of states) {
+      const snapshot: ActionAuthoritySnapshotV1 = {
+        proposal: fixture.proposal,
+        approval: row.approval,
+        state: row.state,
+        operation_id: null,
+        dispatch_record_digest: null,
+        domain_terminal_digest: null,
+        events: [],
+      };
+      expect(
+        projectCapabilityActionSnapshot(snapshot, fixture.storage, fixture.actionAuthority)
+          .operation.delivery,
+      ).toBe(ACTION_DELIVERY_VALUE.NOT_APPLICABLE);
+    }
+    expect(
+      projectCapabilityActionSnapshot(
+        {
+          ...states[1],
+          proposal: fixture.proposal,
+          approval: fixture.approval,
+          state: ACTION_OPERATION_STATE.APPROVED,
+          operation_id: null,
+          dispatch_record_digest: null,
+          domain_terminal_digest: null,
+          events: [],
+        },
+        fixture.storage,
+        fixture.actionAuthority,
+      ).operation.delivery,
+    ).toBe(ACTION_DELIVERY_VALUE.PENDING);
+  });
+
+  test("retains refusal errors through recovery reconciliation without leaking private evidence", () => {
+    const fixture = projectionOperationFixture(undefined, true);
+    appendProjectionRefusal(fixture);
+    fixture.appendScenario([
+      { receipts: [], terminal: ACTION_OPERATION_STATE.NEEDS_RECOVERY },
+      { receipts: [], terminal: ACTION_OPERATION_STATE.FAILED },
+    ]);
+    const recovering = projectCapabilityActionSnapshot(
+      fixture.snapshot(ACTION_OPERATION_STATE.NEEDS_RECOVERY),
+      fixture.storage,
+      fixture.actionAuthority,
+    ).operation;
+    expect(recovering.error).toEqual({
+      code: PUBLIC_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+      message: PUBLIC_ERROR_CANONICAL_MESSAGE[PUBLIC_ERROR_CODE.SCOPE_NEEDS_RECOVERY],
+      correlation_id: recovering.correlation_id,
+      retryable: false,
+      recovery_action: PUBLIC_RECOVERY_ACTION.REPAIR,
+      details: { operation_id: fixture.operationId },
+    });
+    expect(recovering.recovery_actions).toEqual([PUBLIC_RECOVERY_ACTION.REPAIR]);
+
+    const failed = projectCapabilityActionSnapshot(
+      fixture.snapshot(ACTION_OPERATION_STATE.FAILED),
+      fixture.storage,
+      fixture.actionAuthority,
+    ).operation;
+    expect(failed.error).toEqual({
+      code: PUBLIC_ERROR_CODE.PRE_EFFECT_REFUSED,
+      message: PUBLIC_ERROR_CANONICAL_MESSAGE[PUBLIC_ERROR_CODE.PRE_EFFECT_REFUSED],
+      correlation_id: failed.correlation_id,
+      retryable: false,
+      recovery_action: PUBLIC_RECOVERY_ACTION.REFRESH_PROPOSAL,
+      details: {
+        operation_id: fixture.operationId,
+        reason_code: CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SCOPE_BASE_STALE,
+        frontier_kind: CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION,
+      },
+    });
+    expect(failed.recovery_actions).toEqual([PUBLIC_RECOVERY_ACTION.REFRESH_PROPOSAL]);
+    const serialized = JSON.stringify(failed);
+    expect(serialized).not.toContain("changed-scope-base");
+    expect(serialized).not.toContain("binding_key");
+    expect(serialized).not.toContain("observed_digest");
   });
 
   test("projects reachable failed, omitted, reversed, recovery, and blocked target phases", () => {

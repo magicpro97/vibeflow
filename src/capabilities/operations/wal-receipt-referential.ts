@@ -8,12 +8,19 @@ import {
 import type { CapabilityFabricPlanV1 } from "../planning/types.js";
 import { capabilityObjectPath } from "../storage/paths.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
-import type {
-  AdapterReceiptV1,
-  CapabilityOperationV1,
-  CapabilityWalEventV1,
+import {
+  type AdapterReceiptV1,
+  CAPABILITY_ADAPTER_RECEIPT_COMPENSATION_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_EVIDENCE_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_POSTIMAGE_ABSENT_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityOperationV1,
+  type CapabilityWalEventV1,
+  isCapabilityAdapterReceiptStateIn,
 } from "../wire/operation.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import {
   type CapabilityReceiptEvidenceV1,
   adapterResourceAggregate,
@@ -21,7 +28,7 @@ import {
 } from "./receipts.js";
 
 function corrupt(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 const same = (left: unknown, right: unknown): boolean =>
@@ -53,7 +60,10 @@ export function assertCapabilityReceipt(
     step.owned_resources,
     true,
   );
-  const observedState = !["prepared", "effect_in_progress", "failed"].includes(receipt.state);
+  const observedState = !isCapabilityAdapterReceiptStateIn(
+    CAPABILITY_ADAPTER_RECEIPT_POSTIMAGE_ABSENT_STATES,
+    receipt.state,
+  );
   if (receipt.operation_id !== header.operation_id)
     corrupt("receipt embedded operation identity mismatch");
   if (
@@ -71,19 +81,23 @@ export function assertCapabilityReceipt(
   )
     corrupt("receipt bytes do not match the approved step authority");
   if (receipt.bounded_evidence_digest === null) return;
-  const evidenceReceipt = receipt.state === "reverse_in_progress" ? priorReceipt : receipt;
+  const evidenceReceipt =
+    receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSE_IN_PROGRESS ? priorReceipt : receipt;
+  const evidenceState = evidenceReceipt?.state;
   if (
     !evidenceReceipt ||
-    !["applied", "failed", "uncertain", "reversed"].includes(evidenceReceipt.state) ||
+    evidenceState === undefined ||
+    !isCapabilityAdapterReceiptStateIn(CAPABILITY_ADAPTER_RECEIPT_EVIDENCE_STATES, evidenceState) ||
     evidenceReceipt.observed_at === null ||
-    (receipt.state === "reverse_in_progress" &&
-      (priorReceipt?.state !== "applied" ||
+    (receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSE_IN_PROGRESS &&
+      (priorReceipt?.state !== CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED ||
         receipt.bounded_evidence_digest !== priorReceipt.bounded_evidence_digest))
   )
     corrupt("receipt evidence does not have one exact observed receipt predecessor");
   const descriptorKind =
-    evidenceReceipt.state === "reversed" ||
-    (evidenceReceipt.state === "uncertain" && priorReceipt?.state === "reverse_in_progress")
+    evidenceState === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSED ||
+    (evidenceState === CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN &&
+      priorReceipt?.state === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSE_IN_PROGRESS)
       ? "rollback"
       : "intent";
   const descriptorDigest =
@@ -120,7 +134,7 @@ export function assertCapabilityReceipt(
     step,
     descriptor,
     operationId: header.operation_id,
-    state: evidenceReceipt.state as "applied" | "failed" | "uncertain" | "reversed",
+    state: evidenceState,
     observedAt: evidenceReceipt.observed_at,
     errorCode: evidenceReceipt.error_code,
   });
@@ -144,13 +158,22 @@ export function assertCapabilityForwardReceiptOrder(
   let next = 0;
   let compensationStarted = false;
   for (const event of events) {
-    if (event.payload.kind === "adapter-step") {
+    if (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP) {
       const receipt = event.payload.receipt;
       const key = capabilityReceiptKey(receipt);
-      if (receipt.state === "reverse_in_progress" || receipt.state === "reversed")
+      if (
+        isCapabilityAdapterReceiptStateIn(
+          CAPABILITY_ADAPTER_RECEIPT_COMPENSATION_STATES,
+          receipt.state,
+        )
+      )
         compensationStarted = true;
       if (!introduced.has(key)) {
-        if (compensationStarted || receipt.state !== "prepared" || expected[next] !== key)
+        if (
+          compensationStarted ||
+          receipt.state !== CAPABILITY_ADAPTER_RECEIPT_STATE.PREPARED ||
+          expected[next] !== key
+        )
           corrupt("adapter receipt introductions escaped approved dense execution order");
         introduced.add(key);
         next += 1;
@@ -158,15 +181,17 @@ export function assertCapabilityForwardReceiptOrder(
       latest.set(key, receipt.state);
       continue;
     }
-    if (event.payload.kind !== "pre-effect-refusal") continue;
+    if (event.payload.kind !== CAPABILITY_WAL_PAYLOAD_KIND.PRE_EFFECT_REFUSAL) continue;
     const refusal = event.payload.refusal;
-    const activePrepared = [...latest].filter(([, state]) => state === "prepared");
-    if (refusal.frontier_kind === "adapter-step") {
+    const activePrepared = [...latest].filter(
+      ([, state]) => state === CAPABILITY_ADAPTER_RECEIPT_STATE.PREPARED,
+    );
+    if (refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.ADAPTER_STEP) {
       const refusedKey = `${refusal.plan_id}\0${refusal.step_id}`;
       const expectedKey = activePrepared[0]?.[0] ?? expected[next];
       if (activePrepared.length > 1 || refusedKey !== expectedKey)
         corrupt("adapter refusal escaped approved dense execution order");
-    } else if (refusal.frontier_kind === "operation") {
+    } else if (refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION) {
       if (introduced.size > 0) corrupt("operation refusal occurred after adapter execution began");
     } else if (next !== expected.length) {
       corrupt("post-effect refusal preceded the complete approved adapter frontier");
@@ -181,7 +206,7 @@ export function latestCapabilityReceipts(
   const latest = new Map<string, AdapterReceiptV1>();
   for (const event of events) {
     if (event.sequence >= beforeSequence) break;
-    if (event.payload.kind === "adapter-step")
+    if (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP)
       latest.set(capabilityReceiptKey(event.payload.receipt), event.payload.receipt);
   }
   return latest;

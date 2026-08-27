@@ -7,6 +7,7 @@ import {
   type MaterializedAgentBinding,
   materializeWorkflowAgentBinding,
 } from "../agents/binding.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { runDispatchAsync, writeDispatchPrompt } from "../dispatch.js";
 import { createIsolationLease, releaseIsolationLease } from "../dispatch/isolation.js";
 import { markOwnedRuntimeSpawner } from "../dispatch/owned-process-launch.js";
@@ -15,6 +16,14 @@ import {
   registerPrivateDispatchValues,
   sanitizePublicText,
 } from "../dispatch/public-redaction.js";
+import {
+  DISPATCH_MODE,
+  type DispatchMode,
+  ENGINE_ISOLATION_KIND,
+  ENGINE_OUTPUT_STREAM,
+  ENGINE_SESSION_MODE,
+  ENGINE_SESSION_PROTOCOL,
+} from "../dispatch/session-contract.js";
 import type {
   EngineProcessSpawner,
   EngineSessionAdapter,
@@ -22,12 +31,13 @@ import type {
 } from "../dispatch/session-types.js";
 import { createEngineSessionAdapter } from "../dispatch/session.js";
 import { makeEngineProcessSpawner } from "../dispatch/spawners.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import type { DispatchResult, Engine } from "./_shared.js";
 
 export interface DispatchSessionRuntimeOptions {
   engine: Engine;
   prompt: string;
-  mode: "bridge" | "cli" | "dry";
+  mode: DispatchMode;
   unit: string;
   base: string;
   wtPath?: string;
@@ -47,7 +57,9 @@ export interface DispatchSessionRuntimeOptions {
 }
 
 function sessionMode(options: DispatchSessionRuntimeOptions): AgentBinding["sessionMode"] {
-  return options.mode === "cli" && options.resumeSessionId ? "exact" : "fresh";
+  return options.mode === DISPATCH_MODE.CLI && options.resumeSessionId
+    ? ENGINE_SESSION_MODE.EXACT
+    : ENGINE_SESSION_MODE.FRESH;
 }
 
 function failureResult(
@@ -87,14 +99,16 @@ function makeSessionProcessSpawner(
       cwd,
       env: { ...spawnOptions.env, PWD: cwd },
     };
-    if (options.mode === "bridge") {
+    if (options.mode === DISPATCH_MODE.BRIDGE) {
       const command = options.bridgeCommand ?? process.env.VIBEFLOW_AI;
       if (!command) throw new Error("VIBEFLOW_AI is not set");
       const bridgeArgv =
-        process.platform === "win32" ? ["cmd.exe", "/c", command] : ["/bin/sh", "-c", command];
+        process.platform === RUNTIME_PLATFORM.WINDOWS
+          ? ["cmd.exe", "/c", command]
+          : ["/bin/sh", "-c", command];
       return base(bridgeArgv, { ...ownedOptions, stdinText: bridgePrompt });
     }
-    if (options.engine !== "copilot") return base(argv, ownedOptions);
+    if (options.engine !== AGENT_ENGINE.COPILOT) return base(argv, ownedOptions);
     const promptFlag = argv.findIndex((value) => value === "-p" || value === "--prompt");
     if (promptFlag < 0 || promptFlag === argv.length - 1) return base(argv, ownedOptions);
     const prompt = argv[promptFlag + 1] as string;
@@ -110,7 +124,7 @@ function makeSessionProcessSpawner(
 export async function runDispatchWithSessionRuntime(
   options: DispatchSessionRuntimeOptions,
 ): Promise<DispatchResult> {
-  if (options.mode === "dry") {
+  if (options.mode === DISPATCH_MODE.DRY) {
     return runDispatchAsync({
       engine: options.engine,
       prompt: options.prompt,
@@ -122,14 +136,17 @@ export async function runDispatchWithSessionRuntime(
   }
 
   const attemptId = randomUUID();
-  if (options.mode === "bridge" && !(options.bridgeCommand ?? process.env.VIBEFLOW_AI)) {
+  if (
+    options.mode === DISPATCH_MODE.BRIDGE &&
+    !(options.bridgeCommand ?? process.env.VIBEFLOW_AI)
+  ) {
     return failureResult(options, attemptId, new Error("VIBEFLOW_AI is not set"));
   }
   const isolation =
     options.wtPath === undefined
       ? undefined
       : createIsolationLease({
-          kind: "worktree",
+          kind: ENGINE_ISOLATION_KIND.WORKTREE,
           root: options.wtPath,
           cwd: options.wtPath,
           repoRoot: options.base,
@@ -156,20 +173,23 @@ export async function runDispatchWithSessionRuntime(
         ...options.adapterOptions,
         evidenceRoot: join(options.base, ".vibeflow", "attempts"),
         spawn: makeSessionProcessSpawner(options, binding.spawn.rendered_prompt),
-        protocol: options.mode === "bridge" ? "bridge" : "native",
+        protocol:
+          options.mode === DISPATCH_MODE.BRIDGE
+            ? ENGINE_SESSION_PROTOCOL.BRIDGE
+            : ENGINE_SESSION_PROTOCOL.NATIVE,
         ownsProcessGroup: options.processSpawner === undefined,
       })
     ).start({
       attemptId,
       spawn: binding.spawn,
       signal: options.signal ?? new AbortController().signal,
-      ...(options.mode === "cli" && options.resumeSessionId
+      ...(options.mode === DISPATCH_MODE.CLI && options.resumeSessionId
         ? { nativeSessionId: options.resumeSessionId }
         : {}),
       onChunk: (chunk) =>
-        (chunk.stream === "stderr" ? options.onStderrChunk : options.onStdoutChunk)?.(
-          chunk.content,
-        ),
+        (chunk.stream === ENGINE_OUTPUT_STREAM.STDERR
+          ? options.onStderrChunk
+          : options.onStdoutChunk)?.(chunk.content),
     });
     const completed = await handle.completion;
     const result = registerPrivateDispatchValues(

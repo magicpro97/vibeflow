@@ -6,6 +6,7 @@ import {
   parseActionCommitRequestJson,
   publicActionError,
 } from "../../src/actions/index.js";
+import type { PublicApiErrorBodyV1 } from "../../src/actions/public-error-contract.js";
 
 describe("closed action wire and public errors", () => {
   test("parses exact approval/commit/cancel DTOs and rejects mixed or extra fields", () => {
@@ -73,16 +74,25 @@ describe("closed action wire and public errors", () => {
         details: { ...error.error.details, private_path: "/Users/secret" },
       } as never),
     ).toThrow(/unknown/i);
+    const oversizedCandidateHeads = Array.from({ length: 20 }, (_, index) => ({
+      conversation_id: `conversation-${index.toString().padStart(2, "0")}`,
+      revision_id: `revision-${"r".repeat(300)}-${index.toString().padStart(2, "0")}`,
+      revision_ordinal: 0,
+    }));
     expect(() =>
       publicActionError({
-        code: "invalid_request",
-        message: "x".repeat(500),
+        code: "lineage_head_unresolved",
+        message: "The lineage head is unresolved.",
         correlation_id: "vf-correlation-2",
         retryable: false,
-        recovery_action: null,
-        details: Object.fromEntries(
-          Array.from({ length: 9 }, (_, index) => [`field_${index}`, "y".repeat(500)]),
-        ),
+        recovery_action: "select-lineage-head",
+        details: {
+          root_session_id: "root-session-1",
+          head_status: "ambiguous",
+          candidate_heads: oversizedCandidateHeads,
+          head_digest: `sha256:${"c".repeat(64)}`,
+          head_epoch: 3,
+        },
       }),
     ).toThrow(/4 KiB|byte limit/i);
     expect(httpStatusForPublicError("repair_unavailable")).toBe(410);
@@ -96,9 +106,12 @@ describe("closed action wire and public errors", () => {
       retryable: false,
       recovery_action: null,
       details: null,
-    };
+    } as const;
     expect(() => publicActionError({ ...base, code: "invented" } as never)).toThrow(/unknown/i);
     expect(() => publicActionError({ ...base, extra: true } as never)).toThrow(/unknown/i);
+    expect(() =>
+      publicActionError({ ...base, details: { private_path: "/Users/secret/value" } }),
+    ).toThrow(/private|public/i);
     expect(() => publicActionError({ ...base, recovery_action: "invented" } as never)).toThrow(
       /recovery/i,
     );
@@ -112,5 +125,34 @@ describe("closed action wire and public errors", () => {
         details: { scope: "project" },
       }),
     ).toThrow(/semantics/i);
+  });
+
+  test("orders lineage candidates by numeric ordinal before UTF-8 identity", () => {
+    const candidate = (revision_ordinal: number) => ({
+      conversation_id: `conversation-${revision_ordinal}`,
+      revision_id: `revision-${revision_ordinal}`,
+      revision_ordinal,
+    });
+    const error: Extract<PublicApiErrorBodyV1, { code: "lineage_head_unresolved" }> = {
+      code: "lineage_head_unresolved",
+      message: "The lineage head is unresolved.",
+      correlation_id: "vf-correlation-lineage-order",
+      retryable: false,
+      recovery_action: "select-lineage-head",
+      details: {
+        root_session_id: "root-session-1",
+        head_status: "ambiguous",
+        candidate_heads: [candidate(2), candidate(10)],
+        head_digest: `sha256:${"d".repeat(64)}`,
+        head_epoch: 3,
+      },
+    };
+    expect(publicActionError(error).error.code).toBe("lineage_head_unresolved");
+    expect(() =>
+      publicActionError({
+        ...error,
+        details: { ...error.details, candidate_heads: [candidate(10), candidate(2)] },
+      }),
+    ).toThrow(/unordered/i);
   });
 });

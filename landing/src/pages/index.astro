@@ -6,39 +6,39 @@ const npmUrl = "https://www.npmjs.com/package/@magicpro97/vibeflow";
 
 const capabilities = [
   {
-    title: "AI-first Home",
-    body: "Persistent conversation Home keeps the session rail, capability search, and settings inside one durable local surface.",
-    detail: "Discovery, continuity, action review",
+    title: "One Home, no dashboard maze",
+    body: "Open a session and keep talking. Agents, capabilities, settings, and trace stay beside the conversation, not behind another control panel.",
+    detail: "Resume, steer, inspect",
     className: "capability-card capability-card-home",
   },
   {
-    title: "Ordered message queue",
-    body: "Rapid sends stay FIFO, the latest queued message stays editable, and the browser never outruns queue authority.",
-    detail: "Exact queue ownership and replay",
+    title: "Send now, queue safely",
+    body: "Keep typing while an agent works. VibeFlow preserves the order, keeps a rejected send retryable, and lets ArrowUp edit only the latest queued message.",
+    detail: "FIFO by default, editable before dispatch",
     className: "capability-card capability-card-queue",
   },
   {
-    title: "Canonical context handoff",
-    body: "Fresh or unproved sessions receive canonical public context. Exact resumes keep native history and receive only new user and peer deltas.",
-    detail: "Native history, proof-bound deltas",
+    title: "Handoffs without the re-brief",
+    body: "Claude, Codex, and OpenCode resume by exact ID when proved. Copilot and Antigravity receive canonical user and peer context plus bounded own-history replay.",
+    detail: "Native resume when proved, bounded replay otherwise",
     className: "capability-card capability-card-handoff",
   },
   {
-    title: "Typed quotes and reactions",
-    body: "Quote one to eight visible messages and keep reactions as typed conversation data, not prompt syntax.",
-    detail: "Public quote refs and restrained social signals",
+    title: "Quotes that keep agents aligned",
+    body: "Quote one message or several, react when a signal is enough, and keep collaboration readable without turning emoji into noise.",
+    detail: "Typed references, restrained reactions",
     className: "capability-card capability-card-quotes",
   },
   {
-    title: "Dynamic capability fabric",
-    body: "Skills, MCP, tools, hooks, roles, and engine settings resolve into reviewed installs, repair, rollback, and status.",
-    detail: "One install path for every supported CLI",
+    title: "Install tools from the conversation",
+    body: "Ask for a skill, MCP, hook, or role in chat. Review its targets, approve once, and keep repair or rollback on the same audited path.",
+    detail: "Review, approve, repair, roll back",
     className: "capability-card capability-card-fabric",
   },
   {
-    title: "Owned process recovery",
-    body: "PID, exact process-start identity, host, and operation stay VF-owned. Windows Job Objects are kernel-contained; POSIX process groups prove cooperative lineage.",
-    detail: "Exact proof before orphan takeover",
+    title: "No mystery processes",
+    body: "Every CLI run carries its PID, exact start identity, host, and operation. VibeFlow only reclaims proved orphans. Native Windows Job Object validation is wired into CI, with live evidence pending a green run.",
+    detail: "Owned launch, drain, release, recovery",
     className: "capability-card capability-card-recovery",
   },
 ];
@@ -46,85 +46,89 @@ const capabilities = [
 const steps = [
   {
     cmd: "vf init",
-    title: "Seed shared context",
-    text: "Write canonical context, engine instructions, and the vf skill into every supported CLI.",
+    title: "Give every CLI the same brief",
+    text: "Create shared repo context and install the vf skill where each supported CLI can use it.",
   },
   {
     cmd: "vf doctor --probe",
-    title: "Probe real readiness",
-    text: "Confirm installed engines and live round-trips; report owned CLI recovery state without guessing.",
+    title: "Know who is actually ready",
+    text: "Probe installed engines, real round trips, and owned-process health before work is dispatched.",
   },
   {
     cmd: "vf orchestrate --yes",
-    title: "Run through one authority",
-    text: "Dispatch work, keep queue and evidence bounded, and route reviewed actions through the same host contract.",
+    title: "Let the right agent take the turn",
+    text: "Plan and dispatch work while one durable queue keeps handoffs, actions, and evidence in order.",
   },
   {
     cmd: "vf verify",
-    title: "Hold done until proof lands",
-    text: "Gate completion on typecheck, lint, tests, confidence, evidence, and scope.",
+    title: "Make done earn the word",
+    text: "Hold completion until types, lint, tests, scope, evidence, and confidence all agree.",
   },
 ];
 
 const demoHighlights = [
   {
-    title: "Persistent Home",
-    body: "Conversation, settings, and install review stay in one surface instead of bouncing between modal flows.",
+    title: "Pick up, do not restart",
+    body: "Open any session and continue with its participants, queue, trace, and settings already in place.",
   },
   {
-    title: "Durable queue",
-    body: "Queued sends, edits, and handoff state survive restarts without inventing a second winner.",
+    title: "Type while agents work",
+    body: "New messages wait in order, survive restarts, and stay editable until dispatch claims them.",
   },
   {
-    title: "Exact installs",
-    body: "Capability requests move from natural language to review, approval, operation, and audited result.",
+    title: "Ask for tools in plain language",
+    body: "Capability requests move from chat to exact targets, review, approval, and an audited result.",
   },
   {
-    title: "Proof before done",
-    body: "Verification is part of the run, not a promise added after the screenshot.",
+    title: "Proof is part of the answer",
+    body: "Tests, evidence, scope, and confidence land before VibeFlow lets a run call itself done.",
   },
 ];
 
 const skillHighlights = [
-  "Seed one skill and one canonical context set across Claude Code, Codex, Copilot, OpenCode, and Antigravity.",
-  "Review a capability install inside the same conversation, then choose the exact tools that should receive it.",
-  "Keep repair and rollback in Home instead of letting package state drift in hidden side paths.",
+  "One skill gives Claude Code, Codex, Copilot, OpenCode, and Antigravity the same VibeFlow workflow.",
+  "A capability request stays in the conversation, including exactly which CLIs will receive it.",
+  "Repair and rollback use the same visible path, so tool state cannot drift behind your back.",
 ];
 
 const reliabilityNotes = [
   {
-    title: "Bun 1.4 runtime",
-    body: "The CLI, local web console, and landing deploy from one Bun based toolchain with Node compatible output.",
+    title: "One fast toolchain",
+    body: "Bun 1.4 powers the CLI, local Home, tests, coverage, and landing while the shipped executable stays Node compatible.",
   },
   {
-    title: "Owned lock identity",
-    body: "Queue claims and capability writes bind PID, process-start identity, host, operation, and nonce. Live or unprovable owners fail closed.",
+    title: "A process has a fingerprint",
+    body: "Queue claims and CLI runs bind PID, start identity, host, operation, and nonce. Live or unprovable owners fail closed.",
   },
   {
-    title: "Reported drift",
-    body: "Doctor and status surface manual, unsupported, orphaned, stale, and needs recovery states instead of silently claiming them.",
+    title: "Drift gets a name",
+    body: "Doctor and status say manual, unsupported, orphaned, stale, or needs recovery instead of quietly pretending all is well.",
+  },
+  {
+    title: "One vocabulary, everywhere",
+    body: "Backend, CLI, and Home share frozen typed protocol authority and fail-closed guards instead of duplicate enums or raw wire literals.",
   },
 ];
 ---
 
 <Layout
-  title="VibeFlow | Local-first harness for AI CLIs"
-  description="Local-first npm CLI and web console that connects AI CLIs, keeps Home and context handoff durable, reviews capability installs, and verifies before done."
+  title="VibeFlow | Keep your AI CLIs, lose the re-brief"
+  description="Bring Claude Code, Codex, Copilot, OpenCode, and Antigravity into one durable local conversation without replacing the tools you chose."
 >
   <main id="main">
     <section class="hero container">
       <div class="hero-copy">
-        <p class="eyebrow">Local-first harness</p>
+        <p class="eyebrow">Local-first harness, not another model</p>
         <h1>
-          <span>Connect every AI CLI.</span>
-          <span class="hero-accent">Keep the handoff exact.</span>
+          <span>Keep your AI CLIs.</span>
+          <span class="hero-accent">Lose the re-brief.</span>
         </h1>
         <p class="hero-lede">
-          Persistent Home, durable queue, canonical handoff, and owned recovery stay local.
+          VibeFlow connects your existing agents, carries context between them, owns each CLI run, and requires proof before it says done.
         </p>
         <div class="cta">
-          <a class="btn btn-primary" href={repo}>View on GitHub</a>
-          <a class="btn btn-ghost" href={npmUrl}>npm package</a>
+          <a class="btn btn-primary" href={npmUrl}>Install VibeFlow</a>
+          <a class="btn btn-ghost" href={repo}>Read the source</a>
         </div>
       </div>
       <div class="hero-stage">
@@ -143,9 +147,9 @@ const reliabilityNotes = [
         <div class="install">
           <code>npx @magicpro97/vibeflow</code>
         </div>
-        <h2 id="demo-h" class="section-h">Watch the harness run end to end</h2>
+        <h2 id="demo-h" class="section-h">See a real run go from prompt to evidence</h2>
         <p class="section-lede">
-          The same runtime plans, edits, verifies, and records evidence without leaving the local surface.
+          Follow a Codex run through dispatch, edits, verification, and recorded evidence in one local workflow.
         </p>
       </div>
       <div class="demo-frame">
@@ -175,9 +179,9 @@ const reliabilityNotes = [
 
     <section class="container section" aria-labelledby="features-h">
       <div class="section-copy">
-        <h2 id="features-h" class="section-h">Capability fabric for local AI work</h2>
+        <h2 id="features-h" class="section-h">Where multi-CLI work usually breaks</h2>
         <p class="section-lede">
-          Home, queue, handoff, quotes, installs, and repair all use one exact authority path.
+          VibeFlow keeps sends ordered, handoffs explicit, installs reviewed, and process ownership proved.
         </p>
       </div>
       <div class="capability-grid">
@@ -193,9 +197,9 @@ const reliabilityNotes = [
 
     <section class="container section" aria-labelledby="how-h">
       <div class="section-copy">
-        <h2 id="how-h" class="section-h">One path from prompt to proof</h2>
+        <h2 id="how-h" class="section-h">From one prompt to a proven change</h2>
         <p class="section-lede">
-          The CLI and the browser stay on the same contract from intake to verification.
+          Start naturally. Underneath, every handoff and action stays on one inspectable authority path.
         </p>
       </div>
       <ol class="process-flow">
@@ -211,13 +215,13 @@ const reliabilityNotes = [
 
     <section class="container section" aria-labelledby="skill-h">
       <div class="skill-layout">
-        <div
-          class="terminal"
-          role="img"
-          aria-label="Terminal showing npx @magicpro97/vibeflow init and the vf skill command"
-        >
-          <div class="term-bar"><span></span><span></span><span></span></div>
-          <pre><code><span class="prompt">$</span> npx @magicpro97/vibeflow init
+        <div class="terminal">
+          <div class="term-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+          <pre
+            role="region"
+            aria-label="VibeFlow terminal transcript"
+            tabindex="0"
+          ><code><span class="prompt">$</span> npx @magicpro97/vibeflow init
 <span class="dim">Seed shared context and sync the vf skill into every supported CLI</span>
   <span class="ok">✓</span> claude
   <span class="ok">✓</span> codex
@@ -230,10 +234,10 @@ const reliabilityNotes = [
 <span class="prompt">&gt;</span> /vf</code></pre>
         </div>
         <div class="skill-copy">
-          <h2 id="skill-h" class="section-h">Install the same workflow into every CLI</h2>
+          <h2 id="skill-h" class="section-h">Teach every CLI the same way of working</h2>
           <p class="section-lede">
-            <code class="step-cmd">vf init</code> seeds one shared skill, then Home can review capability
-            installs and choose exact targets before anything changes.
+            <code class="step-cmd">vf init</code> gives each agent the shared workflow. Home keeps every later
+            tool install visible and target-specific before anything changes.
           </p>
           <div class="skill-list">
             {skillHighlights.map((item) => (
@@ -249,10 +253,10 @@ const reliabilityNotes = [
 
     <section class="container section" aria-labelledby="term-h">
       <div class="section-copy">
-        <h2 id="term-h" class="section-h">Recovery stays explicit</h2>
+        <h2 id="term-h" class="section-h">No mystery processes</h2>
         <p class="section-lede">
-          Bun 1.4 runs the same CLI and web console. Doctor and status report drift, manual setup, orphaned
-          markers, and repair paths without guessing.
+          When a CLI finishes, hangs, or loses its owner, VibeFlow uses exact process identity before it
+          releases or recovers anything.
         </p>
       </div>
       <div class="reliability-layout">
@@ -264,6 +268,10 @@ const reliabilityNotes = [
           <div class="command-row">
             <span>Open the harness</span>
             <code>npx @magicpro97/vibeflow</code>
+          </div>
+          <div class="command-row">
+            <span>Choose an ephemeral port</span>
+            <code>vf ui --port 0</code>
           </div>
           <div class="command-row">
             <span>Probe engines</span>
@@ -292,7 +300,7 @@ const reliabilityNotes = [
     <footer class="container footer">
       <div>
         <strong>VibeFlow</strong>
-        <span class="dim"> Local-first harness for AI CLIs.</span>
+        <span class="dim"> Local-first harness for the AI CLIs you already chose.</span>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href={repo}>GitHub</a>
@@ -355,12 +363,13 @@ const reliabilityNotes = [
   }
 
   .hero h1 {
-    font-size: clamp(3rem, 6vw, 5.2rem);
+    font-size: clamp(3rem, 4.15vw, 3.75rem);
     font-weight: 800;
   }
 
   .hero h1 span {
     display: block;
+    white-space: nowrap;
   }
 
   .hero-accent {
@@ -933,6 +942,10 @@ const reliabilityNotes = [
 
     .hero h1 {
       font-size: clamp(2.6rem, 11vw, 4rem);
+    }
+
+    .hero h1 span {
+      white-space: normal;
     }
 
     .process-flow {

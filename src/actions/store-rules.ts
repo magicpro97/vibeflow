@@ -1,15 +1,33 @@
+import { CAPABILITY_SCOPE } from "../core/capability-contract.js";
 import { type ProcessLock, canonicalJsonBytes, digestHex, digestV1 } from "../durability/index.js";
 import { ActionConflictError } from "./errors.js";
+import { HOST_ACTION_KIND, type HostActionKind } from "./host-action-contract.js";
 import {
   actionIdempotencyFileKey,
   actionIdempotencyKeyDigest,
   actionIdempotencyScopeDigest,
 } from "./idempotency.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_STATE,
+  ACTION_IDEMPOTENCY_BINDING_STATE,
+} from "./persistence-contract.js";
 import type { ActionFilePersistence, ActionIdempotencyBindingV1 } from "./persistence.js";
+import { ACTION_AUTHORITY_EVENT_KIND, ACTION_OPERATION_STATE } from "./protocol-contract.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_CLASSES,
+  ACTION_CHALLENGE_CLASS,
+  ACTION_DECISION,
+  ACTION_DOMAIN,
+  ACTOR_KIND,
+  CREDENTIAL_CLASS,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import { assertActor, assertDigest } from "./record-primitives.js";
 import { materializeAuthorityEvent } from "./records.js";
 import { exactObject } from "./strict-json.js";
 import type {
+  ActionApprovalV1,
   ActionAuthoritySnapshotV1,
   ActionProposalV1,
   ActionRequestAuthorityV1,
@@ -35,10 +53,13 @@ export function isBoundHumanBrowserController(input: {
   control_session_digest: string;
   actor: ActionRequestAuthorityV1["actor"];
 }): boolean {
-  if (input.actor.kind !== "human-browser" || input.actor.credential_class !== "loopback-session")
+  if (
+    input.actor.kind !== ACTOR_KIND.HUMAN_BROWSER ||
+    input.actor.credential_class !== CREDENTIAL_CLASS.LOOPBACK_SESSION
+  )
     return false;
   const expectedPrincipal = digestV1("VF-BROWSER-ACTION-PRINCIPAL\0v1\0", {
-    schema_version: "1.0",
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     control_session_digest: input.control_session_digest,
   });
   return (
@@ -52,7 +73,7 @@ export function isAgentProposalBrowserController(
   authority: ActionRequestAuthorityV1,
 ): boolean {
   return (
-    proposal.requested_by.kind === "agent" &&
+    proposal.requested_by.kind === ACTOR_KIND.AGENT &&
     authority.authority_scope_digest ===
       actionIdempotencyScopeDigest(proposal.action_root_locator) &&
     isBoundHumanBrowserController(authority)
@@ -83,9 +104,17 @@ export function completePrepared(
   if (!events.length) {
     files.appendAuthority(
       lock,
-      materializeAuthorityEvent(proposal, 0, null, { kind: "proposal-created", proposal }),
+      materializeAuthorityEvent(proposal, 0, null, {
+        kind: ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED,
+        proposal,
+      }),
     );
-  } else if (!equalCanonical(events[0]?.payload, { kind: "proposal-created", proposal })) {
+  } else if (
+    !equalCanonical(events[0]?.payload, {
+      kind: ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED,
+      proposal,
+    })
+  ) {
     throw new Error("proposal sequence zero conflicts with idempotency binding");
   }
   fault?.("after-authority-sequence-zero");
@@ -93,7 +122,7 @@ export function completePrepared(
     const visible = bindings[1];
     if (
       !visible ||
-      visible.state !== "visible" ||
+      visible.state !== ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE ||
       visible.previous_frame_digest !== bindings[0]?.binding_digest
     )
       throw new Error("invalid visible idempotency binding");
@@ -106,7 +135,7 @@ export function completePrepared(
     ...withoutOldDigest,
     sequence: 1 as const,
     previous_frame_digest: prepared.binding_digest,
-    state: "visible" as const,
+    state: ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE,
     visible_at: visibleAt,
   };
   files.appendIdempotency(lock, path, {
@@ -123,8 +152,12 @@ export function requireOwnedPending(
   authority: ActionRequestAuthorityV1,
 ): ActionAuthoritySnapshotV1 {
   const snapshot = requireOwnedSnapshot(files, get, proposalId, proposalDigest, authority);
-  if (snapshot.state !== "pending_review")
-    throw new ActionConflictError("stale_proposal", "Proposal is not pending review.", proposalId);
+  if (snapshot.state !== ACTION_OPERATION_STATE.PENDING_REVIEW)
+    throw new ActionConflictError(
+      PUBLIC_ERROR_CODE.STALE_PROPOSAL,
+      "Proposal is not pending review.",
+      proposalId,
+    );
   return snapshot;
 }
 
@@ -138,14 +171,14 @@ export function requireOwnedSnapshot(
   const snapshot = get(proposalId);
   if (!snapshot || snapshot.proposal.proposal_digest !== proposalDigest)
     throw new ActionConflictError(
-      "stale_proposal",
+      PUBLIC_ERROR_CODE.STALE_PROPOSAL,
       "Proposal authority was not found.",
       proposalId,
     );
   const derivedScopeDigest = actionIdempotencyScopeDigest(snapshot.proposal.action_root_locator);
   if (authority.authority_scope_digest !== derivedScopeDigest)
     throw new ActionConflictError(
-      "stale_proposal",
+      PUBLIC_ERROR_CODE.STALE_PROPOSAL,
       "Proposal authority scope binding changed.",
       proposalId,
     );
@@ -158,7 +191,7 @@ export function requireOwnedSnapshot(
   );
   const latest = files.readIdempotency(path).at(-1);
   const directlyOwned =
-    latest?.state === "visible" &&
+    latest?.state === ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE &&
     latest.proposal_id === proposalId &&
     latest.proposal_digest === proposalDigest &&
     sameAuthority(latest, authority);
@@ -169,7 +202,7 @@ export function requireOwnedSnapshot(
     isAgentProposalBrowserController(snapshot.proposal, authority) &&
     producerChain.length === 1 &&
     producerChain[0]?.length === 2 &&
-    producerVisible?.state === "visible" &&
+    producerVisible?.state === ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE &&
     producerVisible.proposal_id === proposalId &&
     producerVisible.proposal_digest === proposalDigest &&
     producerVisible.authority_scope_digest === derivedScopeDigest &&
@@ -177,7 +210,7 @@ export function requireOwnedSnapshot(
       actionIdempotencyKeyDigest(snapshot.proposal.idempotency_key);
   if (!controlled)
     throw new ActionConflictError(
-      "stale_proposal",
+      PUBLIC_ERROR_CODE.STALE_PROPOSAL,
       "Proposal authority binding changed.",
       proposalId,
     );
@@ -189,7 +222,7 @@ export function assertRequiredChallenge(
   proposal: ActionProposalV1,
   input: {
     authority: ActionRequestAuthorityV1;
-    decision: "approved" | "denied";
+    decision: ActionApprovalV1["decision"];
     challenge_class: ChallengeClass;
     challenge_id?: string | null;
     challenge_digest: string | null;
@@ -197,31 +230,36 @@ export function assertRequiredChallenge(
     expires_at: string;
   },
 ): void {
-  if (input.decision === "denied") {
-    if (input.challenge_class !== "normal-confirm" || input.challenge_digest !== null)
+  if (input.decision === ACTION_DECISION.DENIED) {
+    if (
+      input.challenge_class !== ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM ||
+      input.challenge_digest !== null
+    )
       throw new Error("denial must use normal confirmation");
     return;
   }
-  if (input.authority.actor.kind === "agent") throw new Error("agent cannot approve host actions");
-  if (input.authority.actor.kind === "system-recovery")
+  if (input.authority.actor.kind === ACTOR_KIND.AGENT)
+    throw new Error("agent cannot approve host actions");
+  if (input.authority.actor.kind === ACTOR_KIND.SYSTEM_RECOVERY)
     throw new Error("system recovery cannot approve new intent");
   const userScope =
-    proposal.base.capability_scope === "user" ||
-    proposal.target_set.some((target) => target.target.scope === "user");
+    proposal.base.capability_scope === CAPABILITY_SCOPE.USER ||
+    proposal.target_set.some((target) => target.target.scope === CAPABILITY_SCOPE.USER);
   const required =
-    proposal.action.type === "conversation.publish_suspected_literal"
-      ? "public-literal"
-      : input.authority.actor.credential_class === "automation-grant"
-        ? "automation-grant"
+    proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
+      ? ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL
+      : input.authority.actor.credential_class === CREDENTIAL_CLASS.AUTOMATION_GRANT
+        ? ACTION_CHALLENGE_CLASS.AUTOMATION_GRANT
         : userScope
-          ? "fresh-user-scope"
-          : "normal-confirm";
+          ? ACTION_CHALLENGE_CLASS.FRESH_USER_SCOPE
+          : ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
   if (input.challenge_class !== required) throw new Error(`approval requires ${required}`);
-  if (required !== "fresh-user-scope" && required !== "public-literal") return;
+  if (!ACTION_APPROVAL_CHALLENGE_CLASSES.some((challengeClass) => challengeClass === required))
+    return;
   if (!input.challenge_id) throw new Error("consumed approval challenge ID is required");
   const frame = files.readChallenge(input.challenge_id).at(-1);
   const valid =
-    frame?.state === "consumed" &&
+    frame?.state === ACTION_APPROVAL_CHALLENGE_STATE.CONSUMED &&
     frame.frame_digest === input.challenge_digest &&
     frame.challenge_class === required &&
     frame.proposal_id === proposal.proposal_id &&
@@ -236,21 +274,25 @@ export function assertRequiredChallenge(
 }
 
 export function assertDispatchHeaderRule(proposal: ActionProposalV1, header: string | null): void {
-  const revision = new Set([
-    "conversation.add_participant",
-    "conversation.remove_participant",
-    "conversation.update_participant",
-    "conversation.update_settings",
-    "conversation.continue_message",
-    "conversation.abandon_revision_operation",
-    "conversation.retry_revision_operation",
-    "conversation.reconcile_revision_operation",
-  ]).has(proposal.action.type);
+  const revision = REVISION_HEADER_ACTION_KINDS.has(proposal.action.type);
   const required =
-    proposal.domain === "capability" || revision || proposal.action.type === "authority.repair";
+    proposal.domain === ACTION_DOMAIN.CAPABILITY ||
+    revision ||
+    proposal.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR;
   if (required !== (header !== null))
     throw new Error("dispatch domain header nullability mismatch");
 }
+
+const REVISION_HEADER_ACTION_KINDS: ReadonlySet<HostActionKind> = new Set([
+  HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_REMOVE_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_UPDATE_SETTINGS,
+  HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE,
+  HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION,
+  HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION,
+  HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION,
+]);
 
 export function assertRequestAuthority(authority: ActionRequestAuthorityV1): void {
   exactObject(
@@ -266,7 +308,8 @@ export function assertRequestAuthority(authority: ActionRequestAuthorityV1): voi
     [],
     "$.authority",
   );
-  if (authority.schema_version !== "1.0") throw new Error("invalid authenticated action authority");
+  if (authority.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION)
+    throw new Error("invalid authenticated action authority");
   for (const field of [
     "principal_digest",
     "authority_scope_digest",
@@ -276,13 +319,21 @@ export function assertRequestAuthority(authority: ActionRequestAuthorityV1): voi
     assertDigest(authority[field], `$.authority.${field}`);
   assertActor(authority.actor, "$.authority.actor");
   const credential = authority.actor.credential_class;
-  if (authority.actor.kind === "human-browser" && credential !== "loopback-session")
+  if (
+    authority.actor.kind === ACTOR_KIND.HUMAN_BROWSER &&
+    credential !== CREDENTIAL_CLASS.LOOPBACK_SESSION
+  )
     throw new Error("browser actor requires loopback session credential");
   if (
-    authority.actor.kind === "agent" &&
-    !["loopback-session", "automation-grant"].includes(credential)
+    authority.actor.kind === ACTOR_KIND.AGENT &&
+    ![CREDENTIAL_CLASS.LOOPBACK_SESSION, CREDENTIAL_CLASS.AUTOMATION_GRANT].some(
+      (credentialClass) => credentialClass === credential,
+    )
   )
     throw new Error("agent request credential is not admitted");
-  if (authority.actor.kind === "system-recovery" && credential !== "recovery")
+  if (
+    authority.actor.kind === ACTOR_KIND.SYSTEM_RECOVERY &&
+    credential !== CREDENTIAL_CLASS.RECOVERY
+  )
     throw new Error("system recovery requires recovery credential");
 }

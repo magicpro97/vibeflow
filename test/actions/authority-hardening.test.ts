@@ -9,6 +9,7 @@ import {
   actionIdempotencyFileKey,
   actionIdempotencyKeyDigest,
   actionIdempotencyScopeDigest,
+  assertProposal,
   boundedActionNamespaceNames,
   canonicalActionRequestDigest,
   materializeApproval,
@@ -120,21 +121,9 @@ describe("action idempotency durability", () => {
     for (const directory of ["proposals", "operations", "idempotency"])
       expect(readdirSync(join(substitutedPath, "actions", "v1", directory))).toEqual([]);
 
-    const bootstrapPath = root();
-    const bootstrap = new ActionAuthorityStore(bootstrapPath, {
-      now: () => fixedNow,
-      authority_resolver: testAuthorityResolver(),
-    });
-    const bootstrapProposal = materializeProposal(repairProposalDraft("recovery-checkpoint"));
-    expect(() =>
-      bootstrap.createProposal({
-        authority,
-        canonical_request: canonicalRequest(),
-        proposal: bootstrapProposal,
-      }),
-    ).toThrow(/bootstrap.*idempotency/i);
-    for (const directory of ["proposals", "operations", "idempotency"])
-      expect(readdirSync(join(bootstrapPath, "actions", "v1", directory))).toEqual([]);
+    expect(() => materializeProposal(repairProposalDraft("recovery-checkpoint"))).toThrow(
+      /durable bootstrap resolver/i,
+    );
   });
 });
 
@@ -686,9 +675,7 @@ describe("proposal closure validation", () => {
     ).toThrow(/permission binding/i);
 
     const bootstrapRepair = repairProposalDraft("recovery-checkpoint");
-    expect(materializeProposal(bootstrapRepair).action_root_locator.kind).toBe(
-      "recovery-bootstrap",
-    );
+    expect(() => materializeProposal(bootstrapRepair)).toThrow(/durable bootstrap resolver/i);
     expect(() =>
       materializeProposal({
         ...bootstrapRepair,
@@ -698,9 +685,119 @@ describe("proposal closure validation", () => {
         },
       }),
     ).toThrow(/does not bind the repair plan/i);
+
+    const conversationOrigin = repairOriginProposal(
+      "action-authority",
+      "conversation",
+      "root-origin-1",
+    );
+    expect(materializeProposal(conversationOrigin).domain).toBe("conversation");
+    expect(() =>
+      materializeProposal({
+        ...conversationOrigin,
+        action_root_locator: { kind: "conversation", root_session_id: "root-origin-2" },
+      }),
+    ).toThrow(/immutable target origin/i);
+
+    const capabilityOrigin = repairOriginProposal(
+      "authority-repair",
+      "project",
+      testDigest("repair-target-scope"),
+    );
+    expect(materializeProposal(capabilityOrigin).domain).toBe("capability");
+    expect(() =>
+      materializeProposal({
+        ...capabilityOrigin,
+        action_root_locator: {
+          kind: "capability",
+          scope: "project",
+          scope_identity_digest: testDigest("another-repair-target-scope"),
+        },
+      }),
+    ).toThrow(/immutable target origin/i);
   });
 
-  test("derives the exact approval class from actor, action, and bootstrap authority", () => {
+  test("publishes an ordinary conversation repair only under its canonical origin", () => {
+    const draft = repairOriginProposal("action-authority", "conversation", "root-repair-1");
+    if (draft.action.type !== "authority.repair") throw new Error("repair fixture is invalid");
+    const repairAuthority = {
+      ...authority,
+      authority_scope_digest: actionIdempotencyScopeDigest(draft.action_root_locator),
+    };
+    const request = {
+      schema_version: "1.0" as const,
+      origin: "conversation" as const,
+      principal_digest: repairAuthority.principal_digest,
+      authority_scope_digest: repairAuthority.authority_scope_digest,
+      planning_options: {
+        mode: "durable" as const,
+        network_read: "ordinary-host-policy" as const,
+      },
+      request: {
+        schema_version: "1.0" as const,
+        anchor_event_id: null,
+        expected: {
+          mode: "writable-revision" as const,
+          conversation_id: draft.base.conversation_id as string,
+          revision_id: draft.base.revision_id as string,
+          last_seq: draft.base.last_seq as number,
+          conversation_lock_digest: draft.base.conversation_lock_digest as string,
+        },
+        candidate: {
+          type: "authority.repair" as const,
+          repair_id: draft.action.plan.repair_id,
+          plan_digest: draft.action.plan.plan_digest,
+        },
+      },
+    };
+    const proposal = materializeProposal({
+      ...draft,
+      producer_request_binding: {
+        kind: "canonical-action-request",
+        digest: canonicalActionRequestDigest(request),
+      },
+    });
+    const store = new ActionAuthorityStore(root(), {
+      now: () => fixedNow,
+      authority_resolver: testAuthorityResolver(),
+    });
+    expect(
+      store.createProposal({
+        authority: repairAuthority,
+        canonical_request: request,
+        proposal,
+      }).created,
+    ).toBe(true);
+
+    const crossOrigin = {
+      schema_version: "1.0" as const,
+      origin: "standalone" as const,
+      principal_digest: repairAuthority.principal_digest,
+      authority_scope_digest: repairAuthority.authority_scope_digest,
+      scope: "project" as const,
+      planning_options: request.planning_options,
+      action: request.request.candidate,
+    };
+    const rejected = new ActionAuthorityStore(root(), {
+      now: () => fixedNow,
+      authority_resolver: testAuthorityResolver(),
+    });
+    expect(() =>
+      rejected.createProposal({
+        authority: repairAuthority,
+        canonical_request: crossOrigin,
+        proposal,
+      }),
+    ).toThrow(/standalone request scope/i);
+    expect(() =>
+      materializeProposal({
+        ...draft,
+        action_root_locator: { kind: "conversation", root_session_id: "root-repair-2" },
+      }),
+    ).toThrow(/immutable target origin/i);
+  });
+
+  test("derives the exact approval class and rejects unbound bootstrap authority", () => {
     const ordinary = materializeProposal(proposalDraft());
     expect(() =>
       materializeApproval(ordinary, {
@@ -716,21 +813,150 @@ describe("proposal closure validation", () => {
         expires_at: "2026-08-25T00:10:00.000Z",
       }),
     ).toThrow(/automation-grant/i);
-    const bootstrap = materializeProposal(repairProposalDraft("recovery-checkpoint"));
-    expect(
-      materializeApproval(bootstrap, {
-        decision: "approved",
-        decided_by: {
-          kind: "human-cli",
-          public_actor_id: "recovery-operator-1",
-          credential_class: "recovery",
+    expect(() => materializeProposal(repairProposalDraft("recovery-checkpoint"))).toThrow(
+      /durable bootstrap resolver/i,
+    );
+  });
+
+  test("raises the proposal risk floor for additive permissions and full/manual config diffs", () => {
+    const target = projectTarget();
+    const targetDispositions = [
+      { target_id: target.target_id, execution: "host" as const, reason_code: null },
+    ];
+    const basePreview = {
+      ...proposalDraft().preview,
+      targets: [target],
+      target_dispositions: targetDispositions,
+    };
+    const riskFor = (
+      permissionChange: "add" | "expand" | "unchanged",
+      configMode?: "full-file" | "manual",
+    ) =>
+      materializeProposal(
+        proposalDraft({
+          risk: "high",
+          target_set: [target],
+          preview: {
+            ...basePreview,
+            permission_delta: [
+              {
+                permission_id: "legacy.mcp.claude.managed-id/owned-0",
+                change: permissionChange,
+                public_scope: "project",
+                enforcement: "engine-enforced",
+              },
+            ],
+            config_diffs:
+              configMode === undefined
+                ? []
+                : [
+                    {
+                      target: ".codex/agents/acme.reviewer--reviewer.toml",
+                      target_ids: [target.target_id],
+                      mode: configMode,
+                      before_digest: testDigest(`${configMode}-before`),
+                      after_digest: testDigest(`${configMode}-after`),
+                      bounded_before: configMode === "manual" ? "before" : null,
+                      bounded_after: configMode === "manual" ? "after" : null,
+                    },
+                  ],
+          },
+        }),
+      ).risk;
+
+    expect(riskFor("add")).toBe("high");
+    expect(riskFor("expand")).toBe("high");
+    expect(riskFor("unchanged", "full-file")).toBe("high");
+    expect(riskFor("unchanged", "manual")).toBe("high");
+  });
+
+  test("permits recovery-tty approvals only after the proposal crosses into bootstrap repair mode", () => {
+    const baseProposal = materializeProposal(repairProposalDraft("current"));
+    const approvalInput = {
+      decision: "approved" as const,
+      decided_by: {
+        kind: "human-cli" as const,
+        public_actor_id: "recovery-actor-1",
+        credential_class: "recovery" as const,
+      },
+      challenge_class: "recovery-tty" as const,
+      challenge_digest: null,
+      decided_at: "2026-08-25T00:01:00.000Z",
+      expires_at: "2026-08-25T00:10:00.000Z",
+    };
+
+    const toggledProposal = (switchAfterReads: number) => {
+      let reads = 0;
+      const locator = new Proxy(
+        { ...baseProposal.action_root_locator },
+        {
+          get: (target, key, receiver) => {
+            if (key === "kind") {
+              reads += 1;
+              return reads <= switchAfterReads ? "capability" : "recovery-bootstrap";
+            }
+            return Reflect.get(target, key, receiver);
+          },
         },
-        challenge_class: "recovery-tty",
-        challenge_digest: null,
-        decided_at: "2026-08-25T00:01:00.000Z",
-        expires_at: "2026-08-25T00:10:00.000Z",
-      }).challenge_class,
-    ).toBe("recovery-tty");
+      );
+      const proposalBase = new Proxy(
+        { ...baseProposal.base },
+        {
+          get: (target, key, receiver) => {
+            if (key === "authority_binding_mode") {
+              reads += 1;
+              return reads <= switchAfterReads ? "current" : "recovery-checkpoint";
+            }
+            return Reflect.get(target, key, receiver);
+          },
+        },
+      );
+      return {
+        proposal: {
+          ...baseProposal,
+          action_root_locator: locator,
+          base: proposalBase,
+        },
+        reads: () => reads,
+      };
+    };
+
+    const measured = toggledProposal(Number.MAX_SAFE_INTEGER);
+    assertProposal(measured.proposal);
+    const baselineReads = measured.reads();
+
+    let approval: ReturnType<typeof materializeApproval> | null = null;
+    let switchAfterReads: number | null = null;
+    let lastError: unknown = null;
+    for (
+      let candidate = Math.max(1, baselineReads - 2);
+      candidate <= baselineReads + 2;
+      candidate++
+    ) {
+      try {
+        const toggled = toggledProposal(candidate);
+        approval = materializeApproval(toggled.proposal, approvalInput);
+        switchAfterReads = candidate;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!approval || switchAfterReads === null) throw lastError;
+    expect(approval.challenge_class).toBe("recovery-tty");
+    expect(approval.credential_class).toBe("recovery");
+
+    const hostile = toggledProposal(switchAfterReads).proposal;
+    expect(() =>
+      materializeApproval(hostile, {
+        ...approvalInput,
+        decided_by: {
+          kind: "human-browser",
+          public_actor_id: "loopback-actor-1",
+          credential_class: "loopback-session",
+        },
+      }),
+    ).toThrow(/outside bootstrap repair/i);
   });
 });
 
@@ -749,6 +975,25 @@ function userTarget() {
   const value = {
     target: {
       scope: "user" as const,
+      engine: null,
+      participant_id: null,
+      required: true as const,
+      on_apply_failure: "abort-scope" as const,
+      on_health_failure: "abort-scope" as const,
+    },
+    subject: {
+      kind: "conversation" as const,
+      action_type: "conversation.stop_operation" as const,
+      participant_id: null,
+    },
+  };
+  return { target_id: targetId(value), ...value };
+}
+
+function projectTarget() {
+  const value = {
+    target: {
+      scope: "project" as const,
       engine: null,
       participant_id: null,
       required: true as const,
@@ -811,7 +1056,7 @@ function repairProposalDraft(mode: "current" | "recovery-checkpoint") {
     schema_version: "1.0" as const,
     domain: "capability-lock" as const,
     authority_scope: "project" as const,
-    scope_id: "project-1",
+    scope_id: testDigest("project-scope"),
     target_preimage: {
       presence: "present" as const,
       corrupt_bytes_sha256: "a".repeat(64),
@@ -867,6 +1112,52 @@ function repairProposalDraft(mode: "current" | "recovery-checkpoint") {
     permission_digest: EMPTY_PERMISSION_DIGEST,
     preview: { ...draft.preview, action_type: "authority.repair" },
   });
+}
+
+function repairOriginProposal(
+  domain: "action-authority" | "authority-repair",
+  authorityScope: "conversation" | "project",
+  scopeId: string,
+) {
+  const draft = repairProposalDraft("current");
+  if (draft.action.type !== "authority.repair") throw new Error("repair fixture is invalid");
+  const { repair_id: _repairId, plan_digest: _planDigest, ...basePlan } = draft.action.plan;
+  const preimage = {
+    ...basePlan,
+    domain,
+    authority_scope: authorityScope,
+    scope_id: scopeId,
+  };
+  const planDigest = digestV1("VF-AUTHORITY-REPAIR-PLAN\0v1\0", preimage);
+  const conversation = authorityScope === "conversation";
+  return {
+    ...draft,
+    domain: conversation ? ("conversation" as const) : ("capability" as const),
+    action_root_locator: conversation
+      ? ({ kind: "conversation", root_session_id: scopeId } as const)
+      : ({ kind: "capability", scope: authorityScope, scope_identity_digest: scopeId } as const),
+    base: conversation
+      ? {
+          ...draft.base,
+          root_session_id: scopeId,
+          conversation_id: "conversation-repair-1",
+          revision_id: "revision-repair-1",
+          last_seq: 7,
+          conversation_lock_digest: testDigest("conversation-repair-lock"),
+          lineage_head_digest: testDigest("conversation-repair-lineage"),
+          lineage_head_epoch: 3,
+          capability_scope: null,
+        }
+      : { ...draft.base, capability_scope: authorityScope },
+    action: {
+      type: "authority.repair" as const,
+      plan: {
+        ...preimage,
+        repair_id: `vf-authority-repair-${digestHex(planDigest)}`,
+        plan_digest: planDigest,
+      },
+    },
+  };
 }
 
 function tamperJournal(path: string, marker: string): void {

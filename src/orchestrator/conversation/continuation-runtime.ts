@@ -1,3 +1,4 @@
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
 import { projectOrchestrationResult } from "./policy-registry.js";
 import type { ConversationRuntime, ConversationRuntimeOptions } from "./runtime.js";
 import type {
@@ -87,7 +88,7 @@ export class ConversationContinuationRuntime {
       if (!manifest || !operationId) return;
       await this.finalize(manifest, operationId, {
         operation_id: operationId,
-        status: "failed",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
         artifact_refs: [],
       });
       this.runtime.finish(id);
@@ -108,11 +109,15 @@ export class ConversationContinuationRuntime {
     try {
       result = await continuation(await this.runtime.context(id), decision);
     } catch {
-      result = { operation_id: operationId, status: "failed", artifact_refs: [] };
+      result = {
+        operation_id: operationId,
+        status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
+        artifact_refs: [],
+      };
     }
     result = projectOrchestrationResult(result, operationId, id, this.options.artifactStore);
     result = await this.finalize(manifest, operationId, result);
-    if (result.status === "awaiting_approval") return true;
+    if (result.status === CONVERSATION_COMMAND_RESULT_STATUS.AWAITING_APPROVAL) return true;
     this.runtime.finish(id);
     await this.options.agentActionCandidates?.flush(id).catch(() => undefined);
     this.onSettled(id);

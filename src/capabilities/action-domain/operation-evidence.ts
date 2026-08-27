@@ -1,8 +1,10 @@
+import { existsSync } from "node:fs";
 import type { ActionApprovalV1, ActionProposalV1 } from "../../actions/index.js";
 import { deriveOperationId } from "../../actions/index.js";
+import { isActionOperationDomainTerminalState } from "../../actions/protocol-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import type { CapabilityOperationAuthorityEvidenceV1 } from "../controller.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import {
   readOperationBaseLock,
   readOperationGraph,
@@ -12,7 +14,9 @@ import type { CapabilityOperationActionAuthorityV1 } from "../operations/types.j
 import { assertCapabilityWalReferentialClosure } from "../operations/wal-referential.js";
 import { capabilityClosurePackagePins } from "../planning/closure-packages.js";
 import { readCapabilityWal } from "../storage/operation-store.js";
+import { capabilityOperationPaths } from "../storage/paths.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
+import { CAPABILITY_WAL_PAYLOAD_KIND } from "../wire/operation.js";
 
 export function readCapabilityDomainAuthorityEvidence(
   storage: CapabilityStorageV1,
@@ -21,28 +25,31 @@ export function readCapabilityDomainAuthorityEvidence(
 ) {
   const prepared = readCapabilityDomainPreparedEvidence(storage, operationId, actionAuthority);
   const { header, plan } = prepared;
-  const events = readCapabilityWal(storage.paths, operationId);
-  assertCapabilityWalReferentialClosure(
-    storage,
-    header,
-    plan,
-    events,
-    readOperationBaseLock(storage, plan),
-  );
+  const eventsPath = capabilityOperationPaths(storage.paths, operationId).events;
+  const events = existsSync(eventsPath) ? readCapabilityWal(storage.paths, operationId) : [];
+  if (existsSync(eventsPath))
+    assertCapabilityWalReferentialClosure(
+      storage,
+      header,
+      plan,
+      events,
+      readOperationBaseLock(storage, plan),
+    );
   let terminal: (typeof events)[number] | undefined;
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const candidate = events[index];
     if (
-      candidate?.payload.kind === "operation-transition" &&
-      ["succeeded", "failed", "needs_recovery"].includes(candidate.payload.to)
+      candidate?.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION &&
+      isActionOperationDomainTerminalState(candidate.payload.to)
     ) {
       terminal = candidate;
       break;
     }
   }
   const outcome =
-    terminal?.payload.kind === "operation-transition"
-      ? (terminal.payload.to as "succeeded" | "failed" | "needs_recovery")
+    terminal?.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION &&
+    isActionOperationDomainTerminalState(terminal.payload.to)
+      ? terminal.payload.to
       : null;
   return {
     header,
@@ -68,6 +75,7 @@ export function readCapabilityDomainPreparedEvidence(
 ) {
   const header = readOperationHeader(storage, operationId);
   const plan = readOperationGraph(actionAuthority, header).plan;
+  actionAuthority.verifyReadable(header, plan);
   const evidence: CapabilityOperationAuthorityEvidenceV1 = {
     schema_version: "1.0",
     operation_id: operationId,
@@ -112,6 +120,6 @@ export function assertCapabilityDomainActionBinding(input: {
   )
     throw new CapabilityRuntimeError(
       "capability domain evidence escaped the approved action closure",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
 }

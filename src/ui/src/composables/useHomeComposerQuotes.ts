@@ -17,7 +17,10 @@ export function useHomeComposerQuotes() {
         content_digest: string | null;
       }
     >();
-    for (const item of projectHomeTimeline(store.timeline?.items ?? [])) {
+    for (const item of projectHomeTimeline(
+      store.timeline?.items ?? [],
+      store.activeRevision?.participants ?? [],
+    )) {
       if (!item.anchorKey) continue;
       sources.set(item.anchorKey, {
         source_key: item.anchorKey,

@@ -6,6 +6,18 @@ import { hostname } from "node:os";
 import { win32 as windowsPath } from "node:path";
 import { canonicalJsonBytes } from "./canonical.js";
 import { durabilityError } from "./errors.js";
+import {
+  PROCESS_START_IDENTITY_DARWIN_PROBE,
+  PROCESS_START_IDENTITY_KIND,
+  PROCESS_START_IDENTITY_PATTERN_SOURCE,
+  PROCESS_START_IDENTITY_PREFIX,
+  PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS,
+  classifyDarwinProcessStartIdentity,
+  formatPlatformProcessStartIdentity,
+  formatProcessStartIdentity,
+  isNativeProcessStartIdentity,
+  isProcessStartIdentityGenericPosixPlatform,
+} from "./process-identity-contract.js";
 
 export interface ProcessLockOwnerV1 {
   schema_version: "1.0";
@@ -34,11 +46,6 @@ const OWNER_KEYS = [
   "process_start_identity",
   "schema_version",
 ] as const;
-const DARWIN_PROC_PID_TBSDINFO = 3;
-const DARWIN_PROC_BSDINFO_BYTES = 136;
-const DARWIN_START_SECONDS_OFFSET = 120;
-const DARWIN_START_MICROSECONDS_OFFSET = 128;
-const DARWIN_LIBPROC_PATH = "/usr/lib/libproc.dylib";
 const IS_BUN = typeof (process.versions as Record<string, string | undefined>).bun === "string";
 const RUNTIME_REQUIRE = createRequire(import.meta.url);
 
@@ -68,7 +75,7 @@ export function loadDarwinProcBinding(runtime: DarwinProcLoaderRuntime): DarwinP
   try {
     if (runtime.isBun) {
       const ffi = runtime.requireModule("bun:ffi") as typeof import("bun:ffi");
-      const library = ffi.dlopen(DARWIN_LIBPROC_PATH, {
+      const library = ffi.dlopen(PROCESS_START_IDENTITY_DARWIN_PROBE.LIBRARY_PATH, {
         proc_pidinfo: {
           args: [
             ffi.FFIType.i32,
@@ -87,7 +94,7 @@ export function loadDarwinProcBinding(runtime: DarwinProcLoaderRuntime): DarwinP
       };
     }
     const koffi = runtime.requireModule("koffi") as typeof import("koffi").default;
-    const library = koffi.load(DARWIN_LIBPROC_PATH);
+    const library = koffi.load(PROCESS_START_IDENTITY_DARWIN_PROBE.LIBRARY_PATH);
     return {
       library,
       procPidInfo: library.func(
@@ -123,6 +130,9 @@ export function boundedOwnerAscii(value: unknown, max: number): value is string 
   );
 }
 
+/** Lock owners must use an identity the host process probe can observe directly. */
+export const isProcessLockOwnerStartIdentity = isNativeProcessStartIdentity;
+
 export function parseProcessLockOwner(bytes: Buffer): ProcessLockOwnerV1 {
   let value: unknown;
   try {
@@ -141,7 +151,7 @@ export function parseProcessLockOwner(bytes: Buffer): ProcessLockOwnerV1 {
     !Number.isSafeInteger(row.pid) ||
     (row.pid as number) < 1 ||
     (row.pid as number) > 2_147_483_647 ||
-    !boundedOwnerAscii(row.process_start_identity, 512) ||
+    !isProcessLockOwnerStartIdentity(row.process_start_identity) ||
     !boundedOwnerAscii(row.host, 255) ||
     !boundedOwnerAscii(row.operation, 512) ||
     typeof row.nonce !== "string" ||
@@ -164,16 +174,28 @@ function linuxStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): stri
       .slice(end + 2)
       .trim()
       .split(/\s+/)[19];
-    if (!startTicks || !/^[0-9]+$/.test(startTicks)) return null;
-    const bootId = runtime.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
-    if (!/^[a-f0-9-]{16,64}$/i.test(bootId)) return null;
-    return `linux:${bootId.toLowerCase()}:${startTicks}`;
+    if (
+      !startTicks ||
+      !new RegExp(PROCESS_START_IDENTITY_PATTERN_SOURCE.POSITIVE_DECIMAL, "u").test(startTicks)
+    )
+      return null;
+    const bootId = runtime
+      .readFileSync("/proc/sys/kernel/random/boot_id", "utf8")
+      .trim()
+      .toLowerCase();
+    if (!new RegExp(PROCESS_START_IDENTITY_PATTERN_SOURCE.LINUX_BOOT_ID, "u").test(bootId))
+      return null;
+    return formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.LINUX, bootId, startTicks);
   } catch {
     return null;
   }
 }
 
-function psStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): string | null {
+function psStartIdentity(
+  pid: number,
+  runtime: ProcessLockOwnerRuntime,
+  platform: Parameters<typeof formatPlatformProcessStartIdentity>[0],
+): string | null {
   try {
     const result = runtime
       .execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
@@ -182,7 +204,7 @@ function psStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): string 
         stdio: ["ignore", "pipe", "ignore"],
       })
       .trim();
-    return result ? `${runtime.platform}:${result}` : null;
+    return result ? formatPlatformProcessStartIdentity(platform, result) : null;
   } catch {
     return null;
   }
@@ -199,7 +221,7 @@ function windowsStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): st
         [
           "-NoProfile",
           "-Command",
-          `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($null -eq $p) { exit 3 }; [Console]::WriteLine($p.CreationDate.ToUniversalTime().Ticks)`,
+          `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($null -eq $p) { exit ${PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS.ABSENT} }; [Console]::WriteLine($p.CreationDate.ToUniversalTime().Ticks)`,
         ],
         {
           encoding: "utf8",
@@ -208,7 +230,9 @@ function windowsStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): st
         },
       )
       .trim();
-    return /^[1-9][0-9]{0,19}$/.test(ticks) ? `win32:${ticks}` : null;
+    return /^[1-9][0-9]{0,19}$/.test(ticks)
+      ? formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.WINDOWS, ticks)
+      : null;
   } catch {
     return null;
   }
@@ -229,17 +253,30 @@ function darwinStartIdentity(pid: number): string | null {
   try {
     const procPidInfo = loadDarwinProcPidInfo();
     if (!procPidInfo || darwinProcLibrary === null) return null;
-    const output = Buffer.alloc(DARWIN_PROC_BSDINFO_BYTES);
+    const output = Buffer.alloc(PROCESS_START_IDENTITY_DARWIN_PROBE.OUTPUT_BYTES);
     if (
-      procPidInfo(pid, DARWIN_PROC_PID_TBSDINFO, 0, output, DARWIN_PROC_BSDINFO_BYTES) !==
-      DARWIN_PROC_BSDINFO_BYTES
+      procPidInfo(
+        pid,
+        PROCESS_START_IDENTITY_DARWIN_PROBE.FLAVOR,
+        0,
+        output,
+        PROCESS_START_IDENTITY_DARWIN_PROBE.OUTPUT_BYTES,
+      ) !== PROCESS_START_IDENTITY_DARWIN_PROBE.OUTPUT_BYTES
     ) {
       return null;
     }
-    const seconds = output.readBigUInt64LE(DARWIN_START_SECONDS_OFFSET);
-    const microseconds = output.readBigUInt64LE(DARWIN_START_MICROSECONDS_OFFSET);
-    if (seconds === 0n || microseconds >= 1_000_000n) return null;
-    return `darwin:${seconds}:${microseconds}`;
+    const seconds = output.readBigUInt64LE(
+      PROCESS_START_IDENTITY_DARWIN_PROBE.START_SECONDS_OFFSET,
+    );
+    const microseconds = output.readBigUInt64LE(
+      PROCESS_START_IDENTITY_DARWIN_PROBE.START_MICROSECONDS_OFFSET,
+    );
+    if (
+      seconds === 0n ||
+      microseconds >= BigInt(PROCESS_START_IDENTITY_DARWIN_PROBE.MICROSECONDS_PER_SECOND)
+    )
+      return null;
+    return formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.DARWIN, seconds, microseconds);
   } catch {
     return null;
   }
@@ -251,16 +288,21 @@ export function processStartIdentity(
 ): string | null {
   const runtime = ownerRuntime(overrides);
   if (runtime.observeStartIdentity) return runtime.observeStartIdentity(pid);
-  if (runtime.platform === "linux") return linuxStartIdentity(pid, runtime);
-  if (runtime.platform === "darwin") return darwinStartIdentity(pid);
-  if (runtime.platform === "win32") return windowsStartIdentity(pid, runtime);
-  return psStartIdentity(pid, runtime);
+  if (runtime.platform === PROCESS_START_IDENTITY_KIND.LINUX)
+    return linuxStartIdentity(pid, runtime);
+  if (runtime.platform === PROCESS_START_IDENTITY_KIND.DARWIN) return darwinStartIdentity(pid);
+  if (runtime.platform === PROCESS_START_IDENTITY_KIND.WINDOWS)
+    return windowsStartIdentity(pid, runtime);
+  return isProcessStartIdentityGenericPosixPlatform(runtime.platform)
+    ? psStartIdentity(pid, runtime, runtime.platform)
+    : null;
 }
 
 export function processLockOwnerIsAlive(
   owner: ProcessLockOwnerV1,
   overrides: Partial<ProcessLockOwnerRuntime> = {},
 ): boolean | null {
+  if (!isProcessLockOwnerStartIdentity(owner.process_start_identity)) return null;
   const runtime = ownerRuntime(overrides);
   if (owner.host !== runtime.host) return null;
   try {
@@ -269,5 +311,13 @@ export function processLockOwnerIsAlive(
     return (error as NodeJS.ErrnoException).code === "ESRCH" ? false : null;
   }
   const observed = processStartIdentity(owner.pid, runtime);
-  return observed === null ? null : observed === owner.process_start_identity;
+  if (observed === null || !isNativeProcessStartIdentity(observed)) return null;
+  const persistedDarwinFormat = classifyDarwinProcessStartIdentity(owner.process_start_identity);
+  const observedDarwinFormat = classifyDarwinProcessStartIdentity(observed);
+  if (
+    persistedDarwinFormat !== observedDarwinFormat &&
+    (persistedDarwinFormat !== null || observedDarwinFormat !== null)
+  )
+    return null;
+  return observed === owner.process_start_identity;
 }

@@ -166,6 +166,8 @@ describe("watchLogbus()", () => {
     // Inject a statSyncFn that returns an inode different from the real file's
     // inode, simulating a rotation. The createReadStream seam delivers mock data.
     const mockEvent = JSON.stringify({
+      seq: 1,
+      ts: 1,
       channel: "vf",
       level: "info",
       text: "rotated",

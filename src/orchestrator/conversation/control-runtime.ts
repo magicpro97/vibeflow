@@ -6,6 +6,10 @@ import type {
   StoredTraceEvent,
   TraceCorrelation,
 } from "../trace/types.js";
+import {
+  type CONVERSATION_LIFECYCLE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import { ConversationAuthorityClosedError } from "./lifecycle-gate.js";
 import type { OperationRegistry } from "./operation-registry.js";
 import { terminalEmissions } from "./policy-registry.js";
@@ -76,7 +80,7 @@ export class ControlRuntime {
 
   async transition(
     id: string,
-    lifecycle: "ACTIVE" | "PAUSED",
+    lifecycle: typeof CONVERSATION_LIFECYCLE.ACTIVE | typeof CONVERSATION_LIFECYCLE.PAUSED,
     health: ConversationHealth,
     epoch: number,
   ): Promise<StoredTraceEvent> {
@@ -86,7 +90,7 @@ export class ControlRuntime {
     const stored = await this.options.appendTransition(correlation, {
       idempotency_key: `conversation:transition:${epoch}:${lifecycle}`,
       event: {
-        type: "state_change",
+        type: CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE,
         payload: { lifecycle, health, terminal: false, reason: null },
       },
     });
@@ -98,7 +102,7 @@ export class ControlRuntime {
 
   async health(
     id: string,
-    lifecycle: "ACTIVE" | "PAUSED",
+    lifecycle: typeof CONVERSATION_LIFECYCLE.ACTIVE | typeof CONVERSATION_LIFECYCLE.PAUSED,
     health: ConversationHealth,
     epoch: number,
   ): Promise<StoredTraceEvent> {
@@ -108,7 +112,7 @@ export class ControlRuntime {
     const stored = await this.options.appendTransition(correlation, {
       idempotency_key: `conversation:health:${epoch}:${health}`,
       event: {
-        type: "state_change",
+        type: CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE,
         payload: { lifecycle, health, terminal: false, reason: null },
       },
     });
@@ -147,7 +151,7 @@ export class ControlRuntime {
       {
         idempotency_key: key,
         event: {
-          type: "user_message",
+          type: CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE,
           payload: {
             content: request.content,
             target_participants: request.target_participants ?? "all",
@@ -171,10 +175,10 @@ export class ControlRuntime {
     const records = await this.options.read(id);
     const requested = records.find(
       ({ stored_event: stored }) =>
-        stored.event.type === "approval_requested" &&
+        stored.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED &&
         stored.event.payload.token.approval_id === decision.approval_id,
     )?.stored_event;
-    if (!requested || requested.event.type !== "approval_requested") {
+    if (!requested || requested.event.type !== CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED) {
       return { response: { status: 404, body: { code: "approval_not_found" } }, fresh: false };
     }
     if (requested.event.payload.token.operation_id !== decision.operation_id) {
@@ -191,10 +195,10 @@ export class ControlRuntime {
     }
     const prior = records.find(
       ({ stored_event: stored }) =>
-        stored.event.type === "approval_resolved" &&
+        stored.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED &&
         stored.event.payload.decision.approval_id === decision.approval_id,
     )?.stored_event;
-    if (prior?.event.type === "approval_resolved") {
+    if (prior?.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED) {
       return {
         response: equalDecision(prior.event.payload.decision, decision)
           ? { status: 202, body: { ...decision, resolved: true } }
@@ -222,7 +226,7 @@ export class ControlRuntime {
       });
       const stored = await this.options.appendActive(correlation, {
         idempotency_key: `approval:${decision.approval_id}`,
-        event: { type: "approval_resolved", payload: { decision } },
+        event: { type: CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED, payload: { decision } },
       });
       return {
         response: { status: 202, body: { ...decision, resolved: true } },
@@ -242,11 +246,11 @@ export class ControlRuntime {
       const retry = await this.options.read(id);
       const observed = retry.find(
         ({ stored_event: stored }) =>
-          stored.event.type === "approval_resolved" &&
+          stored.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED &&
           stored.event.payload.decision.approval_id === decision.approval_id,
       )?.stored_event;
       const same =
-        observed?.event.type === "approval_resolved" &&
+        observed?.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED &&
         equalDecision(observed.event.payload.decision, decision);
       return {
         response: same
@@ -286,7 +290,7 @@ export class ControlRuntime {
       const stored = await this.options.appendCancellation(correlation, {
         idempotency_key: `caller-cancelled:${command.operation_id}`,
         event: {
-          type: "caller_cancelled",
+          type: CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED,
           payload: {
             operation_id: command.operation_id,
             actor: command.actor,
@@ -307,16 +311,18 @@ export class ControlRuntime {
       const durable = observed.find(
         ({ stored_event: stored }) =>
           stored.idempotency_key === `caller-cancelled:${command.operation_id}` &&
-          stored.event.type === "caller_cancelled" &&
+          stored.event.type === CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED &&
           stored.event.payload.operation_id === command.operation_id,
       )?.stored_event;
       if (durable) {
         const same =
-          durable.event.type === "caller_cancelled" &&
+          durable.event.type === CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED &&
           durable.event.payload.actor === command.actor &&
           durable.event.payload.reason === command.reason;
         const reason =
-          durable.event.type === "caller_cancelled" ? durable.event.payload.reason : null;
+          durable.event.type === CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED
+            ? durable.event.payload.reason
+            : null;
         await reservation.commit(reason ?? undefined);
         if (same && durable.turn_id === correlation?.turn_id) {
           return {

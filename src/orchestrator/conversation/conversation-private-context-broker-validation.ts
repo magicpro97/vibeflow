@@ -7,6 +7,7 @@ import {
   CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT,
   CONVERSATION_PRIVATE_CONTEXT_MESSAGE_STAGE_STATE,
   CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD,
+  CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD,
   type ConversationPrivateContextBrokerErrorCodeV1,
   type ConversationPrivateContextStageIdempotencyFieldV1,
   isConversationPrivateContextBrokerErrorCode,
@@ -20,7 +21,6 @@ import {
   isConversationPrivateContextSourceKind,
   isConversationPrivateContextSourceRecordRef,
 } from "./conversation-private-context-broker-contract.js";
-import { CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS } from "./conversation-private-context-broker-fields.js";
 import {
   draftStageRecordDigest,
   messageStageRecordDigest,
@@ -34,6 +34,7 @@ import type {
   StageConversationDraftPrivateContextRequestV1,
   StageConversationMessagePrivateContextRequestV1,
 } from "./conversation-private-context-broker-types.js";
+import { CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS } from "./conversation-private-context-broker-wire.js";
 
 export class ConversationPrivateContextBrokerConflictError extends Error {
   constructor(
@@ -184,8 +185,8 @@ export function assertConversationHomeCreateRequestV1(
       Object.keys(candidate).some(
         (key) => !hasField(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.HOME_CREATE_PARTICIPANT, key),
       ) ||
-      !Object.hasOwn(candidate, "role_ref") ||
-      !Object.hasOwn(candidate, "engine") ||
+      !Object.hasOwn(candidate, CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD.ROLE_REF) ||
+      !Object.hasOwn(candidate, CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD.ENGINE) ||
       typeof candidate.role_ref !== "string" ||
       !candidate.role_ref.trim() ||
       candidate.role_ref.normalize("NFC") !== candidate.role_ref ||

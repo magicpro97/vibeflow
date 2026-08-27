@@ -7,6 +7,7 @@
 // sites (dispatch/spawners.ts + commands/coord.ts). No Docker, no new dep.
 
 import type { Engine } from "../core.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 
 /** Env-scrub policy for spawned engine subprocesses. Absent/empty = conservative default. */
 export interface EnvPolicy {
@@ -190,7 +191,7 @@ export function filterEnv(
   policy: EnvPolicy = {},
   platform: NodeJS.Platform = process.platform,
 ): EnvFilterResult {
-  const ci = platform === "win32";
+  const ci = platform === RUNTIME_PLATFORM.WINDOWS;
   const strict = policy.selectedEngine !== undefined || (policy.allow?.length ?? 0) > 0;
   const denyGlobs = [...DEFAULT_DENY, ...(policy.deny ?? [])];
   const env: NodeJS.ProcessEnv = {};

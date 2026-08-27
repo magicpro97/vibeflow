@@ -1,6 +1,6 @@
 import type { BrowserHostActionRequestV1 } from "../../actions/index.js";
 import type { AgentBinding, ResolvedAgentBinding } from "../../agents/binding.js";
-import type { Engine } from "../../core/types.js";
+import type { AgentHostToolV1, Engine } from "../../core/agent-contract.js";
 import type { EngineChunk, EngineSessionResult } from "../../dispatch/session-types.js";
 import type { EvaluatorOutput, RoundDecision } from "../consensus.js";
 import type {
@@ -16,11 +16,15 @@ import type {
   TraceCorrelation,
   TraceEvent,
 } from "../trace/types.js";
+import type { ConversationOrchestrationResultStatus } from "./conversation-command-result-contract.js";
 import type {
   AgentSocialIntentRequestV1,
   PublicQuoteReferenceV1,
 } from "./conversation-interaction-types.js";
+import type { ConversationMessageQueueTargetParticipantsV1 } from "./conversation-message-queue-contract.js";
 import type { PublicConversationMessageQueueInvalidationV1 } from "./conversation-message-queue-records.js";
+import type * as ConversationWire from "./conversation-public-wire-contract.js";
+import type { ConversationSseFrameV1 } from "./conversation-sse-contract.js";
 import type { PrivateFileRangeHandoffBindingV1 } from "./private-file-range-staging-store.js";
 import type {
   ConversationTurnPreparationRequestV1,
@@ -41,14 +45,7 @@ export type ConversationArtifactRef = string & {
   readonly [conversationArtifactRefBrand]: "ConversationArtifactRef";
 };
 
-export type ConversationArtifactType =
-  | "decision_matrix"
-  | "plan"
-  | "diff"
-  | "tests"
-  | "synthesis"
-  | "transcript"
-  | "compaction";
+export type ConversationArtifactType = ConversationWire.ConversationArtifactTypeV1;
 
 export interface ArtifactCreateRequest {
   artifact_type: ConversationArtifactType;
@@ -95,17 +92,21 @@ type EmissionOf<T extends TraceEvent["type"]> = Omit<PolicyEmission, "event"> & 
 };
 
 export type CoordinatorEmission = EmissionOf<
-  | "round_boundary"
-  | "consensus_update"
-  | "baseline_result"
-  | "synthesis_completed"
-  | "dry_run_result"
-  | "approval_requested"
-  | "error"
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.SYNTHESIS_COMPLETED
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.DRY_RUN_RESULT
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.ERROR
 >;
 
 export type AttemptEmission = EmissionOf<
-  "precommit" | "agent_response_delta" | "tool_action" | "evaluator_assessment" | "error"
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.ERROR
 >;
 
 export interface PolicyAttempt {
@@ -165,7 +166,7 @@ export interface ConversationBinding {
   host_tools?: ConversationHostToolV1[];
 }
 
-export type ConversationHostToolV1 = "propose_action";
+export type ConversationHostToolV1 = AgentHostToolV1;
 
 export interface BrowserHostActionCandidateV1 {
   schema_version: "1.0";
@@ -220,7 +221,7 @@ export interface RoundResponse {
 }
 
 export interface RoundAssessment {
-  stage: "blind" | "full";
+  stage: ConversationWire.ConversationAssessmentStageV1;
   assessment: EvaluatorOutput;
 }
 
@@ -257,7 +258,7 @@ export type FoldedConversation = ConversationSnapshot;
 
 export interface ConversationCreateParticipant {
   role_ref: string;
-  engine: string;
+  engine: Engine;
   model?: string;
   host_tools?: ConversationHostToolV1[];
 }
@@ -296,7 +297,7 @@ export interface ConversationStartResult {
 
 export interface MessageRequest {
   content: string;
-  target_participants?: string[] | "all";
+  target_participants?: ConversationMessageQueueTargetParticipantsV1;
   quote_refs?: PublicQuoteReferenceV1[];
   private_file_range?: PrivateFileRangeHandoffBindingV1;
 }
@@ -310,17 +311,17 @@ export interface MessageResponse {
 
 export interface PauseResponse {
   paused: true;
-  lifecycle: "PAUSED";
+  lifecycle: typeof ConversationWire.CONVERSATION_TRANSITION_LIFECYCLE.PAUSED;
 }
 
 export interface ResumeResponse {
   resumed: true;
-  active_state: "ACTIVE";
+  active_state: typeof ConversationWire.CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE;
 }
 
 export interface StopResponse {
   stopped: true;
-  terminal_state: "STOPPED";
+  terminal_state: typeof ConversationWire.CONVERSATION_TERMINAL_LIFECYCLE.STOPPED;
 }
 
 export type ApprovalResolveResponse = ApprovalDecision & { resolved: true };
@@ -356,7 +357,7 @@ export type OperationCancelResult =
 
 export interface ConversationOrchestrationResult {
   operation_id: string;
-  status: "completed" | "stopped" | "aborted" | "failed" | "awaiting_approval";
+  status: ConversationOrchestrationResultStatus;
   artifact_refs: string[];
 }
 
@@ -392,9 +393,8 @@ export interface ConversationService {
   subscribe(id: string, listener: ConversationListener, afterSeq?: number): Unsubscribe | null;
 }
 
-export type ConversationSseFrame =
-  | { id: string; event: "trace"; data: PublicStoredTraceEvent }
-  | { id: string; event: "snapshot"; data: ConversationSnapshot }
-  | { event: "message-queue-invalidated"; data: PublicConversationMessageQueueInvalidationV1 }
-  | { event: "error"; data: { code: string; message: string } }
-  | { event: "heartbeat"; data: "" };
+export type ConversationSseFrame = ConversationSseFrameV1<
+  PublicStoredTraceEvent,
+  ConversationSnapshot,
+  PublicConversationMessageQueueInvalidationV1
+>;

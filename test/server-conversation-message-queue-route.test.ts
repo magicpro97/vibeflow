@@ -1,5 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { digestV1 } from "../src/durability/index.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
+  CONVERSATION_MESSAGE_QUEUE_ERROR_CODES,
+  CONVERSATION_MESSAGE_QUEUE_INTERNAL_ERROR_CODES,
+  CONVERSATION_MESSAGE_QUEUE_LIMITS,
+  CONVERSATION_MESSAGE_QUEUE_PUBLIC_ERROR_CODES,
+  CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+  isConversationMessageQueueInternalErrorCode,
+  isConversationMessageQueuePublicErrorCode,
+} from "../src/orchestrator/conversation/conversation-message-queue-contract.js";
+import { CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE } from "../src/orchestrator/conversation/conversation-message-queue-error-contract.js";
 import type {
   ConversationMessageQueueSnapshotV1,
   PublicQueuedUserMessageV1,
@@ -24,7 +37,10 @@ import {
   type ConversationHomeCreateHttpAuthorityV1,
   handleConversationHomeCreateRoute,
 } from "../src/server/conversation-home-create-route.js";
-import { messageQueueRouteError } from "../src/server/conversation-message-queue-http.js";
+import {
+  messageQueueRouteError,
+  queueErrorBody,
+} from "../src/server/conversation-message-queue-http.js";
 import type { ConversationMessageQueueHttpAuthorityV1 } from "../src/server/conversation-message-queue-route.js";
 import {
   handleConversationDraftPrivateContextRoute,
@@ -45,10 +61,10 @@ const item = (state: PublicQueuedUserMessageV1["state"] = "queued") =>
     queue_item_id: queueItemId,
     queue_sequence: 1,
     root_session_id: rootSessionId,
-    author_public_id: "human",
+    author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
     content: "queued content",
     content_digest: digest("content"),
-    target_participants: "all",
+    target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     quote_refs: [],
     private_context_present: false,
     predecessor_queue_item_id: null,
@@ -131,7 +147,7 @@ const enqueueBody = {
   idempotency_key: "enqueue-http",
   expected_authority_digest: digest("authority"),
   content: "queued content",
-  target_participants: "all",
+  target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
   quote_refs: [],
   private_context_present: false,
 };
@@ -172,6 +188,164 @@ describe("conversation message queue HTTP contract", () => {
     );
     expect(forbidden.status).toBe(403);
     expect(roots).toBe(0);
+  });
+
+  test("refuses impossible queue error producer semantics and details", () => {
+    expect(Object.isFrozen(CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE)).toBeTrue();
+    expect(CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE).toEqual({
+      [CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL]:
+        "This conversation already has 32 messages waiting.",
+      [CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUED_MESSAGE_NOT_EDITABLE]:
+        "That queued message changed before the edit could commit.",
+      [CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.STALE_QUEUED_MESSAGE]:
+        "That queued message no longer matches the conversation authority it followed.",
+      [CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.PRIVATE_CONTEXT_CONFLICT]:
+        "Private context changed before this request could commit.",
+      [CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.REQUEST_TOO_LARGE]:
+        "The request body exceeds the 524288-byte limit.",
+      [CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.RATE_LIMITED]:
+        "Too many private context selections are waiting.",
+    });
+    expect(Object.isFrozen(CONVERSATION_MESSAGE_QUEUE_PUBLIC_ERROR_CODES)).toBeTrue();
+    expect(Object.isFrozen(CONVERSATION_MESSAGE_QUEUE_INTERNAL_ERROR_CODES)).toBeTrue();
+    expect([...CONVERSATION_MESSAGE_QUEUE_PUBLIC_ERROR_CODES]).toEqual(
+      CONVERSATION_MESSAGE_QUEUE_ERROR_CODES.filter(
+        (code) => !isConversationMessageQueueInternalErrorCode(code),
+      ),
+    );
+    expect(
+      CONVERSATION_MESSAGE_QUEUE_PUBLIC_ERROR_CODES.every(
+        isConversationMessageQueuePublicErrorCode,
+      ),
+    ).toBeTrue();
+    expect(CONVERSATION_MESSAGE_QUEUE_PUBLIC_ERROR_CODES).not.toContain(
+      CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_CLAIM_BUSY,
+    );
+    expect(CONVERSATION_MESSAGE_QUEUE_PUBLIC_ERROR_CODES).not.toContain(
+      CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_AUTHORITY_CORRUPT,
+    );
+    const canonical = {
+      code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
+      message:
+        CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE[
+          CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL
+        ],
+      retryable: true,
+      recovery_action: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.RETRY,
+      details: {
+        root_session_id: rootSessionId,
+        max_nonterminal_items: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems,
+      },
+    } as const;
+
+    expect(queueErrorBody(canonical).status).toBe(429);
+    expect(() => queueErrorBody({ ...canonical, retryable: false })).toThrow(
+      "invalid conversation message queue error semantics",
+    );
+    expect(() =>
+      queueErrorBody({
+        ...canonical,
+        details: {
+          root_session_id: rootSessionId,
+          max_nonterminal_items: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems - 1,
+        },
+      }),
+    ).toThrow("invalid conversation message queue error details");
+    expect(() => queueErrorBody({ ...canonical, message: "" })).toThrow(
+      "invalid conversation message queue error message",
+    );
+    expect(() => queueErrorBody({ ...canonical, message: "Almost canonical." })).toThrow(
+      "conversation message queue error message semantics mismatch",
+    );
+    expect(() =>
+      queueErrorBody({
+        ...canonical,
+        code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_CLAIM_BUSY as never,
+        details: null,
+      }),
+    ).toThrow("invalid public conversation message queue error code");
+    expect(() =>
+      queueErrorBody({
+        ...canonical,
+        code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_AUTHORITY_CORRUPT as never,
+        details: null,
+      }),
+    ).toThrow("invalid public conversation message queue error code");
+  });
+
+  test("constructs only the exact bounded public error fields from widened producer input", async () => {
+    const widened = {
+      code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
+      message:
+        CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE[
+          CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL
+        ],
+      retryable: true,
+      recovery_action: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.RETRY,
+      details: {
+        root_session_id: rootSessionId,
+        max_nonterminal_items: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems,
+      },
+      secret: "must-not-cross",
+      oversized: "x".repeat(8_192),
+    } as const;
+    const response = queueErrorBody(widened);
+    const text = await response.text();
+    const body = JSON.parse(text);
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(4_096);
+    expect(Object.keys(body)).toEqual(["schema_version", "error"]);
+    expect(Object.keys(body.error).sort()).toEqual(
+      ["code", "message", "correlation_id", "retryable", "recovery_action", "details"].sort(),
+    );
+    expect(text).not.toContain("must-not-cross");
+    expect(text).not.toContain("xxxxxxxxxxxxxxxx");
+    expect(() =>
+      queueErrorBody({ ...widened, details: { ...widened.details, secret: "leak" } }),
+    ).toThrow("invalid conversation message queue error details");
+  });
+
+  test("snapshots accessor-backed details once before validation and byte serialization", async () => {
+    for (const lateRoot of ["secret-root", "x".repeat(8_192)]) {
+      let detailsReads = 0;
+      let rootReads = 0;
+      const details = Object.create(null) as Record<string, unknown>;
+      Object.defineProperties(details, {
+        root_session_id: {
+          enumerable: true,
+          get: () => {
+            rootReads += 1;
+            return rootReads <= 3 ? rootSessionId : lateRoot;
+          },
+        },
+        max_nonterminal_items: {
+          enumerable: true,
+          value: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems,
+        },
+      });
+      const producer = {
+        code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
+        message:
+          CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE[
+            CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL
+          ],
+        retryable: true,
+        recovery_action: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.RETRY,
+        get details() {
+          detailsReads += 1;
+          return details;
+        },
+      } as const;
+      const response = queueErrorBody(producer);
+      const text = await response.text();
+      expect(response.status).toBe(429);
+      expect(detailsReads).toBe(1);
+      expect(rootReads).toBe(1);
+      expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(4_096);
+      expect(text).not.toContain("secret-root");
+      expect(JSON.parse(text)).toMatchObject({
+        error: { details: { root_session_id: rootSessionId } },
+      });
+    }
   });
 
   test("rejects duplicate keys and enforces the incremental 524288-byte cap", async () => {
@@ -393,7 +567,15 @@ describe("conversation message queue HTTP contract", () => {
         409,
         "private_context_conflict",
       ],
-      [new ConversationMessageQueueConflictError("queue_full", "full"), 429, "queue_full"],
+      [
+        new ConversationMessageQueueConflictError(
+          CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
+          "full",
+          { root_session_id: rootSessionId },
+        ),
+        429,
+        CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
+      ],
       [
         new ConversationMessageQueueConflictError("idempotency_conflict", "bound"),
         409,
@@ -432,6 +614,49 @@ describe("conversation message queue HTTP contract", () => {
     );
     expect(unavailableItem.status).toBe(423);
     expect(await unavailableItem.json()).toMatchObject({ error: { code: "authority_corrupt" } });
+  });
+
+  test("uses exact typed root context and rejects conflicting route authority", async () => {
+    const conflict = new ConversationMessageQueueConflictError("queue_full", "full", {
+      root_session_id: rootSessionId,
+    });
+    expect(Object.isFrozen(conflict.context)).toBeTrue();
+    const projected = messageQueueRouteError(conflict);
+    expect(projected.status).toBe(429);
+    expect(await projected.json()).toMatchObject({
+      error: {
+        code: "queue_full",
+        message:
+          CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE[
+            CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL
+          ],
+        details: {
+          root_session_id: rootSessionId,
+          max_nonterminal_items: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems,
+        },
+      },
+    });
+    const mismatched = messageQueueRouteError(
+      conflict,
+      queueAuthority(),
+      "different-root",
+      queueItemId,
+    );
+    expect(mismatched.status).toBe(423);
+    expect(await mismatched.json()).toMatchObject({ error: { code: "authority_corrupt" } });
+    expect(
+      () =>
+        new ConversationMessageQueueConflictError("queue_full", "full", {
+          root_session_id: "root",
+          secret: true,
+        } as never),
+    ).toThrow("invalid conversation message queue conflict context");
+    expect(() =>
+      Reflect.construct(ConversationMessageQueueConflictError, [
+        CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
+        "full",
+      ]),
+    ).toThrow("invalid conversation message queue conflict context");
   });
 
   test("contains queue authority failures at both root and draft route boundaries", async () => {

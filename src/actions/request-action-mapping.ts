@@ -1,47 +1,7 @@
 import { canonicalJsonBytes } from "../durability/index.js";
+import { HOST_ACTION_KIND, isHostActionKind } from "./host-action-contract.js";
 import type { HostActionV1 } from "./internal-action-types.js";
 import type { HostActionRequestV1 } from "./request-types.js";
-
-type StagedRequest = Extract<
-  HostActionRequestV1,
-  {
-    type:
-      | "conversation.publish_suspected_literal"
-      | "conversation.abandon_revision_operation"
-      | "conversation.retry_revision_operation"
-      | "conversation.reconcile_revision_operation"
-      | "context.compact"
-      | "capability.adopt"
-      | "policy.update_authority"
-      | "secret.revoke"
-      | "authority.repair";
-  }
->;
-type DirectRequestType = Exclude<HostActionRequestV1["type"], StagedRequest["type"]>;
-
-const DIRECT_TYPE_LIST = [
-  "conversation.add_participant",
-  "conversation.remove_participant",
-  "conversation.update_participant",
-  "conversation.update_settings",
-  "conversation.continue_message",
-  "conversation.select_lineage_head",
-  "conversation.associate_lineages",
-  "conversation.stop_operation",
-  "capability.install",
-  "capability.update",
-  "capability.configure",
-  "capability.retarget",
-  "capability.remove",
-  "capability.rollback_scope",
-  "capability.restore_package",
-  "capability.repair",
-  "grant.create",
-  "grant.renew",
-  "grant.revoke",
-  "registry.trust_key",
-] as const satisfies readonly DirectRequestType[];
-const DIRECT_TYPES = new Set<HostActionRequestV1["type"]>(DIRECT_TYPE_LIST);
 
 function equal(left: unknown, right: unknown): boolean {
   return canonicalJsonBytes(left).equals(canonicalJsonBytes(right));
@@ -60,13 +20,10 @@ export function assertRequestActionMapping(
   request: HostActionRequestV1,
   action: HostActionV1,
 ): void {
+  if (!isHostActionKind(request.type) || !isHostActionKind(action.type)) mismatch();
   if (request.type !== action.type) mismatch();
-  if (DIRECT_TYPES.has(request.type)) {
-    if (!equal(request, action)) mismatch();
-    return;
-  }
   switch (request.type) {
-    case "conversation.publish_suspected_literal": {
+    case HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL: {
       if (
         action.type !== request.type ||
         action.binding.private_staging_id !== request.private_staging_id ||
@@ -77,16 +34,16 @@ export function assertRequestActionMapping(
         mismatch();
       return;
     }
-    case "conversation.abandon_revision_operation":
-    case "conversation.retry_revision_operation":
-    case "conversation.reconcile_revision_operation":
+    case HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION:
+    case HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION:
+    case HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION:
       if (
         action.type !== request.type ||
         action.revision_operation_id !== request.revision_operation_id
       )
         mismatch();
       return;
-    case "context.compact":
+    case HOST_ACTION_KIND.CONTEXT_COMPACT:
       if (
         action.type !== request.type ||
         action.oversized_candidate.candidate_id !== request.oversized_candidate_id ||
@@ -96,7 +53,7 @@ export function assertRequestActionMapping(
       )
         mismatch();
       return;
-    case "capability.adopt":
+    case HOST_ACTION_KIND.CAPABILITY_ADOPT:
       if (
         action.type !== request.type ||
         action.scope !== request.scope ||
@@ -106,7 +63,7 @@ export function assertRequestActionMapping(
       )
         mismatch();
       return;
-    case "policy.update_authority":
+    case HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY:
       if (
         action.type !== request.type ||
         action.scope !== request.scope ||
@@ -115,7 +72,7 @@ export function assertRequestActionMapping(
       )
         mismatch();
       return;
-    case "secret.revoke":
+    case HOST_ACTION_KIND.SECRET_REVOKE:
       if (
         action.type !== request.type ||
         action.scope !== request.scope ||
@@ -125,7 +82,7 @@ export function assertRequestActionMapping(
       )
         mismatch();
       return;
-    case "authority.repair":
+    case HOST_ACTION_KIND.AUTHORITY_REPAIR:
       if (
         action.type !== request.type ||
         action.plan.repair_id !== request.repair_id ||
@@ -134,6 +91,6 @@ export function assertRequestActionMapping(
         mismatch();
       return;
     default:
-      mismatch();
+      if (!equal(request, action)) mismatch();
   }
 }

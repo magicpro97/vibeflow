@@ -2,6 +2,8 @@ import type { Ref, ShallowRef } from "vue";
 import {
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   CONVERSATION_MESSAGE_QUEUE_STATE,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+  type ConversationMessageQueueTargetParticipantsV1,
 } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
 import { conversationHomeApi } from "./conversation-home-api.js";
 import { createHomeMessageQueueAdmissionRuntime } from "./conversation-home-message-queue-admission-runtime.js";
@@ -20,6 +22,7 @@ import type {
   HomeMessageQueueSnapshot,
   HomeOptimisticQueuedMessage,
   HomeQueuedMessageEditBinding,
+  HomeRetryableQueuedMessage,
 } from "./conversation-home-message-queue-types.js";
 import { createHomeActionKey, readableHomeError } from "./conversation-home-runtime.js";
 export type { HomeQueueAdmissionSnapshot } from "./conversation-home-message-queue-admission-runtime.js";
@@ -37,6 +40,7 @@ interface HomeMessageQueueRuntimeInput {
   composerError: Ref<string>;
   snapshot: ShallowRef<HomeMessageQueueSnapshot | null>;
   optimistic: Ref<HomeOptimisticQueuedMessage[]>;
+  retryable: Ref<HomeRetryableQueuedMessage[]>;
   edit: ShallowRef<HomeQueuedMessageEditBinding | null>;
   editSaving: Ref<boolean>;
   sendAsNew: Ref<boolean>;
@@ -56,8 +60,12 @@ interface QueueCommand {
   root_session_id: string;
 }
 
-const cloneTargets = (targets: "all" | string[]): "all" | string[] =>
-  targets === "all" ? "all" : [...targets];
+const cloneTargets = (
+  targets: ConversationMessageQueueTargetParticipantsV1,
+): ConversationMessageQueueTargetParticipantsV1 =>
+  targets === CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
+    ? CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
+    : [...targets];
 
 export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInput) {
   const savedDrafts = new Map<string, SavedRootDraft>();
@@ -81,6 +89,7 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
     composerError: input.composerError,
     snapshot: input.snapshot,
     optimistic: input.optimistic,
+    retryable: input.retryable,
     announcement: input.announcement,
     refreshQueue: input.refreshQueue,
     clearSendAsNew() {
@@ -280,14 +289,18 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
   function goOffline(): void {
     const rootSessionId = input.activeRootId.value;
     if (!rootSessionId) return;
-    admissions.goOffline(rootSessionId);
+    const retainedForRetry = admissions.goOffline(rootSessionId);
     if (input.editSaving.value) {
       input.edit.value = null;
       input.editSaving.value = false;
       editToken = null;
       editController = null;
     }
-    announce("Connection lost. Unacknowledged text remains an inert draft.");
+    announce(
+      retainedForRetry
+        ? "Connection lost. Unacknowledged text remains in Message queue for an explicit retry."
+        : "Connection lost. Unacknowledged text remains an inert draft.",
+    );
   }
 
   function dispose(): void {
@@ -301,6 +314,7 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
     adoptSnapshot,
     switchRoot,
     enqueue: admissions.enqueue,
+    retry: admissions.retry,
     beginEdit,
     cancelEdit,
     saveEdit,

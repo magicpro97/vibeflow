@@ -10,6 +10,7 @@ import type { RevisionOperationEventV1 } from "./revision-planner.js";
 
 export function missingInitialRevisionLaneToken(
   operation: RevisionOperationV1,
+  plan: RevisionPreparationPlanV1,
   participant: RevisionPreparationPlanV1["participant_starts"][number],
   events: RevisionOperationEventV1[],
   now: string,
@@ -26,7 +27,9 @@ export function missingInitialRevisionLaneToken(
       (events.at(-1)?.recorded_at ?? operation.created_at) > now
         ? (events.at(-1)?.recorded_at ?? operation.created_at)
         : now,
-    effect_action_operation_id: foldRevisionOperation(operation, events).effect_action_operation_id,
+    effect_action_operation_id: foldRevisionOperation(operation, events, {
+      preparationPlan: plan,
+    }).effect_action_operation_id,
   };
 }
 

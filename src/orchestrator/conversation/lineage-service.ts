@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import {
   type CatalogCursorCodec,
   CatalogCursorError,
@@ -5,6 +6,13 @@ import {
 } from "./catalog-cursor.js";
 import { createConversationRevisionSummary } from "./catalog-row.js";
 import type { ConversationRevisionSummaryV1 } from "./catalog-types.js";
+import {
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_CURSOR_ERROR_CODE,
+  CONVERSATION_CURSOR_VALIDATION_STATUS,
+  CONVERSATION_HEAD_STATUS,
+  type ConversationHeadStatus,
+} from "./conversation-catalog-contract.js";
 export { activeRevisionOperationIdForHead } from "./lineage-active-revision.js";
 import { activeRevisionOperationIdForHead } from "./lineage-active-revision.js";
 import { validateLineageHeadAuthorityChain } from "./lineage-head-authority.js";
@@ -38,10 +46,10 @@ import {
 } from "./source-inventory.js";
 
 export interface ConversationLineageResponseV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   root_session_id: string;
   requested: LineageNodeIdentityV1;
-  head_status: "committed" | "ambiguous" | "unclaimed";
+  head_status: ConversationHeadStatus;
   active: LineageNodeIdentityV1 | null;
   candidate_heads: LineageNodeIdentityV1[];
   head_epoch: number;
@@ -51,9 +59,9 @@ export interface ConversationLineageResponseV1 {
 }
 
 export interface ConversationHeadResponseV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   root_session_id: string;
-  head_status: "committed" | "ambiguous" | "unclaimed";
+  head_status: ConversationHeadStatus;
   head_epoch: number;
   head_digest: string;
   active: ConversationRevisionSummaryV1 | null;
@@ -71,7 +79,7 @@ export interface ResolvedConversationLineageV1 {
 }
 
 export class ConversationLineageNotFoundError extends Error {
-  readonly code = "not_found" as const;
+  readonly code = PUBLIC_ERROR_CODE.NOT_FOUND;
   constructor() {
     super("conversation lineage was not found");
     this.name = "ConversationLineageNotFoundError";
@@ -79,7 +87,7 @@ export class ConversationLineageNotFoundError extends Error {
 }
 
 export class StaleLineageCursorError extends Error {
-  readonly code = "stale_lineage_cursor" as const;
+  readonly code = PUBLIC_ERROR_CODE.STALE_LINEAGE_CURSOR;
   constructor(
     readonly restart_cursor: string,
     readonly head_digest: string,
@@ -285,12 +293,13 @@ export class ConversationLineageService {
       : [];
     if (
       activeNode.length > 1 ||
-      (resolved.head.head_status === "committed" && activeNode.length !== 1) ||
-      (resolved.head.head_status !== "committed" && activeNode.length !== 0)
+      (resolved.head.head_status === CONVERSATION_HEAD_STATUS.COMMITTED &&
+        activeNode.length !== 1) ||
+      (resolved.head.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED && activeNode.length !== 0)
     )
       throw new LineageAuthorityCorruptError("lineage head summary does not bind one active leaf");
     return {
-      schema_version: "1.0",
+      schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
       root_session_id: rootSessionId,
       head_status: resolved.head.head_status,
       head_epoch: resolved.head.head_epoch,
@@ -307,7 +316,10 @@ export class ConversationLineageService {
   ): ConversationLineageResponseV1 {
     const limit = input.limit ?? 50;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
-      throw new CatalogCursorError("invalid_cursor", "invalid lineage page size");
+      throw new CatalogCursorError(
+        CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+        "invalid lineage page size",
+      );
     const resolved = this.resolve(conversationId);
     const final = resolved.selected_nodes.at(-1);
     if (!final) throw new LineageAuthorityCorruptError("lineage has no selected nodes");
@@ -323,7 +335,7 @@ export class ConversationLineageService {
     let start = 0;
     if (input.cursor) {
       const checked = this.options.cursorCodec.validateLineage(input.cursor, current, positions);
-      if (checked.status === "stale")
+      if (checked.status === CONVERSATION_CURSOR_VALIDATION_STATUS.STALE)
         throw new StaleLineageCursorError(
           checked.restart_cursor,
           checked.head_digest,
@@ -358,7 +370,7 @@ export class ConversationLineageService {
       createConversationRevisionSummary(node, resolved.revision_claim_epoch),
     );
     return {
-      schema_version: "1.0",
+      schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
       root_session_id: resolved.lineage.root_session_id,
       requested: structuredClone(resolved.requested.node),
       head_status: resolved.head.head_status,

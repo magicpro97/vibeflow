@@ -1,3 +1,4 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import type { PublishedRevisionTransitionInputV1 } from "./lineage-published-transition.js";
 import type { MessageRequest } from "./types.js";
@@ -44,7 +45,7 @@ export function findPublishedContinuation(
       authority.operation?.parent?.conversation_id === conversationId &&
       typeof epoch === "number" &&
       authority.proposal?.idempotency_key === revisionActionIdempotencyKey(messageKey, epoch) &&
-      authority.proposal.action?.type === "conversation.continue_message" &&
+      authority.proposal.action?.type === HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE &&
       authority.proposal.action.content === request.content &&
       same(authority.proposal.action.target_participants, request.target_participants) &&
       same(authority.proposal.action.quote_refs ?? [], request.quote_refs ?? []) &&

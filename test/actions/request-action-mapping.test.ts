@@ -112,6 +112,15 @@ const direct: HostActionRequestV1[] = [
 ];
 
 describe("canonical request to immutable action mapping", () => {
+  test("rejects an unknown matching discriminant at the runtime boundary", () => {
+    expect(() =>
+      assertRequestActionMapping(
+        { type: "future.action", payload: 1 } as never,
+        { type: "future.action", payload: 1 } as never,
+      ),
+    ).toThrow(/disagree/i);
+  });
+
   test("binds all twenty direct variants byte-for-byte", () => {
     expect(direct).toHaveLength(20);
     for (const request of direct) {

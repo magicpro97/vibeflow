@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import { ConversationHomeApiError } from "./conversation-home-api.js";
 import type { HomeTimelineItem } from "./conversation-home-types.js";
 
@@ -12,14 +13,16 @@ export function mergeHomePage<T>(
   return [...merged.values()];
 }
 
+const HOME_STALE_CURSOR_ERROR_CODES = Object.freeze([
+  PUBLIC_ERROR_CODE.STALE_CATALOG_CURSOR,
+  PUBLIC_ERROR_CODE.STALE_PENDING_PROPOSAL_CURSOR,
+  PUBLIC_ERROR_CODE.STALE_TIMELINE_CURSOR,
+  PUBLIC_ERROR_CODE.STALE_CAPABILITY_CURSOR,
+] as const);
+
 export function staleHomeCursor(error: unknown): string | null {
   if (!(error instanceof ConversationHomeApiError)) return null;
-  return [
-    "stale_catalog_cursor",
-    "stale_pending_proposal_cursor",
-    "stale_timeline_cursor",
-    "stale_capability_cursor",
-  ].includes(error.publicError.code)
+  return HOME_STALE_CURSOR_ERROR_CODES.some((code) => code === error.publicError.code)
     ? error.publicError.code
     : null;
 }

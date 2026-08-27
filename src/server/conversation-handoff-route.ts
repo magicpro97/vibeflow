@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import {
   ConversationHandoffCorruptError,
   type ConversationHandoffService,
@@ -16,24 +17,30 @@ export async function handleConversationHandoffRoute(
   conversationId: string,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "GET")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   try {
     const value = await authority.handoff.read(conversationId);
     return value
       ? Response.json(value, { status: 200, headers: { "cache-control": "no-store" } })
-      : conversationReadError("not_found", { message: "The context handoff was not found." });
+      : conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+          message: "The context handoff was not found.",
+        });
   } catch (error) {
     if (error instanceof ConversationHandoffCorruptError)
-      return conversationReadError("authority_corrupt", {
+      return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
         message: "The context handoff authority is corrupt.",
-        recoveryAction: "repair-authority",
+        recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
       });
-    return conversationReadError("service_unavailable", {
+    return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
       message: "The context handoff is unavailable.",
       retryable: true,
-      recoveryAction: "retry",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
     });
   }
 }

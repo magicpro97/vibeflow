@@ -1,6 +1,12 @@
-import { existsSync } from "node:fs";
+import { ACTION_ROOT_LOCATOR_KIND } from "../actions/protocol-contract.js";
+import {
+  ACTION_PLANNING_MODE,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "../actions/public-action-contract.js";
 import { deriveOperationId } from "../actions/records.js";
+import type { ActionPlanningMode, CapabilityScope } from "../actions/types.js";
 import { digestHex, digestV1 } from "../durability/index.js";
+import { readCapabilityDomainAuthorityEvidence } from "./action-domain/operation-evidence.js";
 import type { CapabilityEffectBrokerV1 } from "./adapters/types.js";
 import {
   type CapabilityActionControllerV1,
@@ -24,8 +30,7 @@ import type {
   LegacyAdoptScanRequestV1,
   LegacyMarkerReaderV1,
 } from "./legacy/types.js";
-import { CapabilityRuntimeError } from "./operations/errors.js";
-import { readOperationGraph, readOperationHeader } from "./operations/fold.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./operations/errors.js";
 import {
   type CapabilityExecutionAuthorizationV1,
   type CapabilityExecutionRequestV1,
@@ -59,8 +64,6 @@ import {
   type CapabilityQueryRequestV1,
   CapabilityQueryServiceV1,
 } from "./query/index.js";
-import { readCapabilityWal } from "./storage/operation-store.js";
-import { capabilityOperationPaths } from "./storage/paths.js";
 import type { CapabilityStorageV1 } from "./storage/store.js";
 import type { PublicLegacyAdoptInspectionResponseV1 } from "./wire/cli.js";
 import type {
@@ -122,16 +125,22 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
   inspectPlan(request: CapabilityPlanningRequestV1): CapabilityFabricPlanV1 {
     this.#assertBoundScope(request.scope);
     try {
-      return buildCapabilityPlan(request, this.options.broker, this.#now(), "transient");
+      return buildCapabilityPlan(
+        request,
+        this.options.broker,
+        this.#now(),
+        ACTION_PLANNING_MODE.TRANSIENT,
+      );
     } finally {
       this.options.broker.clearTransientPayloads();
     }
   }
 
   prepareIntent(request: CapabilityIntentPreparationRequestV1): CapabilityFabricPlanV1 {
-    if (request.planning_options.mode === "durable") return this.prepareIntentGraph(request).plan;
+    if (request.planning_options.mode === ACTION_PLANNING_MODE.DURABLE)
+      return this.prepareIntentGraph(request).plan;
     try {
-      return this.#materializeIntentGraph(request, "transient").plan;
+      return this.#materializeIntentGraph(request, ACTION_PLANNING_MODE.TRANSIENT).plan;
     } finally {
       this.options.broker.clearTransientPayloads();
     }
@@ -140,22 +149,22 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
   prepareIntentGraph(
     request: CapabilityIntentPreparationRequestV1,
   ): CapabilityDurablePlanningGraphV1 {
-    if (request.planning_options.mode !== "durable")
+    if (request.planning_options.mode !== ACTION_PLANNING_MODE.DURABLE)
       throw new CapabilityRuntimeError(
         "durable capability graph requires durable planning mode",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
-    return this.#materializeIntentGraph(request, "durable");
+    return this.#materializeIntentGraph(request, ACTION_PLANNING_MODE.DURABLE);
   }
 
   #materializeIntentGraph(
     request: CapabilityIntentPreparationRequestV1,
-    persistence: "transient" | "durable",
+    persistence: ActionPlanningMode,
   ): CapabilityDurablePlanningGraphV1 {
-    if (request.schema_version !== "1.0" || !this.options.intentMaterializer)
+    if (request.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION || !this.options.intentMaterializer)
       throw new CapabilityRuntimeError(
         "capability intent materializer is unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     const action = validateCapabilityIntentAction(request.action);
     this.#assertBoundScope(action.scope);
@@ -176,11 +185,20 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     this.#assertBoundScope(plan.scope);
     const current = this.options.storage.readStatus();
     if (current.state === "corrupt" || current.state === "unsupported")
-      throw new CapabilityRuntimeError("capability scope requires repair", "scope-needs-recovery");
+      throw new CapabilityRuntimeError(
+        "capability scope requires repair",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+      );
     if ((current.lock?.content_digest ?? null) !== plan.base_lock_digest)
-      throw new CapabilityRuntimeError("capability base generation changed", "scope-base-stale");
+      throw new CapabilityRuntimeError(
+        "capability base generation changed",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_BASE_STALE,
+      );
     if (!this.options.sourceAuthority)
-      throw new CapabilityRuntimeError("source authority is unavailable", "service-unavailable");
+      throw new CapabilityRuntimeError(
+        "source authority is unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
     const mismatch = capabilityRuntimeAuthorityMismatch(
       graph,
       this.options.authority,
@@ -195,7 +213,7 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
       if (observed.content_sha256 !== descriptor.resource.expected_preimage_sha256)
         throw new CapabilityRuntimeError(
           "owned capability preimage changed",
-          "owned-preimage-stale",
+          CAPABILITY_RUNTIME_ERROR_CODE.OWNED_PREIMAGE_STALE,
         );
     }
   }
@@ -213,9 +231,9 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     const operation_id = deriveOperationId(request.proposal, request.approval.approval_id);
     const base = request.proposal.base;
     const conversationCorrelation =
-      request.proposal.action_root_locator.kind === "conversation"
+      request.proposal.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION
         ? {
-            schema_version: "1.0" as const,
+            schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
             correlation_id: `vf-correlation-${digestHex(
               digestV1("VF-ACTION-CORRELATION\0v1\0", {
                 proposal_id: request.proposal.proposal_id,
@@ -236,7 +254,7 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     return this.#executor.prepare({
       graph: request.graph,
       authorization: {
-        schema_version: "1.0",
+        schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
         proposal_id: request.proposal.proposal_id,
         proposal_digest: request.proposal.proposal_digest,
         approval_id: request.approval.approval_id,
@@ -254,41 +272,14 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
   }
 
   operationAuthorityEvidence(operationId: string): CapabilityOperationAuthorityEvidenceV1 {
-    const header = readOperationHeader(this.options.storage, operationId);
-    if (!this.options.actionAuthority)
-      throw new CapabilityRuntimeError("action authority is unavailable", "service-unavailable");
-    const graph = readOperationGraph(this.options.actionAuthority, header);
-    const { plan } = graph;
-    this.options.actionAuthority.verifyReadable(header, plan);
-    const events = existsSync(
-      capabilityOperationPaths(this.options.storage.paths, operationId).events,
-    )
-      ? readCapabilityWal(this.options.storage.paths, operationId)
-      : [];
-    const last = events.at(-1);
-    const transition = last?.payload.kind === "operation-transition" ? last.payload : null;
-    const outcome =
-      transition?.to === "succeeded"
-        ? ("succeeded" as const)
-        : transition?.to === "failed"
-          ? ("failed" as const)
-          : transition?.to === "needs_recovery"
-            ? ("needs_recovery" as const)
-            : null;
-    return {
-      schema_version: "1.0",
-      operation_id: operationId,
-      header_digest: header.header_digest,
-      prepared_at: header.created_at,
-      terminal:
-        outcome && last
-          ? {
-              outcome,
-              domain_terminal_digest: last.event_digest,
-              recorded_at: last.recorded_at,
-            }
-          : null,
-    };
+    const authority = this.options.actionAuthority;
+    if (!authority)
+      throw new CapabilityRuntimeError(
+        "action authority is unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
+    return readCapabilityDomainAuthorityEvidence(this.options.storage, operationId, authority)
+      .evidence;
   }
 
   execute(request: CapabilityExecutionRequestV1): CapabilityOperationResultV1 {
@@ -331,12 +322,12 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     return this.#query.detail(request);
   }
 
-  status(input: { scope: "project" | "user"; package_id?: string }): CapabilityQueryResponseV1 {
+  status(input: { scope: CapabilityScope; package_id?: string }): CapabilityQueryResponseV1 {
     return this.#query.status(input);
   }
 
   discover(input: {
-    scope: "project" | "user";
+    scope: CapabilityScope;
     query?: string;
     engines?: import("../actions/types.js").EngineName[];
     statuses?: CapabilityStatusV1[];
@@ -353,7 +344,7 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     if (!this.options.legacyIssuance)
       throw new CapabilityRuntimeError(
         "legacy adoption issuance authority is unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     return this.options.legacyIssuance.inspect(request, authority);
   }
@@ -365,7 +356,7 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     if (!this.options.legacyIssuance)
       throw new CapabilityRuntimeError(
         "legacy adoption issuance authority is unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     return this.options.legacyIssuance.resolve(candidate, context);
   }
@@ -376,12 +367,12 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     if (validated.scope_identity_digest !== this.options.storage.scopeIdentityDigest)
       throw new CapabilityRuntimeError(
         "legacy adoption scope identity does not match the bound service",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     if (!this.options.legacy)
       throw new CapabilityRuntimeError(
         "legacy marker reader is unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     return inspectLegacyAdoptCandidates(
       { ...validated, markers: this.options.legacy.scan(validated) },
@@ -389,11 +380,11 @@ export class CapabilityFabricServiceV1 implements CapabilityActionControllerV1 {
     );
   }
 
-  #assertBoundScope(scope: "project" | "user"): void {
+  #assertBoundScope(scope: CapabilityScope): void {
     if (scope !== this.options.storage.paths.scope)
       throw new CapabilityRuntimeError(
         "capability request scope is not owned by this service instance",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
   }
 }

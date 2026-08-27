@@ -1,18 +1,28 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_AUTHORITY_EVENT_KIND,
+  ACTION_OPERATION_EVENT_SCHEMA_VERSION,
+  ACTION_OPERATION_STATE,
   type ActionAuthoritySnapshotV1,
   type ActionOperationEventV1,
+  PUBLIC_OPERATION_FIXED_PHASE,
+  PUBLIC_OPERATION_MESSAGE_CODE_PREFIX,
+  PUBLIC_OPERATION_PREFIXED_PHASE,
+  PUBLIC_OPERATION_PROGRESS_STATUS,
   type PublicOperationPhaseV1,
   projectActionSnapshot,
 } from "../../actions/index.js";
 import { expectedOperationStatus } from "../../actions/operation-phase-rules.js";
+import { publicOperationRevisionPhase } from "../../actions/public-operation-semantics.js";
 import { digestHex, digestV1 } from "../../durability/index.js";
 import type { ConversationActionReceiptV1 } from "./conversation-action-receipt-store.js";
+import { REVISION_OPERATION_EVENT_PAYLOAD_KIND } from "./revision-operation-event-contract.js";
 import type { RevisionOperationEventV1 } from "./revision-planner.js";
 
 function cursor(operationId: string, sequence: number, eventDigest: string): string {
   return `vf-operation-event-${digestHex(
     digestV1("VF-CONVERSATION-ACTION-EVENT-CURSOR\0v1\0", {
-      schema_version: "1.0",
+      schema_version: ACTION_OPERATION_EVENT_SCHEMA_VERSION,
       operation_id: operationId,
       phase_sequence: sequence,
       revision_event_digest: eventDigest,
@@ -21,8 +31,12 @@ function cursor(operationId: string, sequence: number, eventDigest: string): str
 }
 
 function revisionPhase(event: RevisionOperationEventV1): PublicOperationPhaseV1 | null {
-  if (event.payload.kind === "head-commit") return "revision:published";
-  if (event.payload.kind === "state-transition") return `revision:${event.payload.to}`;
+  if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.HEAD_COMMIT)
+    return PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.PUBLISHED;
+  if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.RECONCILIATION_RESULT)
+    return PUBLIC_OPERATION_PREFIXED_PHASE.REVISION.NEEDS_RECOVERY;
+  if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION)
+    return publicOperationRevisionPhase(event.payload.to);
   return null;
 }
 
@@ -41,7 +55,7 @@ export function projectRevisionActionEvents(
   ) => {
     const phaseSequence = output.length;
     output.push({
-      schema_version: "1.0",
+      schema_version: ACTION_OPERATION_EVENT_SCHEMA_VERSION,
       operation_id: operationId,
       phase_sequence: phaseSequence,
       state,
@@ -49,7 +63,7 @@ export function projectRevisionActionEvents(
         sequence: phaseSequence,
         phase,
         status: expectedOperationStatus(phase, state),
-        message_code: `operation.${phase}`,
+        message_code: `${PUBLIC_OPERATION_MESSAGE_CODE_PREFIX}${phase}`,
         at: occurredAt,
       },
       target: null,
@@ -58,7 +72,12 @@ export function projectRevisionActionEvents(
       event_cursor: cursor(operationId, phaseSequence, authorityDigest),
     });
   };
-  append("dispatch", "committing", snapshot.approval.decided_at, snapshot.approval.approval_digest);
+  append(
+    PUBLIC_OPERATION_FIXED_PHASE.DISPATCH,
+    ACTION_OPERATION_STATE.COMMITTING,
+    snapshot.approval.decided_at,
+    snapshot.approval.approval_digest,
+  );
   for (const event of revisionEvents) {
     const payload = event.payload;
     const relevant =
@@ -71,12 +90,11 @@ export function projectRevisionActionEvents(
     const phase = revisionPhase(event);
     if (!phase) continue;
     const terminal =
-      event.payload.kind === "state-transition"
-        ? event.payload.action_terminals.find(
-            (binding) => binding.action_operation_id === operationId,
-          )?.outcome
+      "action_terminals" in payload
+        ? payload.action_terminals.find((binding) => binding.action_operation_id === operationId)
+            ?.outcome
         : undefined;
-    const state = terminal ?? "committing";
+    const state = terminal ?? ACTION_OPERATION_STATE.COMMITTING;
     append(phase, state, event.recorded_at, event.event_digest);
     if (terminal) break;
   }
@@ -95,14 +113,20 @@ export function projectConversationActionSnapshot(
 }
 
 function receiptPhase(receipt: ConversationActionReceiptV1): PublicOperationPhaseV1 {
-  if (receipt.outcome === "failed") return "conversation-receipt:failed";
-  if (receipt.outcome === "needs_recovery") return "conversation-receipt:needs_recovery";
+  if (receipt.outcome === ACTION_OPERATION_STATE.FAILED)
+    return PUBLIC_OPERATION_PREFIXED_PHASE.CONVERSATION_RECEIPT.FAILED;
+  if (receipt.outcome === ACTION_OPERATION_STATE.NEEDS_RECOVERY)
+    return PUBLIC_OPERATION_PREFIXED_PHASE.CONVERSATION_RECEIPT.NEEDS_RECOVERY;
   const phases = {
-    "conversation.select_lineage_head": "lineage-head:committed",
-    "conversation.associate_lineages": "lineage-association:committed",
-    "conversation.publish_suspected_literal": "public-literal:published",
-    "conversation.stop_operation": "conversation-receipt:succeeded",
-    "context.compact": "context-compaction:committed",
+    [HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD]:
+      PUBLIC_OPERATION_FIXED_PHASE.LINEAGE_HEAD_COMMITTED,
+    [HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES]:
+      PUBLIC_OPERATION_FIXED_PHASE.LINEAGE_ASSOCIATION_COMMITTED,
+    [HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL]:
+      PUBLIC_OPERATION_FIXED_PHASE.PUBLIC_LITERAL_PUBLISHED,
+    [HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION]:
+      PUBLIC_OPERATION_PREFIXED_PHASE.CONVERSATION_RECEIPT.SUCCEEDED,
+    [HOST_ACTION_KIND.CONTEXT_COMPACT]: PUBLIC_OPERATION_FIXED_PHASE.CONTEXT_COMPACTION_COMMITTED,
   } as const;
   return phases[receipt.action_type];
 }
@@ -115,19 +139,21 @@ export function projectConversationReceiptEvents(
   if (!operationId || !snapshot.approval) return [];
   const dispatchAt =
     snapshot.events.find(
-      (event) => event.payload.kind === "state-transition" && event.payload.to === "committing",
+      (event) =>
+        event.payload.kind === ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION &&
+        event.payload.to === ACTION_OPERATION_STATE.COMMITTING,
     )?.recorded_at ?? snapshot.approval.decided_at;
   const phase = receiptPhase(receipt);
   const dispatch: ActionOperationEventV1 = {
-    schema_version: "1.0",
+    schema_version: ACTION_OPERATION_EVENT_SCHEMA_VERSION,
     operation_id: operationId,
     phase_sequence: 0,
-    state: "committing",
+    state: ACTION_OPERATION_STATE.COMMITTING,
     progress: {
       sequence: 0,
-      phase: "dispatch",
-      status: "running",
-      message_code: "operation.dispatch",
+      phase: PUBLIC_OPERATION_FIXED_PHASE.DISPATCH,
+      status: PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+      message_code: `${PUBLIC_OPERATION_MESSAGE_CODE_PREFIX}${PUBLIC_OPERATION_FIXED_PHASE.DISPATCH}`,
       at: dispatchAt,
     },
     target: null,
@@ -136,7 +162,7 @@ export function projectConversationReceiptEvents(
     event_cursor: cursor(operationId, 0, snapshot.approval.approval_digest),
   };
   const terminal: ActionOperationEventV1 = {
-    schema_version: "1.0",
+    schema_version: ACTION_OPERATION_EVENT_SCHEMA_VERSION,
     operation_id: operationId,
     phase_sequence: 1,
     state: receipt.outcome,
@@ -144,7 +170,7 @@ export function projectConversationReceiptEvents(
       sequence: 1,
       phase,
       status: expectedOperationStatus(phase, receipt.outcome),
-      message_code: `operation.${phase}`,
+      message_code: `${PUBLIC_OPERATION_MESSAGE_CODE_PREFIX}${phase}`,
       at: receipt.recorded_at,
     },
     target: null,

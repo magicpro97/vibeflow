@@ -1,16 +1,18 @@
+import { ENGINE_ATTEMPT_START_OUTCOME } from "../../dispatch/session-contract.js";
 import type {
   AttemptStartAuthorityRecordV1,
   InternalResumeBinding,
 } from "../../dispatch/session-types.js";
 import type { InitialRevisionLaneTokenV1 } from "./revision-initial-lane-authority.js";
 import type { RevisionLaneEvidenceStore } from "./revision-lane-evidence-store.js";
+import { REVISION_OPERATION_EVENT_PAYLOAD_KIND } from "./revision-operation-event-contract.js";
 import type { ParticipantStartReceiptV1 } from "./revision-participant-receipt.js";
 import type { RevisionOperationEventV1 } from "./revision-planner.js";
 
 export function latestRevisionLaneReceipts(events: readonly RevisionOperationEventV1[]) {
   const latest = new Map<string, ParticipantStartReceiptV1>();
   for (const event of events)
-    if (event.payload.kind === "participant-start")
+    if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.PARTICIPANT_START)
       latest.set(event.payload.receipt.participant_id, event.payload.receipt);
   return latest;
 }
@@ -32,7 +34,7 @@ export function writeInitialRevisionLaneEvidence(input: {
     adapter_evidence_ref: input.authority.record_digest,
     reconciliation_mode: input.token.participant.reconciliation_mode,
     adapter_reference_utf8: input.authority.evidence_ref,
-    absence_proved: input.authority.outcome === "proved-absent",
+    absence_proved: input.authority.outcome === ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT,
     recorded_at: input.recordedAt,
   });
 }

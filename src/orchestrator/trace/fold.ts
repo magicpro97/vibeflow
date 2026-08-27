@@ -1,3 +1,4 @@
+import { CONVERSATION_TRACE_EVENT_KIND } from "../conversation/conversation-public-wire-contract.js";
 import type { StoredTraceEvent } from "./types.js";
 
 export interface FoldedParticipantResponse {
@@ -86,7 +87,7 @@ export function foldTrace(records: readonly StoredTraceEvent[]): FoldedTrace {
   const groupsInFirstSeenOrder: Group[] = [];
 
   for (const record of [...records].sort((left, right) => left.seq - right.seq)) {
-    if (record.event.type !== "agent_response_delta") continue;
+    if (record.event.type !== CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) continue;
 
     const delta = validateDeltaPayload(record.event.payload);
     if (

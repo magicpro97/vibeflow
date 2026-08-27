@@ -290,7 +290,7 @@ describe("engine session execution projection", () => {
         "--excluded-tools=Write,Edit,Bash",
       ],
     ],
-    ["opencode", "opencode", ["run", "--format", "json", "--model", "default", "-"]],
+    ["opencode", "opencode", ["run", "--format", "json", "--model", "default"]],
     ["antigravity", "agy", ["-p", "prompt-antigravity", "--model", "default"]],
   ] as const;
 
@@ -745,38 +745,42 @@ describe("engine session execution projection", () => {
         "--disallowedTools",
         "Write,Edit,Bash",
       ],
+      { type: "result", session_id: CLAUDE_UUID },
     ],
     [
       "codex",
       CODEX_UUID,
       "gpt-5.4",
       ["--sandbox", "read-only", "--model", "gpt-5.4", "exec", "resume", CODEX_UUID, "--json", "-"],
+      { type: "thread.started", thread_id: CODEX_UUID },
     ],
     [
-      "antigravity",
-      "agy-conversation.42",
-      "gemini-3-pro",
+      "opencode",
+      "ses_fc311e3c9ffegocll2MayNGmaZ",
+      "provider/model",
       [
-        "--conversation",
-        "agy-conversation.42",
-        "-p",
-        "prompt-antigravity",
+        "run",
+        "--session",
+        "ses_fc311e3c9ffegocll2MayNGmaZ",
+        "--format",
+        "json",
         "--model",
-        "gemini-3-pro",
+        "provider/model",
       ],
+      { type: "step_start", sessionID: "ses_fc311e3c9ffegocll2MayNGmaZ" },
     ],
   ] as const)(
     "%s exact mode consumes the exact native id and model override",
-    async (engine, nativeSessionId, model, expectedArgs) => {
+    async (engine, nativeSessionId, model, expectedArgs, acknowledgement) => {
       let argv: string[] = [];
       const adapter = createEngineSessionAdapter({
         spawn: (next) => {
           argv = [...next];
-          return completedProcess();
+          return completedProcess([`${JSON.stringify(acknowledgement)}\n`]);
         },
         writeEvidence: async () => `evidence/${engine}-exact.json`,
       });
-      await adapter.start(
+      const handle = adapter.start(
         request(engine, {
           nativeSessionId,
           spawn: spawnProjection(engine, {
@@ -784,20 +788,143 @@ describe("engine session execution projection", () => {
             model,
             ...(engine === "codex"
               ? { rendered_tools: [] }
-              : engine === "antigravity"
+              : engine === "opencode"
                 ? { rendered_tools: [], sandbox: null }
                 : {}),
           }),
         }),
-      ).completion;
+      );
+      const result = await handle.completion;
       expect(argv.slice(1)).toEqual([...expectedArgs]);
+      expect(result.state).toBe("completed");
+      expect(handle.readResumeBinding()?.nativeSessionId).toBe(nativeSessionId);
       if (engine === "claude") expect(argv).toContain("--safe-mode");
       if (engine === "codex") {
         expect(argv.indexOf("--sandbox")).toBeLessThan(argv.indexOf("resume"));
         expect(argv.indexOf("--model")).toBeLessThan(argv.indexOf("resume"));
       }
+      if (engine === "opencode") {
+        expect(argv).not.toContain("--continue");
+        expect(argv.filter((value) => value === nativeSessionId)).toHaveLength(1);
+      }
     },
   );
+
+  test.each([
+    [
+      "claude",
+      "00000000-0000-4000-8000-000000000001",
+      { type: "result", session_id: "00000000-0000-4000-8000-000000000002" },
+    ],
+    [
+      "codex",
+      "00000000-0000-4000-8000-000000000001",
+      { type: "thread.started", thread_id: "00000000-0000-4000-8000-000000000002" },
+    ],
+    ["opencode", "opencode-session-001", { type: "step_start", sessionID: "opencode-session-002" }],
+  ] as const)(
+    "%s exact mode rejects a mismatched runtime session acknowledgement",
+    async (engine, requestedId, acknowledgement) => {
+      const adapter = createEngineSessionAdapter({
+        spawn: () => completedProcess([`${JSON.stringify(acknowledgement)}\n`]),
+        writeEvidence: async () => `evidence/${engine}-mismatched-resume.json`,
+      });
+      const handle = adapter.start(
+        request(engine, {
+          attemptId: `attempt-${engine}-mismatched-resume`,
+          nativeSessionId: requestedId,
+          spawn: spawnProjection(engine, {
+            sessionMode: "exact",
+            ...(engine === "opencode" ? { rendered_tools: [], sandbox: null } : {}),
+          }),
+        }),
+      );
+      const result = await handle.completion;
+
+      expect(handle.readResumeBinding()).toBeUndefined();
+      expect(result.state).toBe("ambiguous");
+      expect(result.lifecycle).not.toContain("acknowledged");
+      expect(result.nativeSessionStatus).toBe("unavailable");
+      expect(result.reason).toContain("exact native session acknowledgement mismatched");
+      expect(JSON.stringify(result)).not.toContain(requestedId);
+      expect(JSON.stringify(result)).not.toContain(Object.values(acknowledgement).at(-1));
+    },
+  );
+
+  test("an exact mismatch remains rejected even if a later record echoes the requested id", async () => {
+    const mismatchedId = "00000000-0000-4000-8000-000000000002";
+    const adapter = createEngineSessionAdapter({
+      spawn: () =>
+        completedProcess([
+          `${JSON.stringify({ type: "thread.started", thread_id: mismatchedId })}\n`,
+          `${JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID })}\n`,
+        ]),
+      writeEvidence: async () => "evidence/codex-sticky-resume-rejection.json",
+    });
+    const handle = adapter.start(
+      request("codex", {
+        attemptId: "attempt-codex-sticky-resume-rejection",
+        nativeSessionId: CODEX_UUID,
+        spawn: spawnProjection("codex", { sessionMode: "exact" }),
+      }),
+    );
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()).toBeUndefined();
+    expect(result.state).toBe("ambiguous");
+    expect(result.lifecycle).not.toContain("acknowledged");
+    expect(result.output).not.toContain(mismatchedId);
+    expect(result.output).not.toContain(CODEX_UUID);
+  });
+
+  test("OpenCode redacts a later opaque mismatch from the same acknowledged chunk", async () => {
+    const requestedId = "opencode-session-001";
+    const mismatchedId = "opencode-session-002";
+    const adapter = createEngineSessionAdapter({
+      spawn: () =>
+        completedProcess([
+          `${JSON.stringify({ type: "step_start", sessionID: requestedId })}\n${JSON.stringify({ type: "step_start", sessionID: mismatchedId })} ordinary ${mismatchedId}\n`,
+        ]),
+      writeEvidence: async () => "evidence/opencode-late-resume-mismatch.json",
+    });
+    const handle = adapter.start(
+      request("opencode", {
+        attemptId: "attempt-opencode-late-resume-mismatch",
+        nativeSessionId: requestedId,
+        spawn: spawnProjection("opencode", {
+          sessionMode: "exact",
+          rendered_tools: [],
+          sandbox: null,
+        }),
+      }),
+    );
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()).toBeUndefined();
+    expect(result.state).toBe("ambiguous");
+    expect(result.output).not.toContain(requestedId);
+    expect(result.output).not.toContain(mismatchedId);
+  });
+
+  test("Codex exact mode rejects turn.started without the requested thread identity", async () => {
+    const adapter = createEngineSessionAdapter({
+      spawn: () => completedProcess([`${JSON.stringify({ type: "turn.started" })}\n`]),
+      writeEvidence: async () => "evidence/codex-missing-resume-proof.json",
+    });
+    const handle = adapter.start(
+      request("codex", {
+        attemptId: "attempt-codex-missing-resume-proof",
+        nativeSessionId: CODEX_UUID,
+        spawn: spawnProjection("codex", { sessionMode: "exact" }),
+      }),
+    );
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()).toBeUndefined();
+    expect(result.state).toBe("ambiguous");
+    expect(result.lifecycle).toEqual(["requested", "dispatched", "ambiguous"]);
+    expect(result.nativeSessionStatus).toBe("unavailable");
+  });
 
   test.each(["fresh", "replay"] as const)(
     "Claude %s mode never consumes a supplied native id",
@@ -842,7 +969,7 @@ describe("engine session execution projection", () => {
     },
   );
 
-  test("Antigravity rejects a flag-shaped exact conversation id before spawn", () => {
+  test("Antigravity rejects exact resume because no exact binding is evidenced", () => {
     let spawns = 0;
     const adapter = createEngineSessionAdapter({
       spawn: () => {
@@ -862,11 +989,38 @@ describe("engine session execution projection", () => {
           }),
         }),
       ),
-    ).toThrow(/invalid antigravity native session id/);
+    ).toThrow(/exact resume is unavailable/);
     expect(spawns).toBe(0);
   });
 
-  test.each(["copilot", "opencode"] as const)(
+  test.each(["--continue", "session id with spaces", "ses_safe\n--model"])(
+    "OpenCode rejects an argv-shaped or non-opaque exact session id: %s",
+    (nativeSessionId) => {
+      let spawns = 0;
+      const adapter = createEngineSessionAdapter({
+        spawn: () => {
+          spawns++;
+          return completedProcess();
+        },
+        writeEvidence: async () => "internal/invalid-opencode-native",
+      });
+      expect(() =>
+        adapter.start(
+          request("opencode", {
+            nativeSessionId,
+            spawn: spawnProjection("opencode", {
+              sessionMode: "exact",
+              rendered_tools: [],
+              sandbox: null,
+            }),
+          }),
+        ),
+      ).toThrow(/invalid opencode native session id/);
+      expect(spawns).toBe(0);
+    },
+  );
+
+  test.each(["copilot", "antigravity"] as const)(
     "%s exact mode fails closed because safe native resume is not admitted",
     (engine) => {
       const adapter = createEngineSessionAdapter({

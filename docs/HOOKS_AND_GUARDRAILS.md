@@ -2,7 +2,7 @@
 title: Hooks and Guardrails
 description: How to configure and use hooks for safety guardrails — universal hook design, per-engine enforcement, false positive reduction, and automation.
 category: how-to
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # Hooks and Guardrails
@@ -379,12 +379,19 @@ When `vf orchestrate` is launched from the web UI (`vf ui`), hooks that return
 instead of auto-deciding. The engine waits indefinitely for user response.
 
 ### How it works
-1. `vf hook` detects a running UI server (`.vibeflow/.ui-port` present)
-2. Registers the pending approval at `POST /api/hook/pending`
-3. Blocks on `GET /api/hook/response/{id}` (no timeout — waits for user)
+1. `vf hook` validates the running UI's `.vibeflow/.ui-port` discovery record
+2. It uses the record's exact loopback-only `hook_origin`; a LAN-exposed UI creates a separate
+   OS-selected listener on `127.0.0.1`, while legacy loopback records remain compatible
+3. It registers at `POST /api/hook/pending`, then blocks on
+   `GET /api/hook/response/{id}` (no timeout — waits for user)
 4. User sees HookApprovalModal: tool, command, risk level, reasons
 5. User clicks Allow once / Block → `POST /api/hook/approve {id, decision}`
 6. `vf hook` exits with the user decision
+
+Discovery contains no bearer, page token, cookie, or bootstrap. The hook client rejects
+non-loopback origins; the local approval listener rejects browser Origin/Referer requests,
+requires JSON, and caps registration bodies at 64 KiB. LAN browser APIs continue to use their
+separate page CSRF authority, and Conversation Home authentication remains independent.
 
 If the UI tab is closed and reopened, `GET /api/hook/pending` returns pending
 approvals and the modal re-appears automatically.

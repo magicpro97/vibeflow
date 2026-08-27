@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { createPinia, setActivePinia } from "pinia";
 import { computed, effectScope, nextTick, reactive, ref, shallowRef } from "vue";
+import {
+  ACTION_OPERATION_SSE_EVENT,
+  ACTION_OPERATION_STATE,
+} from "../src/actions/protocol-contract.js";
 import { api } from "../src/ui/src/api.js";
 import { useHomePrivateRangeComposer } from "../src/ui/src/composables/useHomePrivateRangeComposer.js";
 import { conversationApi } from "../src/ui/src/conversation-api.js";
@@ -191,6 +195,7 @@ function actionView(
   overrides: Partial<HomeActionView> = {},
 ): HomeActionView {
   return {
+    schema_version: "1.0",
     proposal: {
       schema_version: "1.0",
       proposal_id: proposalId,
@@ -229,7 +234,7 @@ function actionView(
       latest_event_cursor: null,
       progress: [],
       targets: [],
-      delivery: "inline",
+      delivery: "not-applicable",
       result_ref: null,
       error: null,
       recovery_actions: [],
@@ -237,6 +242,28 @@ function actionView(
       updated_at: "2026-08-25T00:00:00.000Z",
     },
     ...overrides,
+  };
+}
+
+function operationTarget(targetId: string) {
+  return {
+    target_id: targetId,
+    target: {
+      scope: "project" as const,
+      engine: null,
+      participant_id: null,
+      required: true as const,
+      on_apply_failure: "abort-scope" as const,
+      on_health_failure: "abort-scope" as const,
+    },
+    subject: {
+      kind: "capability" as const,
+      package_id: "package-a",
+      component_id: "component-a",
+    },
+    outcome: "applied" as const,
+    health: "ready" as const,
+    evidence_digest: null,
   };
 }
 
@@ -830,8 +857,26 @@ describe("post-freeze UI Home HTTP contracts", () => {
     const originalFetch = globalThis.fetch;
     const calls: Array<{ path: string; init: RequestInit }> = [];
     globalThis.fetch = (async (path, init) => {
-      calls.push({ path: String(path), init: init ?? {} });
-      return new Response(JSON.stringify({ ok: true, items: [], next_cursor: null }));
+      const requestPath = String(path);
+      calls.push({ path: requestPath, init: init ?? {} });
+      const queueContract =
+        (requestPath === "/api/conversations" && init?.method === "POST") ||
+        requestPath.includes("/messages/") ||
+        requestPath.startsWith("/api/conversation-drafts/private-context");
+      return new Response(
+        JSON.stringify({
+          schema_version: "1.0",
+          error: {
+            code: "invalid_request",
+            message: "Expected request-contract probe failure.",
+            correlation_id: "request-contract-probe",
+            retryable: false,
+            recovery_action: queueContract ? "edit" : null,
+            details: null,
+          },
+        }),
+        { status: 400 },
+      );
     }) as typeof fetch;
     const signal = new AbortController().signal;
     const expected = {
@@ -1118,7 +1163,11 @@ describe("post-freeze UI Home HTTP contracts", () => {
     try {
       for (const row of cases) {
         const before = calls.length;
-        await row.invoke();
+        await expect(row.invoke()).rejects.toMatchObject({
+          name: "ConversationHomeApiError",
+          status: 400,
+          publicError: { code: "invalid_request", retryable: false },
+        });
         const call = calls[before];
         expect(call?.path).toBe(row.path);
         expect(call?.init.method).toBe(row.method);
@@ -1146,14 +1195,29 @@ describe("post-freeze UI Home HTTP contracts", () => {
         publicError: { code: "invalid_response", retryable: true },
       });
       globalThis.fetch = (async () =>
-        new Response(JSON.stringify({ code: "stale", message: "Refresh", retryable: false }), {
-          status: 409,
-        })) as unknown as typeof fetch;
+        new Response(
+          JSON.stringify({
+            schema_version: "1.0",
+            error: {
+              code: "stale_conversation",
+              message: "Refresh",
+              correlation_id: "stale-conversation-probe",
+              retryable: false,
+              recovery_action: "refresh-proposal",
+              details: null,
+            },
+          }),
+          { status: 409 },
+        )) as unknown as typeof fetch;
       await expect(conversationHomeApi.head("root-a")).rejects.toMatchObject({
         name: "ConversationHomeApiError",
         status: 409,
         message: "Refresh",
-        publicError: { code: "stale", retryable: false, recovery_action: null },
+        publicError: {
+          code: "stale_conversation",
+          retryable: false,
+          recovery_action: "refresh-proposal",
+        },
       });
       const nested = new ConversationHomeApiError(403, {
         code: "forbidden",
@@ -1704,14 +1768,6 @@ describe("post-freeze UI Home range and pagination behavior", () => {
     const loading = ref(false);
     const error = ref("");
     const paging = reactive({ nextCursor: null as string | null, loadingMore: false });
-    const runtime = createHomeCapabilityQueryRuntime({
-      capabilities,
-      query,
-      scope,
-      loading,
-      error,
-      paging,
-    });
     const item = capabilityItem;
     let mode: "refresh" | "more" | "stale" | "error" = "refresh";
     let calls = 0;
@@ -1727,6 +1783,17 @@ describe("post-freeze UI Home range and pagination behavior", () => {
       if (mode === "more") return capabilityResponse([item("pkg/a"), item("pkg/b", null)]);
       return capabilityResponse([item("pkg/a")], "capability-cursor");
     }) as typeof conversationHomeApi.capabilities;
+    const runtime = createHomeCapabilityQueryRuntime(
+      {
+        capabilities,
+        query,
+        scope,
+        loading,
+        error,
+        paging,
+      },
+      Object.freeze({ capabilities: conversationHomeApi.capabilities }),
+    );
     try {
       await runtime.searchCapabilities();
       expect(capabilities.value.map((value) => value.package_id)).toEqual(["pkg/a"]);
@@ -2033,7 +2100,7 @@ describe("post-freeze UI Home command behavior", () => {
 
 describe("post-freeze UI Home durable streams", () => {
   test("operation streams fold progress and target outcomes, release terminals, and reject malformed updates", async () => {
-    type Listener = (event: { data: string }) => void;
+    type Listener = (event: { data: string; lastEventId: string }) => void;
     class FakeEventSource {
       static instances: FakeEventSource[] = [];
       closed = false;
@@ -2045,7 +2112,15 @@ describe("post-freeze UI Home durable streams", () => {
         if (type === "operation") this.listener = listener;
       }
       emit(update: unknown) {
-        this.listener?.({ data: JSON.stringify(update) });
+        const data = JSON.stringify(update);
+        const lastEventId =
+          typeof update === "object" &&
+          update !== null &&
+          "event_cursor" in update &&
+          typeof update.event_cursor === "string"
+            ? update.event_cursor
+            : "";
+        this.listener?.({ data, lastEventId });
       }
       close() {
         this.closed = true;
@@ -2057,10 +2132,31 @@ describe("post-freeze UI Home durable streams", () => {
     const token = epoch.begin("root-a");
     const streams = new ActivationResourceRegistry<EventSource>();
     const view = actionView("proposal-stream");
+    view.proposal.action_type = "capability.install";
+    view.proposal.domain = "capability";
+    view.operation.domain = "capability";
     view.operation.state = "approved";
-    view.operation.targets = [{ target_id: "target-a", outcome: "pending", health: "unknown" }];
+    const targetA = operationTarget("target-a");
+    const targetB = operationTarget("target-b");
+    view.proposal.targets = [
+      { target_id: targetA.target_id, target: targetA.target, subject: targetA.subject },
+      { target_id: targetB.target_id, target: targetB.target, subject: targetB.subject },
+    ];
+    view.operation.targets = [targetA];
     let reloads = 0;
     let invalid = 0;
+    const undispatched = actionView("proposal-undispatched");
+    undispatched.operation.operation_id = null;
+    watchHomeOperation({
+      token,
+      conversationId: "root-a-conversation",
+      view: undispatched,
+      streams,
+      operationFor: () => undispatched.operation,
+      reload: async () => {},
+      invalidUpdate: () => {},
+    });
+    expect(FakeEventSource.instances).toHaveLength(0);
     const watch = () =>
       watchHomeOperation({
         token,
@@ -2080,30 +2176,78 @@ describe("post-freeze UI Home durable streams", () => {
       const first = FakeEventSource.instances[0];
       if (!first) throw new Error("operation source was not opened");
       first.emit({
+        schema_version: "1.0",
+        operation_id: view.operation.operation_id,
         state: "committing",
+        phase_sequence: 0,
+        progress: {
+          sequence: 0,
+          phase: "operation-started",
+          status: "running",
+          message_code: "operation.operation-started",
+          at: "2026-08-25T00:00:01.000Z",
+        },
+        target: null,
+        error: null,
+        occurred_at: "2026-08-25T00:00:01.000Z",
+        event_cursor: operationCursor("0"),
+      });
+      first.emit({
+        schema_version: "1.0",
+        operation_id: view.operation.operation_id,
+        state: "succeeded",
         phase_sequence: 1,
         progress: {
           sequence: 1,
-          phase: "install",
-          status: "running",
-          message_code: "installing",
-          at: "2026-08-25T00:00:01.000Z",
+          phase: "target-applied",
+          status: "succeeded",
+          message_code: "operation.target-applied",
+          at: "2026-08-25T00:00:02.000Z",
         },
-        target: { target_id: "target-a", outcome: "installed", health: "healthy" },
+        target: operationTarget("target-a"),
+        error: null,
+        occurred_at: "2026-08-25T00:00:02.000Z",
         event_cursor: operationCursor("1"),
       });
       expect(view.operation).toMatchObject({
-        state: "committing",
+        state: "succeeded",
         phase_sequence: 1,
-        targets: [{ target_id: "target-a", outcome: "installed", health: "healthy" }],
+        targets: [{ target_id: "target-a", outcome: "applied", health: "ready" }],
       });
-      expect(view.operation.progress).toHaveLength(1);
+      expect(view.operation.progress).toHaveLength(2);
       first.emit({
+        schema_version: "1.0",
+        operation_id: view.operation.operation_id,
         state: "succeeded",
         phase_sequence: 2,
-        progress: null,
-        target: { target_id: "target-b", outcome: "installed", health: "healthy" },
+        progress: {
+          sequence: 2,
+          phase: "target-applied",
+          status: "succeeded",
+          message_code: "operation.target-applied",
+          at: "2026-08-25T00:00:03.000Z",
+        },
+        target: operationTarget("target-b"),
+        error: null,
+        occurred_at: "2026-08-25T00:00:03.000Z",
         event_cursor: operationCursor("2"),
+      });
+      first.emit({
+        schema_version: "1.0",
+        operation_id: view.operation.operation_id,
+        state: "succeeded",
+        phase_sequence: 3,
+        progress: {
+          sequence: 3,
+          phase: "operation-succeeded",
+          status: "succeeded",
+          message_code: "operation.operation-succeeded",
+          at: "2026-08-25T00:00:04.000Z",
+        },
+        target: null,
+        error: null,
+        occurred_at: "2026-08-25T00:00:04.000Z",
+        event_cursor: operationCursor("3"),
       });
       expect(view.operation.targets.map((target) => target.target_id)).toEqual([
         "target-a",
@@ -2138,14 +2282,44 @@ describe("post-freeze UI Home durable streams", () => {
 
       view.operation.state = "approved";
       view.operation.phase_sequence = null;
+      view.proposal.action_type = "conversation.add_participant";
+      view.proposal.domain = "conversation";
+      view.operation.domain = "conversation";
       watch();
       const malformed = FakeEventSource.instances.at(-1);
       malformed?.emit({
+        schema_version: "1.0",
+        operation_id: view.operation.operation_id,
+        state: "committing",
+        phase_sequence: 0,
+        progress: {
+          sequence: 0,
+          phase: "dispatch",
+          status: "running",
+          message_code: "operation.dispatch",
+          at: "2026-08-25T00:00:05.000Z",
+        },
+        target: null,
+        error: null,
+        occurred_at: "2026-08-25T00:00:05.000Z",
+        event_cursor: operationCursor("4"),
+      });
+      malformed?.emit({
+        schema_version: "1.0",
+        operation_id: view.operation.operation_id,
         state: "committing",
         phase_sequence: 1,
-        progress: "not-an-object",
+        progress: {
+          sequence: 1,
+          phase: "authority-repair:prepared",
+          status: "pending",
+          message_code: "operation.authority-repair:prepared",
+          at: "2026-08-25T00:00:06.000Z",
+        },
         target: null,
-        event_cursor: operationCursor("3"),
+        error: null,
+        occurred_at: "2026-08-25T00:00:06.000Z",
+        event_cursor: operationCursor("5"),
       });
       expect(invalid).toBe(1);
       await Promise.resolve();
@@ -2309,15 +2483,19 @@ describe("post-freeze UI Home durable streams", () => {
       first.emit(
         "snapshot",
         new MessageEvent("snapshot", {
-          data: JSON.stringify({ conversation_id: "conversation/a", last_seq: 8 }),
+          // biome-ignore format: compact focused SSE fixture
+          data: JSON.stringify({ conversation_id: "conversation/a", lifecycle: "ACTIVE", health: "healthy", policy: "direct", topic: "Conversation", participants: [], rounds: [], consensus_score: null, last_seq: 8 }),
         }),
       );
-      first.emit("snapshot", new MessageEvent("snapshot", { data: "{" }));
+      // biome-ignore format: compact focused malformed snapshot regression
+      first.emit("snapshot", new MessageEvent("snapshot", { data: JSON.stringify({ conversation_id: "conversation/a", lifecycle: "ACTIVE", health: "healthy", policy: "direct", topic: "Conversation", participants: [{ participant_id: 7 }], rounds: [], consensus_score: null, last_seq: 9 }) }));
       expect(snapshots).toHaveLength(1);
       expect(statuses).toContainEqual(["error", "conversation snapshot was invalid"]);
 
-      first.emit("trace", new MessageEvent("trace", { data: JSON.stringify(traceRecord()) }));
-      first.emit("trace", new MessageEvent("trace", { data: "not-json" }));
+      // biome-ignore format: compact focused valid trace fixture
+      first.emit("trace", new MessageEvent("trace", { data: JSON.stringify(traceRecord("user_message", { conversation_id: "conversation/a" })) }));
+      // biome-ignore format: compact focused unknown-event regression
+      first.emit("trace", new MessageEvent("trace", { data: JSON.stringify({ ...traceRecord("user_message", { conversation_id: "conversation/a" }), event: { type: "future_event", payload: {} } }) }));
       expect(traces).toHaveLength(1);
       const refreshTimer = [...timers.entries()].find(([, timer]) => timer.delay === 120);
       expect(refreshTimer).toBeDefined();
@@ -2336,7 +2514,7 @@ describe("post-freeze UI Home durable streams", () => {
           data: JSON.stringify({ code: "temporary", message: "Try again" }),
         }),
       );
-      expect(statuses).toContainEqual(["error", "Try again"]);
+      expect(statuses).toContainEqual(["error", "conversation stream failed"]);
       renewMode = "throw-error";
       await first.onerror?.();
       await flush();
@@ -2348,11 +2526,26 @@ describe("post-freeze UI Home durable streams", () => {
       await flush();
       expect(FakeEventSource.instances.length).toBeGreaterThanOrEqual(2);
 
+      renewMode = "success";
+      const recovered = FakeEventSource.instances.at(-1);
+      const sourceCountBeforeRenewal = FakeEventSource.instances.length;
+      await recovered?.onerror?.();
+      await flush();
+      expect(recovered?.closed).toBeTrue();
+      expect(FakeEventSource.instances).toHaveLength(sourceCountBeforeRenewal + 1);
+
       const current = FakeEventSource.instances.at(-1);
       current?.emit(
         "error",
         new MessageEvent("error", {
-          data: JSON.stringify({ code: "conversation_not_found", message: "Gone" }),
+          data: JSON.stringify({
+            code: "not_found",
+            message: "Gone",
+            correlation_id: "vf-stream-test",
+            retryable: false,
+            recovery_action: null,
+            details: null,
+          }),
         }),
       );
       expect(current?.closed).toBeTrue();
@@ -2382,6 +2575,69 @@ describe("post-freeze UI Home durable streams", () => {
       globalThis.clearTimeout = originalClearTimeout;
     }
   });
+
+  test("conversation SSE rejects a delayed renewal from a superseded generation", async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+      closed = false;
+      onerror: (() => Promise<void>) | null = null;
+      constructor(readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+      addEventListener() {}
+      close() {
+        this.closed = true;
+      }
+    }
+    type StreamCredentials = Awaited<ReturnType<typeof conversationApi.renewStreamToken>>;
+    const stale = deferred<StreamCredentials>();
+    const current = deferred<StreamCredentials>();
+    let renewalCall = 0;
+    const credentials = (token: string): StreamCredentials => ({
+      stream_token: token,
+      stream_token_expires_at: "invalid-expiry",
+    });
+    const authority = Object.freeze({
+      eventSourceConstructor: FakeEventSource as unknown as new (url: string) => EventSource,
+      renewStreamToken: (async () => {
+        renewalCall += 1;
+        if (renewalCall === 1) return credentials("token-initial");
+        return renewalCall === 2 ? stale.promise : current.promise;
+      }) as typeof conversationApi.renewStreamToken,
+      startTimer: globalThis.setTimeout.bind(globalThis),
+      clearTimer: globalThis.clearTimeout.bind(globalThis),
+      now: Date.now.bind(Date),
+    });
+    const stream = watchHomeConversationStream(
+      {
+        conversationId: "conversation-race",
+        cursor: () => 0,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        setStatus() {},
+        onSnapshot() {},
+        onTrace() {},
+        onRefreshNeeded() {},
+      },
+      authority,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    const first = FakeEventSource.instances[0];
+    if (!first) throw new Error("initial conversation source was not opened");
+    const staleRecovery = first.onerror?.();
+    const currentRecovery = first.onerror?.();
+    current.resolve(credentials("token-current"));
+    await currentRecovery;
+    await Promise.resolve();
+    stale.resolve(credentials("token-stale"));
+    await staleRecovery;
+    await Promise.resolve();
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1]?.url).toContain("stream_token=token-current");
+    expect(FakeEventSource.instances[1]?.url).not.toContain("token-stale");
+    stream.close();
+  });
 });
 
 describe("post-freeze UI Home query and store lifecycle", () => {
@@ -2399,7 +2655,20 @@ describe("post-freeze UI Home query and store lifecycle", () => {
         this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
       }
       emit(type: string, data: string) {
-        const event = new MessageEvent(type, { data });
+        let lastEventId = "";
+        try {
+          const decoded: unknown = JSON.parse(data);
+          if (
+            typeof decoded === "object" &&
+            decoded !== null &&
+            "event_cursor" in decoded &&
+            typeof decoded.event_cursor === "string"
+          )
+            lastEventId = decoded.event_cursor;
+        } catch {
+          // Malformed payload probes intentionally have no SSE event id.
+        }
+        const event = new MessageEvent(type, { data, lastEventId });
         for (const listener of this.listeners.get(type) ?? []) listener(event);
       }
       close() {
@@ -2461,6 +2730,39 @@ describe("post-freeze UI Home query and store lifecycle", () => {
     const selectedConversationId = computed(() => activeRevision.value?.conversation_id ?? null);
     const readEpoch = new ActivationEpoch();
     const commandAuthority = new ActivationEpoch();
+    let catalogMode: "error" | "refresh" | "more" | "stale" = "error";
+    let refreshCount = 0;
+    conversationHomeApi.sessions = (async (input) => {
+      if (catalogMode === "error") throw new Error("catalog unavailable");
+      if (catalogMode === "stale" && input.cursor)
+        throw new ConversationHomeApiError(409, {
+          code: "stale_catalog_cursor",
+          message: "stale",
+          retryable: true,
+        });
+      refreshCount += input.cursor ? 0 : 1;
+      if (catalogMode === "more") return catalogResponse([session("root-a"), session("root-b")]);
+      return catalogResponse([session("root-a")], "catalog-next");
+    }) as typeof conversationHomeApi.sessions;
+    const liveRevision = revision("root-a", { lifecycle: "ACTIVE" });
+    const pending = actionView("proposal-live");
+    pending.operation.operation_id = null;
+    pending.operation.state = ACTION_OPERATION_STATE.APPROVED;
+    conversationHomeApi.head = (async () =>
+      head("root-a", liveRevision)) as typeof conversationHomeApi.head;
+    conversationHomeApi.timeline = (async () =>
+      timeline("root-a")) as typeof conversationHomeApi.timeline;
+    conversationHomeApi.pending = (async () =>
+      pendingResponse([pending])) as typeof conversationHomeApi.pending;
+    conversationHomeApi.messageQueue = (async (rootSessionId) => ({
+      schema_version: "1.0",
+      root_session_id: rootSessionId,
+      current_authority_digest: digest("a"),
+      max_nonterminal_items: 32,
+      items: [],
+    })) as typeof conversationHomeApi.messageQueue;
+    conversationHomeApi.capabilities = (async () =>
+      capabilityResponse([])) as typeof conversationHomeApi.capabilities;
     const runtime = createHomeQueryRuntime({
       sessions,
       sessionQuery,
@@ -2491,37 +2793,6 @@ describe("post-freeze UI Home query and store lifecycle", () => {
       readEpoch,
       commandAuthority,
     });
-    let catalogMode: "error" | "refresh" | "more" | "stale" = "error";
-    let refreshCount = 0;
-    conversationHomeApi.sessions = (async (input) => {
-      if (catalogMode === "error") throw new Error("catalog unavailable");
-      if (catalogMode === "stale" && input.cursor)
-        throw new ConversationHomeApiError(409, {
-          code: "stale_catalog_cursor",
-          message: "stale",
-          retryable: true,
-        });
-      refreshCount += input.cursor ? 0 : 1;
-      if (catalogMode === "more") return catalogResponse([session("root-a"), session("root-b")]);
-      return catalogResponse([session("root-a")], "catalog-next");
-    }) as typeof conversationHomeApi.sessions;
-    const liveRevision = revision("root-a", { lifecycle: "ACTIVE" });
-    const pending = actionView("proposal-live");
-    conversationHomeApi.head = (async () =>
-      head("root-a", liveRevision)) as typeof conversationHomeApi.head;
-    conversationHomeApi.timeline = (async () =>
-      timeline("root-a")) as typeof conversationHomeApi.timeline;
-    conversationHomeApi.pending = (async () =>
-      pendingResponse([pending])) as typeof conversationHomeApi.pending;
-    conversationHomeApi.messageQueue = (async (rootSessionId) => ({
-      schema_version: "1.0",
-      root_session_id: rootSessionId,
-      current_authority_digest: digest("a"),
-      max_nonterminal_items: 32,
-      items: [],
-    })) as typeof conversationHomeApi.messageQueue;
-    conversationHomeApi.capabilities = (async () =>
-      capabilityResponse([])) as typeof conversationHomeApi.capabilities;
     const flush = async (turns = 8) => {
       for (let index = 0; index < turns; index += 1) await Promise.resolve();
     };
@@ -2544,6 +2815,16 @@ describe("post-freeze UI Home query and store lifecycle", () => {
       await runtime.selectSession("root-a");
       await flush();
       expect(streamStatus.value).toBe("connecting");
+      expect(
+        FakeEventSource.instances.find((source) => source.url.includes("action-proposals")),
+      ).toBeUndefined();
+      const committed = pendingActions.value[0];
+      if (!committed) throw new Error("pending action was not loaded");
+      committed.operation.operation_id = "operation-proposal-live";
+      expect(runtime.reconcileActionOperation(committed)).toBeTrue();
+      const sourceCountAfterCommit = FakeEventSource.instances.length;
+      expect(runtime.reconcileActionOperation(actionView("proposal-gone"))).toBeFalse();
+      expect(FakeEventSource.instances).toHaveLength(sourceCountAfterCommit);
       const operationSource = FakeEventSource.instances.find((source) =>
         source.url.includes("action-proposals"),
       );
@@ -2553,17 +2834,27 @@ describe("post-freeze UI Home query and store lifecycle", () => {
       expect(operationSource).toBeDefined();
       expect(conversationSource).toBeDefined();
       operationSource?.emit(
-        "operation",
+        ACTION_OPERATION_SSE_EVENT.OPERATION,
         JSON.stringify({
-          state: "approved",
+          schema_version: "1.0",
+          operation_id: "operation-proposal-live",
+          state: "committing",
           phase_sequence: 0,
-          progress: null,
+          progress: {
+            sequence: 0,
+            phase: "dispatch",
+            status: "running",
+            message_code: "operation.dispatch",
+            at: "2026-08-25T00:00:00.000Z",
+          },
           target: null,
+          error: null,
+          occurred_at: "2026-08-25T00:00:00.000Z",
           event_cursor: operationCursor("0"),
         }),
       );
       expect(pendingActions.value[0]?.operation.phase_sequence).toBe(0);
-      operationSource?.emit("operation", "not-json");
+      operationSource?.emit(ACTION_OPERATION_SSE_EVENT.OPERATION, "not-json");
       expect(activationError.value).toContain("could not be read");
 
       conversationSource?.emit(
@@ -2639,7 +2930,28 @@ describe("post-freeze UI Home query and store lifecycle", () => {
       root_session_id: rootSessionId,
       current_authority_digest: digest("a"),
       max_nonterminal_items: 32,
-      items: [],
+      items: [
+        {
+          schema_version: "1.0",
+          queue_item_id: `vf-queued-message-${"1".repeat(64)}`,
+          queue_sequence: 1,
+          root_session_id: rootSessionId,
+          author_public_id: "human",
+          content: "queued work",
+          content_digest: digest("b"),
+          target_participants: "all",
+          quote_refs: [],
+          private_context_present: false,
+          predecessor_queue_item_id: null,
+          admitted_authority_digest: digest("c"),
+          effective_authority_digest: digest("c"),
+          state: "queued",
+          stale_reason: null,
+          admitted_at: "2026-08-25T00:00:00.000Z",
+          updated_at: "2026-08-25T00:00:00.000Z",
+          item_digest: digest("d"),
+        },
+      ],
     })) as typeof conversationHomeApi.messageQueue;
     conversationHomeApi.capabilities = (async () =>
       capabilityResponse([])) as typeof conversationHomeApi.capabilities;

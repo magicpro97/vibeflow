@@ -1,5 +1,21 @@
 import { digestV1 } from "../durability/index.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_FAILURE_STATES,
+  ACTION_APPROVAL_CHALLENGE_LIMIT,
+  ACTION_APPROVAL_CHALLENGE_RETRYABLE_STATES,
+  ACTION_APPROVAL_CHALLENGE_STATE,
+  ACTION_IDEMPOTENCY_BINDING_STATE,
+  isActionApprovalChallengeState,
+  isActionApprovalChallengeStateIn,
+  isActionApprovalChallengeTransition,
+} from "./persistence-contract.js";
 import type { ActionIdempotencyBindingV1 } from "./persistence.js";
+import { ACTION_AUTHORITY_EVENT_KIND } from "./protocol-contract.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_CLASSES,
+  ACTION_APPROVAL_CHALLENGE_ID_PATTERN,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
 import {
   assertActor,
   assertDerivedId,
@@ -55,9 +71,15 @@ const CHALLENGE_FIELDS = [
 
 export function validateIdempotencyBinding(value: unknown): ActionIdempotencyBindingV1 {
   const row = exactObject(value, IDEMPOTENCY_FIELDS, [], "$.idempotency");
-  if (row.schema_version !== "1.0") invalid("unsupported idempotency version");
+  if (row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION)
+    invalid("unsupported idempotency version");
   if (row.sequence !== 0 && row.sequence !== 1) invalid("idempotency sequence is not 0 or 1");
-  if (row.state !== (row.sequence === 0 ? "prepared" : "visible"))
+  if (
+    row.state !==
+    (row.sequence === 0
+      ? ACTION_IDEMPOTENCY_BINDING_STATE.PREPARED
+      : ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE)
+  )
     invalid("idempotency sequence/state mismatch");
   if ((row.sequence === 0) !== (row.previous_frame_digest === null))
     invalid("idempotency previous digest nullability mismatch");
@@ -74,9 +96,9 @@ export function validateIdempotencyBinding(value: unknown): ActionIdempotencyBin
   const created = assertTimestamp(row.created_at, "$.idempotency.created_at");
   const retain = assertTimestamp(row.retain_until, "$.idempotency.retain_until");
   if (retain <= created) invalid("idempotency retention is invalid");
-  if (row.state === "prepared" && row.visible_at !== null)
+  if (row.state === ACTION_IDEMPOTENCY_BINDING_STATE.PREPARED && row.visible_at !== null)
     invalid("prepared binding has visible time");
-  if (row.state === "visible") {
+  if (row.state === ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE) {
     const visible = assertTimestamp(row.visible_at, "$.idempotency.visible_at");
     if (visible < created || visible >= retain)
       invalid("visible idempotency time is outside its retention window");
@@ -119,15 +141,16 @@ export function validateIdempotencyChain(values: unknown[]): ActionIdempotencyBi
 
 export function validateChallengeFrame(value: unknown): ApprovalChallengeFrameV1 {
   const row = exactObject(value, CHALLENGE_FIELDS, [], "$.challenge");
-  if (row.schema_version !== "1.0") invalid("unsupported challenge version");
+  if (row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION) invalid("unsupported challenge version");
   const challengeId = assertOpaqueId(row.challenge_id, "$.challenge.challenge_id", 43);
   if (
-    !/^[A-Za-z0-9_-]{43}$/.test(challengeId) ||
-    Buffer.from(challengeId, "base64url").length !== 32
+    !ACTION_APPROVAL_CHALLENGE_ID_PATTERN.test(challengeId) ||
+    Buffer.from(challengeId, "base64url").length !== ACTION_APPROVAL_CHALLENGE_LIMIT.ENTROPY_BYTES
   )
     invalid("challenge ID is not 256-bit base64url");
   const sequence = safeInteger(row.sequence, "$.challenge.sequence");
-  if (sequence > 5) invalid("challenge sequence exceeds bounded attempts");
+  if (sequence > ACTION_APPROVAL_CHALLENGE_LIMIT.MAX_FAILED_ATTEMPTS)
+    invalid("challenge sequence exceeds bounded attempts");
   if ((row.sequence === 0) !== (row.previous_frame_digest === null))
     invalid("challenge previous digest nullability mismatch");
   if (row.previous_frame_digest !== null)
@@ -143,22 +166,29 @@ export function validateChallengeFrame(value: unknown): ApprovalChallengeFrameV1
     assertDigest(row[field], `$.challenge.${field}`);
   if (!/^[a-f0-9]{64}$/.test(row.response_hmac_sha256 as string))
     invalid("challenge HMAC is invalid");
-  if (!["fresh-user-scope", "public-literal"].includes(row.challenge_class as string))
+  if (
+    !ACTION_APPROVAL_CHALLENGE_CLASSES.some(
+      (challengeClass) => challengeClass === row.challenge_class,
+    )
+  )
     invalid("challenge class is invalid");
-  if (!["created", "failed-attempt", "consumed", "expired", "locked"].includes(row.state as string))
-    invalid("challenge state is invalid");
+  if (!isActionApprovalChallengeState(row.state)) invalid("challenge state is invalid");
+  const state = row.state;
   const attempts = safeInteger(row.failed_attempts, "$.challenge.failed_attempts");
   if (
-    attempts > 5 ||
-    (row.state === "created" && attempts !== 0) ||
-    (row.state === "failed-attempt" && (attempts < 1 || attempts >= 5)) ||
-    (row.state === "locked" && attempts !== 5)
+    attempts > ACTION_APPROVAL_CHALLENGE_LIMIT.MAX_FAILED_ATTEMPTS ||
+    (state === ACTION_APPROVAL_CHALLENGE_STATE.CREATED && attempts !== 0) ||
+    (state === ACTION_APPROVAL_CHALLENGE_STATE.FAILED_ATTEMPT &&
+      (attempts < 1 || attempts >= ACTION_APPROVAL_CHALLENGE_LIMIT.MAX_FAILED_ATTEMPTS)) ||
+    (state === ACTION_APPROVAL_CHALLENGE_STATE.LOCKED &&
+      attempts !== ACTION_APPROVAL_CHALLENGE_LIMIT.MAX_FAILED_ATTEMPTS)
   )
     invalid("challenge failure counter/state mismatch");
   const issued = assertTimestamp(row.issued_at, "$.challenge.issued_at");
   const expires = assertTimestamp(row.expires_at, "$.challenge.expires_at");
-  if (expires !== issued + 120_000) invalid("challenge lifetime is not 120 seconds");
-  const consumed = row.state === "consumed";
+  if (expires !== issued + ACTION_APPROVAL_CHALLENGE_LIMIT.LIFETIME_MS)
+    invalid("challenge lifetime is not 120 seconds");
+  const consumed = state === ACTION_APPROVAL_CHALLENGE_STATE.CONSUMED;
   if (
     consumed !==
     (row.approval_decided_by !== null &&
@@ -193,7 +223,7 @@ export function validateChallengeFrame(value: unknown): ApprovalChallengeFrameV1
 export function validateChallengeChain(values: unknown[]): ApprovalChallengeFrameV1[] {
   const rows = values.map(validateChallengeFrame);
   const first = rows[0];
-  if (!first || first.sequence !== 0 || first.state !== "created")
+  if (!first || first.sequence !== 0 || first.state !== ACTION_APPROVAL_CHALLENGE_STATE.CREATED)
     invalid("challenge sequence zero is invalid");
   for (const [index, row] of rows.entries()) {
     if (
@@ -201,18 +231,25 @@ export function validateChallengeChain(values: unknown[]): ApprovalChallengeFram
       (index && row.previous_frame_digest !== rows[index - 1]?.frame_digest)
     )
       invalid("challenge sequence is not dense");
-    if (index && !["created", "failed-attempt"].includes(rows[index - 1]?.state ?? ""))
-      invalid("terminal challenge has a successor");
     const previous = rows[index - 1];
+    if (
+      index &&
+      previous &&
+      !isActionApprovalChallengeStateIn(ACTION_APPROVAL_CHALLENGE_RETRYABLE_STATES, previous.state)
+    )
+      invalid("terminal challenge has a successor");
     if (previous) {
-      const expectedAttempts =
-        row.state === "failed-attempt" || row.state === "locked"
-          ? previous.failed_attempts + 1
-          : previous.failed_attempts;
+      const expectedAttempts = isActionApprovalChallengeStateIn(
+        ACTION_APPROVAL_CHALLENGE_FAILURE_STATES,
+        row.state,
+      )
+        ? previous.failed_attempts + 1
+        : previous.failed_attempts;
       if (
-        row.state === "created" ||
+        !isActionApprovalChallengeTransition(previous.state, row.state) ||
         row.failed_attempts !== expectedAttempts ||
-        (row.state === "locked" && previous.failed_attempts !== 4)
+        (row.state === ACTION_APPROVAL_CHALLENGE_STATE.LOCKED &&
+          previous.failed_attempts !== ACTION_APPROVAL_CHALLENGE_LIMIT.MAX_FAILED_ATTEMPTS - 1)
       )
         invalid("challenge transition or failure counter is invalid");
     }
@@ -255,7 +292,8 @@ export function validateAuthorityEvent(value: unknown): ActionAuthorityEventV1 {
     [],
     "$.authority_event",
   );
-  if (row.schema_version !== "1.0") invalid("unsupported action authority version");
+  if (row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION)
+    invalid("unsupported action authority version");
   assertDerivedId(row.proposal_id, "proposal", "$.authority_event.proposal_id");
   safeInteger(row.sequence, "$.authority_event.sequence");
   if (row.previous_event_digest !== null)
@@ -277,12 +315,12 @@ export function validateAuthorityEvent(value: unknown): ActionAuthorityEventV1 {
     ],
     "$.authority_event.payload",
   );
-  if (payload.kind === "proposal-created") {
+  if (payload.kind === ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED) {
     exactObject(row.payload, ["kind", "proposal"], [], "$.authority_event.payload");
     assertProposal(payload.proposal as never);
-  } else if (payload.kind === "approval-decision") {
+  } else if (payload.kind === ACTION_AUTHORITY_EVENT_KIND.APPROVAL_DECISION) {
     exactObject(row.payload, ["kind", "from", "to", "approval"], [], "$.authority_event.payload");
-  } else if (payload.kind === "state-transition") {
+  } else if (payload.kind === ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION) {
     exactObject(
       row.payload,
       [
@@ -326,7 +364,7 @@ export function validateDispatchRecord(value: unknown): ActionDispatchRecordV1 {
     [],
     "$.dispatch",
   );
-  if (row.schema_version !== "1.0") invalid("unsupported dispatch version");
+  if (row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION) invalid("unsupported dispatch version");
   assertDerivedId(row.operation_id, "operation", "$.dispatch.operation_id");
   assertDerivedId(row.proposal_id, "proposal", "$.dispatch.proposal_id");
   assertDerivedId(row.approval_id, "approval", "$.dispatch.approval_id");

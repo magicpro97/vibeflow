@@ -1,80 +1,143 @@
-import type { CapabilityScope } from "../../capabilities/manifest/types.js";
-import { ENGINES, type Engine } from "../../core/types.js";
+import { ENGINES, type Engine, isAgentEngine } from "../../core/agent-contract.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+  type ConversationMessageQueueTargetParticipantsV1,
+} from "../../orchestrator/conversation/conversation-message-queue-contract.js";
 
 export type ConversationEngine = Engine;
 
+export const HOME_COMPOSER_INTENT_KIND = Object.freeze({
+  EMPTY: "empty",
+  INVALID: "invalid",
+  MESSAGE: "message",
+  ADD_PARTICIPANT: "add-participant",
+  REMOVE_PARTICIPANT: "remove-participant",
+  INSTALL_CAPABILITY: "install-capability",
+  REMOVE_CAPABILITY: "remove-capability",
+} as const);
+
+export const HOME_COMPOSER_CAPABILITY_COMMAND = Object.freeze({
+  INSTALL: "install",
+  REMOVE: "remove",
+} as const);
+
+export const HOME_COMPOSER_SCOPE_FLAG = Object.freeze({
+  USER: "--user",
+  PROJECT: "--project",
+} as const);
+
 export type ComposerIntent =
-  | { kind: "empty" }
-  | { kind: "invalid"; message: string }
-  | { kind: "message"; content: string; targets: "all" | string[] }
+  | { kind: typeof HOME_COMPOSER_INTENT_KIND.EMPTY }
+  | { kind: typeof HOME_COMPOSER_INTENT_KIND.INVALID; message: string }
   | {
-      kind: "add-participant";
+      kind: typeof HOME_COMPOSER_INTENT_KIND.MESSAGE;
+      content: string;
+      targets: ConversationMessageQueueTargetParticipantsV1;
+    }
+  | {
+      kind: typeof HOME_COMPOSER_INTENT_KIND.ADD_PARTICIPANT;
       roleRef: string;
       engine: ConversationEngine;
       model: string | null;
     }
-  | { kind: "remove-participant"; participantId: string }
-  | { kind: "install-capability"; packageId: string; scope: CapabilityScope }
-  | { kind: "remove-capability"; packageId: string; scope: CapabilityScope };
+  | { kind: typeof HOME_COMPOSER_INTENT_KIND.REMOVE_PARTICIPANT; participantId: string }
+  | {
+      kind: typeof HOME_COMPOSER_INTENT_KIND.INSTALL_CAPABILITY;
+      packageId: string;
+      scope: CapabilityScope;
+    }
+  | {
+      kind: typeof HOME_COMPOSER_INTENT_KIND.REMOVE_CAPABILITY;
+      packageId: string;
+      scope: CapabilityScope;
+    };
 
 const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const SAFE_PARTICIPANT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 
-function isConversationEngine(value: string): value is ConversationEngine {
-  return (ENGINES as readonly string[]).includes(value);
-}
-
 export function parseComposerIntent(source: string): ComposerIntent {
   const text = source.normalize("NFC").trim();
-  if (!text) return { kind: "empty" };
+  if (!text) return { kind: HOME_COMPOSER_INTENT_KIND.EMPTY };
 
   const add = /^\+([^@\s]+)@([a-z]+)(?::([^\s]+))?$/i.exec(text);
   if (add) {
     const [, roleRef = "", rawEngine = "", model] = add;
     const engine = rawEngine.toLowerCase();
-    if (!isConversationEngine(engine))
+    if (!isAgentEngine(engine))
       return {
-        kind: "invalid",
-        message: "Choose one of: claude, codex, copilot, opencode, antigravity.",
+        kind: HOME_COMPOSER_INTENT_KIND.INVALID,
+        message: `Choose one of: ${ENGINES.join(", ")}.`,
       };
     if (!SAFE_REFERENCE.test(roleRef))
-      return { kind: "invalid", message: "The agent role is not a safe reference." };
-    return { kind: "add-participant", roleRef, engine, model: model ?? null };
+      return {
+        kind: HOME_COMPOSER_INTENT_KIND.INVALID,
+        message: "The agent role is not a safe reference.",
+      };
+    return {
+      kind: HOME_COMPOSER_INTENT_KIND.ADD_PARTICIPANT,
+      roleRef,
+      engine,
+      model: model ?? null,
+    };
   }
 
   const removeParticipant = /^-@([^\s]+)$/u.exec(text);
   if (removeParticipant) {
     const participantId = removeParticipant[1] ?? "";
     return SAFE_PARTICIPANT.test(participantId)
-      ? { kind: "remove-participant", participantId }
-      : { kind: "invalid", message: "Choose an agent from this conversation." };
+      ? { kind: HOME_COMPOSER_INTENT_KIND.REMOVE_PARTICIPANT, participantId }
+      : {
+          kind: HOME_COMPOSER_INTENT_KIND.INVALID,
+          message: "Choose an agent from this conversation.",
+        };
   }
 
   const capability = /^\/(install|remove)\s+([^\s]+)(?:\s+(--user|--project))?$/u.exec(text);
   if (capability) {
     const packageId = capability[2] ?? "";
     if (!SAFE_REFERENCE.test(packageId))
-      return { kind: "invalid", message: "The capability package reference is invalid." };
+      return {
+        kind: HOME_COMPOSER_INTENT_KIND.INVALID,
+        message: "The capability package reference is invalid.",
+      };
     const common: { packageId: string; scope: CapabilityScope } = {
       packageId,
-      scope: capability[3] === "--user" ? "user" : "project",
+      scope:
+        capability[3] === HOME_COMPOSER_SCOPE_FLAG.USER
+          ? CAPABILITY_SCOPE.USER
+          : CAPABILITY_SCOPE.PROJECT,
     };
-    return capability[1] === "install"
-      ? { kind: "install-capability", ...common }
-      : { kind: "remove-capability", ...common };
+    return capability[1] === HOME_COMPOSER_CAPABILITY_COMMAND.INSTALL
+      ? { kind: HOME_COMPOSER_INTENT_KIND.INSTALL_CAPABILITY, ...common }
+      : { kind: HOME_COMPOSER_INTENT_KIND.REMOVE_CAPABILITY, ...common };
   }
 
   const targeted = /^@([^\s]+)\s+([\s\S]+)$/u.exec(text);
   if (targeted) {
     const participantId = targeted[1] ?? "";
     if (!SAFE_PARTICIPANT.test(participantId))
-      return { kind: "invalid", message: "Choose an agent from this conversation." };
-    return { kind: "message", content: targeted[2]?.trim() ?? "", targets: [participantId] };
+      return {
+        kind: HOME_COMPOSER_INTENT_KIND.INVALID,
+        message: "Choose an agent from this conversation.",
+      };
+    return {
+      kind: HOME_COMPOSER_INTENT_KIND.MESSAGE,
+      content: targeted[2]?.trim() ?? "",
+      targets: [participantId],
+    };
   }
 
   if (text.startsWith("/") || text.startsWith("+") || text.startsWith("-@"))
-    return { kind: "invalid", message: "That command is incomplete. Choose a suggestion below." };
-  return { kind: "message", content: text, targets: "all" };
+    return {
+      kind: HOME_COMPOSER_INTENT_KIND.INVALID,
+      message: "That command is incomplete. Choose a suggestion below.",
+    };
+  return {
+    kind: HOME_COMPOSER_INTENT_KIND.MESSAGE,
+    content: text,
+    targets: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
+  };
 }
 
 export interface ActivationToken {

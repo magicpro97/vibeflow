@@ -7,15 +7,26 @@ import {
   type ConversationAskCompatibilityRequestV1,
   ConversationAskCompatibilityV1,
 } from "./conversation-ask-compatibility.js";
+import {
+  CONVERSATION_COMMAND_RESULT_STATUS,
+  CONVERSATION_LEGACY_RESULT_LIFECYCLE,
+  type ConversationCommandResultStatus,
+} from "./conversation-command-result-contract.js";
 import { ConversationHomeCreateBrokerV1 } from "./conversation-home-create-authority.js";
-
-type ConversationStatus =
-  | "completed"
-  | "aborted"
-  | "failed"
-  | "awaiting_approval"
-  | "accepted"
-  | "stopped";
+import {
+  CONVERSATION_MESSAGE_QUEUE_EVENT_KIND,
+  CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+} from "./conversation-message-queue-contract.js";
+import {
+  CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+  CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND,
+} from "./conversation-private-context-broker-wire.js";
+import {
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_TERMINAL_LIFECYCLES,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 
 export interface ObservedConversationResultV1 {
   conversation_id: string;
@@ -30,7 +41,7 @@ export interface ObservedConversationResultV1 {
   revisionId?: string;
   artifact_refs?: string[];
   artifactRefs?: string[];
-  status: ConversationStatus;
+  status: ConversationCommandResultStatus;
   output: string;
   events: PublicStoredTraceEvent[];
 }
@@ -49,15 +60,20 @@ export interface DurableQueuedConversationMessageV1 {
 
 const WAIT_MS = 5;
 const WAIT_TIMEOUT_MS = 300_000;
-const stable = new Set(["COMPLETED", "FAILED", "ABORTED", "STOPPED", "AWAITING_APPROVAL"]);
+const STABLE_COMPATIBILITY_LIFECYCLES = Object.freeze([
+  ...CONVERSATION_TERMINAL_LIFECYCLES,
+  CONVERSATION_LEGACY_RESULT_LIFECYCLE.AWAITING_APPROVAL,
+]);
 
-function lifecycleStatus(value: string): ConversationStatus {
-  if (value === "COMPLETED") return "completed";
-  if (value === "ABORTED") return "aborted";
-  if (value === "STOPPED") return "stopped";
-  if (value === "AWAITING_APPROVAL") return "awaiting_approval";
-  if (value === "ACTIVE") return "accepted";
-  return "failed";
+function lifecycleStatus(value: string): ConversationCommandResultStatus {
+  if (value === CONVERSATION_LIFECYCLE.COMPLETED)
+    return CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED;
+  if (value === CONVERSATION_LIFECYCLE.ABORTED) return CONVERSATION_COMMAND_RESULT_STATUS.ABORTED;
+  if (value === CONVERSATION_LIFECYCLE.STOPPED) return CONVERSATION_COMMAND_RESULT_STATUS.STOPPED;
+  if (value === CONVERSATION_LEGACY_RESULT_LIFECYCLE.AWAITING_APPROVAL)
+    return CONVERSATION_COMMAND_RESULT_STATUS.AWAITING_APPROVAL;
+  if (value === CONVERSATION_LIFECYCLE.ACTIVE) return CONVERSATION_COMMAND_RESULT_STATUS.ACCEPTED;
+  return CONVERSATION_COMMAND_RESULT_STATUS.FAILED;
 }
 
 function observe(
@@ -73,7 +89,7 @@ function observe(
     if (event.seq <= lastSeq) return;
     lastSeq = event.seq;
     events.push(event);
-    if (event.event.type !== "agent_response_delta") return;
+    if (event.event.type !== CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) return;
     const delta = String(event.event.payload.content_delta ?? "");
     if (!delta) return;
     output += delta;
@@ -146,7 +162,7 @@ async function waitForTerminal(
     while (true) {
       const snapshot = await abortable(bootstrap.service.snapshot(conversationId), signal);
       if (!snapshot) throw new Error("conversation not found");
-      if (!stable.has(snapshot.lifecycle)) {
+      if (!STABLE_COMPATIBILITY_LIFECYCLES.some((value) => value === snapshot.lifecycle)) {
         if (Date.now() >= deadline)
           throw new Error("timed out waiting for conversation to reach a terminal lifecycle");
         await pause(WAIT_MS, signal);
@@ -195,11 +211,11 @@ function deliveredChildConversation(
     break;
   }
   if (!event) return null;
-  if (event.payload.kind === "stale") {
+  if (event.payload.kind === CONVERSATION_MESSAGE_QUEUE_EVENT_KIND.STALE) {
     const detail = event.payload.item.stale_reason ?? "unknown";
     throw new Error(`queued conversation message became stale (${detail})`);
   }
-  return event.payload.kind === "delivered"
+  return event.payload.kind === CONVERSATION_MESSAGE_QUEUE_EVENT_KIND.DELIVERED
     ? event.payload.delivery_proof.successor_authority.conversation_id
     : null;
 }
@@ -223,7 +239,7 @@ async function waitForQueuedConversation(
 
 export function durableCliPrincipalDigest(scope: string): string {
   return digestV1("VF-CLI-CONVERSATION-COMPATIBILITY-PRINCIPAL\0v1\0", {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
     scope,
   });
 }
@@ -298,9 +314,9 @@ export async function executeDurableQueuedConversationMessageV1(
       principal_digest: input.principal_digest,
       resolve_authority: () => bootstrap.authorities.messageQueue.resolveAuthority(rootSessionId),
       request: {
-        schema_version: "1.0",
+        schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
         enqueue_idempotency_key: input.idempotency_key,
-        source_kind: "private-file-range",
+        source_kind: CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND.PRIVATE_FILE_RANGE,
         repo_relative_path: input.private_file_range.repo_relative_path,
         start_line: input.private_file_range.start_line,
         end_line: input.private_file_range.end_line,
@@ -313,11 +329,11 @@ export async function executeDurableQueuedConversationMessageV1(
         root_session_id: rootSessionId,
         principal_digest: input.principal_digest,
         request: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
           idempotency_key: input.idempotency_key,
           expected_authority_digest: authority.authority_digest,
           content: input.content,
-          target_participants: "all",
+          target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
           quote_refs: [],
           private_context_present: true,
         },

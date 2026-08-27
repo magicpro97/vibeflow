@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
 import type { CapabilityEffectDescriptorV1 } from "../adapters/types.js";
 import type {
@@ -6,7 +7,15 @@ import type {
   CapabilityAdapterStepV1,
   CapabilityFabricPlanV1,
 } from "../planning/types.js";
-import type { AdapterReceiptV1 } from "../wire/operation.js";
+import {
+  type AdapterReceiptV1,
+  CAPABILITY_ADAPTER_RECEIPT_OBSERVED_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_POSTIMAGE_ABSENT_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_ADAPTER_RECEIPT_SUCCESS_STATES,
+  type CapabilityAdapterReceiptEvidenceStateV1,
+  isCapabilityAdapterReceiptStateIn,
+} from "../wire/operation.js";
 
 export function adapterResourceAggregate(
   domain: string,
@@ -50,7 +59,8 @@ export function createReceipt(input: {
   evidence_digest?: string | null;
   error_code?: string | null;
 }): AdapterReceiptV1 {
-  const observed = ["applied", "reverse_in_progress", "reversed", "failed", "uncertain"].includes(
+  const observed = isCapabilityAdapterReceiptStateIn(
+    CAPABILITY_ADAPTER_RECEIPT_OBSERVED_STATES,
     input.state,
   );
   const draft = {
@@ -73,14 +83,16 @@ export function createReceipt(input: {
       input.step.owned_resources,
       false,
     ),
-    observed_postimage_sha256:
-      input.state === "prepared" || input.state === "effect_in_progress" || input.state === "failed"
-        ? null
-        : adapterResourceAggregate(
-            "VF-ADAPTER-OBSERVED-POSTIMAGE\0v1\0",
-            input.step.owned_resources,
-            true,
-          ),
+    observed_postimage_sha256: isCapabilityAdapterReceiptStateIn(
+      CAPABILITY_ADAPTER_RECEIPT_POSTIMAGE_ABSENT_STATES,
+      input.state,
+    )
+      ? null
+      : adapterResourceAggregate(
+          "VF-ADAPTER-OBSERVED-POSTIMAGE\0v1\0",
+          input.step.owned_resources,
+          true,
+        ),
     private_evidence_ref: null,
     bounded_evidence_digest: observed ? (input.evidence_digest ?? null) : null,
     native_identifier_producer_receipt_digests: [],
@@ -97,7 +109,7 @@ export interface CapabilityReceiptEvidenceV1 {
   evidence_schema_id: string;
   evidence_kind: "receipt";
   adapter_fingerprint: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   package_pin_digest: string;
   manifest_digest: string;
@@ -113,7 +125,7 @@ export interface CapabilityReceiptEvidenceV1 {
   plan_id: string;
   step_id: string;
   probe_id: null;
-  observed_receipt_state: "applied" | "failed" | "uncertain" | "reversed";
+  observed_receipt_state: CapabilityAdapterReceiptEvidenceStateV1;
   receipt_attempt: 0;
   observed_preimage_sha256: string;
   observed_postimage_sha256: string | null;
@@ -141,7 +153,7 @@ export function receiptEvidenceRecord(input: {
   step: CapabilityAdapterStepV1;
   descriptor: CapabilityEffectDescriptorV1;
   operationId: string;
-  state: "applied" | "failed" | "uncertain" | "reversed";
+  state: CapabilityAdapterReceiptEvidenceStateV1;
   observedAt: string;
   errorCode: string | null;
 }): CapabilityReceiptEvidenceV1 {
@@ -161,7 +173,10 @@ export function receiptEvidenceRecord(input: {
   if (distinctPackages.size !== 1) throw new Error("receipt evidence package closure is ambiguous");
   const pkg = distinctPackages.values().next().value;
   if (!pkg) throw new Error("receipt evidence package closure is missing");
-  const successful = state === "applied" || state === "reversed";
+  const successful = isCapabilityAdapterReceiptStateIn(
+    CAPABILITY_ADAPTER_RECEIPT_SUCCESS_STATES,
+    state,
+  );
   const draft = {
     schema_version: "1.0" as const,
     evidence_schema_id: step.evidence_schema_id,
@@ -192,7 +207,7 @@ export function receiptEvidenceRecord(input: {
       false,
     ),
     observed_postimage_sha256:
-      state === "failed"
+      state === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED
         ? null
         : adapterResourceAggregate(
             "VF-ADAPTER-OBSERVED-POSTIMAGE\0v1\0",
@@ -218,9 +233,9 @@ export function receiptEvidenceRecord(input: {
     expires_at: null,
   };
   const permittedDescriptorDigests =
-    state === "reversed"
+    state === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSED
       ? [step.rollback.descriptor_digest]
-      : state === "uncertain"
+      : state === CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN
         ? [step.intent.descriptor_digest, step.rollback.descriptor_digest]
         : [step.intent.descriptor_digest];
   if (!permittedDescriptorDigests.includes(descriptor.descriptor_digest))

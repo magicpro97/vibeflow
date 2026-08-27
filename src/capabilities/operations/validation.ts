@@ -1,3 +1,9 @@
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/index.js";
+import { ACTION_TARGET_DISPOSITION_EXECUTION_VALUE } from "../../actions/public-action-vocabulary-contract.js";
+import {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  type CapabilityAuthorityStaleRuntimeErrorCodeV1,
+} from "../../core/capability-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import { digestHex } from "../../durability/index.js";
 import { validatePrivateEffectBinding } from "../adapters/private-descriptors.js";
@@ -14,7 +20,7 @@ import type { CapabilityFabricPlanV1, CapabilityRuntimeAuthorityV1 } from "../pl
 import { CapabilityRuntimeError } from "./errors.js";
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "invalid-plan");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN);
 }
 
 export function validateCapabilityFabricPlan(plan: CapabilityFabricPlanV1): CapabilityFabricPlanV1 {
@@ -28,7 +34,8 @@ export function validateCapabilityFabricPlan(plan: CapabilityFabricPlanV1): Capa
   )
     invalid("execution closure digest mismatch");
   if (
-    (plan.action_root_locator as { kind: string }).kind === "recovery-bootstrap" ||
+    (plan.action_root_locator as { kind: string }).kind ===
+      ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP ||
     canonicalJson(plan.action_root_locator) !==
       canonicalJson(plan.execution_closure.action_root_locator)
   )
@@ -76,28 +83,25 @@ export function authorityMismatch(
   expected: CapabilityRuntimeAuthorityV1,
   observed: CapabilityRuntimeAuthorityV1,
   includeSourceAuthority = true,
-):
-  | "authority-head-stale"
-  | "policy-stale"
-  | "grant-stale"
-  | "permission-stale"
-  | "source-authority-stale"
-  | null {
+): CapabilityAuthorityStaleRuntimeErrorCodeV1 | null {
   if (
     observed.scope !== expected.scope ||
     observed.scope_identity_digest !== expected.scope_identity_digest ||
     observed.authority_epoch !== expected.authority_epoch ||
     observed.authority_head_digest !== expected.authority_head_digest
   )
-    return "authority-head-stale";
-  if (observed.policy_digest !== expected.policy_digest) return "policy-stale";
-  if (observed.grant_digest !== expected.grant_digest) return "grant-stale";
-  if (observed.permission_digest !== expected.permission_digest) return "permission-stale";
+    return CAPABILITY_RUNTIME_ERROR_CODE.AUTHORITY_HEAD_STALE;
+  if (observed.policy_digest !== expected.policy_digest)
+    return CAPABILITY_RUNTIME_ERROR_CODE.POLICY_STALE;
+  if (observed.grant_digest !== expected.grant_digest)
+    return CAPABILITY_RUNTIME_ERROR_CODE.GRANT_STALE;
+  if (observed.permission_digest !== expected.permission_digest)
+    return CAPABILITY_RUNTIME_ERROR_CODE.PERMISSION_STALE;
   if (
     includeSourceAuthority &&
     observed.source_authority_set_digest !== expected.source_authority_set_digest
   )
-    return "source-authority-stale";
+    return CAPABILITY_RUNTIME_ERROR_CODE.SOURCE_AUTHORITY_STALE;
   return null;
 }
 
@@ -110,7 +114,7 @@ export function capabilityRuntimeAuthorityMismatch(
   if (!now)
     throw new CapabilityRuntimeError(
       "capability authority clock is unavailable",
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     );
   const checkedAt = now();
   const observed = authority.read(graph.plan.scope);
@@ -171,12 +175,14 @@ export function captureCapabilityRuntimeAuthorityCheck(
 
 export function capabilityHostTargetIds(plan: CapabilityFabricPlanV1): string[] {
   const hostTargets = plan.target_dispositions
-    .filter((disposition) => disposition.execution === "host")
+    .filter(
+      (disposition) => disposition.execution === ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST,
+    )
     .map((disposition) => disposition.target_id);
   if (hostTargets.length === 0)
     throw new CapabilityRuntimeError(
       "an executable capability plan has no canonical host targets",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   return hostTargets;
 }

@@ -1,33 +1,23 @@
+import { CAPABILITY_PACKAGE_PIN_TRUST } from "../../actions/capability-security-contract.js";
+import { HOST_ACTION_KIND, HOST_ACTION_NAMESPACE } from "../../actions/host-action-contract.js";
 import type { ActionRisk, HostRenderedPreviewV1, RecoveryAction } from "../../actions/index.js";
+import {
+  ACTION_PERMISSION_ENFORCEMENT_VALUE,
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  ACTION_PREVIEW_PROJECTOR_VERSION,
+} from "../../actions/public-action-contract.js";
+import {
+  PUBLIC_RECOVERY_ACTION,
+  PUBLIC_RECOVERY_ACTIONS,
+} from "../../actions/public-error-contract.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type { CapabilityFabricPlanV1, CapabilityHostActionV1 } from "../planning/types.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
 import { bytewise } from "../wire/primitives.js";
 
-const RECOVERY_ORDER: readonly RecoveryAction[] = [
-  "retry",
-  "edit",
-  "refresh-proposal",
-  "restart-pagination",
-  "complete-challenge",
-  "select-lineage-head",
-  "rebuild-catalog",
-  "resume-by-id",
-  "inspect-trace",
-  "resolve-again",
-  "rollback",
-  "repair",
-  "repair-authority",
-  "verified-abandon",
-  "reconcile-revision",
-  "adopt",
-  "renew-grant",
-  "authorize-source",
-  "disable",
-  "retarget",
-  "complete-manual-step",
-  "export-redacted-diagnostics",
-];
+const RECOVERY_ORDER: readonly RecoveryAction[] = PUBLIC_RECOVERY_ACTIONS;
 
 function packagePins(plan: CapabilityFabricPlanV1) {
   return plan.runtime_closure.packages.map(({ pin }) => ({
@@ -146,19 +136,19 @@ function health(plan: CapabilityFabricPlanV1): HostRenderedPreviewV1["health_pla
 
 function recovery(plan: CapabilityFabricPlanV1): RecoveryAction[] {
   const selected = new Set<RecoveryAction>([
-    "retry",
-    "rollback",
-    "repair",
-    "export-redacted-diagnostics",
+    PUBLIC_RECOVERY_ACTION.RETRY,
+    PUBLIC_RECOVERY_ACTION.ROLLBACK,
+    PUBLIC_RECOVERY_ACTION.REPAIR,
+    PUBLIC_RECOVERY_ACTION.EXPORT_REDACTED_DIAGNOSTICS,
   ]);
   if (plan.target_dispositions.some((row) => row.execution !== "host"))
-    selected.add("complete-manual-step");
+    selected.add(PUBLIC_RECOVERY_ACTION.COMPLETE_MANUAL_STEP);
   return RECOVERY_ORDER.filter((row) => selected.has(row));
 }
 
 function title(action: CapabilityHostActionV1): string {
   return `${action.type
-    .slice("capability.".length)
+    .slice(HOST_ACTION_NAMESPACE.CAPABILITY.length)
     .replaceAll("_", " ")
     .replace(/^./, (value) => value.toUpperCase())} capability`;
 }
@@ -178,7 +168,10 @@ export function materializeCapabilityPreview(input: {
     title: title(action),
     summary: `Review the immutable ${action.type} plan before any capability effect runs.`,
     action_type: action.type,
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     review_fields: [],
     targets: structuredClone(plan.targets),
     target_dispositions: structuredClone(plan.target_dispositions),
@@ -191,7 +184,7 @@ export function materializeCapabilityPreview(input: {
     reversibility: plan.reversibility,
     health_plan: health(plan),
     recovery_actions: recovery(plan),
-    projector_version: "vf-public-projector/1",
+    projector_version: ACTION_PREVIEW_PROJECTOR_VERSION,
     rules_digest: rules,
     redaction_manifest_digest: digestV1("VF-CAPABILITY-ACTION-REDACTION-MANIFEST\0v1\0", {
       schema_version: "1.0",
@@ -207,8 +200,8 @@ export function materializeCapabilityPreview(input: {
 
 export function capabilityPreviewRisk(
   preview: HostRenderedPreviewV1,
-  scope: "project" | "user",
-  actionType: string,
+  scope: CapabilityScope,
+  actionType: CapabilityHostActionV1["type"],
 ): ActionRisk {
   const effects = new Map([
     ["pure-local-read", 0],
@@ -220,17 +213,23 @@ export function capabilityPreviewRisk(
     ["external-compensatable", 2],
     ["external-irreversible", 3],
   ]);
-  let rank = actionType === "capability.adopt" ? 2 : 1;
+  let rank = actionType === HOST_ACTION_KIND.CAPABILITY_ADOPT ? 2 : 1;
   for (const effect of preview.effect_classes) rank = Math.max(rank, effects.get(effect) ?? 4);
   rank = Math.max(
     rank,
     { reversible: 0, compensatable: 1, manual: 2, irreversible: 3 }[preview.reversibility],
   );
   if (
-    scope === "user" ||
-    preview.package_pins.some((pin) => ["dev-unverified", "legacy-verified"].includes(pin.trust)) ||
+    scope === CAPABILITY_SCOPE.USER ||
+    preview.package_pins.some(
+      (pin) =>
+        pin.trust === CAPABILITY_PACKAGE_PIN_TRUST.DEV_UNVERIFIED ||
+        pin.trust === CAPABILITY_PACKAGE_PIN_TRUST.LEGACY_VERIFIED,
+    ) ||
     preview.permission_delta.some((row) => ["add", "expand"].includes(row.change)) ||
-    preview.enforcement.some((row) => row.enforcement === "disclosed-not-enforced") ||
+    preview.enforcement.some(
+      (row) => row.enforcement === ACTION_PERMISSION_ENFORCEMENT_VALUE.DISCLOSED_NOT_ENFORCED,
+    ) ||
     preview.config_diffs.some((row) => ["full-file", "manual"].includes(row.mode))
   )
     rank = Math.max(rank, 2);

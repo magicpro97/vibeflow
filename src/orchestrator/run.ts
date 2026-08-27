@@ -1,6 +1,9 @@
 import {
   type Engine,
+  GATE_STATE,
   type RiskLevel,
+  WORK_UNIT_RISK_CLASS,
+  WORK_UNIT_STATUS,
   type WorkUnit,
   type WorkflowState,
   cwd,
@@ -10,9 +13,14 @@ import { computeConfidence } from "../gates.js";
 import { type OrchestratorApplyGate, applyGateBlock } from "../hooks/apply-gate.js";
 import type { Logbus } from "../logbus.js";
 import { thresholdFor } from "./investigate.js";
-import { cleanupMarker, createMarker, readMarker, updateMarker } from "./marker.js";
+import { MARKER_STATUS, cleanupMarker, createMarker, readMarker, updateMarker } from "./marker.js";
 import { type SecurityCheckpointResult, runSecurityCheckpoint } from "./security-checkpoint.js";
 import { applyStuckDetection } from "./stuck-wire.js";
+import {
+  hasCheapGateFailure,
+  projectReviewGate,
+  projectSecurityGate,
+} from "./work-unit-gate-projection.js";
 
 /** Default bounded concurrency for parallel dispatch (avoids exhausting quota / the machine). */
 export const DEFAULT_CONCURRENCY = 3;
@@ -243,9 +251,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
     async (u, i) => {
       const { finish, unsub } = applyStuckDetection(u, opts.stuckOpts, opts.logbus);
       try {
-        updateMarker(u.name, { status: "running" });
+        updateMarker(u.name, { status: MARKER_STATUS.RUNNING });
         opts.onProgress?.({ phase: "start", unit: u.name, index: i, total: opts.units.length });
-        // Catch dispatcher throw → per-unit blocked so siblings complete.
         let outcome: UnitOutcome;
         try {
           outcome = await opts.dispatcher(u, signal);
@@ -262,7 +269,7 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
           }
           process.stderr.write(`[orchestrator] dispatcher for ${u.name} threw: ${msg}\n`);
           outcome = {
-            status: "blocked" as const,
+            status: WORK_UNIT_STATUS.BLOCKED,
             confidence: 0,
             evidence: [],
           };
@@ -273,21 +280,13 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
         }
         // #519: security checkpoint between dispatcher and reviewer. Skip when
         // already doomed (blocked or a cheap gate failed).
-        const cheapFailed =
-          outcome.status === "blocked" ||
-          (["build", "lint", "test"] as const).some((k) => outcome.gates?.[k] === "fail");
+        const cheapFailed = hasCheapGateFailure(outcome);
         if (security && !cheapFailed) {
           const sec = await runSecurityCheckpoint(u, security.base, {
             askFn: security.askFn,
             runSkillFn: security.runSkillFn,
           });
-          outcome.security = sec;
-          if (sec.verdict === "fail") {
-            outcome.status = "blocked";
-            outcome.gates = { ...(outcome.gates ?? {}), security: "fail" };
-          } else if (sec.verdict === "pass" || sec.verdict === "needs-review") {
-            outcome.gates = { ...(outcome.gates ?? {}), security: "pass" };
-          }
+          projectSecurityGate(outcome, sec);
         }
         const reviewed = applyOutcome(u, outcome, opts.now);
         const review = await opts.reviewer(reviewed, outcome);
@@ -306,19 +305,19 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
           tokens: reviewed.resources?.tokens,
           ...(stuck.length ? { stuck } : {}),
         });
-        reviewed.status = review.pass ? "done" : "blocked";
-        reviewed.gates = { ...reviewed.gates, review: review.pass ? "pass" : "fail" };
+        projectReviewGate(reviewed, review.pass);
         // #542: record the verdict + gate outcome on the durable stream (append-only),
         // so `vf logs` / SSE / export see the decision at the moment it happened —
         // WORKFLOW_STATE.gates only keeps the LAST state (overwritten each update).
         try {
           const out = (await import("../logbus.js")).out;
-          out("vf", `verdict ${u.name}: ${review.pass ? "pass" : "fail"}`, {
+          const reviewGate = review.pass ? GATE_STATE.PASS : GATE_STATE.FAIL;
+          out("vf", `verdict ${u.name}: ${reviewGate}`, {
             level: "info",
             unit: u.name,
             meta: {
               kind: "verdict",
-              review: review.pass ? "pass" : "fail",
+              review: reviewGate,
               gates: reviewed.gates,
               ...(review.score !== undefined ? { goal_score: review.score } : {}),
               ...(reviewed.resources ? { resources: reviewed.resources } : {}),
@@ -331,7 +330,8 @@ export async function orchestrateUnits<U extends WorkUnit = WorkUnit>(opts: {
         const blocked = await applyGateBlock(opts, reviewed, review.pass);
         if (blocked) reviews[i] = { unit: u.name, pass: false, reason: blocked.reason };
         updateMarker(u.name, {
-          status: reviewed.status,
+          status:
+            reviewed.status === WORK_UNIT_STATUS.DONE ? MARKER_STATUS.DONE : MARKER_STATUS.BLOCKED,
           confidence: reviewed.confidence,
           evidence: reviewed.evidence,
         });
@@ -372,21 +372,21 @@ export function goalEval(state: WorkflowState): { verdict: GoalVerdict; reasons:
   const reasons: string[] = [];
   if (!units.length) return { verdict: "partial", reasons: ["no work units to evaluate"] };
 
-  const blocked = units.filter((u) => u.status === "blocked");
+  const blocked = units.filter((u) => u.status === WORK_UNIT_STATUS.BLOCKED);
   if (blocked.length) {
     for (const u of blocked) reasons.push(`blocked: ${u.name}`);
     return { verdict: "blocked", reasons };
   }
   const incomplete = units.filter((u) => {
-    if (u.status !== "done" || !u.evidence?.length) return true;
-    const threshold = thresholdFor(u.riskClass ?? "feature");
+    if (u.status !== WORK_UNIT_STATUS.DONE || !u.evidence?.length) return true;
+    const threshold = thresholdFor(u.riskClass ?? WORK_UNIT_RISK_CLASS.FEATURE);
     // Use computed confidence (gate-derived), NOT the agent's raw self-report,
     // or the self-certification loop stays open here (ADR: computed confidence).
     return computeConfidence(u) < threshold;
   });
   if (incomplete.length) {
     for (const u of incomplete) {
-      const threshold = thresholdFor(u.riskClass ?? "feature");
+      const threshold = thresholdFor(u.riskClass ?? WORK_UNIT_RISK_CLASS.FEATURE);
       reasons.push(
         `incomplete: ${u.name} (status=${u.status}, conf=${u.confidence}, threshold=${threshold}, evidence=${u.evidence?.length ?? 0})`,
       );
@@ -394,7 +394,7 @@ export function goalEval(state: WorkflowState): { verdict: GoalVerdict; reasons:
     return { verdict: "partial", reasons };
   }
   reasons.push(
-    `all units done at per-unit confidence threshold (${units.map((u) => thresholdFor(u.riskClass ?? "feature")).join(", ")}) with evidence`,
+    `all units done at per-unit confidence threshold (${units.map((u) => thresholdFor(u.riskClass ?? WORK_UNIT_RISK_CLASS.FEATURE)).join(", ")}) with evidence`,
   );
   return { verdict: "met", reasons };
 }

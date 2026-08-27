@@ -1,6 +1,13 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { CTX_DIR } from "../core.js";
+import {
+  SKILL_MCP_TRANSPORT,
+  SKILL_SCOPE,
+  isSkillMcpTransport,
+  isSkillScope,
+  isSkillType,
+} from "../core/skill-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { validateSourceAnchors } from "./anchor-freshness.js";
@@ -48,8 +55,6 @@ const STANDARD_FRONTMATTER = new Set([
   "supersedes",
   "sourceAnchors",
 ]);
-
-const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
 
 const HARDCODED_PATH_PAT = /\/Users\/\w+|C:\\Users\\\w+|\/home\/\w+/;
 
@@ -196,7 +201,7 @@ export function validateSkillDir(
 
   // #543: type is optional; when present it must be "repo" or "knowledge" (unknown degrades
   // to knowledge at the injection site, so this is a warning, not a hard error).
-  if (data.type !== undefined && data.type !== "repo" && data.type !== "knowledge") {
+  if (data.type !== undefined && !isSkillType(data.type)) {
     warnings.push('frontmatter.type must be "repo" or "knowledge"');
   }
 
@@ -210,9 +215,13 @@ export function validateSkillDir(
     } else {
       const r = m as Record<string, unknown>;
       const t = r.transport;
-      const transport = t === "http" || t === "sse" ? t : "stdio";
-      if (transport === "stdio" && (typeof r.command !== "string" || !r.command)) malformed = true;
-      if ((transport === "http" || transport === "sse") && (typeof r.url !== "string" || !r.url))
+      const transport = isSkillMcpTransport(t) ? t : SKILL_MCP_TRANSPORT.STDIO;
+      if (transport === SKILL_MCP_TRANSPORT.STDIO && (typeof r.command !== "string" || !r.command))
+        malformed = true;
+      if (
+        (transport === SKILL_MCP_TRANSPORT.HTTP || transport === SKILL_MCP_TRANSPORT.SSE) &&
+        (typeof r.url !== "string" || !r.url)
+      )
         malformed = true;
     }
     if (malformed) {
@@ -223,7 +232,7 @@ export function validateSkillDir(
   // #655: scope validation — warn on unrecognized scope values.
   if (data.scope !== undefined) {
     const raw = typeof data.scope === "string" ? data.scope.trim().toLowerCase() : "";
-    if (!VALID_SCOPES.has(raw)) {
+    if (!isSkillScope(raw)) {
       warnings.push(
         `frontmatter.scope must be one of: common, organization, project, adapter (got "${raw}")`,
       );
@@ -233,7 +242,7 @@ export function validateSkillDir(
   // #655: project.id is valid only when scope=project or scope=adapter.
   if (data["project.id"] !== undefined) {
     const rawScope = typeof data.scope === "string" ? data.scope.trim().toLowerCase() : "";
-    if (rawScope !== "project" && rawScope !== "adapter") {
+    if (rawScope !== SKILL_SCOPE.PROJECT && rawScope !== SKILL_SCOPE.ADAPTER) {
       warnings.push(
         "frontmatter.project.id is only meaningful with scope=project or scope=adapter",
       );
@@ -298,7 +307,7 @@ export function validateSkillDir(
   }
 
   // #655: hardcoded path detection for common-scoped skills at trust boundary.
-  if (data.scope === "common" && body) {
+  if (data.scope === SKILL_SCOPE.COMMON && body) {
     const matches = body.match(HARDCODED_PATH_PAT);
     if (matches && matches.length > 0) {
       warnings.push(

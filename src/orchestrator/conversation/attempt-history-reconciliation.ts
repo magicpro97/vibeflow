@@ -1,5 +1,6 @@
 import type { AttemptRuntimeOptions } from "./attempt-runtime-options.js";
 import type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { RegisteredOperation } from "./operation-registry.js";
 
 export async function reconcileAttemptHistory(input: {
@@ -36,7 +37,7 @@ export async function reconcileAttemptHistory(input: {
       {
         idempotency_key: `native-history:${participantId}:${attemptId}`,
         event: {
-          type: "native_history_reconciled",
+          type: CONVERSATION_TRACE_EVENT_KIND.NATIVE_HISTORY_RECONCILED,
           payload: {
             public_session_ref: resume.nativeSessionId,
             status: result.status,

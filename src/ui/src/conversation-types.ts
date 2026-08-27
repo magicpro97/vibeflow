@@ -1,34 +1,29 @@
-export type ConversationEngine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
-export type ConversationLifecycle =
-  | "INIT"
-  | "ACTIVE"
-  | "PAUSED"
-  | "COMPLETED"
-  | "STOPPED"
-  | "FAILED"
-  | "ABORTED";
-export type ConversationHealth = "healthy" | "degraded";
-export type TerminalLifecycle = "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED";
-export type ApprovalOutcome = "approve" | "reject";
-export type OperationState =
-  | "requested"
-  | "dispatched"
-  | "acknowledged"
-  | "completed"
-  | "ambiguous";
-export type ConversationArtifactType =
-  | "decision_matrix"
-  | "plan"
-  | "diff"
-  | "tests"
-  | "synthesis"
-  | "transcript";
+import type { Engine } from "../../core/agent-contract.js";
+import type { PublicQuoteReferenceV1 } from "../../orchestrator/conversation/conversation-interaction-types.js";
+import type { ConversationMessageQueueTargetParticipantsV1 } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
+import type * as ConversationWire from "../../orchestrator/conversation/conversation-public-wire-contract.js";
+import {
+  type CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
+  type CONVERSATION_DECISION_OUTCOME,
+  type CONVERSATION_INVALID_ASSESSMENT_REASON,
+  type CONVERSATION_LIFECYCLE,
+  CONVERSATION_TERMINAL_LIFECYCLES,
+  type CONVERSATION_TRACE_EVENT_KIND,
+} from "../../orchestrator/conversation/conversation-public-wire-contract.js";
+
+export type ConversationEngine = Engine;
+export type ConversationLifecycle = ConversationWire.ConversationLifecycleV1;
+export type ConversationHealth = ConversationWire.ConversationHealthV1;
+export type TerminalLifecycle = ConversationWire.ConversationTerminalLifecycleV1;
+export type ApprovalOutcome = ConversationWire.ConversationApprovalOutcomeV1;
+export type OperationState = ConversationWire.ConversationOperationStateV1;
+export type ConversationArtifactType = ConversationWire.ConversationArtifactTypeV1;
 export interface BooleanGate {
   value: boolean;
   evidence: string;
 }
 export interface ConvergenceGate {
-  value: boolean | "not_applicable";
+  value: boolean | typeof CONVERSATION_CONVERGENCE_NOT_APPLICABLE;
   evidence: string;
 }
 export interface EvaluatorOutput {
@@ -37,11 +32,13 @@ export interface EvaluatorOutput {
   evidence_quality: BooleanGate;
   convergence: ConvergenceGate;
 }
-
 export type RoundDecision =
-  | { outcome: "abort"; score: null; reason: "invalid_assessment" }
-  | { outcome: "consensus" | "continue" | "exhausted"; score: number };
-
+  | {
+      outcome: typeof CONVERSATION_DECISION_OUTCOME.ABORT;
+      score: null;
+      reason: typeof CONVERSATION_INVALID_ASSESSMENT_REASON;
+    }
+  | { outcome: ConversationWire.ConversationContinuingDecisionOutcomeV1; score: number };
 export interface ConversationParticipantSnapshot {
   participant_id: string;
   role_ref: string;
@@ -59,7 +56,7 @@ export interface RoundResponse {
 }
 
 export interface RoundAssessment {
-  stage: "blind" | "full";
+  stage: ConversationWire.ConversationAssessmentStageV1;
   assessment: EvaluatorOutput;
 }
 
@@ -104,7 +101,7 @@ export interface ConversationCreateResponse {
 
 export interface MessageRequest {
   content: string;
-  target_participants?: string[] | "all";
+  target_participants?: ConversationMessageQueueTargetParticipantsV1;
 }
 
 export interface MessageResponse {
@@ -116,17 +113,17 @@ export interface MessageResponse {
 
 export interface PauseResponse {
   paused: true;
-  lifecycle: "PAUSED";
+  lifecycle: typeof CONVERSATION_LIFECYCLE.PAUSED;
 }
 
 export interface ResumeResponse {
   resumed: true;
-  active_state: "ACTIVE";
+  active_state: typeof CONVERSATION_LIFECYCLE.ACTIVE;
 }
 
 export interface StopResponse {
   stopped: true;
-  terminal_state: "STOPPED";
+  terminal_state: typeof CONVERSATION_LIFECYCLE.STOPPED;
 }
 
 export interface ApprovalDecision {
@@ -174,7 +171,7 @@ export interface ConversationTraceCorrelation {
 
 export type ConversationTraceEvent =
   | {
-      type: "conversation_configured";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED;
       payload: {
         topic: string;
         participants: Array<{
@@ -187,9 +184,12 @@ export type ConversationTraceEvent =
         max_rounds: number;
       };
     }
-  | { type: "coordinator_decision"; payload: { selected_policy: string; reason: string } }
   | {
-      type: "participant_bound";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.COORDINATOR_DECISION;
+      payload: { selected_policy: string; reason: string };
+    }
+  | {
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.PARTICIPANT_BOUND;
       payload: {
         participant_id: string;
         engine: ConversationEngine;
@@ -200,19 +200,19 @@ export type ConversationTraceEvent =
       };
     }
   | {
-      type: "skill_injected";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.SKILL_INJECTED;
       payload: {
         skill_refs: string[];
         resolved_hashes: string[];
-        source: "repo" | "shared" | "builtin";
+        source: ConversationWire.ConversationSkillSourceV1;
       };
     }
   | {
-      type: "precommit";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT;
       payload: { round_id: string; participant_id: string; answer: string; evidence: string[] };
     }
   | {
-      type: "agent_response_delta";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA;
       payload: {
         round_id: string;
         participant_id: string;
@@ -223,24 +223,41 @@ export type ConversationTraceEvent =
       };
     }
   | {
-      type: "tool_action";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION;
       payload: {
         tool: string;
         action: string;
-        status: "started" | "completed" | "failed";
+        status: ConversationWire.ConversationToolActionStatusV1;
         input_ref: string | null;
         output_ref: string | null;
       };
     }
   | {
-      type: "evaluator_assessment";
-      payload: { round_id: string; stage: "blind" | "full"; assessment: EvaluatorOutput };
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT;
+      payload: {
+        round_id: string;
+        stage: ConversationWire.ConversationAssessmentStageV1;
+        assessment: EvaluatorOutput;
+      };
     }
-  | { type: "user_message"; payload: { content: string; target_participants: string[] | "all" } }
-  | { type: "consensus_update"; payload: { round_id: string; decision: RoundDecision } }
-  | { type: "round_boundary"; payload: { round_id: string; phase: "start" | "end" } }
   | {
-      type: "state_change";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE;
+      payload: {
+        content: string;
+        target_participants: ConversationMessageQueueTargetParticipantsV1;
+        quote_refs?: PublicQuoteReferenceV1[];
+      };
+    }
+  | {
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE;
+      payload: { round_id: string; decision: RoundDecision };
+    }
+  | {
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY;
+      payload: { round_id: string; phase: ConversationWire.ConversationRoundPhaseV1 };
+    }
+  | {
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE;
       payload: {
         lifecycle: ConversationLifecycle;
         health: ConversationHealth;
@@ -249,24 +266,24 @@ export type ConversationTraceEvent =
       };
     }
   | {
-      type: "baseline_result";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT;
       payload: {
-        status: "success" | "failed" | "skipped";
+        status: ConversationWire.ConversationBaselineStatusV1;
         answer: string | null;
         confidence: number | null;
-        skip_reason: string | null;
+        skip_reason: ConversationWire.ConversationBaselineReasonV1 | null;
       };
     }
   | {
-      type: "synthesis_completed";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.SYNTHESIS_COMPLETED;
       payload: { decision_matrix_ref: string; baseline_comparison_ref: string };
     }
   | {
-      type: "conversation_terminal";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL;
       payload: { lifecycle: TerminalLifecycle; terminal: true; final_score: number | null };
     }
   | {
-      type: "dry_run_result";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.DRY_RUN_RESULT;
       payload: {
         participants: Array<Record<string, unknown>>;
         evaluator_auto_added: boolean;
@@ -274,41 +291,47 @@ export type ConversationTraceEvent =
         models_valid: boolean;
       };
     }
-  | { type: "error"; payload: { agent_id: string | null; code: string; message: string } }
   | {
-      type: "operation_lifecycle";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.ERROR;
+      payload: { agent_id: string | null; code: string; message: string };
+    }
+  | {
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE;
       payload: { operation_id: string; attempt_id: string; state: OperationState };
     }
   | {
-      type: "approval_requested";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED;
       payload: {
         token: { approval_id: string; operation_id: string; actor: string };
         description: string;
       };
     }
-  | { type: "approval_resolved"; payload: { decision: ApprovalDecision } }
   | {
-      type: "caller_cancelled";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED;
+      payload: { decision: ApprovalDecision };
+    }
+  | {
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED;
       payload: { operation_id: string; actor: string; reason: string | null };
     }
   | {
-      type: "artifact_created";
-      payload: { artifact_id: string; artifact_type: ConversationArtifactType; ref: string | null };
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED;
+      payload: { artifact_id: string; artifact_type: ConversationArtifactType; ref: string };
     }
   | {
-      type: "artifact_updated";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED;
       payload: {
         artifact_id: string;
-        artifact_type: string;
-        ref: string | null;
-        previous_ref: string | null;
+        artifact_type: ConversationArtifactType;
+        ref: string;
+        previous_ref: string;
       };
     }
   | {
-      type: "native_history_reconciled";
+      type: typeof CONVERSATION_TRACE_EVENT_KIND.NATIVE_HISTORY_RECONCILED;
       payload: {
         public_session_ref: string;
-        status: "reconciled" | "partial" | "unavailable";
+        status: ConversationWire.ConversationReconciliationStatusV1;
         imported_turn_count: number;
         imported_tool_count: number;
         provenance_refs: string[];
@@ -316,6 +339,11 @@ export type ConversationTraceEvent =
         completeness_reason: string;
       };
     };
+
+export const CONVERSATION_TRACE_EVENT_KIND_PARITY = true satisfies ConversationWire.SameUnion<
+  ConversationTraceEvent["type"],
+  ConversationWire.ConversationTraceEventKindV1
+>;
 
 export interface ConversationTraceRecord extends ConversationTraceCorrelation {
   event_id: string;
@@ -327,51 +355,11 @@ export interface ConversationTraceRecord extends ConversationTraceCorrelation {
 
 export const OPAQUE_ARTIFACT_PATTERN = /^artifact_[A-Za-z0-9_-]{43}$/;
 export const OPAQUE_SESSION_PATTERN = /^session_[A-Za-z0-9_-]{43}$/;
-const FATAL_STREAM_ERRORS = new Set(["conversation_not_found", "stream_unavailable"]);
-
-export function createConversationStreamAttemptGuard() {
-  let recoverable = true;
-  return {
-    acceptTypedError(raw: string) {
-      let payload: { code?: unknown; message?: unknown } = {};
-      try {
-        const decoded: unknown = JSON.parse(raw);
-        if (decoded && typeof decoded === "object") payload = decoded as typeof payload;
-      } catch {
-        // Malformed typed frames remain recoverable transport failures.
-      }
-      const code = typeof payload.code === "string" ? payload.code : "";
-      const fatal = FATAL_STREAM_ERRORS.has(code);
-      if (fatal) recoverable = false;
-      return {
-        fatal,
-        message:
-          typeof payload.message === "string" && payload.message.trim()
-            ? payload.message
-            : code || "conversation stream failed",
-      };
-    },
-    canRecover: () => recoverable,
-  };
-}
-
-export async function recoverConversationStreamAttempt(
-  attempt: ReturnType<typeof createConversationStreamAttemptGuard>,
-  renew: () => Promise<boolean>,
-  reconnect: () => void,
-) {
-  if (!attempt.canRecover()) return "terminal" as const;
-  if (await renew()) return "renewed" as const;
-  if (!attempt.canRecover()) return "terminal" as const;
-  reconnect();
-  return "reconnecting" as const;
-}
+export {
+  createConversationStreamAttemptGuard,
+  recoverConversationStreamAttempt,
+} from "./conversation-stream-attempt.js";
 
 export function isTerminalLifecycle(lifecycle: ConversationLifecycle): boolean {
-  return (
-    lifecycle === "COMPLETED" ||
-    lifecycle === "STOPPED" ||
-    lifecycle === "FAILED" ||
-    lifecycle === "ABORTED"
-  );
+  return CONVERSATION_TERMINAL_LIFECYCLES.some((candidate) => candidate === lifecycle);
 }

@@ -4,6 +4,8 @@ import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:
 import { tmpdir as nodeTmpdir } from "node:os";
 import { join } from "node:path";
 import { ensurePrivateDirectory } from "../durability/index.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { ownedProcessRuntimeFileNames } from "./owned-process-contract.js";
 import type { EngineProcessSpawner } from "./session-types.js";
 
 const OWNED_RUNTIME = Symbol.for("vibeflow.dispatch.owned-runtime");
@@ -57,7 +59,7 @@ export function createOwnedRuntimeRoot(
       throw new Error("owned runtime root is not a private directory");
     }
     path =
-      (runtime.platform ?? process.platform) === "win32"
+      (runtime.platform ?? process.platform) === RUNTIME_PLATFORM.WINDOWS
         ? candidate
         : (runtime.ensurePrivateDirectory ?? ensurePrivateDirectory)(candidate);
   } catch (error) {
@@ -77,6 +79,17 @@ export function createOwnedRuntimeRoot(
         // A cleanup failure must not replace the process terminal outcome.
       }
     },
+  };
+}
+
+export function createOwnedRuntimeArtifacts(runtime: OwnedSupervisorLaunchRuntime, nonce: string) {
+  const root = createOwnedRuntimeRoot(runtime, nonce);
+  const names = ownedProcessRuntimeFileNames(nonce);
+  return {
+    bindAckPath: join(root.path, names.bindAck),
+    cleanupRuntimeRoot: root.cleanup,
+    receiptPath: join(root.path, names.receipt),
+    statusPath: join(root.path, names.status),
   };
 }
 

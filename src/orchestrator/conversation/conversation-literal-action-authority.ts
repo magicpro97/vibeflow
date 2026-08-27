@@ -1,3 +1,4 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
   type ActionProposalRequestV1,
   type ActionRequestAuthorityV1,
@@ -16,6 +17,8 @@ import {
   materializeConversationActionReceipt,
 } from "./conversation-action-receipt-store.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import { CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE } from "./conversation-message-queue-contract.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import { assertReceiptSource } from "./conversation-receipt-native-plans.js";
 import { materializeConversationReceiptProposal } from "./conversation-receipt-planner.js";
 import type { ConversationLineageService } from "./lineage-service.js";
@@ -28,9 +31,9 @@ function isLiteralCandidate(
   candidate: BrowserHostActionRequestV1,
 ): candidate is Extract<
   BrowserHostActionRequestV1,
-  { type: "conversation.publish_suspected_literal" }
+  { type: typeof HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL }
 > {
-  return candidate.type === "conversation.publish_suspected_literal";
+  return candidate.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL;
 }
 
 function eventDigest(event: StoredTraceEvent): string {
@@ -82,7 +85,7 @@ export class ConversationLiteralActionAuthority {
       throw new Error("literal staging record expired");
     const projected = {
       content,
-      target_participants: "all" as const,
+      target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     };
     const planPreimage = {
       schema_version: "1.0" as const,
@@ -168,7 +171,7 @@ export class ConversationLiteralActionAuthority {
     const snapshot = this.options.home.actions.get(proposalId);
     const stored = this.options.home.actionReceipts.readPlan(proposalId);
     const binding =
-      snapshot?.proposal.action.type === "conversation.publish_suspected_literal"
+      snapshot?.proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
         ? snapshot.proposal.action.binding
         : null;
     if (!snapshot?.approval || !stored || !binding)
@@ -200,7 +203,10 @@ export class ConversationLiteralActionAuthority {
     };
     if (!same(plan.binding, binding)) throw new Error("public literal plan binding changed");
     const content = this.options.home.literalStaging.content(binding);
-    const projected = { content, target_participants: "all" as const };
+    const projected = {
+      content,
+      target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
+    };
     if (
       digestV1("VF-PUBLIC-LITERAL-EVENT-CONTENT\0v1\0", projected) !==
       plan.projected_public_event_content_digest
@@ -278,7 +284,7 @@ export class ConversationLiteralActionAuthority {
         this.correlation(proposalId, dispatch.operation_id, source.manifest),
         {
           idempotency_key: `action-public-literal:${proposalId}`,
-          event: { type: "user_message", payload: projected },
+          event: { type: CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE, payload: projected },
         },
         null,
         plan.expected_last_seq,
@@ -294,7 +300,7 @@ export class ConversationLiteralActionAuthority {
     const consumed = this.options.home.literalStaging.readFrames(binding.private_staging_id).at(-1);
     if (!consumed) throw new Error("public literal consumption is absent");
     const expected = materializeConversationActionBinding({
-      action_type: "conversation.publish_suspected_literal",
+      action_type: HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
       plan_digest: snapshot.proposal.plan_digest,
       phase: "expected",
       facts: sortedFacts([
@@ -316,7 +322,7 @@ export class ConversationLiteralActionAuthority {
       ]),
     });
     const observed = materializeConversationActionBinding({
-      action_type: "conversation.publish_suspected_literal",
+      action_type: HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
       plan_digest: snapshot.proposal.plan_digest,
       phase: "observed",
       facts: sortedFacts([
@@ -341,7 +347,7 @@ export class ConversationLiteralActionAuthority {
       operation_id: dispatch.operation_id,
       proposal_id: proposalId,
       approval_id: snapshot.approval.approval_id,
-      action_type: "conversation.publish_suspected_literal",
+      action_type: HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
       plan_digest: snapshot.proposal.plan_digest,
       expected_authority_binding_digest: expected.binding_digest,
       observed_authority_binding_digest: observed.binding_digest,

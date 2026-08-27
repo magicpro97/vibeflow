@@ -1,8 +1,11 @@
+import { CAPABILITY_MANIFEST_INPUT_TYPE } from "../../actions/capability-manifest-vocabulary-contract.js";
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { CapabilityPublicInputV1 } from "../../actions/request-types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type { CapabilityInputDeclarationV1 } from "../manifest/types.js";
 import { patternMatches } from "../manifest/validation-helpers.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { CapabilityExecutionPrivateInputBindingV1 } from "../private-input/types.js";
 import { bytewise } from "../wire/primitives.js";
 import { privateActionInputBindingDigest } from "./action-materialization.js";
@@ -18,7 +21,7 @@ export interface CapabilityPrivateInputPatchBindingV1 {
 
 export interface CapabilityPrivateInputAuthorityV1 {
   validateReference(input: {
-    scope: "project" | "user";
+    scope: CapabilityScope;
     scope_identity_digest: string;
     package_id: string;
     package_pin_digest: string;
@@ -27,7 +30,7 @@ export interface CapabilityPrivateInputAuthorityV1 {
     reference: PrivateReferenceV1;
   }): void;
   resolveCurrentBinding(input: {
-    scope: "project" | "user";
+    scope: CapabilityScope;
     scope_identity_digest: string;
     package_id: string;
     package_pin_digest: string;
@@ -35,7 +38,7 @@ export interface CapabilityPrivateInputAuthorityV1 {
     input_ids: string[];
   }): string;
   resolvePatchedBinding?(input: {
-    scope: "project" | "user";
+    scope: CapabilityScope;
     scope_identity_digest: string;
     package_id: string;
     package_pin_digest: string;
@@ -46,7 +49,7 @@ export interface CapabilityPrivateInputAuthorityV1 {
     patch_digest: string;
   }): CapabilityPrivateInputPatchBindingV1;
   materializeExecutionBinding?(input: {
-    scope: "project" | "user";
+    scope: CapabilityScope;
     scope_identity_digest: string;
     package_id: string;
     package_pin_digest: string;
@@ -54,7 +57,7 @@ export interface CapabilityPrivateInputAuthorityV1 {
     input_ids: string[];
     action_root_locator: Exclude<
       import("../../actions/types.js").PrivateActionRootLocatorV1,
-      { kind: "recovery-bootstrap" }
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
     >;
     preparation_digest: string | null;
   }): CapabilityExecutionPrivateInputBindingV1;
@@ -66,7 +69,7 @@ export class UnavailableCapabilityPrivateInputAuthorityV1
   validateReference(): void {
     throw new CapabilityRuntimeError(
       "a credential broker with durable private-input authority is unavailable",
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     );
   }
 
@@ -77,15 +80,15 @@ export class UnavailableCapabilityPrivateInputAuthorityV1
 }
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "invalid-plan");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN);
 }
 
 function validatePublicValue(declaration: CapabilityInputDeclarationV1, value: unknown): void {
-  if (declaration.type === "boolean") {
+  if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.BOOLEAN) {
     if (typeof value !== "boolean") invalid(`input ${declaration.input_id} requires a boolean`);
     return;
   }
-  if (declaration.type === "integer") {
+  if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.INTEGER) {
     if (!Number.isSafeInteger(value)) invalid(`input ${declaration.input_id} requires an integer`);
     const integer = value as number;
     if (declaration.min !== null && integer < declaration.min)
@@ -95,12 +98,15 @@ function validatePublicValue(declaration: CapabilityInputDeclarationV1, value: u
     return;
   }
   if (typeof value !== "string") invalid(`input ${declaration.input_id} requires a string`);
-  if (declaration.type === "enum" && !declaration.enum_values.includes(value as string))
+  if (
+    declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.ENUM &&
+    !declaration.enum_values.includes(value as string)
+  )
     invalid(`input ${declaration.input_id} is outside its enum`);
   if (declaration.pattern !== null && !patternMatches(declaration.pattern, value as string))
     invalid(`input ${declaration.input_id} does not match its pattern`);
   if (
-    declaration.type === "project-path" &&
+    declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.PROJECT_PATH &&
     ((value as string).startsWith("/") || (value as string).split(/[\\/]/u).includes(".."))
   )
     invalid(`input ${declaration.input_id} is not a bounded project path`);
@@ -109,7 +115,7 @@ function validatePublicValue(declaration: CapabilityInputDeclarationV1, value: u
 export function materializePackageInputs(input: {
   pkg: ResolvedCapabilityPackageV1;
   values: CapabilityPublicInputV1[];
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scopeIdentityDigest: string;
   privateInputs: CapabilityPrivateInputAuthorityV1;
 }): ResolvedCapabilityPackageV1 {
@@ -122,7 +128,10 @@ export function materializePackageInputs(input: {
     const declaration = declarations.get(value.input_id);
     if (!declaration) invalid(`capability input ${value.input_id} is undeclared`);
     const privateReference = typeof value.value === "object" && value.value !== null;
-    if ((declaration as CapabilityInputDeclarationV1).type === "secret-handle") {
+    if (
+      (declaration as CapabilityInputDeclarationV1).type ===
+      CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE
+    ) {
       if (!privateReference) invalid(`secret input ${value.input_id} requires an opaque binding`);
       input.privateInputs.validateReference({
         scope: input.scope,
@@ -145,7 +154,10 @@ export function materializePackageInputs(input: {
   }
   for (const declaration of input.pkg.manifest.inputs) {
     if (input.values.some((row) => row.input_id === declaration.input_id)) continue;
-    if (declaration.default_value !== null && declaration.type !== "secret-handle") {
+    if (
+      declaration.default_value !== null &&
+      declaration.type !== CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE
+    ) {
       validatePublicValue(declaration, declaration.default_value);
       publicInputs.push({ input_id: declaration.input_id, value: declaration.default_value });
     } else if (declaration.required)
@@ -175,7 +187,7 @@ export function materializeCurrentPackageInputs(input: {
   pkg: ResolvedCapabilityPackageV1;
   publicInputs: ResolvedCapabilityPackageV1["public_inputs"];
   secretInputIds: string[];
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scopeIdentityDigest: string;
   privateInputs: CapabilityPrivateInputAuthorityV1;
 }): ResolvedCapabilityPackageV1 {
@@ -187,12 +199,12 @@ export function materializeCurrentPackageInputs(input: {
     invalid("current capability input set is duplicated");
   for (const row of input.publicInputs) {
     const declaration = declarations.get(row.input_id);
-    if (!declaration || declaration.type === "secret-handle")
+    if (!declaration || declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE)
       invalid(`current public input ${row.input_id} is not declared by the selected package`);
     validatePublicValue(declaration, row.value);
   }
   for (const inputId of input.secretInputIds) {
-    if (declarations.get(inputId)?.type !== "secret-handle")
+    if (declarations.get(inputId)?.type !== CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE)
       invalid(`current secret input ${inputId} is not declared by the selected package`);
   }
   for (const declaration of input.pkg.manifest.inputs) {
@@ -223,7 +235,7 @@ export function materializeCurrentPackageInputs(input: {
 export function materializePatchedPackageInputs(input: {
   pkg: ResolvedCapabilityPackageV1;
   values: CapabilityPublicInputV1[];
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scopeIdentityDigest: string;
   privateInputs: CapabilityPrivateInputAuthorityV1;
 }): ResolvedCapabilityPackageV1 {
@@ -238,7 +250,10 @@ export function materializePatchedPackageInputs(input: {
     const declaration = declarations.get(value.input_id);
     if (!declaration) invalid(`capability input ${value.input_id} is undeclared`);
     const privateReference = typeof value.value === "object" && value.value !== null;
-    if ((declaration as CapabilityInputDeclarationV1).type === "secret-handle") {
+    if (
+      (declaration as CapabilityInputDeclarationV1).type ===
+      CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE
+    ) {
       if (!privateReference) invalid(`secret input ${value.input_id} requires an opaque binding`);
       input.privateInputs.validateReference({
         scope: input.scope,
@@ -288,7 +303,7 @@ export function materializePatchedPackageInputs(input: {
   )
     throw new CapabilityRuntimeError(
       "private input patch aggregation is unavailable",
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     );
   const binding = resolvedPatch?.binding_digest ?? input.pkg.private_input_binding_digest;
   return {

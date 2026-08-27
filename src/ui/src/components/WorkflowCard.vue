@@ -28,6 +28,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { WORKFLOW_DASHBOARD_STATUS, WORK_UNIT_STATUS } from "../../../core/workflow-contract.js";
 import type { WorkflowDashboardItem } from "../types.js";
 
 const props = defineProps<{
@@ -39,10 +40,12 @@ defineEmits<{ select: [] }>();
 
 const runningCount = computed(
   () =>
-    props.item.workUnits.filter((u) => u.status === "running" || u.status === "verifying").length,
+    props.item.workUnits.filter(
+      (u) => u.status === WORK_UNIT_STATUS.RUNNING || u.status === WORK_UNIT_STATUS.VERIFYING,
+    ).length,
 );
 const blockedCount = computed(
-  () => props.item.workUnits.filter((u) => u.status === "blocked").length,
+  () => props.item.workUnits.filter((u) => u.status === WORK_UNIT_STATUS.BLOCKED).length,
 );
 
 function fmtTime(ts: number) {
@@ -51,9 +54,9 @@ function fmtTime(ts: number) {
 
 const statusDot = computed(() => {
   const s = props.item.status;
-  if (s === "running") return "bg-blue-400 animate-pulse";
-  if (s === "blocked") return "bg-red-500";
-  if (s === "done") return "bg-emerald-500";
+  if (s === WORKFLOW_DASHBOARD_STATUS.RUNNING) return "bg-blue-400 animate-pulse";
+  if (s === WORKFLOW_DASHBOARD_STATUS.BLOCKED) return "bg-red-500";
+  if (s === WORKFLOW_DASHBOARD_STATUS.DONE) return "bg-emerald-500";
   return "bg-neutral-600";
 });
 </script>

@@ -1,5 +1,6 @@
 import type { ArtifactPreparation, ConversationArtifactStore } from "./artifact-store.js";
 import type { ConstructedContextCompactionV1 } from "./conversation-compaction-plan.js";
+import { CONVERSATION_ARTIFACT_TYPE } from "./conversation-public-wire-contract.js";
 
 export interface PreparedConversationCompactionArtifactsV1 {
   preparations: ArtifactPreparation<never>[];
@@ -22,7 +23,7 @@ export function prepareConversationCompactionArtifacts(input: {
         input.conversation_id,
         omitted.range.artifact.artifact_id,
         {
-          artifact_type: "transcript",
+          artifact_type: CONVERSATION_ARTIFACT_TYPE.TRANSCRIPT,
           content: omitted.bytes,
           idempotency_key: `compaction-omitted-${input.proposal_id.slice(-32)}-${index}`,
         },
@@ -34,7 +35,7 @@ export function prepareConversationCompactionArtifacts(input: {
       input.conversation_id,
       input.construction.artifact_id,
       {
-        artifact_type: "compaction",
+        artifact_type: CONVERSATION_ARTIFACT_TYPE.COMPACTION,
         content: input.construction.artifact_bytes,
         idempotency_key: `compaction-artifact-${input.proposal_id.slice(-32)}`,
       },

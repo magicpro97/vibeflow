@@ -7,7 +7,7 @@ import {
   watchFile,
 } from "node:fs";
 import type { Logbus } from "../logbus.js";
-import type { LogEvent, WatchHandle } from "./types.js";
+import { type LogEvent, type WatchHandle, decodeLogEvent } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // logbus-watcher — uses fs.watch with debounce + safety poll to follow current.log.
@@ -89,8 +89,8 @@ export function watchLogbus(
         buffer = buffer.slice(nl + 1);
         if (!line) continue;
         try {
-          const ev = JSON.parse(line) as LogEvent;
-          onEvent(ev);
+          const ev = decodeLogEvent(JSON.parse(line));
+          if (ev) onEvent(ev);
         } catch (err) {
           process.stderr.write(`[logbus-watcher] bad line: ${(err as Error).message}\n`);
         }

@@ -24,6 +24,12 @@ function tempRoot(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+const SYNTHETIC_IDENTITY = Object.freeze({
+  OWNER: "freebsd:fixture-owner",
+  SUPERVISOR: "freebsd:fixture-supervisor",
+  CLI: "freebsd:fixture-cli",
+} as const);
+
 describe("owned CLI output and orphan recovery", () => {
   test("root watcher waits for the streams-drained phase after CLI exit", async () => {
     let now = 0;
@@ -67,6 +73,35 @@ describe("owned CLI output and orphan recovery", () => {
       "owned CLI output drain proof failed",
     );
     expect(now).toBe(OWNED_PROCESS_TIMING_MS.OUTPUT_DRAIN_PROOF_TIMEOUT);
+  });
+
+  test("root watcher rejects missing or extra supervisor status fields", async () => {
+    const invalidStatuses: readonly unknown[] = [
+      { phase: "streams-drained" },
+      { exit_code: 0 },
+      { phase: "streams-drained", exit_code: 0, unexpected_field: true },
+    ];
+    for (const invalid of invalidStatuses) {
+      let reads = 0;
+      const outcome = await watchOwnedSupervisorExit(
+        "status.json",
+        new Promise<number | null>(() => undefined),
+        {
+          delay: async () => undefined,
+          now: () => 0,
+          readFileSync: (() =>
+            JSON.stringify(
+              reads++ === 0 ? invalid : { phase: "streams-drained", exit_code: 0 },
+            )) as never,
+        },
+      );
+
+      expect(reads).toBe(2);
+      expect(outcome).toEqual({
+        phase: OWNED_SUPERVISOR_TERMINAL_PHASE.STREAMS_DRAINED,
+        exitCode: 0,
+      });
+    }
   });
 
   test("exit code 125 is not a drain failure when the typed phase proves another outcome", async () => {
@@ -184,10 +219,11 @@ describe("owned CLI output and orphan recovery", () => {
         platform: process.platform,
         observe: (pid: number) => {
           if (pid === process.pid && ownerAlive)
-            return { pid, identity: "owner", pgid: process.pid, sid: null };
+            return { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null };
           if (pid === 700 && treeAlive)
-            return { pid, identity: "supervisor", pgid: 700, sid: null };
-          if (pid === 701 && treeAlive) return { pid, identity: "cli", pgid: 700, sid: null };
+            return { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null };
+          if (pid === 701 && treeAlive)
+            return { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null };
           return null;
         },
         terminateExactTree: () => {
@@ -241,10 +277,11 @@ describe("owned CLI output and orphan recovery", () => {
           platform: process.platform,
           observe: (pid: number) => {
             if (pid === process.pid && ownerAlive)
-              return { pid, identity: "owner", pgid: process.pid, sid: null };
+              return { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null };
             if (pid === 700 && supervisorAlive)
-              return { pid, identity: "supervisor", pgid: 700, sid: null };
-            if (pid === 701 && cliAlive) return { pid, identity: "cli", pgid: 700, sid: null };
+              return { pid, identity: SYNTHETIC_IDENTITY.SUPERVISOR, pgid: 700, sid: null };
+            if (pid === 701 && cliAlive)
+              return { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null };
             return null;
           },
           terminateExactTree: () => {
@@ -255,7 +292,7 @@ describe("owned CLI output and orphan recovery", () => {
             cli: { pid: number; identity: string },
             force: boolean,
           ) => {
-            expect(cli).toMatchObject({ pid: 701, identity: "cli" });
+            expect(cli).toMatchObject({ pid: 701, identity: SYNTHETIC_IDENTITY.CLI });
             fallbackForces.push(force);
             cliAlive = false;
           },
@@ -306,8 +343,10 @@ describe("owned CLI output and orphan recovery", () => {
         strategy: "posix-session" as const,
         platform: process.platform,
         observe: (pid: number) => {
-          if (pid === process.pid) return { pid, identity: "owner", pgid: process.pid, sid: null };
-          if (pid === 701 && cliAlive) return { pid, identity: "cli", pgid: 700, sid: null };
+          if (pid === process.pid)
+            return { pid, identity: SYNTHETIC_IDENTITY.OWNER, pgid: process.pid, sid: null };
+          if (pid === 701 && cliAlive)
+            return { pid, identity: SYNTHETIC_IDENTITY.CLI, pgid: 700, sid: null };
           return null;
         },
         terminateExactTree: () => {
@@ -318,7 +357,7 @@ describe("owned CLI output and orphan recovery", () => {
           cli: { pid: number; identity: string },
           force: boolean,
         ) => {
-          expect(cli).toMatchObject({ pid: 701, identity: "cli" });
+          expect(cli).toMatchObject({ pid: 701, identity: SYNTHETIC_IDENTITY.CLI });
           fallbackForces.push(force);
           cliAlive = false;
         },
@@ -339,7 +378,7 @@ describe("owned CLI output and orphan recovery", () => {
         state: OWNED_PROCESS_STATE.UNCERTAIN,
         supervisor_pid: 700,
         cli_pid: 701,
-        cli_identity: "cli",
+        cli_identity: SYNTHETIC_IDENTITY.CLI,
       });
     } finally {
       rmSync(root, { recursive: true, force: true });

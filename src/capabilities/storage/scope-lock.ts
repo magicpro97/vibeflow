@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import type { ProcessLock } from "../../durability/index.js";
 import { acquireProcessLock, inspectProcessLockStatus } from "../../durability/index.js";
 import { canonicalDurabilityPath } from "../../durability/native.js";
@@ -6,7 +7,7 @@ import { CapabilityValidationError } from "../wire/primitives.js";
 import type { CapabilityStorePathsV1 } from "./paths.js";
 
 export interface CapabilityScopeLockV1 {
-  readonly scope: "project" | "user";
+  readonly scope: CapabilityScope;
   readonly scopeIdentityDigest: string;
   readonly processLock: ProcessLock;
   assertHeld(): void;
@@ -14,21 +15,21 @@ export interface CapabilityScopeLockV1 {
 }
 
 export interface CapabilityAuthorityActivationLockV1 {
-  readonly scope: "project" | "user";
+  readonly scope: CapabilityScope;
   readonly processLock: ProcessLock;
   assertHeld(): void;
   release(): void;
 }
 
 export interface CapabilityPortableCasLockV1 {
-  readonly scope: "project" | "user";
+  readonly scope: CapabilityScope;
   readonly scopeIdentityDigest: string;
   readonly processLock: ProcessLock;
   assertHeld(): void;
 }
 
 interface LockBindingV1 {
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scopeIdentityDigest: string | null;
   privateRoot: string;
   portableTarget: string | null;
@@ -78,7 +79,9 @@ export function acquireCapabilityAuthorityActivationLock(
   timeoutMs = 5_000,
 ): CapabilityAuthorityActivationLockV1 {
   const operation =
-    paths.scope === "project" ? "project-authority-activation" : "user-authority-activation";
+    paths.scope === CAPABILITY_SCOPE.PROJECT
+      ? "project-authority-activation"
+      : "user-authority-activation";
   return acquireCapabilityAuthorityLock(paths, operation, timeoutMs);
 }
 
@@ -119,8 +122,8 @@ export function bindProjectIdentityPortableCas(
   const binding = LOCK_BINDINGS.get(authorityLock);
   if (
     !binding ||
-    binding.scope !== "project" ||
-    paths.scope !== "project" ||
+    binding.scope !== CAPABILITY_SCOPE.PROJECT ||
+    paths.scope !== CAPABILITY_SCOPE.PROJECT ||
     binding.privateRoot !== canonicalDurabilityPath(paths.privateRoot) ||
     binding.processLock !== authorityLock.processLock
   )
@@ -132,7 +135,7 @@ export function bindProjectIdentityPortableCas(
   authorityLock.assertHeld();
   return register(
     {
-      scope: "project" as const,
+      scope: CAPABILITY_SCOPE.PROJECT,
       scopeIdentityDigest,
       processLock: authorityLock.processLock,
       assertHeld: () => authorityLock.assertHeld(),

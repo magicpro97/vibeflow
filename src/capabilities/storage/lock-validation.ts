@@ -1,6 +1,13 @@
+import { CAPABILITY_MANIFEST_DEPENDENCY_SCOPE } from "../../actions/capability-manifest-vocabulary-contract.js";
+import { ENGINES } from "../../core/agent-contract.js";
+import { type CapabilityScope, isCapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJson, canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import { validateImmutablePackagePin } from "../source/pins.js";
-import type { CapabilityLockEntryV1, CapabilityLockV1 } from "../wire/lock.js";
+import {
+  CAPABILITY_LOCK_TARGET_STATES,
+  type CapabilityLockEntryV1,
+  type CapabilityLockV1,
+} from "../wire/lock.js";
 import {
   CapabilityValidationError,
   assertSortedUnique,
@@ -18,8 +25,6 @@ import {
 } from "../wire/primitives.js";
 import { validateLockEntryAuthenticity } from "./lock-entry-authenticity.js";
 import { validatePortablePublicScalar } from "./portable-value-validation.js";
-
-const ENGINES = ["claude", "codex", "copilot", "opencode", "antigravity"] as const;
 
 export function capabilityLockEntryDigest(entry: CapabilityLockEntryV1): string {
   const { lock_entry_digest: _, ...preimage } = entry;
@@ -78,14 +83,14 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
   );
   for (const [index, dependency] of entry.dependencies.entries()) {
     const path = `${entry.package_id}.dependencies[${index}]`;
-    if (dependency.required_scope === "same")
+    if (dependency.required_scope === CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.SAME)
       exactKeys(
         dependency,
         ["required_scope", "package_id", "version", "content_sha256"],
         [],
         path,
       );
-    else if (dependency.required_scope === "user-prerequisite")
+    else if (dependency.required_scope === CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.USER_PREREQUISITE)
       exactKeys(
         dependency,
         [
@@ -102,7 +107,7 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
     packageId(dependency.package_id, "dependency.package_id");
     text(dependency.version, `${path}.version`, { min: 1, max: 128, ascii: true });
     rawSha256(dependency.content_sha256, "dependency.content_sha256");
-    if (dependency.required_scope === "user-prerequisite")
+    if (dependency.required_scope === CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.USER_PREREQUISITE)
       digest(dependency.required_health_plan_digest, "dependency.required_health_plan_digest");
   }
   assertSortedUnique(
@@ -163,7 +168,7 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
     if (target.participant_id !== null)
       text(target.participant_id, "target.participant_id", { min: 1, max: 512, ascii: true });
     boolean(target.required, "target.required");
-    enumeration(target.state, ["installed", "degraded"] as const, "target.state");
+    enumeration(target.state, CAPABILITY_LOCK_TARGET_STATES, "target.state");
     assertSortedUnique(target.adapter_fingerprints, bytewise, "target.adapter_fingerprints");
     for (const fingerprint of target.adapter_fingerprints)
       digest(fingerprint, "target.adapter_fingerprints");
@@ -207,7 +212,7 @@ function validateEntry(entry: CapabilityLockEntryV1, scope: CapabilityLockV1["sc
 
 export function validateCapabilityLock(
   lock: CapabilityLockV1,
-  options: { expected_scope?: "project" | "user"; parents?: readonly CapabilityLockV1[] } = {},
+  options: { expected_scope?: CapabilityScope; parents?: readonly CapabilityLockV1[] } = {},
 ): CapabilityLockV1 {
   exactKeys(
     lock,
@@ -235,7 +240,7 @@ export function validateCapabilityLock(
     );
   if (
     lock.fabric_active !== true ||
-    !["project", "user"].includes(lock.scope) ||
+    !isCapabilityScope(lock.scope) ||
     (options.expected_scope && options.expected_scope !== lock.scope)
   )
     throw new CapabilityValidationError("capability lock scope/fabric marker is invalid", "lock");
@@ -259,7 +264,7 @@ export function validateCapabilityLock(
   const packages = new Map(lock.packages.map((entry) => [entry.package_id, entry]));
   for (const entry of lock.packages) {
     for (const dependency of entry.dependencies) {
-      if (dependency.required_scope !== "same") continue;
+      if (dependency.required_scope !== CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.SAME) continue;
       const resolved = packages.get(dependency.package_id);
       if (
         !resolved ||

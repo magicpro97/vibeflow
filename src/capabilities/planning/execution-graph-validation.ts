@@ -2,7 +2,7 @@ import { canonicalJson, digestV1 } from "../../durability/index.js";
 import { validateAdapterPrivateDescriptor } from "../adapters/private-descriptors.js";
 import { validateCapabilityAdapterRegistry } from "../adapters/registry.js";
 import type { CapabilityAdapterPrivateDescriptorV1 } from "../adapters/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { validateCapabilityFabricPlan } from "../operations/validation.js";
 import { permissionBindingDigest } from "../permissions/index.js";
 import { validateExecutionPrivateInputRecord } from "../private-input/execution-binding.js";
@@ -32,7 +32,7 @@ import { ownedProjectionRecord } from "./resource-planner.js";
 import type { CapabilityAdapterPlanV1, CapabilityDurablePlanningGraphV1 } from "./types.js";
 
 function fail(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function assertDense(rows: readonly { order: number }[], label: string): void {

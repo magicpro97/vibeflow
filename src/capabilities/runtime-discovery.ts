@@ -1,6 +1,7 @@
 import { readdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { EngineName } from "../actions/types.js";
+import { isAgentEngine } from "../core/agent-contract.js";
 import { digestV1 } from "../durability/index.js";
 import type {
   CapabilityDiscoveryEntryV1,
@@ -10,8 +11,6 @@ import type {
 import { packageRecordCachePath } from "./source/package-cache-paths.js";
 import type { FilesystemCapabilityPackageCacheV1 } from "./source/package-cache-reader.js";
 import { CapabilityValidationError, bytewise } from "./wire/primitives.js";
-
-const ENGINES: EngineName[] = ["antigravity", "claude", "codex", "copilot", "opencode"];
 
 /** Deterministic offline discovery projected only from fully validated retained packages. */
 export class FilesystemCapabilityDiscoveryReaderV1 implements CapabilityDiscoveryReaderV1 {
@@ -46,7 +45,7 @@ export class FilesystemCapabilityDiscoveryReaderV1 implements CapabilityDiscover
       if (!resolved)
         throw new CapabilityValidationError("scanned package record disappeared", name);
       const compatible = Object.keys(resolved.manifest.compatibility.engines)
-        .filter((engine): engine is EngineName => ENGINES.includes(engine as EngineName))
+        .filter((engine): engine is EngineName => isAgentEngine(engine))
         .sort(bytewise);
       const draft = {
         package_id: resolved.pin.id,

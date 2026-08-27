@@ -1,20 +1,16 @@
-import type { ActionEffectClass } from "../../actions/index.js";
+import {
+  ACTION_EFFECT_CLASSES,
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  type ActionEffectClass,
+} from "../../actions/index.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { validateCapabilityFabricPlan } from "../operations/validation.js";
 import type { CapabilityAdapterPlanV1, CapabilityFabricPlanV1 } from "../planning/types.js";
 import type { CapabilityActionPlanBindingV1 } from "./types.js";
 
-const EFFECT_ORDER: readonly ActionEffectClass[] = [
-  "pure-local-read",
-  "local-read-with-cache",
-  "network-read",
-  "process-probe",
-  "project-write",
-  "user-write",
-  "external-compensatable",
-  "external-irreversible",
-];
+const EFFECT_ORDER: readonly ActionEffectClass[] = ACTION_EFFECT_CLASSES;
 
 function stepEffects(plan: CapabilityAdapterPlanV1): ActionEffectClass[] {
   return EFFECT_ORDER.filter((effect) =>
@@ -34,7 +30,10 @@ export function materializeCapabilityActionPlan(
     schema_version: "1.0",
     domain: "capability",
     action_root_locator: structuredClone(plan.action_root_locator),
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     execution_object_closure_digest: plan.execution_closure_digest,
     permission_digest: plan.permission_digest,
     steps: plan.adapter_plans.map((adapterPlan, order) => ({
@@ -57,6 +56,6 @@ export function assertCapabilityActionPlan(
   if (canonicalJson(value) !== canonicalJson(expected))
     throw new CapabilityRuntimeError(
       "capability action plan does not bind the exact Fabric plan",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
 }

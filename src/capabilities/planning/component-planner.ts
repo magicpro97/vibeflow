@@ -1,5 +1,12 @@
 import type { ActionTargetBindingV1 } from "../../actions/preview-types.js";
-import type { ActionEffectClass } from "../../actions/types.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import {
+  ACTION_EFFECT_CLASS,
+  ACTION_PLANNING_MODE,
+  ACTION_REVERSIBILITY_VALUE,
+} from "../../actions/public-action-contract.js";
+import type { ActionEffectClass, ActionPlanningMode } from "../../actions/types.js";
+import { CAPABILITY_SCOPE, CAPABILITY_STATUS } from "../../core/capability-contract.js";
 import { digestV1Bytes } from "../../durability/canonical.js";
 import { digestHex, digestV1 } from "../../durability/index.js";
 import type {
@@ -9,7 +16,7 @@ import type {
   CapabilityEffectDescriptorV1,
 } from "../adapters/types.js";
 import type { CapabilityComponentV1 } from "../manifest/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import { buildHealthPlans, targetPermissions } from "./component-target.js";
 import { adapterPlanDigest, adapterPlanIdentity, projectionSnapshotDigest } from "./digests.js";
@@ -33,7 +40,7 @@ export function buildHostAdapterPlan(input: {
   adapter: CapabilityAdapterIdentityV1;
   broker: CapabilityEffectBrokerV1;
   now: string;
-  persistence?: "transient" | "durable";
+  persistence?: ActionPlanningMode;
 }): {
   snapshot: CapabilityProjectionSnapshotV1;
   descriptors: CapabilityEffectDescriptorV1[];
@@ -65,7 +72,7 @@ export function buildHostAdapterPlan(input: {
   if (evidenceDigests.size > 1)
     throw new CapabilityRuntimeError(
       "one adapter plan produced conflicting private inspection evidence",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   const live = resources.map((resource) => resource.expected_preimage_sha256);
   const adoptingPackage =
@@ -93,8 +100,11 @@ export function buildHostAdapterPlan(input: {
         state: (alreadyDesired
           ? "owned"
           : live.every((value) => value === null)
-            ? "absent"
-            : "unmanaged") as "owned" | "absent" | "unmanaged",
+            ? CAPABILITY_STATUS.ABSENT
+            : CAPABILITY_STATUS.UNMANAGED) as
+          | "owned"
+          | typeof CAPABILITY_STATUS.ABSENT
+          | typeof CAPABILITY_STATUS.UNMANAGED,
         live_projection_digests: alreadyDesired
           ? resources
               .map(
@@ -119,7 +129,7 @@ export function buildHostAdapterPlan(input: {
       ? "remove"
       : "ensure";
   const actionRootLocator = request.action_root_locator ?? {
-    kind: "capability" as const,
+    kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
     scope: request.scope,
     scope_identity_digest: request.scope_identity_digest,
   };
@@ -133,7 +143,7 @@ export function buildHostAdapterPlan(input: {
           targetId: target.target_id,
           prepared: preparedEffect,
           broker,
-          persistence: persistence ?? "transient",
+          persistence: persistence ?? ACTION_PLANNING_MODE.TRANSIENT,
           actionRootLocator,
           descriptorKind: "intent",
           operation,
@@ -147,7 +157,7 @@ export function buildHostAdapterPlan(input: {
             targetId: target.target_id,
             prepared: preparedEffect,
             broker,
-            persistence: persistence ?? "transient",
+            persistence: persistence ?? ACTION_PLANNING_MODE.TRANSIENT,
             actionRootLocator,
             ownerBinding: intent.descriptor.private_payload_binding,
             descriptorKind: "rollback",
@@ -158,7 +168,10 @@ export function buildHostAdapterPlan(input: {
   const permissions = targetPermissions(pkg.manifest.permissions, target)
     .map((permission) => permission.permission_id)
     .sort(bytewise);
-  const effect: ActionEffectClass = request.scope === "project" ? "project-write" : "user-write";
+  const effect: ActionEffectClass =
+    request.scope === CAPABILITY_SCOPE.PROJECT
+      ? ACTION_EFFECT_CLASS.PROJECT_WRITE
+      : ACTION_EFFECT_CLASS.USER_WRITE;
   const steps: CapabilityAdapterStepV1[] = alreadyDesired
     ? []
     : descriptorPairs.map(({ intent, rollback }, order) => {
@@ -183,7 +196,7 @@ export function buildHostAdapterPlan(input: {
           },
           owned_resources: [resources[order] as (typeof resources)[number]],
           rollback: {
-            class: "reversible",
+            class: ACTION_REVERSIBILITY_VALUE.REVERSIBLE,
             schema_id: rollbackDescriptor.descriptor_schema_id,
             descriptor_digest: rollbackDescriptor.descriptor_digest,
             private_descriptor_ref: `actions/v1/objects/${digestHex(rollbackDescriptor.descriptor_digest)}.json`,
@@ -220,7 +233,7 @@ export function buildHostAdapterPlan(input: {
     },
     steps,
     health_plan: buildHealthPlans(pkg, component, target),
-    reversibility: "reversible" as const,
+    reversibility: ACTION_REVERSIBILITY_VALUE.REVERSIBLE,
     plan_digest: "",
   };
   const provisional = adapterPlanDigest(draft);
@@ -267,7 +280,7 @@ export function buildNonHostAdapterPlan(input: {
     target_states: [
       {
         target_id: target.target_id,
-        state: "absent" as const,
+        state: CAPABILITY_STATUS.ABSENT,
         live_projection_digests: [],
       },
     ],
@@ -314,7 +327,7 @@ export function buildNonHostAdapterPlan(input: {
     },
     steps: [],
     health_plan: [],
-    reversibility: "manual" as const,
+    reversibility: ACTION_REVERSIBILITY_VALUE.MANUAL,
     plan_digest: "",
   };
   const digest = adapterPlanDigest(draft);

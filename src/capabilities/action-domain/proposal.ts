@@ -1,4 +1,6 @@
 import {
+  ACTION_PRODUCER_REQUEST_BINDING_KIND,
+  ACTION_ROOT_LOCATOR_KIND,
   type ActionProposalRequestV1,
   type ActionRequestAuthorityV1,
   type CanonicalActionRequestV1,
@@ -6,6 +8,13 @@ import {
   canonicalActionRequestDigest,
   materializeProposal,
 } from "../../actions/index.js";
+import {
+  ACTION_AUTHORITY_BINDING_MODE,
+  ACTION_DOMAIN,
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "../../actions/public-action-contract.js";
 import type { CapabilityConversationProposalBaseV1 as ConversationBase } from "../../orchestrator/conversation/conversation-action-service.js";
 import { capabilityClosurePackagePins } from "../planning/closure-packages.js";
 import type {
@@ -47,17 +56,23 @@ export function materializeCapabilityConversationProposal(input: {
 }) {
   const { request, authority, conversation, action, graph, base_lock } = input;
   const { plan } = graph;
-  const locator = { kind: "conversation" as const, root_session_id: conversation.root_session_id };
+  const locator = {
+    kind: ACTION_ROOT_LOCATOR_KIND.CONVERSATION,
+    root_session_id: conversation.root_session_id,
+  };
   if (authority.authority_scope_digest !== actionIdempotencyScopeDigest(locator))
     throw new Error("capability conversation authority scope mismatch");
   const canonicalRequest: CanonicalActionRequestV1 = {
-    schema_version: "1.0",
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     origin: "conversation",
     principal_digest: authority.principal_digest,
     authority_scope_digest: authority.authority_scope_digest,
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     request: {
-      schema_version: "1.0",
+      schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
       anchor_event_id: request.anchor_event_id,
       expected: structuredClone(request.expected),
       candidate: structuredClone(request.candidate),
@@ -70,16 +85,19 @@ export function materializeCapabilityConversationProposal(input: {
     plan.runtime_closure.effect_packages,
   );
   const proposal = materializeProposal({
-    schema_version: "1.0",
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     idempotency_key: request.idempotency_key,
     origin_event_id: request.anchor_event_id,
-    domain: "capability",
+    domain: ACTION_DOMAIN.CAPABILITY,
     action_root_locator: locator,
     producer_request_binding: {
-      kind: "canonical-action-request",
+      kind: ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST,
       digest: canonicalActionRequestDigest(canonicalRequest),
     },
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     execution_object_closure_digest: plan.execution_closure_digest,
     base: {
       root_session_id: conversation.root_session_id,
@@ -95,7 +113,7 @@ export function materializeCapabilityConversationProposal(input: {
       capability_lock_digest: plan.base_lock_digest,
       capability_parent_generation_digests: plan.base_lock_digest ? [plan.base_lock_digest] : [],
       user_prerequisites: prerequisites(plan),
-      authority_binding_mode: "current",
+      authority_binding_mode: ACTION_AUTHORITY_BINDING_MODE.CURRENT,
       authority_epoch: plan.runtime_closure.authority.authority_epoch,
       authority_head_digest: plan.runtime_closure.authority.authority_head_digest,
       repair_authorization_binding_digest: null,

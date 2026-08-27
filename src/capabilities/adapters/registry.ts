@@ -1,5 +1,11 @@
+import {
+  CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_COMPONENT_TYPES,
+  LEGACY_SOURCES,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { LegacySourceV1 } from "../../actions/legacy-adopt-types.js";
 import type { EngineName } from "../../actions/types.js";
+import { AGENT_ENGINE } from "../../core/agent-contract.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import type { CapabilityComponentV1 } from "../manifest/types.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
@@ -10,45 +16,57 @@ import type {
   CapabilityAdapterSupportV1,
 } from "./types.js";
 
-const COMPONENTS: CapabilityComponentV1["type"][] = [
-  "skill",
-  "mcp",
-  "tool",
-  "hook",
-  "role",
-  "engine-setting",
-];
-const ENGINES: EngineName[] = ["claude", "codex", "copilot", "opencode", "antigravity"];
-const LEGACY_SOURCES: LegacySourceV1[] = [
-  "skill-lock",
-  "tool-managed-evidence",
-  "mcp-managed-sidecar",
-  "hook-sentinel",
-  "role-marker",
-];
+const COMPONENTS: readonly CapabilityComponentV1["type"][] = CAPABILITY_MANIFEST_COMPONENT_TYPES;
+/** Stable adapter registry wire order. Changing it changes the signed registry digest. */
+export const CAPABILITY_ADAPTER_ENGINE_ORDER = Object.freeze([
+  AGENT_ENGINE.CLAUDE,
+  AGENT_ENGINE.CODEX,
+  AGENT_ENGINE.COPILOT,
+  AGENT_ENGINE.OPENCODE,
+  AGENT_ENGINE.ANTIGRAVITY,
+] as const satisfies readonly EngineName[]);
+const ADOPTABLE_LEGACY_SOURCES: readonly LegacySourceV1[] = LEGACY_SOURCES;
 
 const SUPPORT: Record<
   CapabilityComponentV1["type"],
   Record<EngineName, CapabilityAdapterSupportV1>
 > = {
-  skill: { claude: "host", codex: "host", copilot: "host", opencode: "host", antigravity: "host" },
-  mcp: {
+  [CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL]: {
+    claude: "host",
+    codex: "host",
+    copilot: "host",
+    opencode: "host",
+    antigravity: "host",
+  },
+  [CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP]: {
     claude: "host",
     codex: "host",
     copilot: "external-confirmation-required",
     opencode: "host",
     antigravity: "host",
   },
-  tool: {
+  [CAPABILITY_MANIFEST_COMPONENT_TYPE.TOOL]: {
     claude: "native-install-required",
     codex: "native-install-required",
     copilot: "native-install-required",
     opencode: "native-install-required",
     antigravity: "native-install-required",
   },
-  hook: { claude: "host", codex: "host", copilot: "host", opencode: "host", antigravity: "host" },
-  role: { claude: "host", codex: "host", copilot: "host", opencode: "host", antigravity: "host" },
-  "engine-setting": {
+  [CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK]: {
+    claude: "host",
+    codex: "host",
+    copilot: "host",
+    opencode: "host",
+    antigravity: "host",
+  },
+  [CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE]: {
+    claude: "host",
+    codex: "host",
+    copilot: "host",
+    opencode: "host",
+    antigravity: "host",
+  },
+  [CAPABILITY_MANIFEST_COMPONENT_TYPE.ENGINE_SETTING]: {
     claude: "unsupported",
     codex: "unsupported",
     copilot: "unsupported",
@@ -82,7 +100,7 @@ function adapterIdentity(
 
 function registryEntries(): CapabilityAdapterRegistryEntryV1[] {
   return COMPONENTS.flatMap((component_type) =>
-    ENGINES.map((engine): CapabilityAdapterRegistryEntryV1 => {
+    CAPABILITY_ADAPTER_ENGINE_ORDER.map((engine): CapabilityAdapterRegistryEntryV1 => {
       const support = SUPPORT[component_type][engine];
       return support === "unsupported"
         ? { component_type, engine, support, adapter: null }
@@ -97,7 +115,7 @@ function registryEntries(): CapabilityAdapterRegistryEntryV1[] {
 }
 
 function legacyAdoptionEntries(): CapabilityAdapterRegistryV1["legacy_adoption_entries"] {
-  return LEGACY_SOURCES.map((legacy_source) => {
+  return ADOPTABLE_LEGACY_SOURCES.map((legacy_source) => {
     const adapter_id = `vf.legacy-adopt.${legacy_source}`;
     const adapter_version = "1.0.0";
     return {
@@ -144,7 +162,10 @@ export const CAPABILITY_ADAPTER_REGISTRY_V1: CapabilityAdapterRegistryV1 = Objec
 export function validateCapabilityAdapterRegistry(
   value: CapabilityAdapterRegistryV1,
 ): CapabilityAdapterRegistryV1 {
-  if (value.schema_version !== "1.0" || value.entries.length !== COMPONENTS.length * ENGINES.length)
+  if (
+    value.schema_version !== "1.0" ||
+    value.entries.length !== COMPONENTS.length * CAPABILITY_ADAPTER_ENGINE_ORDER.length
+  )
     throw new CapabilityValidationError("adapter registry is incomplete", "adapter_registry");
   const expected = registryEntries();
   for (let index = 0; index < expected.length; index += 1) {

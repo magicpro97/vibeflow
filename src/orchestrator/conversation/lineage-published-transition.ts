@@ -1,3 +1,4 @@
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import {
   type RevisionReservationRecordV1,
   assertRevisionReservationRecordV1,
@@ -82,9 +83,9 @@ export function validatePublishedRevisionTransition(
   );
   assertOperationReservationClosure(operation, reservation);
   if (
-    prior.head_status !== "committed" ||
+    prior.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     !prior.active ||
-    current.head_status !== "committed" ||
+    current.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     !current.active ||
     current.root_session_id !== prior.root_session_id ||
     current.root_session_id !== operation.root_session_id ||

@@ -1,7 +1,14 @@
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import { ACTION_PLANNING_MODE } from "../../actions/public-action-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
-import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import type { ActionPlanningMode, PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import { isCapabilityScope } from "../../core/capability-contract.js";
 import { digestV1Bytes } from "../../durability/canonical.js";
 import { canonicalJsonBytes, digestHex, digestV1, sha256Digest } from "../../durability/index.js";
+import {
+  CAPABILITY_OPERATION_RECOVERY_PHASE,
+  type CapabilityOperationRecoveryPhaseV1,
+} from "../wire/operation-state-contract.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import {
   type CapabilityInternalCasFaultV1,
@@ -83,12 +90,15 @@ export class FilesystemCapabilityPayloadStoreV1 {
 
   put(
     descriptor: CapabilityAdapterPrivateDescriptorV1,
-    persistence: "transient" | "durable",
-    actionRootLocator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    persistence: ActionPlanningMode,
+    actionRootLocator: Exclude<
+      PrivateActionRootLocatorV1,
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+    >,
   ): CapabilityPrivateEffectBindingV1 {
     const validated = validateAdapterPrivateDescriptor(descriptor);
     const binding = privateEffectBinding(validated, actionRootLocator);
-    if (persistence === "transient")
+    if (persistence === ACTION_PLANNING_MODE.TRANSIENT)
       this.#transient.set(validated.descriptor_digest, { descriptor: validated, binding });
     else {
       if (validated.value.private_payload.payload_kind === "memory-test-only")
@@ -118,10 +128,13 @@ export class FilesystemCapabilityPayloadStoreV1 {
   putPreimage(
     resource: CapabilityOwnedResourceV1,
     bytes: Uint8Array | null,
-    persistence: "transient" | "durable",
-    actionRootLocator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    persistence: ActionPlanningMode,
+    actionRootLocator: Exclude<
+      PrivateActionRootLocatorV1,
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+    >,
   ): void {
-    if (bytes === null || persistence === "transient") return;
+    if (bytes === null || persistence === ACTION_PLANNING_MODE.TRANSIENT) return;
     const digest = digestV1Bytes("VF-ADAPTER-PRIVATE-PREIMAGE\0v1\0", bytes);
     if (
       resource.expected_preimage_sha256 !== sha256Digest(bytes).slice("sha256:".length) ||
@@ -221,7 +234,7 @@ export class FilesystemCapabilityPayloadStoreV1 {
   publishOwner(
     payload: CapabilityPrivateEffectPayloadV1,
     binding: CapabilityPrivateEffectBindingV1,
-    direction: "forward" | "rollback",
+    direction: CapabilityOperationRecoveryPhaseV1,
   ): void {
     if (payload.payload_kind === "memory-test-only") return;
     const path = boundedProjectionPath(
@@ -234,13 +247,15 @@ export class FilesystemCapabilityPayloadStoreV1 {
       payload.expected_postimage_sha256 === null
         ? null
         : ownerRecord(payload.ownership_key, binding);
-    const expectedBytes = direction === "forward" ? preimageBytes : postimageBytes;
+    const expectedBytes =
+      direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? preimageBytes : postimageBytes;
     if (!bytesEqual(currentBytes, expectedBytes))
       throw new CapabilityValidationError(
         "owned projection registry CAS preimage mismatch",
         payload.ownership_key,
       );
-    const replacementBytes = direction === "forward" ? postimageBytes : preimageBytes;
+    const replacementBytes =
+      direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? postimageBytes : preimageBytes;
     compareAndSwapProjectionFile(path, currentBytes, replacementBytes, 0o600);
     this.fault()?.({ phase: "after-cas", absolute_path: path, surface: "owner-binding" });
   }
@@ -248,7 +263,7 @@ export class FilesystemCapabilityPayloadStoreV1 {
   reconcileOwner(
     payload: CapabilityPrivateEffectPayloadV1,
     binding: CapabilityPrivateEffectBindingV1,
-    direction: "forward" | "rollback",
+    direction: CapabilityOperationRecoveryPhaseV1,
   ): void {
     if (payload.payload_kind === "memory-test-only") return;
     const path = boundedProjectionPath(
@@ -266,7 +281,8 @@ export class FilesystemCapabilityPayloadStoreV1 {
         "owner repair encountered an unapproved binding",
         payload.ownership_key,
       );
-    const desiredBytes = direction === "forward" ? postimageBytes : preimageBytes;
+    const desiredBytes =
+      direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? postimageBytes : preimageBytes;
     if (bytesEqual(currentBytes, desiredBytes)) return;
     compareAndSwapProjectionFile(path, currentBytes, desiredBytes, 0o600);
   }
@@ -306,7 +322,7 @@ export class FilesystemCapabilityPayloadStoreV1 {
 
   private scopeFromOwnershipKey(ownershipKey: string): keyof FilesystemPayloadStoreRootsV1 {
     const scope = ownershipKey.split(":")[1];
-    if (scope !== "project" && scope !== "user")
+    if (!isCapabilityScope(scope))
       throw new CapabilityValidationError("ownership key has no capability scope", ownershipKey);
     return scope;
   }

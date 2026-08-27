@@ -7,7 +7,9 @@ import {
 } from "../../actions/index.js";
 import { validateLegacyCandidate } from "../../actions/internal-candidate-validation.js";
 import type { StrictLegacyAdoptCandidateV1 } from "../../actions/legacy-adopt-types.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import {
   acquireProcessLock,
   canonicalJson,
@@ -219,7 +221,7 @@ export class LegacyAdoptInspectionIssuerV1 {
 
   resolve(
     candidateRef: { candidate_id: string; candidate_digest: string },
-    context: { scope: "project" | "user"; action_root_locator: LegacyAdoptActionRootLocatorV1 },
+    context: { scope: CapabilityScope; action_root_locator: LegacyAdoptActionRootLocatorV1 },
   ): StrictLegacyAdoptCandidateV1 {
     if (context.scope !== this.options.storage.paths.scope)
       throw new CapabilityValidationError("candidate scope is not owned by this service", "scope");
@@ -336,7 +338,7 @@ export class LegacyAdoptInspectionIssuerV1 {
   private readCandidate(
     root: string,
     candidateId: string,
-    scope: "project" | "user",
+    scope: CapabilityScope,
   ): StrictLegacyAdoptCandidateV1 {
     if (!/^vf-adopt-[a-f0-9]{64}$/.test(candidateId))
       throw new CapabilityValidationError("invalid legacy candidate ID", "candidate_id");
@@ -370,9 +372,9 @@ export class LegacyAdoptInspectionIssuerV1 {
 
   private locator(
     value: PrivateActionRootLocatorV1,
-    scope: "project" | "user",
+    scope: CapabilityScope,
   ): LegacyAdoptActionRootLocatorV1 {
-    if (value.kind === "recovery-bootstrap")
+    if (value.kind === ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP)
       throw new CapabilityValidationError(
         "recovery bootstrap cannot inspect legacy state",
         "action_root_locator",

@@ -17,6 +17,7 @@ import {
   type WorkflowState,
   writeState,
 } from "../core.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { DEFAULT_CONCURRENCY, orchestrateUnits } from "../orchestrator/run.js";
 import { preflightAllAsync } from "../preflight.js";
 import type { ProjectProfile } from "../scanner.js";
@@ -67,7 +68,7 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
     const match = readiness.find((r) => r.engine === forceEngine && r.level === "ready");
     engine = match ? forceEngine : null;
   } else {
-    const readiness = await probe(ENGINES, { probe: true });
+    const readiness = await probe([...ENGINES], { probe: true });
     engine = selectBestEngine(readiness);
   }
   if (!engine) {
@@ -230,7 +231,8 @@ export async function runAiInitWorkflow(opts: AiInitWorkflowOpts): Promise<AiIni
 
   const result = { units: allUnits, reviews: allReviews };
   const goalMet =
-    result.reviews.every((r) => r.pass) && result.units.every((u) => u.status === "done");
+    result.reviews.every((r) => r.pass) &&
+    result.units.every((u) => u.status === WORK_UNIT_STATUS.DONE);
   return {
     ok: goalMet,
     engine,

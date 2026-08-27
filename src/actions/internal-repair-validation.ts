@@ -1,28 +1,17 @@
 import { digestHex, digestV1 } from "../durability/index.js";
+import {
+  ACTION_AUTHORITY_REPAIR_TARGET_PREIMAGE_PRESENCE,
+  isAuthorityRepairDomain,
+  isAuthorityRepairScopeAllowed,
+} from "./internal-action-vocabulary-contract.js";
 import { EMPTY_PERMISSION_DIGEST } from "./proposal-content-validation.js";
+import {
+  ACTION_RISK,
+  ACTION_SCOPE,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
 import { assertDigest, assertOpaqueId, assertTimestamp } from "./record-primitives.js";
 import { ActionValidationError, exactObject } from "./strict-json.js";
-
-const DOMAINS = new Set([
-  "conversation-manifest",
-  "conversation-journal",
-  "conversation-content",
-  "lineage-head",
-  "lineage-reservation",
-  "lineage-association",
-  "revision-operation",
-  "action-authority",
-  "capability-lock",
-  "capability-operation",
-  "capability-outbox",
-  "scope-identity",
-  "authority-epoch",
-  "grant-authority",
-  "policy-authority",
-  "registry-trust",
-  "secret-revocation",
-  "authority-repair",
-]);
 
 export function validateRepairPlan(value: unknown): void {
   const row = exactObject(
@@ -49,18 +38,18 @@ export function validateRepairPlan(value: unknown): void {
     [],
     "$.action.plan",
   );
-  if (row.schema_version !== "1.0" || row.risk !== "critical")
+  if (row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION || row.risk !== ACTION_RISK.CRITICAL)
     invalid("invalid repair plan version or risk");
-  if (!["conversation", "project", "user"].includes(row.authority_scope as string))
+  if (!Object.values(ACTION_SCOPE).some((scope) => scope === row.authority_scope))
     invalid("invalid repair authority scope");
-  if (!DOMAINS.has(row.domain as string)) invalid("invalid repair domain");
+  if (!isAuthorityRepairDomain(row.domain)) invalid("invalid repair domain");
   const target = exactObject(
     row.target_preimage,
     ["presence", "corrupt_bytes_sha256", "quarantine_ref", "absence_evidence_digest"],
     [],
     "$.action.plan.target_preimage",
   );
-  if (target.presence === "present") {
+  if (target.presence === ACTION_AUTHORITY_REPAIR_TARGET_PREIMAGE_PRESENCE.PRESENT) {
     if (
       typeof target.corrupt_bytes_sha256 !== "string" ||
       !/^[a-f0-9]{64}$/.test(target.corrupt_bytes_sha256) ||
@@ -69,7 +58,7 @@ export function validateRepairPlan(value: unknown): void {
     )
       invalid("invalid present repair preimage");
     assertDigest(target.quarantine_ref, "$.action.plan.target_preimage.quarantine_ref");
-  } else if (target.presence === "absent") {
+  } else if (target.presence === ACTION_AUTHORITY_REPAIR_TARGET_PREIMAGE_PRESENCE.ABSENT) {
     if (
       target.corrupt_bytes_sha256 !== null ||
       target.quarantine_ref !== null ||
@@ -95,30 +84,7 @@ export function validateRepairPlan(value: unknown): void {
     if (row[key] !== null) assertDigest(row[key], `$.action.plan.${key}`);
   if (row.permission_digest !== EMPTY_PERMISSION_DIGEST)
     invalid("repair plan must use the canonical empty permission binding");
-  const conversationDomains = new Set([
-    "conversation-manifest",
-    "conversation-journal",
-    "conversation-content",
-    "lineage-head",
-    "lineage-reservation",
-    "lineage-association",
-    "revision-operation",
-  ]);
-  const capabilityDomains = new Set([
-    "capability-lock",
-    "capability-operation",
-    "capability-outbox",
-    "scope-identity",
-    "authority-epoch",
-    "grant-authority",
-    "policy-authority",
-    "registry-trust",
-    "secret-revocation",
-  ]);
-  if (
-    (conversationDomains.has(row.domain as string) && row.authority_scope !== "conversation") ||
-    (capabilityDomains.has(row.domain as string) && row.authority_scope === "conversation")
-  )
+  if (!isAuthorityRepairScopeAllowed(row.domain, row.authority_scope))
     invalid("repair domain and authority scope mismatch");
   const created = assertTimestamp(row.created_at, "$.action.plan.created_at");
   if (assertTimestamp(row.expires_at, "$.action.plan.expires_at") <= created)

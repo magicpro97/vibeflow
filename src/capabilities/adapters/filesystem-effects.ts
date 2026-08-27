@@ -1,4 +1,8 @@
 import { canonicalJsonBytes, sha256Digest } from "../../durability/index.js";
+import {
+  CAPABILITY_OPERATION_RECOVERY_PHASE,
+  type CapabilityOperationRecoveryPhaseV1,
+} from "../wire/operation-state-contract.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import {
   type CapabilityInternalCasFaultV1,
@@ -293,7 +297,7 @@ function applyToml(
 export function mutateFilesystemPayload(
   payload: CapabilityPrivateEffectPayloadV1,
   roots: ProjectionBuilderRootsV1,
-  direction: "forward" | "rollback",
+  direction: CapabilityOperationRecoveryPhaseV1,
   fault?: CapabilityInternalCasFaultV1,
 ): void {
   if (payload.payload_kind === "legacy-claim") return;
@@ -302,7 +306,7 @@ export function mutateFilesystemPayload(
       "memory payload reached production filesystem broker",
       "private_payload",
     );
-  const forward = direction === "forward";
+  const forward = direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD;
   if (payload.payload_kind === "owned-file") applyFile(payload, roots, forward, fault);
   else if (payload.payload_kind === "json-key-slice") applyJson(payload, roots, forward, fault);
   else if (payload.payload_kind === "hook-config-slice")

@@ -1,4 +1,13 @@
+import {
+  ACTION_OPERATION_DOMAIN_TERMINAL_STATES,
+  ACTION_OPERATION_STATE,
+  PUBLIC_OPERATION_REVISION_PHASE,
+} from "../../actions/protocol-contract.js";
 import type { RevisionOperationV1 } from "./lineage-revision-operation.js";
+import {
+  REVISION_OPERATION_EVENT_PAYLOAD_KIND,
+  type REVISION_OPERATION_INITIAL_PHASE,
+} from "./revision-operation-event-contract.js";
 import type {
   RevisionActionTerminalBindingV1,
   RevisionOperationPayloadV1,
@@ -30,8 +39,10 @@ function assertTerminalShape(terminals: readonly RevisionActionTerminalBindingV1
   for (const terminal of terminals) {
     if (
       !OPERATION.test(terminal.action_operation_id) ||
-      !["succeeded", "failed", "needs_recovery"].includes(terminal.outcome) ||
-      (terminal.outcome === "succeeded") !== (terminal.reason_code === null) ||
+      !ACTION_OPERATION_DOMAIN_TERMINAL_STATES.some(
+        (candidate) => candidate === terminal.outcome,
+      ) ||
+      (terminal.outcome === ACTION_OPERATION_STATE.SUCCEEDED) !== (terminal.reason_code === null) ||
       (terminal.reason_code !== null && !/^[a-z][a-z0-9_~-]{0,127}$/.test(terminal.reason_code)) ||
       (prior && Buffer.compare(Buffer.from(prior), Buffer.from(terminal.action_operation_id)) >= 0)
     )
@@ -49,14 +60,20 @@ function terminal(
 }
 
 function assertOrdinaryTransition(
-  payload: Extract<RevisionOperationPayloadV1, { kind: "state-transition" }>,
+  payload: Extract<
+    RevisionOperationPayloadV1,
+    { kind: typeof REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION }
+  >,
   activeEffect: string,
 ): string {
   const { authorized_by_action_operation_id: authorizer, effect_action_operation_id: effect } =
     payload;
   if (!OPERATION.test(authorizer) || !OPERATION.test(effect))
     throw new Error("invalid revision transition action authority identity");
-  if (payload.from === "start_failed" && payload.to === "starting") {
+  if (
+    payload.from === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED &&
+    payload.to === PUBLIC_OPERATION_REVISION_PHASE.STARTING
+  ) {
     if (
       authorizer !== effect ||
       effect === activeEffect ||
@@ -66,14 +83,14 @@ function assertOrdinaryTransition(
       throw new Error("invalid revision retry transition authority");
     return effect;
   }
-  if (payload.to === "abandoned") {
+  if (payload.to === PUBLIC_OPERATION_REVISION_PHASE.ABANDONED) {
     const controlled = authorizer !== activeEffect;
     const expected = controlled
       ? [
-          terminal(activeEffect, "failed", payload.reason_code),
-          terminal(authorizer, "succeeded", null),
+          terminal(activeEffect, ACTION_OPERATION_STATE.FAILED, payload.reason_code),
+          terminal(authorizer, ACTION_OPERATION_STATE.SUCCEEDED, null),
         ]
-      : [terminal(activeEffect, "failed", payload.reason_code)];
+      : [terminal(activeEffect, ACTION_OPERATION_STATE.FAILED, payload.reason_code)];
     if (
       effect !== activeEffect ||
       payload.reason_code === null ||
@@ -85,14 +102,17 @@ function assertOrdinaryTransition(
   if (authorizer !== activeEffect || effect !== activeEffect)
     throw new Error("ordinary revision work has mismatched authorizer and effect");
   let expected: RevisionActionTerminalBindingV1[] = [];
-  if (payload.to === "started") expected = [terminal(activeEffect, "succeeded", null)];
-  else if (payload.to === "start_failed")
-    expected = [terminal(activeEffect, "failed", payload.reason_code)];
-  else if (payload.to === "needs_recovery")
-    expected = [terminal(activeEffect, "needs_recovery", payload.reason_code)];
+  if (payload.to === PUBLIC_OPERATION_REVISION_PHASE.STARTED)
+    expected = [terminal(activeEffect, ACTION_OPERATION_STATE.SUCCEEDED, null)];
+  else if (payload.to === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED)
+    expected = [terminal(activeEffect, ACTION_OPERATION_STATE.FAILED, payload.reason_code)];
+  else if (payload.to === PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY)
+    expected = [terminal(activeEffect, ACTION_OPERATION_STATE.NEEDS_RECOVERY, payload.reason_code)];
   if (
     (expected.length === 0 && payload.reason_code !== null) ||
-    (expected.length > 0 && payload.to !== "started" && payload.reason_code === null) ||
+    (expected.length > 0 &&
+      payload.to !== PUBLIC_OPERATION_REVISION_PHASE.STARTED &&
+      payload.reason_code === null) ||
     !sameTerminals(payload.action_terminals, expected)
   )
     throw new Error("invalid revision transition terminal cardinality");
@@ -100,11 +120,15 @@ function assertOrdinaryTransition(
 }
 
 export function validateRevisionTransitionAuthority(
-  payload: Extract<RevisionOperationPayloadV1, { kind: "state-transition" }>,
+  payload: Extract<
+    RevisionOperationPayloadV1,
+    { kind: typeof REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION }
+  >,
   activeEffect: string,
 ): string {
   assertTerminalShape(payload.action_terminals);
-  if (payload.from !== "needs_recovery") return assertOrdinaryTransition(payload, activeEffect);
+  if (payload.from !== PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY)
+    return assertOrdinaryTransition(payload, activeEffect);
   const authorizer = payload.authorized_by_action_operation_id;
   if (
     !OPERATION.test(authorizer) ||
@@ -114,11 +138,14 @@ export function validateRevisionTransitionAuthority(
     throw new Error("invalid revision recovery transition authority");
   // The suspended effect was already terminally mirrored as needs_recovery.
   // Recovery closes only the reviewed control action; terminal authority is append-once.
-  const expected = [terminal(authorizer, "succeeded", null)];
+  const expected = [terminal(authorizer, ACTION_OPERATION_STATE.SUCCEEDED, null)];
   if (
-    ((payload.to === "start_failed" || payload.to === "abandoned") &&
+    ((payload.to === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED ||
+      payload.to === PUBLIC_OPERATION_REVISION_PHASE.ABANDONED) &&
       payload.reason_code === null) ||
-    (!["start_failed", "abandoned"].includes(payload.to) && payload.reason_code !== null) ||
+    (payload.to !== PUBLIC_OPERATION_REVISION_PHASE.START_FAILED &&
+      payload.to !== PUBLIC_OPERATION_REVISION_PHASE.ABANDONED &&
+      payload.reason_code !== null) ||
     !sameTerminals(payload.action_terminals, expected)
   )
     throw new Error("invalid revision recovery terminal cardinality");
@@ -127,8 +154,11 @@ export function validateRevisionTransitionAuthority(
 
 export function validateRevisionAuxiliaryAuthority(
   operation: RevisionOperationV1,
-  payload: Exclude<RevisionOperationPayloadV1, { kind: "state-transition" }>,
-  state: RevisionOperationStateV1 | "created",
+  payload: Exclude<
+    RevisionOperationPayloadV1,
+    { kind: typeof REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION }
+  >,
+  state: RevisionOperationStateV1 | typeof REVISION_OPERATION_INITIAL_PHASE.CREATED,
   activeEffect: string,
   prefixDigest: string,
 ): void {
@@ -137,24 +167,28 @@ export function validateRevisionAuxiliaryAuthority(
     payload.effect_action_operation_id !== activeEffect
   )
     throw new Error("invalid revision auxiliary action authority");
-  if (payload.kind === "reconciliation-result") {
+  if (payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.RECONCILIATION_RESULT) {
     assertTerminalShape(payload.action_terminals);
     if (
-      state !== "needs_recovery" ||
+      state !== PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY ||
       payload.authorized_by_action_operation_id === activeEffect ||
-      payload.outcome !== "failed" ||
+      payload.outcome !== ACTION_OPERATION_STATE.FAILED ||
       payload.observed_state_digest !== prefixDigest ||
       !payload.reason_code ||
       !sameTerminals(payload.action_terminals, [
-        terminal(payload.authorized_by_action_operation_id, "failed", payload.reason_code),
+        terminal(
+          payload.authorized_by_action_operation_id,
+          ACTION_OPERATION_STATE.FAILED,
+          payload.reason_code,
+        ),
       ])
     )
       throw new Error("invalid revision reconciliation result authority");
     return;
   }
-  if (payload.kind === "head-commit") {
+  if (payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.HEAD_COMMIT) {
     if (
-      state !== "prepared" ||
+      state !== PUBLIC_OPERATION_REVISION_PHASE.PREPARED ||
       payload.authorized_by_action_operation_id !== activeEffect ||
       payload.prior_head_digest !== operation.expected_head_digest ||
       payload.prior_head_checkpoint_digest !== payload.prior_head_digest ||
@@ -164,6 +198,9 @@ export function validateRevisionAuxiliaryAuthority(
       throw new Error("invalid revision head commit authority");
     return;
   }
-  if (state !== "starting" || payload.authorized_by_action_operation_id !== activeEffect)
+  if (
+    state !== PUBLIC_OPERATION_REVISION_PHASE.STARTING ||
+    payload.authorized_by_action_operation_id !== activeEffect
+  )
     throw new Error("revision participant event is out of order or unauthorized");
 }

@@ -1,8 +1,20 @@
 import { digestHex, digestV1 } from "../durability/index.js";
+import { HOST_ACTION_KIND } from "./host-action-contract.js";
 import { validateIdempotencyKey } from "./idempotency.js";
 import { validateInternalHostAction } from "./internal-validation.js";
 import { validateAdoptProposalClosure } from "./proposal-adopt-validation.js";
 import { validateProposalDraftShape, validateProposalRecord } from "./proposal-validation.js";
+import { ACTION_AUTHORITY_EVENT_KIND, ACTION_ROOT_LOCATOR_KIND } from "./protocol-contract.js";
+import {
+  ACTION_AUTHORITY_BINDING_MODE,
+  ACTION_CHALLENGE_CLASS,
+  ACTION_DECISION,
+  ACTION_EFFECT_CLASS,
+  ACTION_SCOPE,
+  ACTOR_KIND,
+  CREDENTIAL_CLASS,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
 import { assertPublicProjectionSafe } from "./public-safety.js";
 import type {
   ActionApprovalV1,
@@ -16,14 +28,14 @@ import type {
 } from "./types.js";
 
 const EFFECT_ORDER = [
-  "pure-local-read",
-  "local-read-with-cache",
-  "network-read",
-  "process-probe",
-  "project-write",
-  "user-write",
-  "external-compensatable",
-  "external-irreversible",
+  ACTION_EFFECT_CLASS.PURE_LOCAL_READ,
+  ACTION_EFFECT_CLASS.LOCAL_READ_WITH_CACHE,
+  ACTION_EFFECT_CLASS.NETWORK_READ,
+  ACTION_EFFECT_CLASS.PROCESS_PROBE,
+  ACTION_EFFECT_CLASS.PROJECT_WRITE,
+  ACTION_EFFECT_CLASS.USER_WRITE,
+  ACTION_EFFECT_CLASS.EXTERNAL_COMPENSATABLE,
+  ACTION_EFFECT_CLASS.EXTERNAL_IRREVERSIBLE,
 ] as const;
 
 function fail(message: string): never {
@@ -57,6 +69,8 @@ export function deriveOperationId(
 
 export function materializeProposal(draft: ActionProposalDraftV1): ActionProposalV1 {
   assertProposalDraft(draft);
+  if (draft.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP)
+    fail("recovery-bootstrap materialization requires an unavailable durable bootstrap resolver");
   const proposalDigest = digestV1("VF-ACTION-PROPOSAL\0v1\0", draft);
   const proposal: ActionProposalV1 = {
     ...draft,
@@ -101,7 +115,7 @@ function assertProposalDraft(draft: ActionProposalDraftV1): void {
 }
 
 export interface ApprovalDecisionInputV1 {
-  decision: "approved" | "denied";
+  decision: ActionApprovalV1["decision"];
   decided_by: PublicActor;
   challenge_class: ChallengeClass;
   challenge_digest: string | null;
@@ -120,7 +134,7 @@ export function materializeApproval(
   if (expires <= decided || expires > timestamp(proposal.expires_at, "proposal.expires_at"))
     fail("approval expiry exceeds its authority window");
   const withoutIdentity = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     proposal_id: proposal.proposal_id,
     proposal_digest: proposal.proposal_digest,
     plan_digest: proposal.plan_digest,
@@ -151,31 +165,38 @@ export function materializeApproval(
 }
 
 function assertApprovalActor(proposal: ActionProposalV1, input: ApprovalDecisionInputV1): void {
-  if (input.decided_by.kind === "agent" || input.decided_by.kind === "system-recovery")
+  if (
+    input.decided_by.kind === ACTOR_KIND.AGENT ||
+    input.decided_by.kind === ACTOR_KIND.SYSTEM_RECOVERY
+  )
     fail("agent or recovery actor cannot approve new intent");
-  if (input.decision === "denied") {
-    if (input.challenge_class !== "normal-confirm" || input.challenge_digest !== null)
+  if (input.decision === ACTION_DECISION.DENIED) {
+    if (
+      input.challenge_class !== ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM ||
+      input.challenge_digest !== null
+    )
       fail("denial must be normal-confirm without challenge");
-    if (input.decided_by.credential_class === "automation-grant")
+    if (input.decided_by.credential_class === CREDENTIAL_CLASS.AUTOMATION_GRANT)
       fail("automation actor cannot deny");
     return;
   }
   const needsDigest =
-    input.challenge_class === "fresh-user-scope" || input.challenge_class === "public-literal";
+    input.challenge_class === ACTION_CHALLENGE_CLASS.FRESH_USER_SCOPE ||
+    input.challenge_class === ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL;
   if (needsDigest !== (input.challenge_digest !== null))
     fail("challenge class and digest disagree");
   const expected = expectedApprovalClass(proposal, input.decided_by.credential_class);
   if (input.challenge_class !== expected) fail(`approval requires ${expected}`);
-  if (input.challenge_class === "recovery-tty") {
+  if (input.challenge_class === ACTION_CHALLENGE_CLASS.RECOVERY_TTY) {
     if (
-      proposal.action.type !== "authority.repair" ||
-      proposal.action_root_locator.kind !== "recovery-bootstrap" ||
-      proposal.base.authority_binding_mode !== "recovery-checkpoint" ||
-      input.decided_by.kind !== "human-cli" ||
-      input.decided_by.credential_class !== "recovery"
+      proposal.action.type !== HOST_ACTION_KIND.AUTHORITY_REPAIR ||
+      proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP ||
+      proposal.base.authority_binding_mode !== ACTION_AUTHORITY_BINDING_MODE.RECOVERY_CHECKPOINT ||
+      input.decided_by.kind !== ACTOR_KIND.HUMAN_CLI ||
+      input.decided_by.credential_class !== CREDENTIAL_CLASS.RECOVERY
     )
       fail("recovery approval is outside bootstrap repair");
-  } else if (input.decided_by.credential_class === "recovery")
+  } else if (input.decided_by.credential_class === CREDENTIAL_CLASS.RECOVERY)
     fail("recovery credential is forbidden");
 }
 
@@ -183,18 +204,20 @@ function expectedApprovalClass(
   proposal: ActionProposalV1,
   credential: PublicActor["credential_class"],
 ): ChallengeClass {
-  if (proposal.action.type === "authority.repair")
-    return proposal.action_root_locator.kind === "recovery-bootstrap"
-      ? "recovery-tty"
-      : "normal-confirm";
-  if (proposal.action.type === "conversation.publish_suspected_literal") return "public-literal";
-  if (credential === "automation-grant") return "automation-grant";
+  if (proposal.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR)
+    return proposal.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP
+      ? ACTION_CHALLENGE_CLASS.RECOVERY_TTY
+      : ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
+  if (proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL)
+    return ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL;
+  if (credential === CREDENTIAL_CLASS.AUTOMATION_GRANT)
+    return ACTION_CHALLENGE_CLASS.AUTOMATION_GRANT;
   if (
-    proposal.base.capability_scope === "user" ||
-    proposal.target_set.some((target) => target.target.scope === "user")
+    proposal.base.capability_scope === ACTION_SCOPE.USER ||
+    proposal.target_set.some((target) => target.target.scope === ACTION_SCOPE.USER)
   )
-    return "fresh-user-scope";
-  return "normal-confirm";
+    return ACTION_CHALLENGE_CLASS.FRESH_USER_SCOPE;
+  return ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
 }
 
 export function assertApproval(proposal: ActionProposalV1, approval: ActionApprovalV1): void {
@@ -217,9 +240,9 @@ export function materializeDispatchRecord(
   domainHeaderDigest: string | null,
 ): ActionDispatchRecordV1 {
   assertApproval(proposal, approval);
-  if (approval.decision !== "approved") fail("denied proposal cannot dispatch");
+  if (approval.decision !== ACTION_DECISION.APPROVED) fail("denied proposal cannot dispatch");
   const record = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     operation_id: deriveOperationId(proposal, approval.approval_id),
     proposal_id: proposal.proposal_id,
     proposal_digest: proposal.proposal_digest,
@@ -246,17 +269,17 @@ export function materializeAuthorityEvent(
   payload: ActionAuthorityPayloadV1,
   recordedAt?: string,
 ): ActionAuthorityEventV1 {
-  if (payload.kind === "state-transition" && recordedAt === undefined)
+  if (payload.kind === ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION && recordedAt === undefined)
     fail("state transition requires its authoritative recorded timestamp");
   const resolvedRecordedAt =
     recordedAt ??
-    (payload.kind === "proposal-created"
+    (payload.kind === ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED
       ? proposal.created_at
-      : payload.kind === "approval-decision"
+      : payload.kind === ACTION_AUTHORITY_EVENT_KIND.APPROVAL_DECISION
         ? payload.approval.decided_at
         : fail("state transition requires recorded timestamp"));
   const event = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     proposal_id: proposal.proposal_id,
     sequence,
     previous_event_digest: previousEventDigest,

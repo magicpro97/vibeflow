@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type { ConversationActionService } from "./conversation-action-service.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
@@ -6,7 +7,7 @@ import { resolveRevisionBase } from "./revision-source.js";
 
 export class CapabilityConversationSourceStaleError extends ConversationRevisionConflictError {
   override readonly name = "CapabilityConversationSourceStaleError";
-  readonly code = "stale_conversation" as const;
+  readonly code = PUBLIC_ERROR_CODE.STALE_CONVERSATION;
 
   constructor() {
     super("capability proposal expected conversation source is stale");

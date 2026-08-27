@@ -1,89 +1,67 @@
 import type {
-  CONVERSATION_MESSAGE_QUEUE_LIMITS,
-  ConversationMessageQueueSchemaVersionV1,
+  CONVERSATION_MESSAGE_QUEUE_FIELD,
   ConversationMessageQueueStaleReasonV1,
   ConversationMessageQueueStateV1,
 } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
-import type { HomeCanonicalQuoteReference } from "./conversation-home-types.js";
+import type {
+  ConversationMessageQueueSnapshotV1,
+  EditQueuedUserMessageRequestV1,
+  EnqueueConversationUserMessageRequestV1,
+  PublicConversationMessageQueueInvalidationV1,
+  PublicQueuedUserMessageV1,
+} from "../../orchestrator/conversation/conversation-message-queue-wire.js";
 
 export type HomeMessageQueueState = ConversationMessageQueueStateV1;
 export type HomeMessageQueueStaleReason = ConversationMessageQueueStaleReasonV1;
+export type HomeEnqueueMessageRequest = EnqueueConversationUserMessageRequestV1;
+export type HomeEditQueuedMessageRequest = EditQueuedUserMessageRequestV1;
+export type HomeQueuedMessage = PublicQueuedUserMessageV1;
+export type HomeMessageQueueSnapshot = ConversationMessageQueueSnapshotV1;
+export type HomeMessageQueueInvalidation = PublicConversationMessageQueueInvalidationV1;
 
-export interface HomeEnqueueMessageRequest {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  idempotency_key: string;
-  expected_authority_digest: string;
-  content: string;
-  target_participants: "all" | string[];
-  quote_refs: HomeCanonicalQuoteReference[];
-  private_context_present: boolean;
-}
+export const HOME_QUEUED_MESSAGE_PROJECTION_KIND = Object.freeze({
+  AUTHORITATIVE: "authoritative",
+  OPTIMISTIC: "optimistic",
+  RETRYABLE: "retryable",
+} as const);
 
-export interface HomeEditQueuedMessageRequest {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  idempotency_key: string;
-  expected_item_digest: string;
-  content: string;
-}
+export type HomeQueuedMessageProjectionKind =
+  (typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND)[keyof typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND];
 
-export interface HomeQueuedMessage {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  queue_item_id: string;
-  queue_sequence: number;
-  root_session_id: string;
-  author_public_id: "human";
-  content: string;
-  content_digest: string;
-  target_participants: "all" | string[];
-  quote_refs: HomeCanonicalQuoteReference[];
-  private_context_present: boolean;
-  predecessor_queue_item_id: string | null;
-  admitted_authority_digest: string;
-  effective_authority_digest: string;
-  state: HomeMessageQueueState;
-  stale_reason: HomeMessageQueueStaleReason | null;
-  admitted_at: string;
-  updated_at: string;
-  item_digest: string;
-}
+type OptimisticQueueRequestFields =
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.CONTENT
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.TARGET_PARTICIPANTS
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.QUOTE_REFS
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.PRIVATE_CONTEXT_PRESENT;
 
-export interface HomeMessageQueueSnapshot {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  root_session_id: string;
-  current_authority_digest: string;
-  max_nonterminal_items: typeof CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems;
-  items: HomeQueuedMessage[];
-}
-
-export interface HomeMessageQueueInvalidation {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  root_session_id: string;
-  queue_item_id: string;
-  state: HomeMessageQueueState;
-  item_digest: string;
-}
-
-export interface HomeOptimisticQueuedMessage {
-  kind: "optimistic";
+export type HomeOptimisticQueuedMessage = {
+  kind: typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND.OPTIMISTIC;
   projection_key: string;
   root_session_id: string;
   client_order: number;
-  content: string;
-  target_participants: "all" | string[];
-  quote_refs: HomeCanonicalQuoteReference[];
-  private_context_present: boolean;
-}
+} & Pick<EnqueueConversationUserMessageRequestV1, OptimisticQueueRequestFields>;
+
+export type HomeRetryableQueuedMessage = Omit<HomeOptimisticQueuedMessage, "kind"> & {
+  kind: typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND.RETRYABLE;
+  failure_message: string;
+  retrying: boolean;
+};
 
 export type HomeQueuedMessageProjection =
-  | { kind: "authoritative"; item: HomeQueuedMessage }
-  | HomeOptimisticQueuedMessage;
+  | {
+      kind: typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND.AUTHORITATIVE;
+      item: HomeQueuedMessage;
+    }
+  | HomeOptimisticQueuedMessage
+  | HomeRetryableQueuedMessage;
 
-export interface HomeQueuedMessageEditBinding {
-  root_session_id: string;
-  queue_item_id: string;
-  item_digest: string;
-  queue_sequence: number;
-  target_participants: "all" | string[];
-  quote_refs: HomeCanonicalQuoteReference[];
-  private_context_present: boolean;
-}
+type QueueEditBindingFields =
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.ROOT_SESSION_ID
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.QUEUE_ITEM_ID
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.ITEM_DIGEST
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.QUEUE_SEQUENCE
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.TARGET_PARTICIPANTS
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.QUOTE_REFS
+  | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.PRIVATE_CONTEXT_PRESENT;
+
+export type HomeQueuedMessageEditBinding = Pick<PublicQueuedUserMessageV1, QueueEditBindingFields>;

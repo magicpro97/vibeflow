@@ -1,10 +1,11 @@
 import type { readFileSync } from "node:fs";
 import {
   OWNED_PROCESS_TIMING_MS,
+  OWNED_SUPERVISOR_RECEIPT_FIELDS,
   OWNED_SUPERVISOR_RECEIPT_KEY,
-  type OwnedCliIdentityState,
-  type OwnedProcessQuiescenceScope,
-  isOwnedCliIdentityState,
+  type OwnedCliLaunchReceiptV1,
+  type OwnedSupervisorLaunchReceiptV1,
+  isOwnedCliIdentityClaim,
   isOwnedProcessIgnorableStreamErrorCode,
   isOwnedProcessQuiescenceScope,
 } from "./owned-process-contract.js";
@@ -14,16 +15,8 @@ interface OwnedSupervisorReceiptRuntime {
   readFileSync: typeof readFileSync;
 }
 
-type SupervisorLaunchReceipt = {
-  [OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID]: number;
-  [OWNED_SUPERVISOR_RECEIPT_KEY.CONTAINMENT]?: OwnedProcessQuiescenceScope;
-};
-export type CliLaunchReceipt = {
-  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PID]: number;
-  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY]?: string | null;
-  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY_STATE]?: OwnedCliIdentityState;
-  [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PGID]?: number | null;
-};
+type SupervisorLaunchReceipt = OwnedSupervisorLaunchReceiptV1;
+export type CliLaunchReceipt = OwnedCliLaunchReceiptV1;
 
 type OwnedSupervisorPidReceiptKey =
   | typeof OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID
@@ -35,20 +28,30 @@ function parseOwnedSupervisorReceipt(
 ): SupervisorLaunchReceipt | CliLaunchReceipt | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
+  const allowedFields =
+    key === OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID
+      ? OWNED_SUPERVISOR_RECEIPT_FIELDS.SUPERVISOR
+      : OWNED_SUPERVISOR_RECEIPT_FIELDS.CLI;
+  if (
+    !Object.hasOwn(record, key) ||
+    Object.keys(record).some(
+      (field) => !(allowedFields as readonly string[]).some((allowed) => allowed === field),
+    )
+  )
+    return null;
   const pid = record[key];
   if (!Number.isSafeInteger(pid) || (pid as number) < 1) return null;
   if (key === OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID) {
     const containment = record[OWNED_SUPERVISOR_RECEIPT_KEY.CONTAINMENT];
-    if (containment !== undefined && !isOwnedProcessQuiescenceScope(containment)) return null;
+    if (!isOwnedProcessQuiescenceScope(containment)) return null;
     return record as SupervisorLaunchReceipt;
   }
   const identity = record[OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY];
   const identityState = record[OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY_STATE];
   const pgid = record[OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PGID];
   if (
-    (identity !== undefined && identity !== null && typeof identity !== "string") ||
-    (identityState !== undefined && !isOwnedCliIdentityState(identityState)) ||
-    (pgid !== undefined && pgid !== null && (!Number.isSafeInteger(pgid) || (pgid as number) < 1))
+    !isOwnedCliIdentityClaim(identity, identityState) ||
+    (pgid !== null && (!Number.isSafeInteger(pgid) || (pgid as number) < 1))
   )
     return null;
   return record as CliLaunchReceipt;

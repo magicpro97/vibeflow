@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import {
   ConversationArtifactAncestryCorruptError,
   type ConversationArtifactAncestryResolutionV1,
 } from "../orchestrator/conversation/conversation-artifact-ancestry.js";
+import { CONVERSATION_PUBLIC_ARTIFACT_RESOLVER } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import { conversationReadError } from "./conversation-list-route.js";
 
 const OPAQUE_ARTIFACT = /^artifact_[A-Za-z0-9_-]{43}$/;
@@ -21,10 +23,12 @@ export interface ConversationArtifactAuthority {
 }
 
 const missing = (): Response =>
-  conversationReadError("not_found", { message: "The artifact was not found." });
+  conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+    message: "The artifact was not found.",
+  });
 
 function invalidRequest(): Response {
-  return conversationReadError("invalid_request", {
+  return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
     message: "The artifact request is invalid.",
   });
 }
@@ -66,7 +70,7 @@ export async function handleConversationArtifact(
     if (
       actual !== expected ||
       content.byteLength !== resolution.reference.byte_length ||
-      resolution.reference.resolver !== "conversation-artifact-v1"
+      resolution.reference.resolver !== CONVERSATION_PUBLIC_ARTIFACT_RESOLVER.CONVERSATION
     )
       throw new ConversationArtifactAncestryCorruptError(
         "published artifact reference disagrees with retained bytes",
@@ -83,14 +87,14 @@ export async function handleConversationArtifact(
     });
   } catch (error) {
     if (error instanceof ConversationArtifactAncestryCorruptError)
-      return conversationReadError("authority_corrupt", {
+      return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
         message: "Artifact ancestry authority is corrupt.",
-        recoveryAction: "repair-authority",
+        recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
       });
-    return conversationReadError("service_unavailable", {
+    return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
       message: "The artifact store is unavailable.",
       retryable: true,
-      recoveryAction: "retry",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
     });
   }
 }

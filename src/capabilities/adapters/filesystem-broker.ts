@@ -1,9 +1,17 @@
 import { resolve } from "node:path";
+import { CAPABILITY_MANIFEST_COMPONENT_TYPE } from "../../actions/capability-manifest-vocabulary-contract.js";
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
 import type { StrictLegacyAdoptCandidateV1 } from "../../actions/legacy-adopt-types.js";
-import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import { ACTION_PLANNING_MODE } from "../../actions/public-action-contract.js";
+import type { ActionPlanningMode, PrivateActionRootLocatorV1 } from "../../actions/types.js";
 import { digestV1 } from "../../durability/index.js";
 import { filesystemLegacyClaimPayload } from "../legacy/filesystem-reader.js";
 import type { LegacyAdoptClaimAuthorityV1, LegacyOwnedMarkerV1 } from "../legacy/types.js";
+import {
+  type CapabilityOperationRecoveryPhaseV1,
+  CAPABILITY_OPERATION_RECOVERY_PHASE as RECOVERY_PHASE,
+} from "../wire/operation-state-contract.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import { legacyClaimKey } from "./filesystem-broker-keys.js";
 import { mutateFilesystemPayload, observeFilesystemPayload } from "./filesystem-effects.js";
@@ -11,7 +19,10 @@ import { filesystemCapabilityHealth } from "./filesystem-health.js";
 import type { CapabilityInternalCasFaultV1 } from "./filesystem-io.js";
 import { FilesystemCapabilityPayloadStoreV1 } from "./filesystem-payload-store.js";
 import { assertPayloadPreimageBytes } from "./filesystem-preimage.js";
-import { reconcileFilesystemPayload } from "./filesystem-reconcile.js";
+import {
+  assertReconciledFilesystemObservation,
+  reconcileFilesystemPayload,
+} from "./filesystem-reconcile.js";
 import { buildFilesystemRemoval } from "./filesystem-removal.js";
 import { bindResourcePreimage, privateEffectPreimageBytes } from "./payload-preimage-authority.js";
 import {
@@ -35,7 +46,6 @@ import type {
   FilesystemCapabilityEffectBrokerOptionsV1,
 } from "./types.js";
 export type { FilesystemCapabilityEffectBrokerOptionsV1 } from "./types.js";
-
 export class FilesystemCapabilityEffectBrokerV1
   implements CapabilityEffectBrokerV1, LegacyAdoptClaimAuthorityV1
 {
@@ -44,7 +54,6 @@ export class FilesystemCapabilityEffectBrokerV1
   readonly #now: () => string;
   readonly #legacyClaims = new Map<string, CapabilityPrivateEffectPayloadV1>();
   fault: CapabilityInternalCasFaultV1 | null = null;
-
   constructor(options: FilesystemCapabilityEffectBrokerOptionsV1) {
     this.roots = { project: resolve(options.projectRoot), user: resolve(options.userRoot) };
     const stateRoots = {
@@ -52,8 +61,13 @@ export class FilesystemCapabilityEffectBrokerV1
       user: resolve(options.userStateRoot),
     };
     const actionRoots = options.actionRoots ?? {
-      resolve: (locator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>) => {
-        if (locator.kind !== "capability")
+      resolve: (
+        locator: Exclude<
+          PrivateActionRootLocatorV1,
+          { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+        >,
+      ) => {
+        if (locator.kind !== ACTION_ROOT_LOCATOR_KIND.CAPABILITY)
           throw new CapabilityValidationError(
             "conversation action-root resolver is unavailable",
             "action_root_locator",
@@ -72,10 +86,9 @@ export class FilesystemCapabilityEffectBrokerV1
     );
     this.#now = options.now ?? (() => new Date().toISOString());
   }
-
   prepare(
     request: CapabilityEffectPreparationRequestV1,
-    persistence: "transient" | "durable" = "transient",
+    persistence: ActionPlanningMode = ACTION_PLANNING_MODE.TRANSIENT,
   ): CapabilityPreparedEffectV1 {
     if (request.operation === "claim") return this.prepareClaim(request, persistence);
     const built = buildFilesystemProjection(request, this.roots);
@@ -83,7 +96,7 @@ export class FilesystemCapabilityEffectBrokerV1
     const privatePreimageBytes = privateEffectPreimageBytes(privatePayload);
     const resource = bindResourcePreimage(built.resource, privatePreimageBytes);
     const locator = request.request.action_root_locator ?? {
-      kind: "capability" as const,
+      kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
       scope: request.request.scope,
       scope_identity_digest: request.request.scope_identity_digest,
     };
@@ -94,11 +107,13 @@ export class FilesystemCapabilityEffectBrokerV1
       private_preimage_bytes: privatePreimageBytes,
     };
   }
-
   prepareRemoval(
     resource: CapabilityOwnedResourceV1,
-    persistence: "transient" | "durable" = "transient",
-    actionRootLocator?: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    persistence: ActionPlanningMode = ACTION_PLANNING_MODE.TRANSIENT,
+    actionRootLocator?: Exclude<
+      PrivateActionRootLocatorV1,
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+    >,
   ): CapabilityPreparedEffectV1 {
     if (!actionRootLocator)
       throw new CapabilityValidationError("removal action root is absent", "action_root_locator");
@@ -122,8 +137,11 @@ export class FilesystemCapabilityEffectBrokerV1
 
   retainPrivateDescriptor(
     descriptor: CapabilityAdapterPrivateDescriptorV1,
-    persistence: "transient" | "durable",
-    actionRootLocator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    persistence: ActionPlanningMode,
+    actionRootLocator: Exclude<
+      PrivateActionRootLocatorV1,
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+    >,
   ) {
     return this.payloads.put(descriptor, persistence, actionRootLocator);
   }
@@ -142,7 +160,7 @@ export class FilesystemCapabilityEffectBrokerV1
   stage(marker: LegacyOwnedMarkerV1, candidate: StrictLegacyAdoptCandidateV1): void {
     if (
       candidate.legacy_source !== marker.source ||
-      candidate.synthetic_pin.source.kind !== "legacy-adopt" ||
+      candidate.synthetic_pin.source.kind !== CAPABILITY_SOURCE_KIND.LEGACY_ADOPT ||
       candidate.synthetic_pin.source.inspection_evidence_digest !==
         candidate.inspection_evidence_digest
     )
@@ -204,14 +222,15 @@ export class FilesystemCapabilityEffectBrokerV1
           "legacy claim bytes changed",
           descriptor.resource.ownership_key,
         );
-    } else mutateFilesystemPayload(payload, this.roots, "forward", this.fault ?? undefined);
+    } else
+      mutateFilesystemPayload(payload, this.roots, RECOVERY_PHASE.FORWARD, this.fault ?? undefined);
     const after = this.inspect(descriptor.resource, payload);
     if (after.content_sha256 !== descriptor.resource.expected_postimage_sha256)
       throw new CapabilityValidationError(
         "adapter did not create the exact postimage",
         descriptor.resource.ownership_key,
       );
-    this.payloads.publishOwner(payload, descriptor.owner_binding, "forward");
+    this.payloads.publishOwner(payload, descriptor.owner_binding, RECOVERY_PHASE.FORWARD);
     return after;
   }
 
@@ -228,35 +247,27 @@ export class FilesystemCapabilityEffectBrokerV1
         "owned projection postimage changed before rollback",
         descriptor.resource.ownership_key,
       );
-    mutateFilesystemPayload(payload, this.roots, "rollback", this.fault ?? undefined);
+    mutateFilesystemPayload(payload, this.roots, RECOVERY_PHASE.ROLLBACK, this.fault ?? undefined);
     const restored = this.inspect(descriptor.resource, payload);
     if (restored.content_sha256 !== descriptor.resource.expected_preimage_sha256)
       throw new CapabilityValidationError(
         "rollback did not restore exact preimage",
         descriptor.resource.ownership_key,
       );
-    this.payloads.publishOwner(payload, descriptor.owner_binding, "rollback");
+    this.payloads.publishOwner(payload, descriptor.owner_binding, RECOVERY_PHASE.ROLLBACK);
     return restored;
   }
 
   reconcile(
     descriptor: CapabilityEffectDescriptorV1,
     privatePayload: CapabilityPrivateEffectPayloadV1,
-    direction: "forward" | "rollback",
+    direction: CapabilityOperationRecoveryPhaseV1,
   ): CapabilityProjectionObservationV1 {
     const payload = this.assertDescriptorPayload(descriptor, privatePayload);
     reconcileFilesystemPayload(payload, this.roots, direction);
     this.payloads.reconcileOwner(payload, descriptor.owner_binding, direction);
     const observation = this.inspect(descriptor.resource, payload);
-    const expected =
-      direction === "forward"
-        ? descriptor.resource.expected_postimage_sha256
-        : descriptor.resource.expected_preimage_sha256;
-    if (observation.content_sha256 !== expected)
-      throw new CapabilityValidationError(
-        "repaired projection does not match the approved terminal state",
-        descriptor.resource.ownership_key,
-      );
+    assertReconciledFilesystemObservation(descriptor.resource, observation, direction);
     return observation;
   }
 
@@ -323,7 +334,7 @@ export class FilesystemCapabilityEffectBrokerV1
 
   private prepareClaim(
     request: CapabilityEffectPreparationRequestV1,
-    persistence: "transient" | "durable",
+    persistence: ActionPlanningMode,
   ): CapabilityPreparedEffectV1 {
     const adopted = request.adopt_resource;
     if (!adopted)
@@ -332,7 +343,7 @@ export class FilesystemCapabilityEffectBrokerV1
     const source = request.package.pin.source;
     if (
       !candidate ||
-      source.kind !== "legacy-adopt" ||
+      source.kind !== CAPABILITY_SOURCE_KIND.LEGACY_ADOPT ||
       candidate.synthetic_pin.pin_digest !== request.package.pin.pin_digest ||
       candidate.inspection_evidence_digest !== source.inspection_evidence_digest
     )
@@ -364,7 +375,8 @@ export class FilesystemCapabilityEffectBrokerV1
       {
         ...adopted,
         kind:
-          request.component.type === "skill" || request.component.type === "role"
+          request.component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL ||
+          request.component.type === CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE
             ? "file"
             : "managed-registration",
         expected_postimage_sha256: observed,
@@ -374,7 +386,7 @@ export class FilesystemCapabilityEffectBrokerV1
       privatePreimageBytes,
     );
     const locator = request.request.action_root_locator ?? {
-      kind: "capability" as const,
+      kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
       scope: request.request.scope,
       scope_identity_digest: request.request.scope_identity_digest,
     };

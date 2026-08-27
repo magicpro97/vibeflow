@@ -29,6 +29,16 @@ import {
   assertConversationListResponseV1,
   normalizeConversationCatalogQuery,
 } from "./catalog-types.js";
+import {
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_CURSOR_SORT,
+  CONVERSATION_CURSOR_VALIDATION_STATUS,
+  CONVERSATION_SOURCE_INVENTORY_STATE,
+} from "./conversation-catalog-contract.js";
+import {
+  CONVERSATION_CATALOG_HEALTH,
+  CONVERSATION_CATALOG_SOURCE_KIND,
+} from "./conversation-catalog-contract.js";
 import { publishedRevisionAuthorityMap } from "./lineage-published-transition.js";
 import { deriveConversationLineages } from "./lineage-reader.js";
 import type {
@@ -222,7 +232,7 @@ export class ConversationCatalogService {
         root_session_id: rootSessionId,
         cause: "lineage-head-committed",
         source_record: {
-          source_kind: "lineage-head",
+          source_kind: CONVERSATION_CATALOG_SOURCE_KIND.LINEAGE_HEAD,
           root_session_id: rootSessionId,
           record_id: rootSessionId,
           record_digest: installedHead.content_digest,
@@ -235,7 +245,7 @@ export class ConversationCatalogService {
       root_session_id: rootSessionId,
       cause: "conversation-source-committed",
       source_record: {
-        source_kind: "conversation-journal-head",
+        source_kind: CONVERSATION_CATALOG_SOURCE_KIND.CONVERSATION_JOURNAL_HEAD,
         root_session_id: rootSessionId,
         record_id: source.journal_head.record_id,
         record_digest: source.journal_head.record_digest,
@@ -247,13 +257,13 @@ export class ConversationCatalogService {
 
   async list(input: ConversationCatalogListInputV1 = {}): Promise<ConversationListResponseV1> {
     let prior: PublishedConversationCatalogV1 | null = null;
-    let health: ConversationListResponseV1["catalog_health"] = "ready";
+    let health: ConversationListResponseV1["catalog_health"] = CONVERSATION_CATALOG_HEALTH.READY;
     try {
       prior = this.readPublished();
     } catch (error) {
       if (!(error instanceof CatalogProjectionCorruptError)) throw error;
     }
-    if (this.rebuildInFlight && prior) health = "rebuilding";
+    if (this.rebuildInFlight && prior) health = CONVERSATION_CATALOG_HEALTH.REBUILDING;
     else {
       let needsRebuild = prior === null;
       try {
@@ -270,7 +280,7 @@ export class ConversationCatalogService {
           prior = await this.startRebuild();
         } catch (error) {
           if (!prior) throw new CatalogDegradedError(true, { cause: error });
-          health = "degraded";
+          health = CONVERSATION_CATALOG_HEALTH.DEGRADED;
         }
       }
     }
@@ -296,7 +306,7 @@ export class ConversationCatalogService {
       scope_id: this.options.scopeId,
       query_digest: catalogQueryDigest(queryInput),
       filter_digest: catalogQueryDigest({ lifecycle: query.lifecycle, policy: query.policy }),
-      sort: "updated-desc-root-desc" as const,
+      sort: CONVERSATION_CURSOR_SORT.UPDATED_DESC_ROOT_DESC,
       catalog_generation: published.generation.generation_id,
       source_watermark: published.generation.source_watermark,
       catalog_head_digest: published.current.content_digest,
@@ -305,7 +315,7 @@ export class ConversationCatalogService {
     let boundary: CatalogCursorBoundaryV1 | null = null;
     if (input.cursor) {
       const checked = this.options.cursorCodec.validateCatalog(input.cursor, binding);
-      if (checked.status === "stale")
+      if (checked.status === CONVERSATION_CURSOR_VALIDATION_STATUS.STALE)
         throw new StaleCatalogCursorError(checked.restart_cursor, checked.catalog_generation);
       boundary = checked.value;
     }
@@ -313,7 +323,7 @@ export class ConversationCatalogService {
     const items = rows.slice(start, start + limit);
     const last = items.at(-1);
     const response: ConversationListResponseV1 = {
-      schema_version: "1.0",
+      schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
       items,
       next_cursor:
         last && start + items.length < rows.length
@@ -352,7 +362,12 @@ export class ConversationCatalogService {
     };
     const authority = this.authorityInputs(isolated);
     const projection = projectConversationCatalog({
-      inventory: { ...inventory, diagnostics: [], authoritative: true, state: "ready" },
+      inventory: {
+        ...inventory,
+        diagnostics: [],
+        authoritative: true,
+        state: CONVERSATION_SOURCE_INVENTORY_STATE.READY,
+      },
       lineages: isolated,
       cursorCodec: this.options.cursorCodec,
       scopeId: this.options.scopeId,

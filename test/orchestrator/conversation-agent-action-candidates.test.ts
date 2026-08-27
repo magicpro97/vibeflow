@@ -2140,7 +2140,7 @@ describe("agent natural-language host action candidates", () => {
       fx,
       created.conversation_id,
       "compaction-cancel-recovery-seed",
-      `token=${"x".repeat(12_000)}`,
+      `context_token=${"x".repeat(12_000)}`,
     );
     await fx.bootstrap.authorities.browser.actions.commit({
       conversation_id: created.conversation_id,

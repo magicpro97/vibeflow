@@ -1,3 +1,9 @@
+import {
+  AGENT_HOST_TOOLS,
+  type AgentHostToolV1,
+  isAgentEngine,
+  isAgentHostTool,
+} from "../core/agent-contract.js";
 import { assertPrivateFileRangeHandoffBindingV1 } from "../orchestrator/conversation/private-file-range-staging-store.js";
 import type {
   ConversationCreateParticipant,
@@ -9,7 +15,6 @@ const TEXT_LIMIT = 32 * 1024;
 const SHORT_LIMIT = 256;
 const PARTICIPANT_LIMIT = 64;
 const ROUND_LIMIT = 100;
-const ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
 
 function exactKeys(value: JsonObject, allowed: readonly string[]): boolean {
   const keys = Object.keys(value);
@@ -57,7 +62,7 @@ export function createLegacyConversationRequest(
       if (
         !boundedString(participant.role_ref, SHORT_LIMIT) ||
         !boundedString(participant.engine, SHORT_LIMIT) ||
-        !ENGINES.has(participant.engine)
+        !isAgentEngine(participant.engine)
       )
         return null;
       if (participant.model !== undefined && !boundedString(participant.model, SHORT_LIMIT))
@@ -65,9 +70,9 @@ export function createLegacyConversationRequest(
       if (
         participant.host_tools !== undefined &&
         (!Array.isArray(participant.host_tools) ||
-          participant.host_tools.length > 1 ||
+          participant.host_tools.length > AGENT_HOST_TOOLS.length ||
           new Set(participant.host_tools).size !== participant.host_tools.length ||
-          participant.host_tools.some((tool) => tool !== "propose_action"))
+          participant.host_tools.some((tool) => !isAgentHostTool(tool)))
       )
         return null;
       participants.push({
@@ -76,7 +81,7 @@ export function createLegacyConversationRequest(
         ...(participant.model === undefined ? {} : { model: participant.model as string }),
         ...(participant.host_tools === undefined
           ? {}
-          : { host_tools: [...participant.host_tools] as ["propose_action"] | [] }),
+          : { host_tools: [...participant.host_tools] as AgentHostToolV1[] }),
       });
     }
   }

@@ -15,11 +15,12 @@ import {
   tryOpenAt,
   unlinkAt,
 } from "./native.js";
+import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefined;
 
 function trustedSystemAlias(path: string): string | null {
-  if (process.platform !== "darwin") return null;
+  if (process.platform !== RUNTIME_PLATFORM.DARWIN) return null;
   const expected = (
     { "/etc": "/private/etc", "/tmp": "/private/tmp", "/var": "/private/var" } as Record<
       string,

@@ -1,9 +1,11 @@
+import type { CapabilityHostActionKind } from "../../actions/host-action-contract.js";
 import type { StrictLegacyAdoptCandidateV1 } from "../../actions/legacy-adopt-types.js";
 import type {
   ActionTargetBindingV1,
   CapabilityTargetDispositionV1,
   PublicHealthPlanV1,
 } from "../../actions/preview-types.js";
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type {
   ActionEffectClass,
   CapabilityScope,
@@ -12,6 +14,7 @@ import type {
   Reversibility,
   UserScopePrerequisiteBindingV1,
 } from "../../actions/types.js";
+import type { CapabilityPlanStatusV1 } from "../../core/capability-contract.js";
 import type {
   CapabilityAdapterIdentityV1,
   CapabilityAdapterRegistryV1,
@@ -65,7 +68,7 @@ export interface ResolvedCapabilityPackageV1 {
   };
 }
 
-export type CapabilityHostActionV1 = Extract<HostActionV1, { type: `capability.${string}` }>;
+export type CapabilityHostActionV1 = Extract<HostActionV1, { type: CapabilityHostActionKind }>;
 
 export interface CapabilityCanonicalActionBindingV1 {
   schema_version: "1.0";
@@ -107,7 +110,7 @@ export interface CapabilityPlanningRequestV1 {
   /** Trusted logical owner for durable proposal execution objects. */
   action_root_locator?: Exclude<
     import("../../actions/types.js").PrivateActionRootLocatorV1,
-    { kind: "recovery-bootstrap" }
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
   >;
   /** Exact host-authenticated source-access request context. */
   source_request_context?: import("./execution-types.js").CapabilitySourceAccessRequestContextV1;
@@ -182,7 +185,7 @@ export interface CapabilityExecutionObjectClosureV1 {
   schema_version: "1.0";
   action_root_locator: Exclude<
     import("../../actions/types.js").PrivateActionRootLocatorV1,
-    { kind: "recovery-bootstrap" }
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
   >;
   scope: CapabilityScope;
   scope_identity_digest: string;
@@ -218,14 +221,14 @@ export interface CapabilityPlanRuntimeClosureV1 {
 
 export interface CapabilityFabricPlanV1 {
   schema_version: "1.0";
-  status: "planned" | "action-required" | "no-op";
+  status: CapabilityPlanStatusV1;
   intent: CapabilityLifecycleIntentV1;
   action_binding: CapabilityCanonicalActionBindingV1 | null;
   scope: CapabilityScope;
   scope_identity_digest: string;
   action_root_locator: Exclude<
     import("../../actions/types.js").PrivateActionRootLocatorV1,
-    { kind: "recovery-bootstrap" }
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
   >;
   base_generation_id: string | null;
   base_lock_digest: string | null;

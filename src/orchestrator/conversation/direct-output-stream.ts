@@ -32,6 +32,16 @@ export class DirectOutputStreamV1 {
       if (parsed.answer) this.emitPlain(parsed.answer);
       return parsed;
     }
+    const authoritativeOutputReplacedBuffer =
+      this.mode === "structured-candidate" &&
+      this.buffered.length > 0 &&
+      this.buffered.join("") !== output;
+    if (authoritativeOutputReplacedBuffer) {
+      this.buffered.length = 0;
+      if (output) this.emitPlain(output);
+      this.mode = "plain";
+      return parsed;
+    }
     if (this.mode !== "plain") {
       if (this.buffered.length) for (const chunk of this.buffered.splice(0)) this.emitPlain(chunk);
       else if (output) this.emitPlain(output);

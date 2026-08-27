@@ -1,8 +1,15 @@
 import {
+  ACTION_OPERATION_STATE,
+  ACTION_ROOT_LOCATOR_KIND,
   type ActionAuthoritySnapshotV1,
   ActionConflictError,
   type ActionDispatchRecordV1,
+  type ActionOperationState,
   deriveOperationId,
+  isActionOperationDispatchBeginState,
+  isActionOperationDomainTerminalState,
+  isActionOperationResolvedDomainState,
+  isActionOperationTerminalState,
 } from "../../actions/index.js";
 import type { ConversationActionService } from "../../orchestrator/conversation/conversation-action-service.js";
 import { ConversationCapabilityDispatchCorruptError } from "../../orchestrator/conversation/conversation-capability-dispatch-block.js";
@@ -20,6 +27,9 @@ export interface CapabilityConversationActionDomainOptionsV1 {
   recover_on_bootstrap?: boolean;
 }
 
+const isAbortedActionOperationState = (state: ActionOperationState): boolean =>
+  isActionOperationTerminalState(state) && !isActionOperationDomainTerminalState(state);
+
 /** Owns the durable header -> Action dispatch -> lineage claim -> effect frontier. */
 export class CapabilityConversationDispatchRuntimeV1 {
   constructor(
@@ -35,13 +45,13 @@ export class CapabilityConversationDispatchRuntimeV1 {
   ): Promise<ActionAuthoritySnapshotV1> {
     if (!snapshot.approval || snapshot.approval.approval_id !== approvalId)
       throw new Error("capability proposal approval is absent");
-    if (!["approved", "committing"].includes(snapshot.state))
+    if (!isActionOperationDispatchBeginState(snapshot.state))
       throw new ActionConflictError(
         "stale_proposal",
         "Capability proposal can no longer enter committing.",
         snapshot.proposal.proposal_id,
       );
-    if (snapshot.state === "approved")
+    if (snapshot.state === ACTION_OPERATION_STATE.APPROVED)
       this.actions.authority.prevalidateDispatch(snapshot.proposal.proposal_id, approvalId);
     const graph = this.runtime.actionObjects.readGraph(snapshot.proposal);
     const service = this.runtime.service(graph.plan.scope);
@@ -57,7 +67,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
       approvalId,
       preparedAt,
     );
-    if (snapshot.state === "approved") {
+    if (snapshot.state === ACTION_OPERATION_STATE.APPROVED) {
       const terminal = await this.reserveAndBegin(snapshot, dispatch, useBarrier);
       if (terminal) return terminal;
     } else {
@@ -90,7 +100,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
       if (snapshot.proposal.domain !== "capability") continue;
       const locator = snapshot.proposal.action_root_locator;
       if (
-        locator.kind !== "conversation" ||
+        locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
         locator.root_session_id !== snapshot.proposal.base.root_session_id
       )
         throw new Error("recorded conversation capability action root is invalid");
@@ -99,7 +109,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
     for (const snapshot of this.actions.authority.list()) {
       if (
         snapshot.proposal.domain !== "capability" ||
-        snapshot.proposal.action_root_locator.kind !== "conversation" ||
+        snapshot.proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
         !snapshot.proposal.base.root_session_id ||
         !snapshot.approval
       )
@@ -108,7 +118,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
         snapshot.proposal.base.root_session_id,
       );
       if (
-        snapshot.state === "committing" &&
+        snapshot.state === ACTION_OPERATION_STATE.COMMITTING &&
         !(current?.status === "active" && current.proposal_id === snapshot.proposal.proposal_id)
       ) {
         const dispatch = snapshot.operation_id
@@ -136,11 +146,11 @@ export class CapabilityConversationDispatchRuntimeV1 {
         );
       }
       if (current?.status === "active" && current.proposal_id === snapshot.proposal.proposal_id) {
-        if (["succeeded", "failed", "needs_recovery"].includes(snapshot.state)) {
+        if (isActionOperationDomainTerminalState(snapshot.state)) {
           this.releaseTerminal(snapshot);
           continue;
         }
-        if (["canceled", "expired", "stale", "denied"].includes(snapshot.state)) {
+        if (isAbortedActionOperationState(snapshot.state)) {
           this.releaseAborted(snapshot);
           continue;
         }
@@ -148,7 +158,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
         continue;
       }
       if (current?.status === "active") continue;
-      if (snapshot.state !== "approved") continue;
+      if (snapshot.state !== ACTION_OPERATION_STATE.APPROVED) continue;
       const operationId = deriveOperationId(snapshot.proposal, snapshot.approval.approval_id);
       if (!this.actions.authority.getDispatch(operationId)) continue;
       await this.recoverExecute(snapshot);
@@ -156,8 +166,13 @@ export class CapabilityConversationDispatchRuntimeV1 {
   }
 
   releaseTerminal(snapshot: ActionAuthoritySnapshotV1): void {
-    if (!snapshot.approval || !snapshot.operation_id || snapshot.state === "needs_recovery") return;
-    if (!snapshot.domain_terminal_digest || !["succeeded", "failed"].includes(snapshot.state))
+    if (
+      !snapshot.approval ||
+      !snapshot.operation_id ||
+      snapshot.state === ACTION_OPERATION_STATE.NEEDS_RECOVERY
+    )
+      return;
+    if (!snapshot.domain_terminal_digest || !isActionOperationResolvedDomainState(snapshot.state))
       return;
     const dispatch = this.actions.authority.getDispatch(snapshot.operation_id);
     if (!dispatch) throw new Error("terminal capability dispatch closure is absent");
@@ -184,7 +199,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
       proposal: snapshot.proposal,
       approval: snapshot.approval,
       dispatch,
-      release_outcome: snapshot.state as "succeeded" | "failed",
+      release_outcome: snapshot.state,
       domain_terminal_digest: snapshot.domain_terminal_digest,
       now: snapshot.events.at(-1)?.recorded_at ?? dispatch.created_at,
     });
@@ -192,7 +207,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
 
   releaseAborted(snapshot: ActionAuthoritySnapshotV1): void {
     if (!snapshot.approval || !snapshot.proposal.base.root_session_id) return;
-    if (!["canceled", "expired", "stale", "denied"].includes(snapshot.state)) return;
+    if (!isAbortedActionOperationState(snapshot.state)) return;
     const dispatch = this.actions.authority.getDispatch(
       snapshot.operation_id ?? deriveOperationId(snapshot.proposal, snapshot.approval.approval_id),
     );
@@ -238,7 +253,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
         snapshot.proposal.proposal_id,
         approval.approval_id,
       );
-      if (["succeeded", "failed", "needs_recovery"].includes(begun.state)) {
+      if (isActionOperationDomainTerminalState(begun.state)) {
         this.releaseTerminal(begun);
         return begun;
       }
@@ -258,7 +273,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
       await this.execute(snapshot, approval.approval_id, false);
     } catch (error) {
       const current = this.actions.authority.get(snapshot.proposal.proposal_id);
-      if (current && ["canceled", "expired", "stale", "denied"].includes(current.state)) {
+      if (current && isAbortedActionOperationState(current.state)) {
         this.releaseAborted(current);
         return;
       }
@@ -288,7 +303,7 @@ export class CapabilityConversationDispatchRuntimeV1 {
       if (
         !terminal ||
         !terminal.approval ||
-        !["succeeded", "failed", "needs_recovery"].includes(terminal.state) ||
+        !isActionOperationDomainTerminalState(terminal.state) ||
         terminal.proposal.proposal_digest !== snapshot.proposal.proposal_digest ||
         terminal.approval.approval_id !== dispatch.approval_id ||
         terminal.operation_id !== dispatch.operation_id ||

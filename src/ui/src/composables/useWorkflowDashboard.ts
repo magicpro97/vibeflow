@@ -1,4 +1,5 @@
 import { onUnmounted, ref, watch } from "vue";
+import { WORKFLOW_DASHBOARD_STATUS } from "../../../core/workflow-contract.js";
 import { api } from "../api.js";
 import { useVfStore } from "../store.js";
 import type { WorkflowDashboardItem } from "../types.js";
@@ -26,7 +27,7 @@ export function useWorkflowDashboard() {
       const first = res.workflows[0];
       if (!store.selectedWorkflowKey && first) {
         const running = res.workflows.find(
-          (w: WorkflowDashboardItem | undefined) => w?.status === "running",
+          (w: WorkflowDashboardItem | undefined) => w?.status === WORKFLOW_DASHBOARD_STATUS.RUNNING,
         );
         store.selectWorkflow(running?.key ?? first.key);
       }
@@ -39,7 +40,7 @@ export function useWorkflowDashboard() {
 
   function schedule() {
     if (pollTimer) clearInterval(pollTimer);
-    const anyRunning = workflows.value.some((w) => w.status === "running");
+    const anyRunning = workflows.value.some((w) => w.status === WORKFLOW_DASHBOARD_STATUS.RUNNING);
     const interval = anyRunning ? 2000 : 15_000;
     pollTimer = setInterval(fetch, interval);
   }

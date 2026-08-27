@@ -27,6 +27,18 @@ describe("runner: Antigravity-native hook protocol", () => {
     });
   });
 
+  test("maps require_approval to the native ask decision", () => {
+    const result: HookResult = {
+      decision: "require_approval",
+      risk: "high",
+      reasons: ["approval required"],
+    };
+    expect(presentAntigravityDecision(result)).toEqual({
+      json: JSON.stringify({ decision: "ask", reason: "approval required" }),
+      exitCode: 0,
+    });
+  });
+
   test("PostToolUse payload with toolCall maps to post-tool-use event", () => {
     const input = parseHookInput(
       JSON.stringify({

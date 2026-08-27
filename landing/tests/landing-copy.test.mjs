@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const landingRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const repositoryRoot = resolve(landingRoot, "..");
@@ -45,16 +45,39 @@ test("landing preserves key anchors, assets, and current product story", () => {
     'id="term-h"',
     "/demo.mp4",
     "/demo-poster.jpg",
-    "Connect every AI CLI.",
-    "AI-first Home",
-    "Dynamic capability fabric",
-    "Exact resumes keep native history and receive only new user and peer deltas.",
-    "Windows Job Objects are kernel-contained; POSIX process groups prove cooperative lineage.",
+    "Local-first harness, not another model",
+    "carries context between them",
+    "One Home, no dashboard maze",
+    "Install tools from the conversation",
+    "Claude, Codex, and OpenCode resume by exact ID when proved.",
+    "Copilot and Antigravity receive canonical user and peer context plus bounded own-history replay.",
+    "live evidence pending a green run",
+    "frozen typed protocol authority",
+    "--port 0",
     "vf verify",
-    "Bun 1.4 runtime",
+    "Bun 1.4 powers",
   ]) {
     assert.equal(page.includes(snippet), true, `missing expected snippet: ${snippet}`);
   }
+});
+
+test("work-unit pre-flight heading remains outside fenced examples", () => {
+  const content = readFileSync(
+    resolve(repositoryRoot, "docs", "WORK_UNIT_ORCHESTRATION.md"),
+    "utf8",
+  );
+  let fenced = false;
+  let found = false;
+  for (const line of content.split("\n")) {
+    if (line.startsWith("```")) fenced = !fenced;
+    if (line === "## Pre-flight gate") {
+      found = true;
+      assert.equal(fenced, false, "Pre-flight gate heading was swallowed by a code fence");
+    }
+  }
+  assert.equal(found, true, "Pre-flight gate heading is missing");
+  assert.equal(fenced, false, "WORK_UNIT_ORCHESTRATION.md has an unclosed code fence");
+  assert.equal(content.includes("[Pre-Flight Gate](#pre-flight-gate)"), true);
 });
 
 test("every canonical product doc has a byte-identical landing wiki mirror", () => {
@@ -81,7 +104,7 @@ test("mirrored product docs preserve the current runtime proof boundaries", () =
     "kernel-contained",
     "cooperative-lineage",
     "streams-drained",
-    "does not claim a live Windows canary",
+    "live Windows evidence remains pending",
   ]) {
     assert.equal(productDocs.includes(snippet), true, `missing product contract: ${snippet}`);
   }

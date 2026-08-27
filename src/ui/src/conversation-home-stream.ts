@@ -1,7 +1,16 @@
+import { CONVERSATION_TIMELINE_ITEM_KIND } from "../../orchestrator/conversation/conversation-catalog-contract.js";
+import { CONVERSATION_INTERACTION_STATE } from "../../orchestrator/conversation/conversation-interaction-contract.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "../../orchestrator/conversation/conversation-public-wire-contract.js";
+import {
+  CONVERSATION_CLIENT_STREAM_STATE,
+  CONVERSATION_SSE_EVENT,
+  CONVERSATION_STREAM_RECOVERY_OUTCOME,
+} from "../../orchestrator/conversation/conversation-sse-contract.js";
 import {
   conversationApi,
   conversationEventsUrl,
   parseConversationSseRecord,
+  parseConversationSseSnapshot,
 } from "./conversation-api.js";
 import { assertHomeQueueInvalidation } from "./conversation-home-message-queue-authority.js";
 import type { HomeMessageQueueInvalidation } from "./conversation-home-message-queue-types.js";
@@ -24,7 +33,7 @@ import {
 
 export function degradedHomeTimelineInteraction(): HomeTimelineInteraction {
   return {
-    state: "degraded",
+    state: CONVERSATION_INTERACTION_STATE.DEGRADED,
     message_locator: null,
     quote_refs: [],
     reactions: [],
@@ -47,7 +56,7 @@ export function homeTimelineCursorForRevision(
   if (!timeline) return 0;
   let cursor = 0;
   for (const item of timeline.items) {
-    if (item.kind !== "conversation-event") continue;
+    if (item.kind !== CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT) continue;
     if (item.event.conversation_id !== conversationId || item.event.revision_id !== revisionId)
       continue;
     cursor = Math.max(cursor, item.event.seq);
@@ -67,7 +76,7 @@ export function appendHomeTimelineTrace(
   )
     return timeline;
   const nextItem: HomeTimelineItem = {
-    kind: "conversation-event",
+    kind: CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT,
     revision_ordinal: revision.revision_ordinal,
     event: {
       ...record,
@@ -93,7 +102,7 @@ export function applyHomeReactionFold(
   if (!timeline) return timeline;
   let changed = false;
   const items = timeline.items.map((item): HomeTimelineItem => {
-    if (item.kind !== "conversation-event") return item;
+    if (item.kind !== CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT) return item;
     const locator = item.interaction.message_locator;
     if (!locator || locator.target_event_id !== messageRef.target_event_id) return item;
     changed = true;
@@ -101,7 +110,7 @@ export function applyHomeReactionFold(
       ...item,
       interaction: {
         ...item.interaction,
-        state: "ready" as const,
+        state: CONVERSATION_INTERACTION_STATE.READY,
         message_locator: structuredClone(messageRef),
         reactions: reactions.map((reaction) => structuredClone(reaction)),
       },
@@ -124,12 +133,45 @@ interface HomeConversationStreamInput {
   onQueueRefreshNeeded?(): void;
 }
 
-export const HOME_MESSAGE_QUEUE_INVALIDATION_EVENT = "message-queue-invalidated";
+export interface HomeConversationStreamAuthority {
+  readonly eventSourceConstructor: (new (url: string) => EventSource) | undefined;
+  readonly renewStreamToken: typeof conversationApi.renewStreamToken;
+  readonly startTimer: (
+    callback: () => void,
+    delayMilliseconds: number,
+  ) => ReturnType<typeof setTimeout>;
+  readonly clearTimer: (timer: ReturnType<typeof setTimeout>) => void;
+  readonly now: () => number;
+}
 
-export function watchHomeConversationStream(input: HomeConversationStreamInput): { close(): void } {
-  const EventSourceCtor = globalThis.EventSource as { new (url: string): EventSource } | undefined;
+export function captureHomeConversationStreamAuthority(): HomeConversationStreamAuthority {
+  const startTimer = globalThis.setTimeout.bind(globalThis);
+  const clearTimer = globalThis.clearTimeout.bind(globalThis);
+  const now = Date.now.bind(Date);
+  return Object.freeze({
+    eventSourceConstructor: globalThis.EventSource as
+      | (new (
+          url: string,
+        ) => EventSource)
+      | undefined,
+    renewStreamToken: conversationApi.renewStreamToken,
+    startTimer: (callback: () => void, delayMilliseconds: number) =>
+      startTimer(callback, delayMilliseconds),
+    clearTimer: (timer: ReturnType<typeof setTimeout>) => clearTimer(timer),
+    now: () => now(),
+  });
+}
+
+export const HOME_MESSAGE_QUEUE_INVALIDATION_EVENT =
+  CONVERSATION_SSE_EVENT.MESSAGE_QUEUE_INVALIDATED;
+
+export function watchHomeConversationStream(
+  input: HomeConversationStreamInput,
+  authority = captureHomeConversationStreamAuthority(),
+): { close(): void } {
+  const EventSourceCtor = authority.eventSourceConstructor;
   if (!EventSourceCtor) {
-    input.setStatus("idle", null);
+    input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.IDLE, null);
     return { close() {} };
   }
 
@@ -143,57 +185,59 @@ export function watchHomeConversationStream(input: HomeConversationStreamInput):
   let streamTokenExpiresAt: string | null = null;
 
   const clearRenew = () => {
-    if (renewTimer !== null) clearTimeout(renewTimer);
+    if (renewTimer !== null) authority.clearTimer(renewTimer);
     renewTimer = null;
   };
   const clearRetry = () => {
-    if (retryTimer !== null) clearTimeout(retryTimer);
+    if (retryTimer !== null) authority.clearTimer(retryTimer);
     retryTimer = null;
   };
   const clearRefresh = () => {
-    if (refreshTimer !== null) clearTimeout(refreshTimer);
+    if (refreshTimer !== null) authority.clearTimer(refreshTimer);
     refreshTimer = null;
   };
   const queueRefresh = () => {
     clearRefresh();
-    refreshTimer = setTimeout(() => {
+    refreshTimer = authority.startTimer(() => {
       refreshTimer = null;
       if (!closed && input.isCurrent()) input.onRefreshNeeded();
     }, 120);
   };
   const scheduleRenewal = (
     attemptGuard: ReturnType<typeof createConversationStreamAttemptGuard>,
+    expectedGeneration: number,
   ) => {
     clearRenew();
     if (!streamTokenExpiresAt) return;
     const expires = Date.parse(streamTokenExpiresAt);
     if (!Number.isFinite(expires)) return;
-    renewTimer = setTimeout(
+    renewTimer = authority.startTimer(
       () => {
         renewTimer = null;
-        if (attemptGuard.canRecover()) void renewToken(attemptGuard);
+        if (attemptGuard.canRecover()) void renewToken(attemptGuard, expectedGeneration);
       },
-      Math.max(1_000, expires - Date.now() - 30_000),
+      Math.max(1_000, expires - authority.now() - 30_000),
     );
   };
   const renewToken = async (
     attemptGuard?: ReturnType<typeof createConversationStreamAttemptGuard>,
+    expectedGeneration = generation,
   ) => {
-    if (closed || !input.isCurrent()) return false;
+    if (closed || !input.isCurrent() || generation !== expectedGeneration) return false;
     if (attemptGuard && !attemptGuard.canRecover()) return false;
     try {
-      const renewed = await conversationApi.renewStreamToken(input.conversationId, input.signal);
-      if (closed || !input.isCurrent()) return false;
+      const renewed = await authority.renewStreamToken(input.conversationId, input.signal);
+      if (closed || !input.isCurrent() || generation !== expectedGeneration) return false;
       if (attemptGuard && !attemptGuard.canRecover()) return false;
       streamToken = renewed.stream_token;
       streamTokenExpiresAt = renewed.stream_token_expires_at;
-      if (attemptGuard) scheduleRenewal(attemptGuard);
+      if (attemptGuard) scheduleRenewal(attemptGuard, expectedGeneration);
       return true;
     } catch (error) {
-      if (closed || !input.isCurrent()) return false;
+      if (closed || !input.isCurrent() || generation !== expectedGeneration) return false;
       if (attemptGuard && !attemptGuard.canRecover()) return false;
       input.setStatus(
-        "error",
+        CONVERSATION_CLIENT_STREAM_STATE.ERROR,
         error instanceof Error ? error.message : "conversation stream token renewal failed",
       );
       return false;
@@ -209,8 +253,11 @@ export function watchHomeConversationStream(input: HomeConversationStreamInput):
   const scheduleReconnect = (delay = 1_500) => {
     clearRetry();
     if (closed || !input.isCurrent() || !streamToken) return;
-    input.setStatus("reconnecting", "conversation stream disconnected");
-    retryTimer = setTimeout(() => {
+    input.setStatus(
+      CONVERSATION_CLIENT_STREAM_STATE.RECONNECTING,
+      "conversation stream disconnected",
+    );
+    retryTimer = authority.startTimer(() => {
       retryTimer = null;
       void connect();
     }, delay);
@@ -224,22 +271,27 @@ export function watchHomeConversationStream(input: HomeConversationStreamInput):
     const attemptId = generation;
     const attemptGuard = createConversationStreamAttemptGuard();
     closeSource();
-    input.setStatus("connecting", null);
-    scheduleRenewal(attemptGuard);
+    input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.CONNECTING, null);
+    scheduleRenewal(attemptGuard, attemptId);
     const current = new EventSourceCtor(
       conversationEventsUrl(input.conversationId, streamToken, input.cursor()),
     );
     source = current;
     input.onQueueRefreshNeeded?.();
 
-    current.addEventListener("snapshot", (event) => {
+    current.addEventListener(CONVERSATION_SSE_EVENT.SNAPSHOT, (event) => {
       if (closed || attemptId !== generation || !input.isCurrent()) return;
       try {
-        input.onSnapshot(JSON.parse((event as MessageEvent<string>).data) as ConversationSnapshot);
+        input.onSnapshot(
+          parseConversationSseSnapshot((event as MessageEvent<string>).data, input.conversationId),
+        );
         input.onQueueRefreshNeeded?.();
-        input.setStatus("live", null);
+        input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.LIVE, null);
       } catch {
-        input.setStatus("error", "conversation snapshot was invalid");
+        input.setStatus(
+          CONVERSATION_CLIENT_STREAM_STATE.ERROR,
+          "conversation snapshot was invalid",
+        );
       }
     });
 
@@ -251,33 +303,39 @@ export function watchHomeConversationStream(input: HomeConversationStreamInput):
         const invalidation: unknown = JSON.parse((event as MessageEvent<string>).data);
         assertHomeQueueInvalidation(invalidation, input.rootSessionId);
         input.onQueueInvalidation(invalidation);
-        input.setStatus("live", null);
+        input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.LIVE, null);
       } catch {
-        input.setStatus("error", "message queue update was invalid");
+        input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.ERROR, "message queue update was invalid");
         input.onQueueRefreshNeeded?.();
       }
     });
 
-    current.addEventListener("trace", (event) => {
+    current.addEventListener(CONVERSATION_SSE_EVENT.TRACE, (event) => {
       if (closed || attemptId !== generation || !input.isCurrent()) return;
       try {
         const record = parseConversationSseRecord((event as MessageEvent<string>).data);
+        if (record.conversation_id !== input.conversationId)
+          throw new Error("conversation trace identity did not match the stream");
         input.onTrace(record);
-        input.setStatus("live", null);
+        input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.LIVE, null);
         if (
-          record.event.type === "user_message" ||
-          record.event.type === "state_change" ||
-          record.event.type === "conversation_terminal" ||
-          (record.event.type === "agent_response_delta" && record.event.payload.completes_response)
+          record.event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE ||
+          record.event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE ||
+          record.event.type === CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL ||
+          (record.event.type === CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA &&
+            record.event.payload.completes_response)
         )
           queueRefresh();
       } catch {
-        input.setStatus("error", "conversation trace event was invalid");
+        input.setStatus(
+          CONVERSATION_CLIENT_STREAM_STATE.ERROR,
+          "conversation trace event was invalid",
+        );
         queueRefresh();
       }
     });
 
-    current.addEventListener("error", (event) => {
+    current.addEventListener(CONVERSATION_SSE_EVENT.ERROR, (event) => {
       if (
         closed ||
         attemptId !== generation ||
@@ -287,20 +345,27 @@ export function watchHomeConversationStream(input: HomeConversationStreamInput):
         return;
       const failure = attemptGuard.acceptTypedError(event.data);
       if (failure.fatal) closeSource();
-      input.setStatus("error", failure.message);
+      input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.ERROR, failure.message);
     });
 
     current.onerror = async () => {
       if (closed || attemptId !== generation || !input.isCurrent()) return;
-      await recoverConversationStreamAttempt(
+      const recovery = await recoverConversationStreamAttempt(
         attemptGuard,
         async () => {
           current.close();
           source = null;
-          return renewToken(attemptGuard);
+          return renewToken(attemptGuard, attemptId);
         },
         () => attemptId === generation && scheduleReconnect(),
       );
+      if (
+        recovery === CONVERSATION_STREAM_RECOVERY_OUTCOME.RENEWED &&
+        !closed &&
+        attemptId === generation &&
+        input.isCurrent()
+      )
+        void connect();
     };
   };
 
@@ -310,7 +375,7 @@ export function watchHomeConversationStream(input: HomeConversationStreamInput):
       closed = true;
       generation += 1;
       closeSource();
-      input.setStatus("idle", null);
+      input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.IDLE, null);
     },
   };
 }

@@ -1,4 +1,7 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_PRODUCER_REQUEST_BINDING_KIND,
+  ACTION_ROOT_LOCATOR_KIND,
   type ActionEffectClass,
   type ActionProposalDraftV1,
   type ActionProposalRequestV1,
@@ -14,6 +17,7 @@ import {
   canonicalActionRequestDigest,
   materializeProposal,
 } from "../../actions/index.js";
+import { ACTION_PREVIEW_PROJECTOR_VERSION } from "../../actions/public-action-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import { conversationActionAuthorityHead } from "./conversation-action-planner.js";
 import type {
@@ -52,9 +56,9 @@ function effect(action: HostActionV1): {
   risk: "medium" | "critical";
 } {
   if (
-    action.type === "conversation.publish_suspected_literal" ||
-    action.type === "conversation.stop_operation" ||
-    action.type === "conversation.abandon_revision_operation"
+    action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL ||
+    action.type === HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION ||
+    action.type === HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION
   )
     return {
       classes: ["project-write"],
@@ -66,32 +70,35 @@ function effect(action: HostActionV1): {
 
 function preview(action: HostActionV1, publicCandidate: ActionProposalRequestV1["candidate"]) {
   const titles: Record<string, [string, string]> = {
-    "conversation.select_lineage_head": [
+    [HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD]: [
       "Select lineage head",
       "Commit the reviewed lineage leaf.",
     ],
-    "conversation.associate_lineages": [
+    [HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES]: [
       "Associate lineages",
       "Record an explicit unverified lineage association.",
     ],
-    "conversation.publish_suspected_literal": [
+    [HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL]: [
       "Publish suspected literal",
       "Publish reviewed staged content to the public conversation.",
     ],
-    "conversation.stop_operation": [
+    [HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION]: [
       "Stop operation",
       "Request durable cancellation of the selected operation.",
     ],
-    "context.compact": ["Compact context", "Commit a bounded public context compaction artifact."],
-    "conversation.abandon_revision_operation": [
+    [HOST_ACTION_KIND.CONTEXT_COMPACT]: [
+      "Compact context",
+      "Commit a bounded public context compaction artifact.",
+    ],
+    [HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION]: [
       "Abandon revision operation",
       "Prove quiescence and abandon the selected revision operation.",
     ],
-    "conversation.retry_revision_operation": [
+    [HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION]: [
       "Retry revision operation",
       "Start a new reviewed attempt for the failed revision operation.",
     ],
-    "conversation.reconcile_revision_operation": [
+    [HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION]: [
       "Reconcile revision operation",
       "Resolve the selected recovery state from durable evidence.",
     ],
@@ -134,7 +141,7 @@ export function materializeConversationReceiptProposal(input: ReceiptPlanningInp
   proposal: ReturnType<typeof materializeProposal>;
 } {
   const locator = {
-    kind: "conversation" as const,
+    kind: ACTION_ROOT_LOCATOR_KIND.CONVERSATION,
     root_session_id: input.source.root_session_id,
   };
   if (input.authority.authority_scope_digest !== actionIdempotencyScopeDigest(locator))
@@ -181,7 +188,7 @@ export function materializeConversationReceiptProposal(input: ReceiptPlanningInp
     domain: "conversation",
     action_root_locator: locator,
     producer_request_binding: {
-      kind: "canonical-action-request",
+      kind: ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST,
       digest: canonicalActionRequestDigest(canonicalRequest),
     },
     planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
@@ -253,7 +260,7 @@ export function materializeConversationReceiptProposal(input: ReceiptPlanningInp
       reversibility: effectRule.reversibility,
       health_plan: [],
       recovery_actions: ["retry", "inspect-trace"],
-      projector_version: "vf-public-projector/1",
+      projector_version: ACTION_PREVIEW_PROJECTOR_VERSION,
       rules_digest: rules,
       redaction_manifest_digest: digestV1("VF-CONVERSATION-RECEIPT-REDACTION-MANIFEST\0v1\0", {
         schema_version: "1.0",

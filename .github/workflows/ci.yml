@@ -66,6 +66,24 @@ jobs:
       - name: Web UI e2e (real dashboard in Chromium)
         run: rm -f ~/.vibeflow/projects.json && bun run test:e2e
 
+  windows-owned-process:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      VF_REQUIRE_LIVE_WINDOWS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun ci
+      - name: Assert a real Windows runtime
+        run: bun -e "if (process.platform !== 'win32') throw new Error('live Windows evidence requires win32')"
+      - name: Windows PID, Job Object, release, and orphan smoke
+        run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
+
   skill-validation:
     runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
     timeout-minutes: 10

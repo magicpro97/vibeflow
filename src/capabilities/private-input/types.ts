@@ -1,8 +1,10 @@
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { CapabilityPublicInputV1 } from "../../actions/request-types.js";
 import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { PublicPrivateInputBindingV1 } from "../wire/cli.js";
 
-export type Scope = "project" | "user";
+export type Scope = CapabilityScope;
 export type PrivateReferenceV1 = Extract<CapabilityPublicInputV1["value"], object>;
 
 export interface PrivateInputBindRequestV1 {
@@ -46,7 +48,7 @@ export interface CliBindingRecordV1 {
   package_pin_digest: string;
   manifest_digest: string;
   action_root_locator: {
-    kind: "capability";
+    kind: typeof ACTION_ROOT_LOCATOR_KIND.CAPABILITY;
     scope: Scope;
     scope_identity_digest: string;
   };
@@ -66,7 +68,10 @@ export interface CapabilityExecutionPrivateInputRecordV1 {
   package_id: string;
   package_pin_digest: string;
   manifest_digest: string;
-  action_root_locator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>;
+  action_root_locator: Exclude<
+    PrivateActionRootLocatorV1,
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+  >;
   bindings: CliBindingRowV1[];
   created_at: string;
   expires_at: string;

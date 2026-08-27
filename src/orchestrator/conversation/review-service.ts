@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { sanitizePublicText } from "../../dispatch/public-redaction.js";
 import { isSha } from "../../hooks/review-evidence.js";
+import { CONVERSATION_ARTIFACT_TYPE } from "./conversation-public-wire-contract.js";
 import type { PlanArtifact, ReviewResolution, ReviewService } from "./services.js";
 import type { ConversationContext } from "./types.js";
 
@@ -103,7 +104,7 @@ export class InjectedReviewService implements ReviewService {
     requireActive(context);
     const reviewer = sanitizePublicText(resolution.reviewer, [], [], "reviewer");
     const stored = await context.createArtifact({
-      artifact_type: "transcript",
+      artifact_type: CONVERSATION_ARTIFACT_TYPE.TRANSCRIPT,
       content: `${JSON.stringify({
         artifact_id: plan.artifact_id,
         reviewed_head: head,

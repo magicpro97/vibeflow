@@ -1,8 +1,13 @@
+import { skillsCommandHelp } from "../help/skills-command-help.js";
 import {
   ASK_HELP,
   BRAINSTORM_HELP,
   CHAT_HELP,
+  DEFAULT_UI_PORT,
+  EPHEMERAL_UI_PORT,
   SUPERPOWERS_HELP,
+  UI_LAN_EVENT_SOURCE_TOKEN_QUERY,
+  UI_LAN_TOKEN_HEADER,
   authorityCommandHelp,
   c,
   capabilityCommandHelp,
@@ -12,30 +17,50 @@ export const COMMAND_HELP: Record<string, () => string> = {
   chat: CHAT_HELP,
   brainstorm: BRAINSTORM_HELP,
   ui: () => `${c.bold("vf ui")} ${c.dim("[--port <n>] [--host <addr>] [--no-open]")}
-Open the local web UI (intake wizard + workflow console). This is also the default
-command when you run \`vf\` with no arguments.
+Open AI-first Home: the searchable session rail, central chat, durable queue,
+participant details, capabilities, settings, and trace. Repository intake is the
+TTY questionnaire in \`vf init\`; it is not a \`vf ui\` mode.
+
+Bare \`vf\` and explicit \`vf ui\` both use stable port ${DEFAULT_UI_PORT}. Pass
+\`--port ${EPHEMERAL_UI_PORT}\` when you explicitly want an OS-selected free port.
 
 ${c.bold("Options:")}
-  --port <n>    bind to a specific port (default: an ephemeral free port)
-  --host <addr> bind to a specific host (default: 127.0.0.1; use 0.0.0.0 for LAN access)
+  --port <n>    bind to a specific port (default: ${DEFAULT_UI_PORT}; ${EPHEMERAL_UI_PORT} selects a free port)
+  --host <addr> bind to a specific host (default: 127.0.0.1)
   --no-open     start the server without launching a browser
 
+${c.bold("LAN boundary:")}
+  Any non-loopback --host exposes the server. The owner browser receives a single-use
+  bootstrap URL; unauthenticated root loads return 401, and --no-open prints that URL once.
+  Legacy fetch/API CSRF checks require the ${UI_LAN_TOKEN_HEADER} header. Browser EventSource
+  cannot set custom headers, so non-conversation streams use the
+  ${UI_LAN_EVENT_SOURCE_TOKEN_QUERY} query parameter. Page authority never authenticates
+  Conversation Home: its JSON and stream routes return 401. Hook approval uses a separate
+  loopback-only listener discovered without storing a bearer. Use loopback for conversations.
+
 ${c.bold("Examples:")}
-  vf
+  vf                    # port ${DEFAULT_UI_PORT}
+  vf ui                 # same stable default
+  vf ui --port ${EPHEMERAL_UI_PORT}        # ephemeral free port
   vf ui --port 4173 --no-open
-  vf ui --host 0.0.0.0 --port 7799`,
-  doctor: () => `${c.bold("vf doctor")} ${c.dim("[--probe]")}
+  vf ui --host 0.0.0.0 --port ${DEFAULT_UI_PORT}`,
+  doctor: () => `${c.bold("vf doctor")} ${c.dim("[--probe] [--refresh] [--fix]")}
 Check required (node, git) and optional (bun, engine CLIs, docker) tools, plus
-per-engine readiness.
+per-engine readiness and owned CLI process records.
+PID alone is never ownership proof; repair requires an exact dead-or-mismatched identity.
 
 ${c.bold("Options:")}
   --probe       run a live engine round-trip instead of a presence/auth check
+  --refresh     invalidate cached readiness and probe again
+  --fix         repair only exact proved orphan records; uncertain/live owners fail closed
 
 ${c.bold("Examples:")}
   vf doctor
-  vf doctor --probe`,
+  vf doctor --probe
+  vf doctor --refresh
+  vf doctor --fix`,
 
-  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot>] [--no-ask] [--no-ai] [--no-hooks] [--dry-run]")}
+  init: () => `${c.bold("vf init")} ${c.dim("[--engine <claude|codex|copilot|opencode|antigravity>] [--no-ask] [--no-ai] [--no-hooks] [--dry-run]")}
 Generate the canonical context + engine instruction files and a workflow ledger.
 By default a hard creation gate refuses when no engine is ready; --dry-run previews
 offline (writes nothing). When --engine is omitted, init targets the centralized
@@ -89,12 +114,30 @@ ${c.bold("Options:")}
   --isolate           dispatch each unit in its own git worktree (cli only; off by default)
   --no-unit-gate      skip the per-unit typecheck+biome gate (final bun run check still runs)
   --pr                after a unit's review passes, open a QUEUED PR for it (needs --isolate; never merges)
-  --resume            resume crashed units from their persisted engine session (claude + codex) instead of re-running fresh
+  --resume            resume crashed units by validated native id for claude, codex, or opencode; other engines never claim exact resume
 
 ${c.bold("Examples:")}
   vf orchestrate
   vf orchestrate --engine codex --yes --concurrency 2
   vf orchestrate --engine codex --yes --concurrency 3 --isolate --pr`,
+
+  review:
+    () => `${c.bold("vf review")} ${c.dim("<evidence --base <full-SHA> --result <file> | check --base <full-SHA>>")}
+Create or validate current-HEAD review evidence. The producer accepts only a bound
+reviewer result for the exact base SHA, head SHA, sorted name-status manifest, and
+SHA-256 digest observed by the recorder; stale or generic pass JSON fails closed.
+
+${c.bold("Subcommands:")}
+  evidence --base <sha> --result <file>   validate the bound reviewer JSON and record evidence
+  check --base <sha>                     validate current-HEAD evidence (docs-only fallback applies)
+
+${c.bold("Reviewer result fields:")}
+  schemaVersion, baseSha, headSha, changed, changedDigest,
+  status, exitCode, timedOut, findings
+
+${c.bold("Examples:")}
+  vf review evidence --base <full-SHA> --result review-result.json
+  vf review check --base <full-SHA>`,
 
   demo: () => `${c.bold("vf demo")} ${c.dim("[--engine <e>] [--concurrency <n>]")}
 Stage a fixed file corpus as work units and run them through the orchestrate
@@ -190,77 +233,7 @@ ${c.bold("Examples:")}
 
   authority: authorityCommandHelp,
 
-  skills: () =>
-    `${c.bold("vf skills")} ${c.dim("[list | search <term> | resolve | validate | sync | verify-sync | verify-freshness | verify-lock | import | init <name> | draft <name> | crystallize <run-id> | curator scan [--scope=local|repo] | eval <skill-dir> | update-dependent <canonical-skill> | semantic-filter [--max-reviews N] [--reviewer ID] | registry <add|list|update|install|release-propose|release>]")}
-Inspect locally discovered skills, validate the store, sync to engine mirrors,
-import external skills, capture new skills from real work, manage remote
-skill registries via git-backed lock files, and run skill trigger/task evals.
-
-${c.bold("Subcommands:")}
-  list                       list discovered skills (default)
-  search <term>              rank skills matching a task description
-  resolve                    report which skill needs are satisfied locally vs. on demand
-  validate                   validate skill format per Anthropic standard (errors, warnings)
-  sync [--mode pointer|full] [--engine <name>] sync .vibeflow/skills → engine mirror (--engine can repeat; default copilot)
-  verify-sync                verify engine mirror has every canonical skill (defaults to selected engine)
-  verify-freshness           check sourceAnchors against current disk content (SHA-256)
-  verify-lock                verify registry lock integrity, marketplace schema, and mirror completeness
-  import <dir-or-query>      import a local skill dir (or context7 query) into the canonical store
-  init <name>                scaffold an empty SKILL.md stub
-  draft <name>               capture a reusable procedure as a status:draft skill (never auto-installed)
-  curator scan [--scope=local|repo] [--sync] [--yes]  scan: local default is private; repo anchors clean HEAD; --sync previews notes sharing; --yes syncs origin notes
-  eval <skill-dir>           eval cases; semantic-filter [--max-reviews N] [--reviewer ID] finds pairs (reviews execute only when BOTH flags set, N>0; opt-in/no network)
-  registry <add|list|update|install|release-propose|release> manage remote skill registries — see below
-
-${c.bold("Registry subcommands:")}
-  registry add <git-url|owner/repo> [--name <id>] --ref <tag-or-commit> [--yes]
-                             clone + pin a registry; owner/repo → github URL (name = repo slug; --name required for a URL)
-  registry list              list pinned skill registries from the lock file
-  registry update [<id>] [--yes]
-                             re-fetch and re-pin every registry (or a single one);
-                             on failure the prior commit is preserved in the lock
-  registry install <registry-id>/<skill-name> [--version <v>] [--on-collision skip|replace|rename] [--yes]
-                              install a verified skill from a cached registry into the shared catalog
-  propose-merge <skill-a> <skill-b>
-                              produce a non-destructive merge proposal (stdout, no files written)
-  propose-split <skill-name>
-                              produce a non-destructive split proposal (stdout, no files written)
-
-${c.bold("Registry options:")}
-  --yes                      approve the network call (git clone/fetch) — dry-run without it
-  --on-collision skip|replace|rename
-                             collision policy when skill already installed (default: skip)
-
-${c.bold("Registry install options:")}
-  --version <v>              require a specific marketplace version (error on mismatch)
-  --on-collision skip        leave existing skill untouched (default)
-  --on-collision replace     backup existing to .backup/<ts>/, then overwrite
-  --on-collision rename      copy with a new slug, rewrite SKILL.md name: frontmatter
-
-${c.bold("Security scan:")}
-  Before catalog copy runs an optional SkillSpector scan (static, --no-llm).
-  Absent scanner → proceed (scan_summary: {scanned:false} in lock);
-  HIGH/CRITICAL → blocked before copy, lock unchanged;
-  MEDIUM → warn, install continues. See docs/SKILL_SECURITY_SCAN.md.
-
-${c.bold("Examples:")}
-  vf skills list
-  vf skills search "read a pdf"
-  vf skills validate
-  vf skills sync --mode pointer
-  vf skills draft fix-flaky-db-test
-  vf skills import .vibeflow/skills/external-skill
-  vf skills import context7:react-hooks
-  vf skills eval .vibeflow/skills/pdf-reader
-  vf skills eval .vibeflow/skills/pdf-reader --engine opencode --json --out eval-result.json
-  vf skills eval .vibeflow/skills/pdf-reader --previous eval-result.json
-  vf skills registry add https://github.com/x/skills.git --name platform --ref v1.0
-  vf skills registry install platform/my-skill
-  vf skills registry release-propose <registry-id> --from <oid> --to <oid> --version <v>
-  vf skills registry release list
-  vf skills registry release show <proposal-id>
-  vf skills registry release reject <proposal-id>
-  vf skills registry release approve <proposal-id> --yes`,
+  skills: skillsCommandHelp,
 
   tools:
     () => `${c.bold("vf tools")} ${c.dim("[status | enable <tool> | disable <tool> | install <tool> [--yes]]")}
@@ -315,12 +288,19 @@ ${c.bold("Examples:")}
   vf hooks emit --yes`,
 
   verify:
-    () => `${c.bold("vf verify")} ${c.dim("[--sandbox docker --sandbox-image <digest> --sandbox-volume <name>]")}
+    () => `${c.bold("vf verify")} ${c.dim("[--coverage] [--review-base <full-SHA>] [--journal] [--sandbox docker --sandbox-image <digest> --sandbox-volume <name>]")}
 Run auto-detected toolchain + policy gates; nonzero when any gate fails.
 Sandbox runs offline over a disposable copy, without host env/network. Image must be local
 and digest-pinned; dependency volume must be labeled with lockfile SHA-256. Fails closed.
 
-${c.bold("Examples:")} vf verify
+${c.bold("Options:")}
+  --coverage                require coverage/lcov.info and run scripts/coverage-gate.cjs
+  --review-base <full-SHA>  bind the pushed range used by review-evidence validation
+  --journal                 append this verification result to the work journal
+  --sandbox docker          run gates in the configured disposable Docker sandbox
+
+${c.bold("Examples:")}
+  vf verify --coverage --review-base <full-SHA>
   vf verify --sandbox docker --sandbox-image registry/vf@sha256:<digest> --sandbox-volume vf-deps-<lock-sha>`,
 
   eval: () => `${c.bold("vf eval")} ${c.dim("[--min-pass-rate <0..1>] [--min-samples <n>] [--json] [--out <file>]")}

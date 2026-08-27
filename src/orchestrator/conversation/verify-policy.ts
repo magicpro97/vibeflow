@@ -1,4 +1,6 @@
 import { verifyGateManifestOk } from "../../verify/core.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
+import { CONVERSATION_ARTIFACT_TYPE } from "./conversation-public-wire-contract.js";
 import { type PlanArtifactLocator, type VerifyService, policyDryRun } from "./services.js";
 import type {
   ConversationContext,
@@ -29,7 +31,7 @@ export class VerifyConversationPolicy implements ConversationPolicy {
       const report = await this.verify.runVerify(context, plan);
       if (context.signal.aborted) throw new Error("operation aborted");
       const artifact = await context.createArtifact({
-        artifact_type: "tests",
+        artifact_type: CONVERSATION_ARTIFACT_TYPE.TESTS,
         content: `${JSON.stringify(report)}\n`,
         idempotency_key: `verify-policy:report:${context.correlation.operation_id}`,
       });
@@ -37,19 +39,21 @@ export class VerifyConversationPolicy implements ConversationPolicy {
       if (!verifyGateManifestOk(report)) {
         return {
           operation_id: context.correlation.operation_id,
-          status: "failed",
+          status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
           artifact_refs: [],
         };
       }
       return {
         operation_id: context.correlation.operation_id,
-        status: "completed",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
         artifact_refs: [artifact.ref],
       };
     } catch {
       return {
         operation_id: context.correlation.operation_id,
-        status: context.signal.aborted ? "aborted" : "failed",
+        status: context.signal.aborted
+          ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+          : CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
         artifact_refs: [],
       };
     }

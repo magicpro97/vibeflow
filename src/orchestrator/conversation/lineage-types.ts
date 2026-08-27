@@ -1,5 +1,10 @@
 import { digestV1 } from "../../durability/index.js";
 import { sanitizePublicText } from "../trace/public-sanitize.js";
+import {
+  CONVERSATION_HEAD_STATUS,
+  type ConversationHeadStatus,
+  isConversationHeadStatus,
+} from "./conversation-catalog-contract.js";
 
 export const LINEAGE_SCHEMA_VERSION = "1.0" as const;
 export const LINEAGE_LIMITS = Object.freeze({
@@ -49,7 +54,7 @@ export interface LineageNodeIdentityV1 {
 export interface LineageHeadRecordV1 {
   schema_version: typeof LINEAGE_SCHEMA_VERSION;
   root_session_id: string;
-  head_status: "committed" | "ambiguous" | "unclaimed";
+  head_status: ConversationHeadStatus;
   active: LineageNodeIdentityV1 | null;
   candidate_heads: LineageNodeIdentityV1[];
   head_epoch: number;
@@ -155,7 +160,7 @@ export function assertLineageHeadRecordV1(value: unknown): asserts value is Line
     ]) ||
     value.schema_version !== LINEAGE_SCHEMA_VERSION ||
     !isSafeCatalogIdentifier(value.root_session_id) ||
-    !["committed", "ambiguous", "unclaimed"].includes(value.head_status as string) ||
+    !isConversationHeadStatus(value.head_status) ||
     !Array.isArray(value.candidate_heads) ||
     value.candidate_heads.length > LINEAGE_LIMITS.maxCandidates ||
     !Number.isSafeInteger(value.head_epoch) ||
@@ -183,14 +188,17 @@ export function assertLineageHeadRecordV1(value: unknown): asserts value is Line
     throw new Error("invalid lineage head candidate order");
   }
   if (
-    (value.head_status === "committed" && (value.active === null || candidates.length !== 0)) ||
-    (value.head_status === "ambiguous" && (value.active !== null || candidates.length < 2)) ||
-    (value.head_status === "unclaimed" && (value.active !== null || candidates.length !== 1)) ||
+    (value.head_status === CONVERSATION_HEAD_STATUS.COMMITTED &&
+      (value.active === null || candidates.length !== 0)) ||
+    (value.head_status === CONVERSATION_HEAD_STATUS.AMBIGUOUS &&
+      (value.active !== null || candidates.length < 2)) ||
+    (value.head_status === CONVERSATION_HEAD_STATUS.UNCLAIMED &&
+      (value.active !== null || candidates.length !== 1)) ||
     (value.head_epoch === 0 &&
       (value.previous_head_digest !== null || value.updated_by_operation_id !== null)) ||
     ((value.head_epoch as number) > 0 &&
       (value.previous_head_digest === null || value.updated_by_operation_id === null)) ||
-    (value.head_status !== "committed" && value.head_epoch !== 0)
+    (value.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED && value.head_epoch !== 0)
   ) {
     throw new Error("invalid lineage head state");
   }
@@ -229,7 +237,9 @@ export function createInitialLineageHead(
   const preimage: Omit<LineageHeadRecordV1, "content_digest"> = {
     schema_version: LINEAGE_SCHEMA_VERSION,
     root_session_id: rootSessionId,
-    head_status: committed ? "committed" : "ambiguous",
+    head_status: committed
+      ? CONVERSATION_HEAD_STATUS.COMMITTED
+      : CONVERSATION_HEAD_STATUS.AMBIGUOUS,
     active: committed ? structuredClone(first.node) : null,
     candidate_heads: committed ? [] : sorted.map((item) => structuredClone(item.node)),
     head_epoch: 0,

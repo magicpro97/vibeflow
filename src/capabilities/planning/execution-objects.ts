@@ -5,7 +5,7 @@ import type {
   CapabilityAdapterPrivateDescriptorV1,
   CapabilityAdapterRegistryV1,
 } from "../adapters/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { permissionBindingDigest } from "../permissions/index.js";
 import type { PermissionBindingV1 } from "../permissions/types.js";
 import type { PackageAuthenticityBindingV1 } from "../source/types.js";
@@ -176,5 +176,8 @@ export function assertExecutionObjectBinding(
     binding.object_ref !== actionJsonRef(digest) ||
     binding.canonical_byte_length !== canonicalJsonBytes(value).length
   )
-    throw new CapabilityRuntimeError("execution object binding mismatch", "integrity-failure");
+    throw new CapabilityRuntimeError(
+      "execution object binding mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+    );
 }

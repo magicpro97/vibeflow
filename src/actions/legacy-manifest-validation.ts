@@ -1,4 +1,16 @@
+import { ENGINES } from "../core/agent-contract.js";
+import type { CapabilityScope } from "../core/capability-contract.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../durability/index.js";
+import {
+  CAPABILITY_MANIFEST_DEPENDENCY_SCOPE,
+  CAPABILITY_MANIFEST_DEPENDENCY_SCOPES,
+  CAPABILITY_MANIFEST_PLATFORM_ARCHES,
+  CAPABILITY_MANIFEST_PLATFORM_LIBCS,
+  CAPABILITY_MANIFEST_PLATFORM_OS,
+  CAPABILITY_MANIFEST_PLATFORM_OSES,
+  LEGACY_SOURCE_ENGINE_SCOPED_PACKAGE_IDS,
+  LEGACY_SOURCE_PACKAGE_ID_PREFIX,
+} from "./capability-manifest-vocabulary-contract.js";
 import type {
   LegacyDependencyBindingV1,
   LegacyEngineV1,
@@ -13,10 +25,14 @@ import {
 } from "./package-pin-validation.js";
 import { validateManifestPermission } from "./permission-validation.js";
 import { targetId } from "./proposal-content-validation.js";
+import { PUBLIC_ACTION_SCHEMA_VERSION } from "./public-action-contract.js";
+import {
+  PUBLIC_ACTION_TARGET_APPLY_FAILURE,
+  PUBLIC_ACTION_TARGET_HEALTH_FAILURE,
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+} from "./public-operation-contract.js";
 import { assertDigest, assertPackageId, assertRawSha256, bytewise } from "./record-primitives.js";
 import { ActionValidationError, exactObject } from "./strict-json.js";
-
-const ENGINES = ["claude", "codex", "copilot", "opencode", "antigravity"] as const;
 
 export function validateLegacyManifestClosure(
   candidate: StrictLegacyAdoptCandidateV1,
@@ -41,7 +57,7 @@ export function validateLegacyManifestClosure(
     `${path}.synthetic_manifest`,
   );
   if (
-    manifest.schema_version !== "1.0" ||
+    manifest.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION ||
     manifest.id !== candidate.synthetic_pin.id ||
     manifest.version !== candidate.synthetic_pin.version
   )
@@ -163,13 +179,13 @@ function validatePlatforms(value: unknown, path: string): void {
     invalid("platform constraints exceed bound", path);
   const identities = value.map((item, index) => {
     const row = exactObject(item, ["os", "arch", "libc"], [], `${path}[${index}]`);
-    if (!["darwin", "linux", "win32"].includes(row.os as string))
+    if (!CAPABILITY_MANIFEST_PLATFORM_OSES.some((os) => os === row.os))
       invalid("invalid platform OS", `${path}[${index}].os`);
-    if (!["arm64", "x64"].includes(row.arch as string))
+    if (!CAPABILITY_MANIFEST_PLATFORM_ARCHES.some((arch) => arch === row.arch))
       invalid("invalid platform architecture", `${path}[${index}].arch`);
-    if (row.libc !== null && !["glibc", "musl"].includes(row.libc as string))
+    if (row.libc !== null && !CAPABILITY_MANIFEST_PLATFORM_LIBCS.some((libc) => libc === row.libc))
       invalid("invalid platform libc", `${path}[${index}].libc`);
-    if (row.os !== "linux" && row.libc !== null)
+    if (row.os !== CAPABILITY_MANIFEST_PLATFORM_OS.LINUX && row.libc !== null)
       invalid("non-Linux platform cannot select libc", `${path}[${index}].libc`);
     return `${row.os}\0${row.arch}\0${row.libc ?? ""}`;
   });
@@ -195,7 +211,7 @@ function validateManifestDependencies(
       invalid("legacy package depends on itself", `${path}[${index}]`);
     if (typeof row.version_range !== "string" || !isCanonicalVersionRange(row.version_range))
       invalid("invalid dependency version range", `${path}[${index}].version_range`);
-    if (!["same", "user-prerequisite"].includes(row.required_scope as string))
+    if (!CAPABILITY_MANIFEST_DEPENDENCY_SCOPES.some((scope) => scope === row.required_scope))
       invalid("invalid dependency required scope", `${path}[${index}].required_scope`);
     return item as LegacyManifestDependencyV1;
   });
@@ -245,9 +261,9 @@ function validateDependencyBinding(value: unknown, path: string): LegacyDependen
   if (typeof base.version !== "string" || !isCanonicalSemver(base.version))
     invalid("invalid resolved dependency version", `${path}.version`);
   assertRawSha256(base.content_sha256, `${path}.content_sha256`);
-  if (base.required_scope === "same") {
+  if (base.required_scope === CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.SAME) {
     exactObject(value, ["required_scope", "package_id", "version", "content_sha256"], [], path);
-  } else if (base.required_scope === "user-prerequisite") {
+  } else if (base.required_scope === CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.USER_PREREQUISITE) {
     exactObject(
       value,
       ["required_scope", "package_id", "version", "content_sha256", "required_health_plan_digest"],
@@ -263,7 +279,7 @@ function validatePermissionProjection(
   manifestValue: unknown,
   candidateValue: unknown,
   packageId: string,
-  scope: "project" | "user",
+  scope: CapabilityScope,
   path: string,
 ): void {
   if (!Array.isArray(manifestValue) || !Array.isArray(candidateValue) || manifestValue.length > 512)
@@ -297,19 +313,19 @@ function validateTargetProjection(
               engine,
               participant_id: null,
               required: true as const,
-              on_apply_failure: "abort-scope" as const,
-              on_health_failure: "abort-scope" as const,
+              on_apply_failure: PUBLIC_ACTION_TARGET_APPLY_FAILURE.ABORT_SCOPE,
+              on_health_failure: PUBLIC_ACTION_TARGET_HEALTH_FAILURE.ABORT_SCOPE,
             }
           : {
               scope: candidate.scope,
               engine,
               participant_id: null,
               required: false as const,
-              on_apply_failure: "omit-after-rollback" as const,
-              on_health_failure: "omit-after-rollback" as const,
+              on_apply_failure: PUBLIC_ACTION_TARGET_APPLY_FAILURE.OMIT_AFTER_ROLLBACK,
+              on_health_failure: PUBLIC_ACTION_TARGET_HEALTH_FAILURE.OMIT_AFTER_ROLLBACK,
             },
         subject: {
-          kind: "capability" as const,
+          kind: PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY,
           package_id: candidate.synthetic_pin.id,
           component_id: componentId,
         },
@@ -329,16 +345,10 @@ function validateManagedPackageId(
 ): void {
   const row = Array.isArray(components) ? (components[0] as { targets?: unknown }) : null;
   const engine = Array.isArray(row?.targets) ? row.targets[0] : null;
-  const prefix =
-    source === "skill-lock"
-      ? "legacy.skill."
-      : source === "tool-managed-evidence"
-        ? "legacy.tool."
-        : source === "mcp-managed-sidecar"
-          ? `legacy.mcp.${engine}.`
-          : source === "hook-sentinel"
-            ? `legacy.hook.${engine}.`
-            : `legacy.role.${engine}.`;
+  const basePrefix = LEGACY_SOURCE_PACKAGE_ID_PREFIX[source];
+  const prefix = LEGACY_SOURCE_ENGINE_SCOPED_PACKAGE_IDS.some((candidate) => candidate === source)
+    ? `${basePrefix}${engine}.`
+    : basePrefix;
   const managed = packageId.slice(prefix.length);
   const managedMatch = /^([a-z0-9]+(?:-[a-z0-9]+)*)-([a-f0-9]{64})$/.exec(managed);
   if (

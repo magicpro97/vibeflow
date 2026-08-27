@@ -10,7 +10,7 @@ import {
 import { basename, join } from "node:path";
 import { skillForFile } from "../commands.js";
 import { type Attachment, CTX_DIR, ENGINES, type Engine, readState, writeState } from "../core.js";
-import type { LogEvent } from "../logbus.js";
+import { type LogEvent, decodeLogEvent } from "../logbus.js";
 import {
   type EngineReadiness,
   type PreflightOpts,
@@ -213,8 +213,8 @@ export function replayFromLog(
   const events: LogEvent[] = [];
   for (const line of raw.split("\n").filter(Boolean)) {
     try {
-      const ev = JSON.parse(line) as LogEvent;
-      if (typeof ev.seq === "number" && ev.seq >= since) {
+      const ev = decodeLogEvent(JSON.parse(line));
+      if (ev && ev.seq >= since) {
         if (runId !== undefined && ev.runId !== runId) continue;
         events.push(ev);
         if (events.length >= limit) break;

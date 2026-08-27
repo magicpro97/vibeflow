@@ -2,7 +2,7 @@
 title: Coverage
 description: Reference for VibeFlow CLI flags, coverage enforcement rules, anti-patterns suite, and bun:coverage quirks.
 category: reference
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # VibeFlow CLI flag reference
@@ -68,26 +68,31 @@ off, the loop is bypassed entirely. A failure on the first attempt
 returns immediately — no fallback is attempted. The original error
 message is preserved verbatim.
 
-**Tests:** 7 new tests in `test/ai-init.test.ts` (autopilot flag
-block) and 2 new tests in `test/commands-coverage.test.ts` (CLI
-integration). All pass; 100% lcov line coverage maintained.
+**Tests:** the behavior has focused coverage in `test/ai-init.test.ts`
+and `test/commands-coverage.test.ts`. Do not infer a repository-wide
+coverage percentage from those focused tests; only a fresh
+`bun run coverage:check` result is coverage evidence.
 
 ---
 
-# Coverage policy: 100% lcov, 100% branch, always
+# Coverage policy: fresh lcov evidence, no invented percentage
 
-The vibeflow-docs repo is **contractually** at 100% line and branch
-coverage. Every PR must keep it that way.
+VibeFlow targets 100% executable line coverage per `src/` file unless
+the coverage gate carries an explicit issue-bound waiver. A normal test
+pass, a stale `coverage/lcov.info`, or the Bun version is not proof that
+the target was met. Report the exact live numerator/denominator from
+`bun run coverage:check`.
 
 ## How it's enforced
 
-1. `scripts/coverage-gate.cjs` — parses `coverage/lcov.info` after
-   `bun test --coverage --coverage-reporter=lcov` runs. Refuses
-   merge if any `src/*.ts` file is below 100% line or branch.
-2. `bun run coverage:check` — runs the lcov generator + the gate.
+1. `scripts/coverage-gate.cjs` parses freshly generated
+   `coverage/lcov.info`. It enforces per-file executable-line coverage
+   for `src/`, except entries in its explicit `COVERAGE_WAIVERS` map.
+2. `bun run coverage:check` removes old coverage, builds the UI, runs
+   Bun 1.4 with the lcov reporter, then runs that gate.
 3. `bun run check` — runs typecheck + lint + test + coverage:check.
-4. `.github/workflows/ci.yml` — runs `bun run check` on a self-hosted
-   runner (PR #30 + #31). If red, the PR cannot merge.
+4. `.github/workflows/ci.yml` runs the same coverage command. Its result
+   is authoritative only after the current commit's job is green.
 
 ## What to do when you add a new file and coverage drops
 
@@ -98,52 +103,45 @@ coverage. Every PR must keep it that way.
    function.
 3. Run `bun run coverage:check` to confirm.
 
-### Option B: Inline unreachable defensive code
+### Option B: Extract and test a real seam
 
-If a `catch` block or `if (cond) return;` is truly unreachable in
-practice, use the single-statement form:
+If the code path depends on a network, filesystem, clock, process, or
+platform boundary, inject that dependency and drive both success and
+failure branches. Do not reshape production control flow merely to make
+the reporter count fewer lines.
 
-```ts
-// Bad — bun:coverage counts the } as a separate line, drops coverage.
-if (cond) {
-  return;
-}
+### Option C: Use an issue-bound waiver (last resort)
 
-// Good — no standalone }, the line is the same.
-if (cond) return;
-```
-
-### Option C: Extract a test seam (last resort)
-
-If the code path is hard to test (real network, real fs), inject
-the dependency. See `src/commands.ts` for examples.
+When a platform-only path cannot run in the current job, add the narrow
+file waiver required by `scripts/coverage-gate.cjs`, with an owner,
+issue, expiry, and a dedicated platform test job.
 
 ## bun:coverage quirks
 
-1. **Standalone `}` on its own line is counted as executable.** Inline
-   single-statement blocks to avoid.
-2. **bun:coverage emits no BRDA records**, so branch coverage
-   shows as 0/0 in the lcov. The plan called this out — the
-   `::notice::` line in `coverage-gate.cjs` documents this.
+1. Bun 1.4 can generate the lcov file used by this repository, including
+   executable `DA` line records. That fixes neither missing tests nor a
+   stale report.
+2. **The current Bun 1.4 lcov path emits no BRDA records in this suite**,
+   so branch coverage reports `0/0`. The `::notice::` line in
+   `coverage-gate.cjs` makes that blind spot explicit; do not call it
+   100% branch coverage.
 3. **`setInterval(() => {...}, 25000)` callback body never hits in
    tests** because tests complete in <25s. Either exercise the
    callback in a test, or use an `inject.timer` seam.
 
 ## Anti-patterns suite
 
-`test/coverage-anti-patterns.test.ts` is the contract that locks
-the 100% invariant. A future agent that introduces a top-level
-spawn, an empty catch, or a test using raw `Bun.spawn` will fail
-this suite BEFORE the coverage gate runs.
+`test/coverage-anti-patterns.test.ts` rejects structural patterns that
+make coverage or test isolation unreliable, including top-level spawn,
+empty catches, and raw `Bun.spawn` in tests. It is a hygiene gate, not a
+substitute for the lcov result.
 
 ## When you have a real coverage blocker
 
-Open an issue with: file + line, the code that can't be hit, and
-the runtime condition. A maintainer can add an `inject` seam, add
-a `// biome-ignore`, or accept the gap and document the rationale.
-
-Do NOT silently merge <100% coverage. The 100% invariant is load-
-bearing: future contributors rely on it.
+Open an issue with the file, uncovered executable line, runtime
+condition, and an expiry/owner for any temporary waiver. Prefer an
+injected seam and a real test. Do not hide a gap with a type cast,
+formatting trick, stale lcov file, or an untracked ignore.
 
 ---
 

@@ -1,3 +1,5 @@
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { ProcessLock } from "../../durability/index.js";
 import {
   canonicalJson,
@@ -35,7 +37,7 @@ import { assertValidatedPackageTree, materializePackageTree } from "./tree.js";
 
 export interface RetainCapabilityPackageCacheOptionsV1 {
   private_root: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   lock: ProcessLock;
 }
@@ -62,7 +64,7 @@ export function retainCapabilityPackageCache(
     );
 
   let verified = null;
-  if (pin.source.kind === "registry") {
+  if (pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY) {
     verified = assertVerifiedRegistryPackagePin(publication.pin);
     if (
       !publication.registry_envelope ||
@@ -92,7 +94,7 @@ export function retainCapabilityPackageCache(
     );
 
   let legacyDigest: string | null = null;
-  if (pin.source.kind === "legacy-adopt") {
+  if (pin.source.kind === CAPABILITY_SOURCE_KIND.LEGACY_ADOPT) {
     if (publication.legacy_inspection_evidence === null)
       throw new CapabilityValidationError(
         "legacy cache publication lacks validated inspection evidence",

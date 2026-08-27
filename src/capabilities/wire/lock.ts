@@ -1,10 +1,22 @@
+import type { CAPABILITY_MANIFEST_DEPENDENCY_SCOPE } from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { EngineName, JsonScalar } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { PackageAuthenticityBindingV1, PackagePinV1 } from "../source/types.js";
+
+export const CAPABILITY_LOCK_TARGET_STATE = Object.freeze({
+  INSTALLED: "installed",
+  DEGRADED: "degraded",
+} as const);
+export type CapabilityLockTargetState =
+  (typeof CAPABILITY_LOCK_TARGET_STATE)[keyof typeof CAPABILITY_LOCK_TARGET_STATE];
+export const CAPABILITY_LOCK_TARGET_STATES = Object.freeze(
+  Object.values(CAPABILITY_LOCK_TARGET_STATE),
+);
 
 export interface CapabilityLockV1 {
   schema_version: "1.0";
   fabric_active: true;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   generation_id: string;
   generation_ordinal: number;
   parent_generation_digests: string[];
@@ -32,11 +44,11 @@ export interface CapabilityLockEntryV1 {
 export interface CapabilityLockedTargetV1 {
   target_id: string;
   component_id: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   engine: EngineName | null;
   participant_id: string | null;
   required: boolean;
-  state: "installed" | "degraded";
+  state: CapabilityLockTargetState;
   adapter_fingerprints: string[];
   projections: Array<{ ownership_key: string; projection_digest: string }>;
   enforcement_digest: string;
@@ -45,13 +57,13 @@ export interface CapabilityLockedTargetV1 {
 
 export type CapabilityDependencyBindingV1 =
   | {
-      required_scope: "same";
+      required_scope: typeof CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.SAME;
       package_id: string;
       version: string;
       content_sha256: string;
     }
   | {
-      required_scope: "user-prerequisite";
+      required_scope: typeof CAPABILITY_MANIFEST_DEPENDENCY_SCOPE.USER_PREREQUISITE;
       package_id: string;
       version: string;
       content_sha256: string;

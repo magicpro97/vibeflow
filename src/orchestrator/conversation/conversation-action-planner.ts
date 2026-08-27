@@ -1,4 +1,7 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_PRODUCER_REQUEST_BINDING_KIND,
+  ACTION_ROOT_LOCATOR_KIND,
   type ActionApprovalV1,
   type ActionProposalDraftV1,
   type ActionProposalV1,
@@ -14,7 +17,27 @@ import {
   materializeApproval,
   materializeProposal,
 } from "../../actions/index.js";
+import {
+  ACTION_AUTHORITY_BINDING_MODE,
+  ACTION_CHALLENGE_CLASS,
+  ACTION_DECISION,
+  ACTION_DOMAIN,
+  ACTION_EFFECT_CLASS,
+  ACTION_EXPECTED_SOURCE_MODE,
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  ACTION_PREVIEW_PROJECTOR_VERSION,
+  ACTION_REVERSIBILITY_VALUE,
+  ACTION_RISK,
+  CREDENTIAL_CLASS,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "../../actions/public-action-contract.js";
 import { digestV1 } from "../../durability/index.js";
+import type { ConversationMessageQueueTargetParticipantsV1 } from "./conversation-message-queue-contract.js";
+import {
+  conversationRevisionActionPlanDigest,
+  materializeConversationRevisionActionPlan,
+} from "./conversation-revision-action-plan.js";
 import type { LineageActionPlanBindingV1 } from "./lineage-action-authority.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
 import type { LineageHeadRecordV1 } from "./lineage-types.js";
@@ -54,7 +77,11 @@ export interface ConversationRevisionActionPlanInputV1 {
 export type ContinueMessageActionPlanInputV1 = Omit<
   ConversationRevisionActionPlanInputV1,
   "action"
-> & { request: MessageRequest & { target_participants: "all" | string[] } };
+> & {
+  request: MessageRequest & {
+    target_participants: ConversationMessageQueueTargetParticipantsV1;
+  };
+};
 
 export function conversationActionAuthorityHead(input: {
   root_session_id: string;
@@ -76,30 +103,7 @@ function plusMilliseconds(timestamp: string, milliseconds: number): string {
   return new Date(Date.parse(timestamp) + milliseconds).toISOString();
 }
 
-export function materializeConversationRevisionActionPlan(
-  rootSessionId: string,
-  revisionPlan: RevisionPreparationPlanV1,
-): LineageActionPlanBindingV1 {
-  return {
-    schema_version: "1.0",
-    domain: "conversation",
-    action_root_locator: { kind: "conversation", root_session_id: rootSessionId },
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
-    execution_object_closure_digest: null,
-    permission_digest: EMPTY_PERMISSION_DIGEST,
-    steps: [
-      {
-        order: 0,
-        step_id: "revision-operation-0",
-        plan_kind: "revision-operation",
-        plan_digest: revisionPlan.plan_digest,
-        target_ids: [],
-        effect_classes: ["project-write"],
-        reversibility: "reversible",
-      },
-    ],
-  };
-}
+export { materializeConversationRevisionActionPlan } from "./conversation-revision-action-plan.js";
 
 function actionPreview(action: ConversationRevisionMutationV1): {
   title: string;
@@ -108,7 +112,7 @@ function actionPreview(action: ConversationRevisionMutationV1): {
   label: string;
   after: JsonValue;
 } {
-  if (action.type === "conversation.continue_message")
+  if (action.type === HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE)
     return {
       title: "Continue conversation",
       summary: "Create a child revision with the verified shared context.",
@@ -116,7 +120,7 @@ function actionPreview(action: ConversationRevisionMutationV1): {
       label: "Continuation message",
       after: action.content,
     };
-  if (action.type === "conversation.add_participant")
+  if (action.type === HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT)
     return {
       title: "Add conversation participant",
       summary: "Create a child revision with the additional fresh participant.",
@@ -124,7 +128,7 @@ function actionPreview(action: ConversationRevisionMutationV1): {
       label: "Participant",
       after: structuredClone(action.participant) as unknown as JsonValue,
     };
-  if (action.type === "conversation.remove_participant")
+  if (action.type === HOST_ACTION_KIND.CONVERSATION_REMOVE_PARTICIPANT)
     return {
       title: "Remove conversation participant",
       summary: "Create a child revision without the selected participant.",
@@ -132,7 +136,7 @@ function actionPreview(action: ConversationRevisionMutationV1): {
       label: "Participant ID",
       after: action.participant_id,
     };
-  if (action.type === "conversation.update_participant")
+  if (action.type === HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT)
     return {
       title: "Update conversation participant",
       summary: "Create a child revision with the changed participant binding.",
@@ -152,11 +156,14 @@ function actionPreview(action: ConversationRevisionMutationV1): {
 export function materializeConversationRevisionProposal(
   input: ConversationRevisionActionPlanInputV1,
 ): ConversationRevisionProposalPlanV1 {
-  const locator = { kind: "conversation" as const, root_session_id: input.root_session_id };
+  const locator = {
+    kind: ACTION_ROOT_LOCATOR_KIND.CONVERSATION,
+    root_session_id: input.root_session_id,
+  };
   if (input.authority.authority_scope_digest !== actionIdempotencyScopeDigest(locator))
     throw new Error("conversation revision authority scope mismatch");
   const expected = {
-    mode: "writable-revision" as const,
+    mode: ACTION_EXPECTED_SOURCE_MODE.WRITABLE_REVISION,
     conversation_id: input.conversation_id,
     revision_id: input.revision_id,
     last_seq: input.last_seq,
@@ -165,13 +172,16 @@ export function materializeConversationRevisionProposal(
   const action = structuredClone(input.action);
   const preview = actionPreview(action);
   const canonicalRequest: CanonicalActionRequestV1 = {
-    schema_version: "1.0",
-    origin: "conversation",
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
+    origin: ACTION_DOMAIN.CONVERSATION,
     principal_digest: input.authority.principal_digest,
     authority_scope_digest: input.authority.authority_scope_digest,
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     request: {
-      schema_version: "1.0",
+      schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
       anchor_event_id: input.anchor_event_id ?? null,
       expected,
       candidate: action,
@@ -181,7 +191,10 @@ export function materializeConversationRevisionProposal(
     input.root_session_id,
     input.revision_plan,
   );
-  const actionPlanDigest = digestV1("VF-ACTION-PLAN\0v1\0", actionPlan);
+  const actionPlanDigest = conversationRevisionActionPlanDigest(
+    input.root_session_id,
+    input.revision_plan,
+  );
   const authorityHead = conversationActionAuthorityHead(input);
   const expiresAt = plusMilliseconds(input.created_at, 60 * 60_000);
   const previewRules = digestV1("VF-CONVERSATION-ACTION-PREVIEW-RULES\0v1\0", {
@@ -192,13 +205,16 @@ export function materializeConversationRevisionProposal(
     schema_version: "1.0",
     idempotency_key: input.message_key,
     origin_event_id: input.anchor_event_id ?? null,
-    domain: "conversation",
+    domain: ACTION_DOMAIN.CONVERSATION,
     action_root_locator: locator,
     producer_request_binding: {
-      kind: "canonical-action-request",
+      kind: ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST,
       digest: canonicalActionRequestDigest(canonicalRequest),
     },
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     execution_object_closure_digest: null,
     base: {
       root_session_id: input.root_session_id,
@@ -214,14 +230,14 @@ export function materializeConversationRevisionProposal(
       capability_lock_digest: null,
       capability_parent_generation_digests: [],
       user_prerequisites: [],
-      authority_binding_mode: "current",
+      authority_binding_mode: ACTION_AUTHORITY_BINDING_MODE.CURRENT,
       ...authorityHead,
       repair_authorization_binding_digest: null,
     },
     action,
     requested_by: structuredClone(input.authority.actor),
-    risk: "medium",
-    effect_classes: ["project-write"],
+    risk: ACTION_RISK.MEDIUM,
+    effect_classes: [ACTION_EFFECT_CLASS.PROJECT_WRITE],
     target_set: [],
     package_pins: [],
     source_authority_set_digest: EMPTY_SOURCE_AUTHORITY_SET_DIGEST,
@@ -238,12 +254,15 @@ export function materializeConversationRevisionProposal(
       credential_class: input.authority.actor.credential_class,
     }),
     permission_digest: EMPTY_PERMISSION_DIGEST,
-    reversibility: "reversible",
+    reversibility: ACTION_REVERSIBILITY_VALUE.REVERSIBLE,
     preview: {
       title: preview.title,
       summary: preview.summary,
       action_type: action.type,
-      planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+      planning_options: {
+        mode: ACTION_PLANNING_MODE.DURABLE,
+        network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+      },
       review_fields: [
         {
           json_pointer: preview.pointer,
@@ -259,12 +278,12 @@ export function materializeConversationRevisionProposal(
       permission_delta: [],
       dependency_delta: [],
       config_diffs: [],
-      effect_classes: ["project-write"],
+      effect_classes: [ACTION_EFFECT_CLASS.PROJECT_WRITE],
       enforcement: [],
-      reversibility: "reversible",
+      reversibility: ACTION_REVERSIBILITY_VALUE.REVERSIBLE,
       health_plan: [],
       recovery_actions: ["retry", "inspect-trace"],
-      projector_version: "vf-public-projector/1",
+      projector_version: ACTION_PREVIEW_PROJECTOR_VERSION,
       rules_digest: previewRules,
       redaction_manifest_digest: digestV1("VF-CONVERSATION-ACTION-REDACTION-MANIFEST\0v1\0", {
         schema_version: "1.0",
@@ -285,7 +304,7 @@ export function materializeContinueMessageProposal(
   return materializeConversationRevisionProposal({
     ...input,
     action: {
-      type: "conversation.continue_message",
+      type: HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE,
       content: input.request.content,
       target_participants: input.request.target_participants,
       ...(input.request.quote_refs
@@ -300,12 +319,12 @@ export function materializeConversationRevisionAction(
 ): ConversationRevisionActionPlanV1 {
   const planned = materializeConversationRevisionProposal(input);
   const approval = materializeApproval(planned.proposal, {
-    decision: "approved",
+    decision: ACTION_DECISION.APPROVED,
     decided_by: structuredClone(input.authority.actor),
     challenge_class:
-      input.authority.actor.credential_class === "automation-grant"
-        ? "automation-grant"
-        : "normal-confirm",
+      input.authority.actor.credential_class === CREDENTIAL_CLASS.AUTOMATION_GRANT
+        ? ACTION_CHALLENGE_CLASS.AUTOMATION_GRANT
+        : ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM,
     challenge_digest: null,
     decided_at: input.created_at,
     expires_at: plusMilliseconds(input.created_at, 30 * 60_000),
@@ -323,7 +342,7 @@ export function materializeContinueMessageAction(
   return materializeConversationRevisionAction({
     ...input,
     action: {
-      type: "conversation.continue_message",
+      type: HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE,
       content: input.request.content,
       target_participants: input.request.target_participants,
       ...(input.request.quote_refs

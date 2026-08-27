@@ -1,3 +1,5 @@
+import { CAPABILITY_GRANT_TRANSITION } from "../../actions/capability-security-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import { foldGrantFrames, validateAuthorityHead } from "../authority/index.js";
 import type { AuthorityEpochHeadV1, GrantFrameV1 } from "../authority/index.js";
@@ -43,7 +45,7 @@ export function requestedPermissionRowDigest(row: PermissionBindingRowV1): strin
 interface WitnessContextV1 {
   evaluated_at: string;
   principal: EffectiveGrantFrameV1["principal"];
-  scope: "project" | "user";
+  scope: CapabilityScope;
   action_type: string;
   target_engines: string[];
 }
@@ -94,7 +96,8 @@ interface Selection {
 
 function effective(frame: EffectiveGrantFrameV1, context: WitnessContextV1, at: number): boolean {
   return (
-    (frame.transition === "issued" || frame.transition === "renewed") &&
+    (frame.transition === CAPABILITY_GRANT_TRANSITION.ISSUED ||
+      frame.transition === CAPABILITY_GRANT_TRANSITION.RENEWED) &&
     frame.revoked_at === null &&
     canonicalJson(frame.principal) === canonicalJson(context.principal) &&
     frame.scope === context.scope &&

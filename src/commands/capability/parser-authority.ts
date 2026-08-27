@@ -22,7 +22,7 @@ export function parseAuthorityCliArgv(
   if (raw.booleanFlags.has("allow-network-read"))
     usage("--allow-network-read is not supported for authority commands");
   if (common.dryRun && common.yes) usage("--dry-run and --yes are mutually exclusive");
-  if (command.command === "authority.repair") {
+  if (command.command === CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR) {
     if (!io.stdinIsTTY) usage("vf authority repair requires an interactive TTY");
     if (common.yes) usage("vf authority repair does not accept --yes");
     if (common.dryRun) usage("vf authority repair does not accept --dry-run");
@@ -31,7 +31,7 @@ export function parseAuthorityCliArgv(
     usage("non-interactive authority mutations require --idempotency-key");
   }
   if (raw.singleValueFlags.has("request-file")) {
-    if (command.command === "authority.repair")
+    if (command.command === CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR)
       usage("--request-file is forbidden for vf authority repair");
     ensureRequestFileExclusive(raw, {
       directFlagNames: command.directFlagNames,
@@ -46,8 +46,7 @@ export function parseAuthorityCliArgv(
     };
   }
   if (
-    (command.command === "authority.secret.revoke" ||
-      command.command.startsWith("authority.trust.")) &&
+    isCapabilityCliExplicitScopeAuthorityCommand(command.command) &&
     !raw.singleValueFlags.has("scope")
   ) {
     usage(`${command.command} requires an explicit --scope`);
@@ -79,49 +78,63 @@ function authorityCommand(positionals: string[]): {
   if (third !== undefined) usage("authority commands do not accept extra positionals");
   if (first === "grant" && second === "create")
     return {
-      command: "authority.grant.create",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_CREATE,
       directFlagNames: ["grant-file"],
       consumedCommandWords: 2,
     };
   if (first === "grant" && second === "renew")
     return {
-      command: "authority.grant.renew",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_RENEW,
       directFlagNames: ["grant-id", "grant-file"],
       consumedCommandWords: 2,
     };
   if (first === "grant" && second === "revoke")
     return {
-      command: "authority.grant.revoke",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_REVOKE,
       directFlagNames: ["grant-id", "scope"],
       consumedCommandWords: 2,
     };
   if (first === "policy" && second === "update") {
     return {
-      command: "authority.policy.update",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_POLICY_UPDATE,
       directFlagNames: ["scope", "replacement-file"],
       consumedCommandWords: 2,
     };
   }
   if (first === "secret" && second === "revoke") {
     return {
-      command: "authority.secret.revoke",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_SECRET_REVOKE,
       directFlagNames: ["scope", "package", "input", "candidate-id", "candidate-digest"],
       consumedCommandWords: 2,
     };
   }
-  if (first === "trust" && ["add", "rescope", "deprecate", "revoke"].includes(second ?? "")) {
+  const trustCommand = TRUST_COMMAND_BY_SUBCOMMAND[second ?? ""];
+  if (first === "trust" && trustCommand) {
     return {
-      command: `authority.trust.${second}` as ParsedAuthorityDirectMutationV1["command"],
+      command: trustCommand,
       directFlagNames: ["scope", "trust-file"],
       consumedCommandWords: 2,
     };
   }
   if (first === "repair" && second === undefined) {
     return {
-      command: "authority.repair",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR,
       directFlagNames: ["scope", "conversation"],
       consumedCommandWords: 1,
     };
   }
   usage(`unsupported authority subcommand ${JSON.stringify(positionals.join(" "))}`);
 }
+
+const TRUST_COMMAND_BY_SUBCOMMAND: Readonly<
+  Record<string, ParsedAuthorityDirectMutationV1["command"]>
+> = Object.freeze({
+  add: CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_ADD,
+  rescope: CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_RESCOPE,
+  deprecate: CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_DEPRECATE,
+  revoke: CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_REVOKE,
+});
+import {
+  CAPABILITY_CLI_COMMAND,
+  isCapabilityCliExplicitScopeAuthorityCommand,
+} from "../../actions/capability-cli-contract.js";

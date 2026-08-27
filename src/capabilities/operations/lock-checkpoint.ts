@@ -12,12 +12,15 @@ import { readCapabilityWal } from "../storage/operation-store.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
-import type { CapabilityWalPayloadV1 } from "../wire/operation.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_WAL_PAYLOAD_KIND, type CapabilityWalPayloadV1 } from "../wire/operation.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import type { CapabilityOperationJournalV1 } from "./operation-journal.js";
 import type { CapabilityRuntimeFaultPointV1 } from "./types.js";
 
-type LockCheckpointPayloadV1 = Extract<CapabilityWalPayloadV1, { kind: "lock-checkpoint" }>;
+type LockCheckpointPayloadV1 = Extract<
+  CapabilityWalPayloadV1,
+  { kind: typeof CAPABILITY_WAL_PAYLOAD_KIND.LOCK_CHECKPOINT }
+>;
 
 function checkpointPath(storage: CapabilityStorageV1, lockDigest: string): string {
   return join(
@@ -46,7 +49,7 @@ function expectedCheckpoint(
     bytes,
     path: checkpointPath(storage, base.content_digest),
     payload: {
-      kind: "lock-checkpoint",
+      kind: CAPABILITY_WAL_PAYLOAD_KIND.LOCK_CHECKPOINT,
       prior_generation_id: base.generation_id,
       prior_lock_digest: base.content_digest,
       checkpoint_bytes_sha256,
@@ -64,13 +67,13 @@ export function ensureCapabilityLockCheckpoint(input: {
   fault?: (point: CapabilityRuntimeFaultPointV1) => void;
 }): boolean {
   const selected = readCapabilityWal(input.storage.paths, input.operationId).flatMap((event) =>
-    event.payload.kind === "lock-checkpoint" ? [event.payload] : [],
+    event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.LOCK_CHECKPOINT ? [event.payload] : [],
   );
   if (input.base === null) {
     if (selected.length > 0)
       throw new CapabilityRuntimeError(
         "initial capability publication contains a prior-lock checkpoint",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     return false;
   }
@@ -81,7 +84,7 @@ export function ensureCapabilityLockCheckpoint(input: {
   )
     throw new CapabilityRuntimeError(
       "capability lock checkpoint differs from the immutable operation base",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   createOrVerifyPrivateFile(expected.path, expected.bytes, {
     lock: input.held.processLock,
@@ -92,7 +95,7 @@ export function ensureCapabilityLockCheckpoint(input: {
   if (!retained || !Buffer.from(retained).equals(expected.bytes))
     throw new CapabilityRuntimeError(
       "capability lock checkpoint bytes are missing or changed",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   if (selected.length === 0) {
     input.journal.append(input.operationId, expected.payload, input.held);
@@ -111,7 +114,7 @@ export function validateCapabilityLockCheckpoint(input: {
     if (input.payload !== null)
       throw new CapabilityRuntimeError(
         "initial operation has a lock checkpoint",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     return;
   }
@@ -126,6 +129,6 @@ export function validateCapabilityLockCheckpoint(input: {
   )
     throw new CapabilityRuntimeError(
       "required prior-lock checkpoint is absent or inconsistent",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
 }

@@ -11,6 +11,11 @@ import {
   type PrivateProjectorNativeIdentifierBindingV1,
   RevisionNativeBindingStore,
 } from "./revision-native-binding-store.js";
+import {
+  PARTICIPANT_START_RECONCILIATION_MODE,
+  type ParticipantStartReconciliationModeV1,
+  isParticipantStartReconciliationModeV1,
+} from "./revision-participant-receipt.js";
 
 const MAX_EVIDENCE_BYTES = 1024 * 1024;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
@@ -98,7 +103,7 @@ export class RevisionLaneEvidenceStore {
       RevisionLanePrivateEvidenceV1,
       "schema_version" | "content_digest" | "native_reference_digest"
     > & {
-      reconciliation_mode: "provider-idempotency" | "inspect-start" | "vf-process-lease";
+      reconciliation_mode: ParticipantStartReconciliationModeV1;
       adapter_reference_utf8: string;
       absence_proved: boolean;
     },
@@ -110,7 +115,8 @@ export class RevisionLaneEvidenceStore {
       !/^vf-operation-[0-9a-f]{64}$/.test(input.operation_id) ||
       !/^vf-start-[0-9a-f]{64}$/.test(input.attempt_key) ||
       !Number.isSafeInteger(input.start_generation) ||
-      input.start_generation < 0
+      input.start_generation < 0 ||
+      !isParticipantStartReconciliationModeV1(input.reconciliation_mode)
     )
       throw new Error("invalid revision lane evidence identity");
     const {
@@ -124,13 +130,14 @@ export class RevisionLaneEvidenceStore {
       : this.nativeBindings.write({
           root_session_id: input.root_session_id,
           identifier_kind:
-            reconciliationMode === "vf-process-lease"
+            reconciliationMode === PARTICIPANT_START_RECONCILIATION_MODE.VF_PROCESS_LEASE
               ? "process-lease"
               : input.native_session_id
                 ? "provider-session"
                 : "adapter-reference",
           identifier_utf8:
-            reconciliationMode === "vf-process-lease" || !input.native_session_id
+            reconciliationMode === PARTICIPANT_START_RECONCILIATION_MODE.VF_PROCESS_LEASE ||
+            !input.native_session_id
               ? adapterReference
               : input.native_session_id,
         });

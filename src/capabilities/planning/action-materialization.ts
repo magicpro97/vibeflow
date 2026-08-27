@@ -1,5 +1,6 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import type {
   CapabilityFabricPlanV1,
@@ -8,10 +9,13 @@ import type {
   ResolvedCapabilityPackageV1,
 } from "./types.js";
 
-type InstallActionV1 = Extract<CapabilityHostActionV1, { type: "capability.install" }>;
+type InstallActionV1 = Extract<
+  CapabilityHostActionV1,
+  { type: typeof HOST_ACTION_KIND.CAPABILITY_INSTALL }
+>;
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "authorization-mismatch");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH);
 }
 
 export function capabilityActionDigest(action: CapabilityHostActionV1): string {
@@ -125,7 +129,7 @@ export function assertActionMaterialization(
 ): void {
   if (request.scope !== action.scope) invalid("materialized scope does not match canonical action");
   switch (action.type) {
-    case "capability.install": {
+    case HOST_ACTION_KIND.CAPABILITY_INSTALL: {
       if (request.intent.kind !== "install")
         invalid("install action materialized as another lifecycle");
       const pkg = packageFor(request, action.package.id);
@@ -134,7 +138,7 @@ export function assertActionMaterialization(
       assertInputs(action.inputs, pkg);
       return;
     }
-    case "capability.update": {
+    case HOST_ACTION_KIND.CAPABILITY_UPDATE: {
       if (request.intent.kind !== "update" || request.intent.package_id !== action.package_id)
         invalid("update action materialization mismatch");
       const pkg = packageFor(request, action.package_id);
@@ -144,18 +148,18 @@ export function assertActionMaterialization(
       if (action.inputs !== null) assertInputs(action.inputs, pkg);
       return;
     }
-    case "capability.configure":
+    case HOST_ACTION_KIND.CAPABILITY_CONFIGURE:
       if (request.intent.kind !== "configure" || request.intent.package_id !== action.package_id)
         invalid("configure action materialization mismatch");
       assertInputPatch(action.inputs, packageFor(request, action.package_id));
       return;
-    case "capability.retarget":
+    case HOST_ACTION_KIND.CAPABILITY_RETARGET:
       if (request.intent.kind !== "retarget" || request.intent.package_id !== action.package_id)
         invalid("retarget action materialization mismatch");
       packageFor(request, action.package_id);
       assertTargets(action.requested_targets, request, action.package_id);
       return;
-    case "capability.remove":
+    case HOST_ACTION_KIND.CAPABILITY_REMOVE:
       if (
         request.intent.kind !== "remove" ||
         request.intent.package_id !== action.package_id ||
@@ -164,14 +168,14 @@ export function assertActionMaterialization(
         invalid("remove action materialization mismatch");
       packageFor(request, action.package_id);
       return;
-    case "capability.rollback_scope":
+    case HOST_ACTION_KIND.CAPABILITY_ROLLBACK_SCOPE:
       if (
         request.intent.kind !== "rollback" ||
         request.intent.generation_id !== action.generation_id
       )
         invalid("rollback action materialization mismatch");
       return;
-    case "capability.restore_package":
+    case HOST_ACTION_KIND.CAPABILITY_RESTORE_PACKAGE:
       if (
         request.intent.kind !== "restore" ||
         request.intent.package_id !== action.package_id ||
@@ -180,12 +184,12 @@ export function assertActionMaterialization(
         invalid("restore action materialization mismatch");
       packageFor(request, action.package_id);
       return;
-    case "capability.repair":
+    case HOST_ACTION_KIND.CAPABILITY_REPAIR:
       if (request.intent.kind !== "repair" || request.intent.package_id !== action.package_id)
         invalid("repair action materialization mismatch");
       if (action.package_id !== null) packageFor(request, action.package_id);
       return;
-    case "capability.adopt":
+    case HOST_ACTION_KIND.CAPABILITY_ADOPT:
       if (
         request.intent.kind !== "adopt" ||
         request.intent.candidate_digest !== action.candidate.candidate_digest ||

@@ -1,3 +1,9 @@
+import {
+  CAPABILITY_PACKAGE_PIN_POLICY_BY_SOURCE,
+  CAPABILITY_PACKAGE_PIN_TRUST,
+  CAPABILITY_REGISTRY_ENVELOPE_STATUS,
+  CAPABILITY_SOURCE_KIND,
+} from "../../actions/capability-security-contract.js";
 import { validatePackagePin } from "../../actions/package-pin-validation.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import type { ValidatedCapabilityManifestV1 } from "../manifest/types.js";
@@ -19,7 +25,10 @@ import type {
 
 export { validateLegacyInspectionEvidence } from "./legacy-adopt-closure.js";
 
-type NonRegistryPackagePinSourceV1 = Exclude<PackagePinSourceV1, { kind: "registry" }>;
+type NonRegistryPackagePinSourceV1 = Exclude<
+  PackagePinSourceV1,
+  { kind: typeof CAPABILITY_SOURCE_KIND.REGISTRY }
+>;
 
 const VERIFIED_REGISTRY_PINS = new WeakMap<object, VerifiedRegistryEnvelopeV1>();
 const VERIFIED_LEGACY_PINS = new WeakMap<
@@ -38,13 +47,7 @@ function materializePackagePin(input: {
   source: PackagePinSourceV1;
   content_sha256: string;
 }): PackagePinV1 {
-  const matrix = {
-    registry: ["verified", false],
-    git: ["source-pinned", false],
-    "local-dev": ["dev-unverified", true],
-    "legacy-adopt": ["legacy-verified", false],
-  } as const;
-  const [trust, nonportable] = matrix[input.source.kind];
+  const { trust, nonportable } = CAPABILITY_PACKAGE_PIN_POLICY_BY_SOURCE[input.source.kind];
   const preimage = { ...structuredClone(input), trust, nonportable };
   const pin: PackagePinV1 = {
     ...preimage,
@@ -60,7 +63,7 @@ function registryPackagePin(verification: VerifiedRegistryEnvelopeV1): PackagePi
     id: statement.package_id,
     version: statement.version,
     source: {
-      kind: "registry",
+      kind: CAPABILITY_SOURCE_KIND.REGISTRY,
       registry_origin: statement.registry_origin,
       source_url: statement.provenance.source_url,
       commit_oid: statement.provenance.commit_oid,
@@ -76,12 +79,12 @@ export function createPackagePin(input: {
   source: NonRegistryPackagePinSourceV1;
   content_sha256: string;
 }): PackagePinV1 {
-  if ((input.source as PackagePinSourceV1).kind === "registry")
+  if ((input.source as PackagePinSourceV1).kind === CAPABILITY_SOURCE_KIND.REGISTRY)
     throw new CapabilityValidationError(
       "registry pins require signature-verified resolution authority",
       "pin.source",
     );
-  if (input.source.kind === "legacy-adopt")
+  if (input.source.kind === CAPABILITY_SOURCE_KIND.LEGACY_ADOPT)
     throw new CapabilityValidationError(
       "legacy adoption pins require validated migration inspection closure",
       "pin.source",
@@ -101,7 +104,7 @@ export function createLegacyAdoptPackagePin(input: {
       id: closure.manifest.manifest.id,
       version: closure.manifest.manifest.version,
       source: {
-        kind: "legacy-adopt",
+        kind: CAPABILITY_SOURCE_KIND.LEGACY_ADOPT,
         legacy_source: closure.evidence.legacy_source,
         inspection_evidence_digest: closure.evidence.evidence_digest,
       },
@@ -130,7 +133,7 @@ export function revalidateCachedLegacyAdoptPackagePin(
     id: closure.manifest.manifest.id,
     version: closure.manifest.manifest.version,
     source: {
-      kind: "legacy-adopt",
+      kind: CAPABILITY_SOURCE_KIND.LEGACY_ADOPT,
       legacy_source: closure.evidence.legacy_source,
       inspection_evidence_digest: closure.evidence.evidence_digest,
     },
@@ -167,7 +170,10 @@ export function createVerifiedRegistryPackagePin(
   verification: VerifiedRegistryEnvelopeV1,
 ): PackagePinV1 {
   const authority = assertSignatureVerifiedRegistryEnvelope(verification);
-  if (authority.mode !== "resolution" || verification.status !== "verified")
+  if (
+    authority.mode !== "resolution" ||
+    verification.status !== CAPABILITY_REGISTRY_ENVELOPE_STATUS.VERIFIED
+  )
     throw new CapabilityValidationError(
       "new registry pins require current resolution authority",
       "registry_signature",
@@ -198,7 +204,10 @@ export function revalidateCachedRegistryPackagePin(
 
 export function validateImmutablePackagePin(pin: PackagePinV1): PackagePinV1 {
   validatePackagePin(pin, "pin");
-  if (pin.source.kind === "registry" && pin.trust !== "verified")
+  if (
+    pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY &&
+    pin.trust !== CAPABILITY_PACKAGE_PIN_TRUST.VERIFIED
+  )
     throw new CapabilityValidationError("registry pin lost verified trust", "pin.trust");
   const clone = structuredClone(pin);
   const verification = VERIFIED_REGISTRY_PINS.get(pin);
@@ -226,7 +235,7 @@ export function createAuthenticityBinding(
   registry: VerifiedRegistryEnvelopeV1 | null,
 ): PackageAuthenticityBindingV1 {
   validateImmutablePackagePin(pin);
-  if (pin.source.kind === "legacy-adopt") {
+  if (pin.source.kind === CAPABILITY_SOURCE_KIND.LEGACY_ADOPT) {
     const authority = assertVerifiedLegacyAdoptPackagePin(pin);
     if (authority.manifest_digest !== manifestDigest)
       throw new CapabilityValidationError(
@@ -235,12 +244,12 @@ export function createAuthenticityBinding(
         "integrity_failure",
       );
   }
-  if ((pin.source.kind === "registry") !== (registry !== null))
+  if ((pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY) !== (registry !== null))
     throw new CapabilityValidationError(
       "registry authenticity binding nullability mismatch",
       "registry_signature",
     );
-  if (registry && registry.status !== "verified")
+  if (registry && registry.status !== CAPABILITY_REGISTRY_ENVELOPE_STATUS.VERIFIED)
     throw new CapabilityValidationError(
       "only a current verified registry envelope may create a pin",
       "registry_signature",

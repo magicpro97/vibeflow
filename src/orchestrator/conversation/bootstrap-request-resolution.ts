@@ -6,6 +6,7 @@ import type {
 } from "../../agents/binding.js";
 import { conversationRoleSpecs } from "../../agents/role.js";
 import { ENGINES } from "../../core.js";
+import { AGENT_ENGINE } from "../../core/agent-contract.js";
 import { preflightAll } from "../../preflight.js";
 import { type ConversationIsolationAuthority, bindWithIsolation } from "./bootstrap-isolation.js";
 import {
@@ -13,6 +14,7 @@ import {
   explicitConversationParticipants,
   requestedConversationMaxRounds,
 } from "./bootstrap-request.js";
+import { AGENT_ACTION_CANDIDATE_ROLE } from "./conversation-agent-action-candidate-contract.js";
 import { materializeConversationHostTools } from "./conversation-host-tool-policy.js";
 import type { RuntimeCreateRequest, RuntimePreviewRequest } from "./policy-registry.js";
 import {
@@ -77,7 +79,8 @@ export function defaultConversationReadiness(
   return preflightAll([...ENGINES], { probe: false, cacheKey: repoRoot }).map((status) => ({
     engine: status.engine,
     ready: status.level === "ready",
-    admitted: phase > 1 || status.engine === "claude" || status.engine === "codex",
+    admitted:
+      phase > 1 || status.engine === AGENT_ENGINE.CLAUDE || status.engine === AGENT_ENGINE.CODEX,
   }));
 }
 
@@ -125,12 +128,15 @@ async function selectedRoute(
   let evaluatorAutoAdded = false;
   if (
     route.policy === "debate" &&
-    !participants.some((item) => item.roleRef === "brainstorm-evaluator")
+    !participants.some((item) => item.roleRef === AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR)
   ) {
     const engine =
       participants[0]?.engine ??
       authority.engines.find((item) => item.ready && item.admitted)?.engine;
-    participants.push({ roleRef: "brainstorm-evaluator", ...(engine ? { engine } : {}) });
+    participants.push({
+      roleRef: AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR,
+      ...(engine ? { engine } : {}),
+    });
     evaluatorAutoAdded = true;
   }
   if (participants.some((participant) => participant.engine === undefined)) {

@@ -1,6 +1,6 @@
 import type { CapabilityTargetSelectorV1 } from "../../actions/request-types.js";
 import { canonicalJson } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
 import { bytewise } from "../wire/primitives.js";
 import type { CapabilityPlanningRequestV1, ResolvedCapabilityPackageV1 } from "./types.js";
@@ -18,7 +18,10 @@ export function canonicalCapabilityTargets(
 ): MaterializedCapabilityTargetV1[] {
   const sorted = [...rows].sort((left, right) => bytewise(key(left), key(right)));
   if (new Set(sorted.map(key)).size !== sorted.length)
-    throw new CapabilityRuntimeError("capability target selectors are duplicated", "invalid-plan");
+    throw new CapabilityRuntimeError(
+      "capability target selectors are duplicated",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+    );
   return sorted;
 }
 
@@ -34,7 +37,7 @@ export function lockCapabilityTargets(
           if (target.engine === null)
             throw new CapabilityRuntimeError(
               "locked target has no engine identity",
-              "invalid-plan",
+              CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
             );
           return {
             package_id: entry.package_id,
@@ -53,13 +56,13 @@ export function packageCapabilityTargets(
   if (selectors.length === 0)
     throw new CapabilityRuntimeError(
       "capability package target selector set is empty",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   const rows = selectors.map((selector) => {
     if (!pkg.manifest.components.some((component) => component.targets.includes(selector.engine)))
       throw new CapabilityRuntimeError(
         `capability package ${pkg.pin.id} has no component for ${selector.engine}`,
-        "invalid-plan",
+        CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
       );
     return { package_id: pkg.pin.id, ...selector };
   });

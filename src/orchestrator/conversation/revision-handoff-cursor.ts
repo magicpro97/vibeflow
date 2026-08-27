@@ -5,6 +5,7 @@ import {
   assertPublicMessageLocatorV1,
   assertPublicQuoteReferenceV1,
 } from "./conversation-interaction-validation.js";
+import { CONVERSATION_PUBLIC_ARTIFACT_DELIVERY } from "./conversation-public-wire-contract.js";
 import { MAX_CANONICAL_HANDOFF_BYTES } from "./handoff-limits.js";
 import type { ContextHandoffV1, PromptArtifactSelectionV1 } from "./handoff-types.js";
 import { assertContextHandoffV1 } from "./handoff-validation.js";
@@ -12,7 +13,7 @@ import {
   REVISION_INTERACTION_CURSOR_MEDIA_TYPE,
   REVISION_QUOTE_GRAPH_MEDIA_TYPE,
   REVISION_QUOTE_GRAPH_PROFILE,
-} from "./revision-handoff-context.js";
+} from "./revision-handoff-contract.js";
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const GRAPH_ID = /^vf-public-quote-graph-([0-9a-f]{64})$/;
@@ -168,7 +169,7 @@ export function revisionHandoffInteractionCursor(input: {
     throw new Error("revision handoff prompt authority changed");
   const selection = revisionContextSelection(input.handoff);
   if (!selection) return null;
-  if (selection.delivery !== "inline-public-text")
+  if (selection.delivery !== CONVERSATION_PUBLIC_ARTIFACT_DELIVERY.INLINE_PUBLIC_TEXT)
     throw new Error("revision context cursor is not inline");
   const bytes = Buffer.from(selection.public_text, "utf8");
   const expectedId =

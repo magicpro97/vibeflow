@@ -58,7 +58,7 @@ vf
 
 | Command | What it does |
 | --- | --- |
-| `vf` / `vf ui` | Open AI-first Home |
+| `vf` / `vf ui` | Open AI-first Home on stable port `7799` (`--port 0` chooses a free port) |
 | `vf doctor` | Check required and optional tools; `--probe` runs a live round-trip |
 | `vf init` | Scan the repo and generate canonical context + engine files |
 | `vf run <engine>` | Dispatch one engine: `claude`, `codex`, `copilot`, `opencode`, or `antigravity` |
@@ -98,7 +98,8 @@ npm install -g @magicpro97/vibeflow # or install globally, then use `vf`
 ```
 
 ```bash
-vf                # open AI-first Home — searchable session rail + central chat
+vf                # open AI-first Home on 127.0.0.1:7799
+vf ui --port 0    # same Home on an OS-selected free port
 vf doctor         # check required and optional tools (--probe for a live engine round-trip)
 vf init           # scan repo + generate canonical context + engine files (--engine, --no-ask, --dry-run)
 vf run claude     # dispatch one engine: claude | codex | copilot | opencode | antigravity (--yes to launch)
@@ -119,24 +120,39 @@ vf state brief    # durable cross-session coordinator brief
 
 AI-first Home is the default workspace: a searchable conversation rail, a central conversation
 pane, ordered trace replay, details inspection, and drawers for capabilities and trace.
-Use `vf init --interactive` when you want the intake wizard for repo setup; use `vf` or
-`vf ui` for the home surface and conversation work.
+Run `vf init` in a TTY for the repository intake questionnaire (`--no-ask` skips it).
+`vf` and `vf ui` both open Home on port `7799`; pass `--port 0` only when you want an
+OS-selected free port. If a requested fixed port is busy, the interactive CLI offers a
+free-port fallback and a non-interactive launch stops.
 
 Home uses the same durable runtime as `vf ask`, `vf chat`, and `vf brainstorm`. Add or
 remove an agent from the composer or participant details, send while agents are working,
 edit the latest queued human message with ArrowUp, quote one or more visible messages, and
 use restrained typed reactions. Approval and capability actions stay inline with the chat.
+An unacknowledged admission failure remains visible as an explicit retryable row. Retry
+reuses the exact request and idempotency key; it never clears a newer composer draft, and
+offline retry is explicit rather than automatic. The rejected row is current Home UI state,
+not `localStorage` or a promise that it survives a browser restart.
 Public result ids remain distinct from the opaque fetch references carried by artifact
 trace events.
 See the [conversation guide](./docs/USER_GUIDE.md#conversation-workspace) and
 [exact CLI/API contract](./docs/COMMAND_REFERENCE.md#conversations).
 
-Exact native resume keeps that CLI's own session history in the CLI. VibeFlow sends only
-new user messages and peer-agent deltas after a proved cursor; it does not echo the
-recipient's own prior messages back to it. Fresh or unproved sessions receive canonical
-structured public context instead. Private file ranges use a separate one-shot structured
+Exact by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode uses
+`opencode run --session <validated-ses-id> --format json`; Copilot and Antigravity never
+silently claim exact resume. With valid exact proof, the CLI keeps its own history and
+VibeFlow sends only new applicable user messages and peer-agent deltas, without echoing the
+recipient's prior output. Without valid exact authority, turn delivery includes canonical
+user/peer context plus a bounded structured replay of the recipient's last eight public
+responses (at most 2 KiB UTF-8 each) with provenance, digest, and count fields. Own history
+is therefore never silently omitted. Private file ranges use a separate one-shot structured
 payload and never become public trace data. A large Copilot prompt may use a short pointer
 to `.vibeflow/dispatch/<unit>.md`; that file is transport, not memory.
+
+VibeFlow remains the harness, not another coding engine. Its dynamic capability fabric
+extends the selected CLI with reviewed skills, MCP servers, tools, hooks, roles, and engine
+settings, then keeps install, configure, retarget, update, repair, rollback, and removal on
+one typed authority path.
 
 ## Using VibeFlow as a skill
 
@@ -164,6 +180,18 @@ file locking and `koffi` for native process identity and containment boundaries.
 published CLI otherwise uses Node-compatible APIs. The web UI applies the `taste-skill` design read
 with a small inline motion layer (no third-party CDN script, since the page is same-origin
 with the write API).
+
+Closed persisted/API/config vocabularies follow one coding standard: declare a dependency-light
+`Object.freeze({ ... } as const)` authority, infer the TypeScript union and frozen values from
+it, validate external data with prototype-safe guards, and import that authority in backend and
+UI consumers. Do not introduce TypeScript `enum`, duplicate wire literals, mutable vocabulary
+sets, or blind casts. Ordinary prose and genuinely local one-off strings are not protocol
+vocabulary.
+
+The Windows PID/Job Object live-smoke job is configured in CI but must pass on a real
+`windows-latest` runner before anyone claims live Windows evidence; a local macOS/Linux run is
+not that evidence. Coverage likewise comes only from a fresh `bun run coverage:check` result,
+not from the Bun version or an ordinary test pass.
 
 ```bash
 bun install       # install dev tooling and set up git hooks (core.hooksPath)

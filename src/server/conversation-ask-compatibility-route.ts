@@ -6,10 +6,18 @@ import type {
   ConversationAskCompatibilityRequestV1,
   ConversationAskCompatibilityResultV1,
 } from "../orchestrator/conversation/conversation-ask-compatibility.js";
+import { CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND } from "../orchestrator/conversation/conversation-ask-compatibility.js";
 import {
   CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
   CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION,
+  CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
 } from "../orchestrator/conversation/conversation-message-queue-contract.js";
+import {
+  ASK_COMPATIBILITY_SSE_EVENT,
+  SSE_COMMENT,
+  serializeSseComment,
+  serializeSseJsonEvent,
+} from "../orchestrator/conversation/conversation-sse-contract.js";
 import type { ConversationSessionAuthority } from "./conversation-auth.js";
 import {
   authorizeMessageQueueRoute,
@@ -67,7 +75,7 @@ function decodeAsk(activeRepo: string, body: unknown): ConversationAskCompatibil
     )
       throw new Error("invalid Ask resume request");
     return {
-      kind: "resume",
+      kind: CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.RESUME,
       conversation_id: value.conversation_id,
       question: value.question,
     };
@@ -92,7 +100,7 @@ function decodeAsk(activeRepo: string, body: unknown): ConversationAskCompatibil
   if (!selected || selected.startsWith("..") || isAbsolute(selected))
     throw new Error("Ask private context escapes repository");
   return {
-    kind: "fresh",
+    kind: CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.FRESH,
     repo_relative_path: selected.split(sep).join("/"),
     start_line: value.start as number,
     end_line: value.end as number,
@@ -121,7 +129,9 @@ async function admit(
     const principalDigest = queuePrincipal(
       authority,
       request,
-      input.kind === "resume" ? input.conversation_id : "conversation-draft",
+      input.kind === CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.RESUME
+        ? input.conversation_id
+        : "conversation-draft",
     );
     return await authority.submit({
       principal_digest: principalDigest,
@@ -150,7 +160,7 @@ export async function handleConversationAskCompatibilityRoute(
   const result = await admit(authority, request, activeRepo);
   if (result instanceof Response) return result;
   return queueNoStore(
-    { schema_version: "1.0", accepted: true, ...result },
+    { schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION, accepted: true, ...result },
     result.replayed ? 200 : 202,
   );
 }
@@ -173,9 +183,17 @@ export async function handleConversationAskCompatibilityStream(
   }
   const result = await admit(authority, request, activeRepo, body, explicitIdempotencyKey);
   if (result instanceof Response) return result;
-  const accepted = JSON.stringify({ schema_version: "1.0", accepted: true, ...result });
+  const accepted = {
+    schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+    accepted: true,
+    ...result,
+  };
   return new Response(
-    `: vibeflow-ask-compatibility-1\n\nevent: accepted\ndata: ${accepted}\n\nevent: done\ndata: {"ok":true}\n\n`,
+    [
+      serializeSseComment(SSE_COMMENT.ASK_COMPATIBILITY_OPEN),
+      serializeSseJsonEvent(ASK_COMPATIBILITY_SSE_EVENT.ACCEPTED, accepted),
+      serializeSseJsonEvent(ASK_COMPATIBILITY_SSE_EVENT.DONE, { ok: true }),
+    ].join(""),
     {
       status: result.replayed ? 200 : 202,
       headers: {

@@ -1,4 +1,5 @@
 import {
+  ACTION_OPERATION_STATE,
   type ActionApprovalChallengeRequestV1,
   type ActionApprovalChallengeResponseV1,
   type ActionApprovalRequestV1,
@@ -13,7 +14,9 @@ import {
   type ActionRequestAuthorityV1,
   type BrowserHostActionRequestV1,
   type HostActionKind,
+  isActionOperationDomainTerminalState,
 } from "../../actions/index.js";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import type { ConversationActionService } from "./conversation-action-service.js";
 import type { ConversationReceiptActionAuthority } from "./conversation-receipt-action-authority.js";
 import { ConversationReceiptCandidateUnavailableError } from "./conversation-receipt-errors.js";
@@ -71,7 +74,7 @@ export interface ConversationActionDomainPlannerExecutorV1 {
 }
 
 export class ConversationActionTargetUnsupportedError extends Error {
-  readonly code = "target_unsupported" as const;
+  readonly code = PUBLIC_ERROR_CODE.TARGET_UNSUPPORTED;
   constructor(readonly action_type: HostActionKind | null) {
     super("No installed domain handler supports this action target.");
     this.name = "ConversationActionTargetUnsupportedError";
@@ -205,7 +208,7 @@ export class ConversationRevisionActionDomainV1
       view.approval?.approval_id !== context.request.approval_id
     )
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal or approval authority changed.",
         context.proposal_id,
       );
@@ -219,8 +222,8 @@ export class ConversationRevisionActionDomainV1
     const action = snapshot.proposal.action;
     const revisionReplay = isConversationRevisionMutation(action);
     if (
-      ["succeeded", "failed", "needs_recovery"].includes(view.operation.state) &&
-      !(revisionReplay && view.operation.state === "needs_recovery")
+      isActionOperationDomainTerminalState(view.operation.state) &&
+      !(revisionReplay && view.operation.state === ACTION_OPERATION_STATE.NEEDS_RECOVERY)
     )
       return { schema_version: "1.0" as const, operation: view.operation };
     if (revisionReplay)

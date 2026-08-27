@@ -20,6 +20,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ENGINES } from "../core/types.js";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import { pickReviewerEngine } from "../review-engine.js";
 import { c, cwd, out } from "./_shared.js";
 
@@ -276,7 +277,7 @@ export async function review(
   out("vf", c.dim(`vf review: dispatching ${engine} for ${target} ${targetId}`), {
     meta: { kind: "review-dispatch", engine, target, targetId },
   });
-  const result = await dispatch({ engine, prompt, mode: "cli" });
+  const result = await dispatch({ engine, prompt, mode: DISPATCH_MODE.CLI });
   if (!result.ok) {
     out("vf", c.red(`vf review: dispatch failed: ${result.reason ?? "unknown error"}`), {
       level: "error",

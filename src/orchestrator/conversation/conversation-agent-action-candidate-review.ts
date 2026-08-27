@@ -196,9 +196,11 @@ export function assertCurrentAgentActionProposalReviewSource(input: {
   const proposal = input.proposal;
   const reservation = base.reservation;
   const ownDispatchReservation =
+    reservation !== null &&
+    reservation !== undefined &&
     input.phase === AGENT_ACTION_CANDIDATE_REVIEW_PHASE.DISPATCH &&
     input.approval_id !== null &&
-    reservation?.status === AGENT_ACTION_CANDIDATE_RESERVATION_STATE.ACTIVE &&
+    reservation.status === AGENT_ACTION_CANDIDATE_RESERVATION_STATE.ACTIVE &&
     reservation.proposal_id === proposal.proposal_id &&
     reservation.plan_digest === proposal.plan_digest &&
     reservation.operation_id === deriveOperationId(proposal, input.approval_id);
@@ -206,7 +208,7 @@ export function assertCurrentAgentActionProposalReviewSource(input: {
     ? conversationLockDigest(
         base.lineage.root_session_id,
         base.parent.source,
-        (reservation?.revision_claim_epoch ?? 0) - 1,
+        reservation.revision_claim_epoch - 1,
       )
     : base.lock.lock_digest;
   if (

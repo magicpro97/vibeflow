@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_OPERATION_STATE,
   type DurableActionAuthorityReaderV1,
   assertDurableActionAuthorityReaderV1,
 } from "../../actions/index.js";
+import { ACTION_DECISION, ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import { canonicalJsonBytes, digestV1, privateFileBytes } from "../../durability/index.js";
 import type { InternalTraceStoreRecord } from "../trace/types.js";
 import type { ConversationArtifactEntry } from "./artifact-store.js";
@@ -14,6 +17,10 @@ import {
   type ConversationReceiptProposalPlanV1,
 } from "./conversation-action-receipt-store.js";
 import { validatePublicCompactionArtifact } from "./conversation-active-compaction.js";
+import {
+  CONVERSATION_ARTIFACT_TYPE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import { sameCanonical } from "./lineage-action-authority.js";
 
 const PROPOSAL = /^vf-proposal-[0-9a-f]{64}$/;
@@ -114,14 +121,16 @@ function proposalId(record: InternalTraceStoreRecord): string | null {
   );
   if (
     compaction &&
-    stored.event.type === "artifact_created" &&
-    stored.event.payload.artifact_type === "compaction"
+    stored.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED &&
+    stored.event.payload.artifact_type === CONVERSATION_ARTIFACT_TYPE.COMPACTION
   )
     return compaction[1] ?? null;
   const literal = stored.idempotency_key.match(
     /^action-public-literal:(vf-proposal-[0-9a-f]{64})$/,
   );
-  return literal && stored.event.type === "user_message" ? (literal[1] ?? null) : null;
+  return literal && stored.event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE
+    ? (literal[1] ?? null)
+    : null;
 }
 
 function eventMatchesPlan(
@@ -132,16 +141,16 @@ function eventMatchesPlan(
 ): boolean {
   const event = record.stored_event.event;
   const binding = plan.native_plan.effect_binding as Record<string, unknown>;
-  if (event.type === "artifact_created") {
+  if (event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED) {
     const expectedId = `vf-compaction-${String(binding.proposed_compaction_artifact_digest).slice(7)}`;
     const entry = artifacts.find((candidate) => candidate.ref === event.payload.ref);
     if (
       event.payload.artifact_id !== expectedId ||
-      event.payload.artifact_type !== "compaction" ||
+      event.payload.artifact_type !== CONVERSATION_ARTIFACT_TYPE.COMPACTION ||
       !/^vf-artifact-[0-9a-f]{64}$/.test(event.payload.ref) ||
       !entry ||
       entry.artifact_id !== expectedId ||
-      entry.artifact_type !== "compaction" ||
+      entry.artifact_type !== CONVERSATION_ARTIFACT_TYPE.COMPACTION ||
       entry.previous_ref !== null ||
       entry.idempotency_key !== `compaction-artifact-${plan.proposal_id.slice(-32)}`
     )
@@ -161,7 +170,7 @@ function eventMatchesPlan(
     );
   }
   return (
-    event.type === "user_message" &&
+    event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE &&
     digestV1("VF-PUBLIC-LITERAL-EVENT-CONTENT\0v1\0", event.payload) ===
       binding.projected_public_event_content_digest
   );
@@ -188,16 +197,17 @@ export function reviewedActionEventIds(
       const dispatch = authority.reader.getDispatch(operationId);
       const plan = authority.readPlan(id);
       const expectedType =
-        record.stored_event.event.type === "user_message"
-          ? "conversation.publish_suspected_literal"
-          : "context.compact";
+        record.stored_event.event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE
+          ? HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
+          : HOST_ACTION_KIND.CONTEXT_COMPACT;
       if (
         !snapshot ||
         !dispatch ||
         !plan ||
         !snapshot.approval ||
-        snapshot.approval.decision !== "approved" ||
-        !["committing", "succeeded"].includes(snapshot.state) ||
+        snapshot.approval.decision !== ACTION_DECISION.APPROVED ||
+        (snapshot.state !== ACTION_OPERATION_STATE.COMMITTING &&
+          snapshot.state !== ACTION_OPERATION_STATE.SUCCEEDED) ||
         snapshot.operation_id !== operationId ||
         snapshot.proposal.proposal_id !== id ||
         snapshot.proposal.proposal_digest !== plan.proposal_digest ||
@@ -210,7 +220,7 @@ export function reviewedActionEventIds(
         dispatch.approval_id !== snapshot.approval.approval_id ||
         dispatch.approval_digest !== snapshot.approval.approval_digest ||
         dispatch.action_type !== expectedType ||
-        dispatch.domain !== "conversation" ||
+        dispatch.domain !== ACTION_DOMAIN.CONVERSATION ||
         dispatch.plan_digest !== snapshot.proposal.plan_digest ||
         dispatch.domain_header_digest !== null ||
         dispatch.created_at !== snapshot.approval.decided_at ||
@@ -220,10 +230,10 @@ export function reviewedActionEventIds(
       )
         continue;
       const receipt = authority.readReceipt(id);
-      if (snapshot.state === "succeeded") {
+      if (snapshot.state === ACTION_OPERATION_STATE.SUCCEEDED) {
         if (
           !receipt ||
-          receipt.outcome !== "succeeded" ||
+          receipt.outcome !== ACTION_OPERATION_STATE.SUCCEEDED ||
           receipt.operation_id !== operationId ||
           receipt.proposal_id !== id ||
           receipt.approval_id !== snapshot.approval.approval_id ||

@@ -9,6 +9,11 @@ import {
   privateFileBytes,
 } from "../../durability/index.js";
 import {
+  CONVERSATION_CONTROL_ACTION_TYPE,
+  CONVERSATION_CONTROL_CONDITION_KIND,
+  CONVERSATION_CONTROL_EFFECT_KIND,
+  CONVERSATION_CONTROL_HOST_CANCEL_ADAPTER_FINGERPRINT,
+  CONVERSATION_NATIVE_REFERENCE_KIND,
   type ConversationControlActionTypeV1,
   type ConversationControlEffectPlanV1,
   type ConversationControlPostconditionBindingV1,
@@ -18,6 +23,7 @@ import {
   assertConversationNativeReferenceBinding,
 } from "./conversation-control-effect-types.js";
 import { RevisionNativeBindingStore } from "./revision-native-binding-store.js";
+import { PARTICIPANT_CANCEL_MODE } from "./revision-participant-receipt.js";
 
 const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
@@ -134,39 +140,46 @@ export class ConversationControlEffectStore {
     const plan = this.readPlan(input.plan_digest);
     if (!plan || plan.target_operation_id !== input.target_operation_id)
       throw new Error("conversation control effect plan target changed");
-    if (input.action_type === "conversation.stop_operation" && plan.effects.length !== 1)
+    if (
+      input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.STOP_OPERATION &&
+      plan.effects.length !== 1
+    )
       throw new Error("conversation stop effect cardinality changed");
     for (const effect of plan.effects) {
       const native = this.readNativeReference(effect.native_reference_digest);
       const postcondition = this.readPostcondition(effect.expected_control_postcondition_digest);
       if (!native || !postcondition)
         throw new Error("conversation control effect closure disappeared");
-      const reconcile = input.action_type === "conversation.reconcile_revision_operation";
+      const reconcile =
+        input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.RECONCILE_REVISION_OPERATION;
       if (
         postcondition.expected_pre_effect_fold_digest !== input.expected_pre_effect_fold_digest ||
         (reconcile
-          ? effect.effect_kind !== "reconcile"
-          : effect.effect_kind !== "cancel-or-prove-quiescent") ||
+          ? effect.effect_kind !== CONVERSATION_CONTROL_EFFECT_KIND.RECONCILE
+          : effect.effect_kind !== CONVERSATION_CONTROL_EFFECT_KIND.CANCEL_OR_PROVE_QUIESCENT) ||
         (reconcile
-          ? postcondition.condition.kind !== "reconciliation-resolution"
-          : input.action_type === "conversation.stop_operation"
-            ? postcondition.condition.kind !== "operation-terminal"
-            : postcondition.condition.kind !== "participant-quiescent")
+          ? postcondition.condition.kind !==
+            CONVERSATION_CONTROL_CONDITION_KIND.RECONCILIATION_RESOLUTION
+          : input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.STOP_OPERATION
+            ? postcondition.condition.kind !==
+              CONVERSATION_CONTROL_CONDITION_KIND.OPERATION_TERMINAL
+            : postcondition.condition.kind !==
+              CONVERSATION_CONTROL_CONDITION_KIND.PARTICIPANT_QUIESCENT)
       )
         throw new Error("conversation control postcondition changed");
       if (
-        input.action_type === "conversation.stop_operation" &&
+        input.action_type === CONVERSATION_CONTROL_ACTION_TYPE.STOP_OPERATION &&
         (effect.participant_id !== null ||
-          effect.adapter_fingerprint !== "vf-host-operation-cancel/1" ||
-          effect.mode !== "idempotent-cancel" ||
-          native.reference_kind !== "operation-cancel-authority" ||
+          effect.adapter_fingerprint !== CONVERSATION_CONTROL_HOST_CANCEL_ADAPTER_FINGERPRINT ||
+          effect.mode !== PARTICIPANT_CANCEL_MODE.IDEMPOTENT_CANCEL ||
+          native.reference_kind !== CONVERSATION_NATIVE_REFERENCE_KIND.OPERATION_CANCEL_AUTHORITY ||
           native.authority_record_digest !== input.expected_operation_header_digest ||
           native.private_reference_content_digest !== null)
       )
         throw new Error("conversation stop native authority changed");
       if (
-        input.action_type !== "conversation.stop_operation" &&
-        native.reference_kind !== "participant-start-receipt"
+        input.action_type !== CONVERSATION_CONTROL_ACTION_TYPE.STOP_OPERATION &&
+        native.reference_kind !== CONVERSATION_NATIVE_REFERENCE_KIND.PARTICIPANT_START_RECEIPT
       )
         throw new Error("revision control native authority changed");
     }

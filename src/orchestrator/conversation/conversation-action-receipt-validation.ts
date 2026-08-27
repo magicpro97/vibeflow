@@ -1,9 +1,14 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_OPERATION_STATE,
+  ACTION_PRODUCER_REQUEST_BINDING_KIND,
   assertCanonicalRequestAuthority,
   assertProposal,
   canonicalActionRequestDigest,
+  isActionOperationDomainTerminalState,
   validateInternalHostAction,
 } from "../../actions/index.js";
+import { ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import type {
   ConversationActionAuthorityBindingV1,
@@ -12,6 +17,7 @@ import type {
   ConversationReceiptProposalPlanV1,
 } from "./conversation-action-receipt-store.js";
 import {
+  LINEAGE_PLAN_KIND,
   type LineagePlanKindV1,
   assertLineageActionPlanBindingV1,
   sameCanonical,
@@ -59,11 +65,14 @@ const EXPECTED_KEYS = [
 ] as const;
 
 function planKind(actionType: string): LineagePlanKindV1 {
-  if (actionType === "conversation.select_lineage_head") return "lineage-head";
-  if (actionType === "conversation.associate_lineages") return "lineage-association";
-  if (actionType === "conversation.publish_suspected_literal") return "public-literal-publication";
-  if (actionType === "context.compact") return "context-compaction";
-  return "conversation-control";
+  if (actionType === HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD)
+    return LINEAGE_PLAN_KIND.LINEAGE_HEAD;
+  if (actionType === HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES)
+    return LINEAGE_PLAN_KIND.LINEAGE_ASSOCIATION;
+  if (actionType === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL)
+    return LINEAGE_PLAN_KIND.PUBLIC_LITERAL_PUBLICATION;
+  if (actionType === HOST_ACTION_KIND.CONTEXT_COMPACT) return LINEAGE_PLAN_KIND.CONTEXT_COMPACTION;
+  return LINEAGE_PLAN_KIND.CONVERSATION_CONTROL;
 }
 
 function assertNativePlan(
@@ -124,7 +133,7 @@ export function assertConversationReceiptPlan(value: ConversationReceiptProposal
   if (
     value.proposal_id !== value.proposal.proposal_id ||
     value.proposal_digest !== value.proposal.proposal_digest ||
-    value.proposal.domain !== "conversation" ||
+    value.proposal.domain !== ACTION_DOMAIN.CONVERSATION ||
     !sameCanonical(value.proposal.action, value.native_plan.action)
   )
     throw new Error("conversation receipt proposal closure mismatch");
@@ -141,7 +150,8 @@ export function assertConversationReceiptPlan(value: ConversationReceiptProposal
     value.proposal,
   );
   if (
-    value.proposal.producer_request_binding.kind !== "canonical-action-request" ||
+    value.proposal.producer_request_binding.kind !==
+      ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST ||
     value.proposal.producer_request_binding.digest !==
       canonicalActionRequestDigest(value.canonical_request)
   )
@@ -249,8 +259,8 @@ export function assertConversationActionReceipt(
     !isLineageDigest(value.expected_authority_binding_digest) ||
     !isLineageDigest(value.observed_authority_binding_digest) ||
     !isLineageDigest(value.receipt_digest) ||
-    !["succeeded", "failed", "needs_recovery"].includes(value.outcome) ||
-    (value.outcome === "succeeded") !== (value.reason_code === null) ||
+    !isActionOperationDomainTerminalState(value.outcome) ||
+    (value.outcome === ACTION_OPERATION_STATE.SUCCEEDED) !== (value.reason_code === null) ||
     (value.reason_code !== null &&
       (!/^[a-z][a-z0-9-]{0,127}$/.test(value.reason_code) ||
         !isBoundedLineageReference(value.reason_code)))

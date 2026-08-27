@@ -7,6 +7,17 @@ import {
 import { reapOwnedProcessRecord } from "../src/dispatch/owned-process-reaper.js";
 import type { OwnedAttemptProcessRecordV1 } from "../src/dispatch/owned-process-runtime.js";
 
+const WINDOWS_TICKS = Object.freeze({
+  OWNER: "638602314960000001",
+  SUPERVISOR: "638602314960000041",
+  CLI: "638602314960000042",
+} as const);
+const WINDOWS_IDENTITY = Object.freeze({
+  OWNER: `win32:${WINDOWS_TICKS.OWNER}`,
+  SUPERVISOR: `win32:${WINDOWS_TICKS.SUPERVISOR}`,
+  CLI: `win32:${WINDOWS_TICKS.CLI}`,
+} as const);
+
 function windowsRecord(): OwnedAttemptProcessRecordV1 {
   const recordedAt = new Date().toISOString();
   return {
@@ -19,11 +30,11 @@ function windowsRecord(): OwnedAttemptProcessRecordV1 {
     quiescence_scope: "windows-job",
     proof_strength: "kernel-contained",
     owner_pid: 1,
-    owner_identity: "win32:owner",
+    owner_identity: WINDOWS_IDENTITY.OWNER,
     supervisor_pid: 41,
-    supervisor_identity: "win32:supervisor",
+    supervisor_identity: WINDOWS_IDENTITY.SUPERVISOR,
     cli_pid: 42,
-    cli_identity: "win32:cli",
+    cli_identity: WINDOWS_IDENTITY.CLI,
     terminal_kind: null,
     state: "running",
     release_reason: null,
@@ -103,7 +114,7 @@ describe("owned CLI lifecycle on Windows", () => {
     expect(platform.probe?.(41)).toEqual({ kind: "unknown" });
     expect(() =>
       platform.terminateExactTree(
-        { pid: 41, identity: "win32:supervisor", pgid: null, sid: null },
+        { pid: 41, identity: WINDOWS_IDENTITY.SUPERVISOR, pgid: null, sid: null },
         false,
       ),
     ).toThrow(/owned Windows root identity changed/);
@@ -126,8 +137,8 @@ describe("owned CLI lifecycle on Windows", () => {
 
   test("successful taskkill /T plus fresh absent probes proves tree release", async () => {
     const live = new Map([
-      [41, "supervisor"],
-      [42, "cli"],
+      [41, WINDOWS_TICKS.SUPERVISOR],
+      [42, WINDOWS_TICKS.CLI],
     ]);
     const taskkillCalls: string[][] = [];
     const platform = createOwnedProcessPlatform({
@@ -166,7 +177,7 @@ describe("owned CLI lifecycle on Windows", () => {
           throw Object.assign(new Error("taskkill failed"), { status: 1 });
         }
         if (queryFails) throw Object.assign(new Error("query failed"), { status: 1 });
-        return powershellPid(args) === 41 ? "supervisor" : "cli";
+        return powershellPid(args) === 41 ? WINDOWS_TICKS.SUPERVISOR : WINDOWS_TICKS.CLI;
       }) as never,
     });
 
@@ -176,7 +187,7 @@ describe("owned CLI lifecycle on Windows", () => {
   });
 
   test("root-loss recovery reaps an exact live CLI tree on Windows", async () => {
-    const live = new Map([[42, "cli"]]);
+    const live = new Map([[42, WINDOWS_TICKS.CLI]]);
     const commands: string[] = [];
     const platform = createOwnedProcessPlatform({
       platform: "win32",

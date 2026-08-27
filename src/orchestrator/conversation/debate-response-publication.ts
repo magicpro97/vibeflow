@@ -1,6 +1,7 @@
 import type { AgentActionCandidateOutput } from "../debate.js";
 import type { StoredTraceEvent } from "../trace/types.js";
 import type { AgentSocialIntentRequestV1 } from "./conversation-interaction-types.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { ConversationContext, PolicyAttempt } from "./types.js";
 
 export function publishDebateParticipantResponse(
@@ -28,7 +29,7 @@ export function publishDebateParticipantResponse(
     .emit({
       idempotency_key: responseIdempotencyKey,
       event: {
-        type: "agent_response_delta",
+        type: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
         payload: {
           round_id: `round-${round}`,
           participant_id: participant.participantId,
@@ -50,7 +51,7 @@ export function publishDebateParticipantResponse(
         await participant.attempt.emit({
           idempotency_key: `debate:round:${round}:participant:${participant.participantId}:action-candidate:${stagedCandidate.diagnostic_code ?? "rejected"}`,
           event: {
-            type: "error",
+            type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
             payload: {
               agent_id: participant.participantId,
               code: stagedCandidate.diagnostic_code ?? "action_candidate_rejected",

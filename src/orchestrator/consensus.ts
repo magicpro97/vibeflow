@@ -1,9 +1,16 @@
+import {
+  CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
+  CONVERSATION_DECISION_OUTCOME,
+  CONVERSATION_INVALID_ASSESSMENT_REASON,
+  type ConversationContinuingDecisionOutcomeV1,
+} from "./conversation/conversation-public-wire-contract.js";
+
 export interface BooleanGate {
   value: boolean;
   evidence: string;
 }
 export interface ConvergenceGate {
-  value: boolean | "not_applicable";
+  value: boolean | typeof CONVERSATION_CONVERGENCE_NOT_APPLICABLE;
   evidence: string;
 }
 export interface EvaluatorOutput {
@@ -13,14 +20,18 @@ export interface EvaluatorOutput {
   convergence: ConvergenceGate;
 }
 export type RoundDecision =
-  | { outcome: "abort"; score: null; reason: "invalid_assessment" }
-  | { outcome: "consensus" | "continue" | "exhausted"; score: number };
+  | {
+      outcome: typeof CONVERSATION_DECISION_OUTCOME.ABORT;
+      score: null;
+      reason: typeof CONVERSATION_INVALID_ASSESSMENT_REASON;
+    }
+  | { outcome: ConversationContinuingDecisionOutcomeV1; score: number };
 
 export function decideRound(input: unknown, round: unknown, maxRounds: unknown): RoundDecision {
   const invalid = (): RoundDecision => ({
-    outcome: "abort",
+    outcome: CONVERSATION_DECISION_OUTCOME.ABORT,
     score: null,
-    reason: "invalid_assessment",
+    reason: CONVERSATION_INVALID_ASSESSMENT_REASON,
   });
   try {
     if (
@@ -42,7 +53,10 @@ export function decideRound(input: unknown, round: unknown, maxRounds: unknown):
     const isGate = (
       value: unknown,
       convergence = false,
-    ): value is { value: boolean | "not_applicable"; evidence: string } => {
+    ): value is {
+      value: boolean | typeof CONVERSATION_CONVERGENCE_NOT_APPLICABLE;
+      evidence: string;
+    } => {
       if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
       const gate = value as Record<string, unknown>;
       return (
@@ -50,7 +64,8 @@ export function decideRound(input: unknown, round: unknown, maxRounds: unknown):
         Object.prototype.hasOwnProperty.call(gate, "value") &&
         Object.prototype.hasOwnProperty.call(gate, "evidence") &&
         typeof gate.evidence === "string" &&
-        (typeof gate.value === "boolean" || (convergence && gate.value === "not_applicable"))
+        (typeof gate.value === "boolean" ||
+          (convergence && gate.value === CONVERSATION_CONVERGENCE_NOT_APPLICABLE))
       );
     };
     if (
@@ -61,7 +76,7 @@ export function decideRound(input: unknown, round: unknown, maxRounds: unknown):
       !isGate(assessment.conflict_resolution) ||
       !isGate(assessment.evidence_quality) ||
       !isGate(assessment.convergence, true) ||
-      (round > 1 && assessment.convergence.value === "not_applicable")
+      (round > 1 && assessment.convergence.value === CONVERSATION_CONVERGENCE_NOT_APPLICABLE)
     )
       return invalid();
     const active =
@@ -79,10 +94,10 @@ export function decideRound(input: unknown, round: unknown, maxRounds: unknown):
           ];
     const score = active.filter(Boolean).length / active.length;
     return active.every(Boolean)
-      ? { outcome: "consensus", score }
+      ? { outcome: CONVERSATION_DECISION_OUTCOME.CONSENSUS, score }
       : round === maxRounds
-        ? { outcome: "exhausted", score }
-        : { outcome: "continue", score };
+        ? { outcome: CONVERSATION_DECISION_OUTCOME.EXHAUSTED, score }
+        : { outcome: CONVERSATION_DECISION_OUTCOME.CONTINUE, score };
   } catch {
     return invalid();
   }

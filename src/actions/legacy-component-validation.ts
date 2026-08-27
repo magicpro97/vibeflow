@@ -1,25 +1,20 @@
+import { isAgentEngine } from "../core/agent-contract.js";
+import {
+  CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_HEALTH_RETRIES,
+  CAPABILITY_MANIFEST_HOOK_EVENTS,
+  CAPABILITY_MANIFEST_INSTALLER_KINDS,
+  CAPABILITY_MANIFEST_INSTALLER_LIFECYCLE_SCRIPTS,
+  CAPABILITY_MANIFEST_MCP_TRANSPORT,
+  LEGACY_SOURCE_COMPONENT_TYPE,
+  LEGACY_SOURCE_HEALTH_PROBE_KIND,
+} from "./capability-manifest-vocabulary-contract.js";
 import type { LegacySourceV1, LegacySyntheticComponentV1 } from "./legacy-adopt-types.js";
 import { isCanonicalVersionRange } from "./package-pin-validation.js";
 import { assertRawSha256, bytewise } from "./record-primitives.js";
 import { ActionValidationError, boundedString, exactObject, safeInteger } from "./strict-json.js";
 
-const ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
 const LOCAL_ID = /^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$/;
-const SOURCE_TYPE: Record<LegacySourceV1, LegacySyntheticComponentV1["type"]> = {
-  "skill-lock": "skill",
-  "tool-managed-evidence": "tool",
-  "mcp-managed-sidecar": "mcp",
-  "hook-sentinel": "hook",
-  "role-marker": "role",
-};
-const HEALTH_KIND: Record<LegacySourceV1, string> = {
-  "skill-lock": "file-hash",
-  "tool-managed-evidence": "binary-version",
-  "mcp-managed-sidecar": "mcp-handshake",
-  "hook-sentinel": "hook-selftest",
-  "role-marker": "role-parse",
-};
-
 export interface ValidatedLegacyComponentV1 {
   component_id: string;
   targets: LegacySyntheticComponentV1["targets"];
@@ -34,7 +29,7 @@ export function validateLegacyComponents(
   if (!Array.isArray(value) || value.length !== 1)
     invalid("Adopt manifest must contain exactly one legacy component", path);
   const component = validateComponent(value[0], `${path}[0]`);
-  if (component.type !== SOURCE_TYPE[source])
+  if (component.type !== LEGACY_SOURCE_COMPONENT_TYPE[source])
     invalid("legacy source and component type mismatch", `${path}[0].type`);
   return component;
 }
@@ -58,13 +53,13 @@ export function validateLegacyHealth(
     !Array.isArray(row.component_ids) ||
     row.component_ids.length !== 1 ||
     row.component_ids[0] !== component.component_id ||
-    row.kind !== HEALTH_KIND[source] ||
+    row.kind !== LEGACY_SOURCE_HEALTH_PROBE_KIND[source] ||
     row.required !== component.required
   )
     invalid("legacy health probe does not bind its component", `${path}[0]`);
   const timeout = safeInteger(row.timeout_ms, `${path}[0].timeout_ms`, 1);
   if (timeout > 120_000) invalid("legacy health timeout exceeds bound", `${path}[0].timeout_ms`);
-  if (![0, 1, 2].includes(row.retries as number))
+  if (!CAPABILITY_MANIFEST_HEALTH_RETRIES.some((retry) => retry === row.retries))
     invalid("legacy health retry count is invalid", `${path}[0].retries`);
 }
 
@@ -95,7 +90,7 @@ function validateComponent(value: unknown, path: string): LegacySyntheticCompone
   const targets = engineArray(base.targets, `${path}.targets`);
   if (targets.length !== 1) invalid("legacy component must name one real engine target", path);
   switch (base.type) {
-    case "skill":
+    case CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL:
       exactObject(
         value,
         ["component_id", "type", "targets", "required", "bundle_path", "bundle_sha256"],
@@ -105,24 +100,24 @@ function validateComponent(value: unknown, path: string): LegacySyntheticCompone
       relativePath(base.bundle_path, `${path}.bundle_path`);
       assertRawSha256(base.bundle_sha256, `${path}.bundle_sha256`);
       break;
-    case "mcp":
+    case CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP:
       validateMcp(value, base, path);
       break;
-    case "tool":
+    case CAPABILITY_MANIFEST_COMPONENT_TYPE.TOOL:
       validateTool(value, base, path);
       break;
-    case "hook":
+    case CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK:
       exactObject(
         value,
         ["component_id", "type", "targets", "required", "event", "vf_handler_id"],
         [],
         path,
       );
-      if (!["pre-tool", "post-tool", "pre-commit", "pre-push"].includes(base.event as string))
+      if (!CAPABILITY_MANIFEST_HOOK_EVENTS.some((event) => event === base.event))
         invalid("invalid legacy hook event", `${path}.event`);
       localId(base.vf_handler_id, `${path}.vf_handler_id`);
       break;
-    case "role":
+    case CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE:
       exactObject(
         value,
         ["component_id", "type", "targets", "required", "role_spec_path", "role_spec_sha256"],
@@ -148,7 +143,7 @@ function validateMcp(value: unknown, base: Record<string, unknown>, path: string
   const slots = base.secret_slots ?? [];
   if (!Array.isArray(slots) || slots.length !== 0)
     invalid("legacy MCP cannot introduce secret inputs", `${path}.secret_slots`);
-  if (base.transport === "stdio") {
+  if (base.transport === CAPABILITY_MANIFEST_MCP_TRANSPORT.STDIO) {
     if (base.executable === undefined || base.url !== undefined)
       invalid("stdio MCP executable/url matrix mismatch", path);
     const executable = exactObject(
@@ -165,7 +160,10 @@ function validateMcp(value: unknown, base: Record<string, unknown>, path: string
     if (!Array.isArray(args) || args.length > 128)
       invalid("MCP argument list exceeds bound", `${path}.args`);
     args.forEach((arg, index) => canonicalText(arg, `${path}.args[${index}]`, 4_096));
-  } else if (base.transport === "http" || base.transport === "sse") {
+  } else if (
+    base.transport === CAPABILITY_MANIFEST_MCP_TRANSPORT.HTTP ||
+    base.transport === CAPABILITY_MANIFEST_MCP_TRANSPORT.SSE
+  ) {
     if (base.url === undefined || base.executable !== undefined || base.args !== undefined)
       invalid("remote MCP URL/executable matrix mismatch", path);
     const url = canonicalText(base.url, `${path}.url`, 2_048);
@@ -202,8 +200,8 @@ function validateTool(value: unknown, base: Record<string, unknown>, path: strin
     `${path}.installer`,
   );
   if (
-    !["npm", "bun", "pipx", "uv", "go", "cargo", "download"].includes(installer.kind as string) ||
-    installer.lifecycle_scripts !== "disabled"
+    !CAPABILITY_MANIFEST_INSTALLER_KINDS.some((kind) => kind === installer.kind) ||
+    installer.lifecycle_scripts !== CAPABILITY_MANIFEST_INSTALLER_LIFECYCLE_SCRIPTS.DISABLED
   )
     invalid("legacy tool installer is invalid", `${path}.installer`);
   canonicalText(installer.coordinate, `${path}.installer.coordinate`, 1_024);
@@ -223,8 +221,8 @@ function engineArray(value: unknown, path: string): LegacySyntheticComponentV1["
   if (!Array.isArray(value) || value.length < 1 || value.length > 5)
     invalid("invalid component targets", path);
   const values = value.map((item, index) => {
-    if (!ENGINES.has(item as string)) invalid("invalid component engine", `${path}[${index}]`);
-    return item as LegacySyntheticComponentV1["targets"][number];
+    if (!isAgentEngine(item)) invalid("invalid component engine", `${path}[${index}]`);
+    return item;
   });
   ordered(values, path);
   return values;

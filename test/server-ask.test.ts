@@ -440,7 +440,7 @@ describe("streamSpawnAsync — SSE onChunk relay (#580)", () => {
       process.chdir(dir);
       process.env.MY_ASK_STREAM_VAR = "leak-me";
       const r = await streamSpawnAsync(
-        { cmd: "opencode", args: ["run", "-"], promptMode: "stdin" },
+        { cmd: "opencode", args: ["run"], promptMode: "stdin" },
         "",
         () => {},
         undefined,

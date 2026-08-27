@@ -10,6 +10,18 @@ import {
 import { ActionConflictError } from "./errors.js";
 import type { ActionFilePersistence } from "./persistence.js";
 import {
+  ACTION_AUTHORITY_EVENT_KIND,
+  ACTION_OPERATION_STATE,
+  isActionOperationDispatchBeginState,
+  isActionOperationDispatchReplayState,
+  isActionOperationDispatchReservationAssertState,
+  isActionOperationDispatchReservationReadState,
+  isActionOperationDomainTerminalState,
+  isActionOperationResolvedDomainState,
+  isActionOperationTerminalResolutionState,
+} from "./protocol-contract.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
+import {
   deriveOperationId,
   materializeAuthorityEvent,
   materializeDispatchRecord,
@@ -39,9 +51,13 @@ export function prevalidateActionDispatch(
 ): void {
   runtime.files.withLock(`action-dispatch-prevalidate:${proposalId}`, (lock) => {
     const snapshot = runtime.get(proposalId);
-    if (!snapshot || snapshot.state !== "approved" || snapshot.approval?.approval_id !== approvalId)
+    if (
+      !snapshot ||
+      snapshot.state !== ACTION_OPERATION_STATE.APPROVED ||
+      snapshot.approval?.approval_id !== approvalId
+    )
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal is not approved for dispatch.",
         proposalId,
       );
@@ -71,7 +87,7 @@ export function prepareActionDispatch(
     const snapshot = runtime.get(proposalId);
     if (
       snapshot &&
-      ["committing", "succeeded", "failed", "needs_recovery"].includes(snapshot.state) &&
+      isActionOperationDispatchReplayState(snapshot.state) &&
       snapshot.approval?.approval_id === approvalId &&
       snapshot.operation_id
     ) {
@@ -87,9 +103,13 @@ export function prepareActionDispatch(
         throw new Error("durable dispatch replay closure mismatch");
       return existing;
     }
-    if (!snapshot || snapshot.state !== "approved" || snapshot.approval?.approval_id !== approvalId)
+    if (
+      !snapshot ||
+      snapshot.state !== ACTION_OPERATION_STATE.APPROVED ||
+      snapshot.approval?.approval_id !== approvalId
+    )
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal is not approved for dispatch.",
         proposalId,
       );
@@ -131,18 +151,17 @@ export function reserveActionDispatch(
     const snapshot = runtime.get(proposalId);
     if (
       !snapshot ||
-      !["approved", "committing", "succeeded", "failed", "needs_recovery"].includes(
-        snapshot.state,
-      ) ||
+      !isActionOperationDispatchReservationReadState(snapshot.state) ||
       snapshot.approval?.approval_id !== approvalId
     )
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal is not approved for dispatch reservation.",
         proposalId,
       );
     const now = iso(runtime.now());
-    if (snapshot.state === "approved") assertDispatchLease(runtime.files, lock, snapshot, now);
+    if (snapshot.state === ACTION_OPERATION_STATE.APPROVED)
+      assertDispatchLease(runtime.files, lock, snapshot, now);
     const dispatch = runtime.files.readDispatch(
       deriveOperationId(snapshot.proposal, snapshot.approval.approval_id),
     );
@@ -159,7 +178,7 @@ export function reserveActionDispatch(
       approval: structuredClone(snapshot.approval),
       dispatch: structuredClone(dispatch),
       now,
-      requires_reservation: snapshot.state === "approved",
+      requires_reservation: snapshot.state === ACTION_OPERATION_STATE.APPROVED,
     };
   });
   const resolver = requireResolver(runtime.resolver);
@@ -173,7 +192,7 @@ export function reserveActionDispatch(
       runtime.files.withLock(`action-dispatch-reserve-stale:${proposalId}`, (lock) => {
         const current = runtime.get(proposalId);
         if (
-          current?.state === "approved" &&
+          current?.state === ACTION_OPERATION_STATE.APPROVED &&
           current.approval?.approval_id === approvalId &&
           current.proposal.proposal_digest === closure.proposal.proposal_digest
         )
@@ -186,18 +205,16 @@ export function reserveActionDispatch(
     const current = runtime.get(proposalId);
     if (
       !current ||
-      !["approved", "committing", "succeeded", "failed", "needs_recovery"].includes(
-        current.state,
-      ) ||
+      !isActionOperationDispatchReservationReadState(current.state) ||
       current.approval?.approval_id !== approvalId ||
       current.proposal.proposal_digest !== closure.proposal.proposal_digest
     )
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal changed while its dispatch source was reserved.",
         proposalId,
       );
-    if (["approved", "committing", "needs_recovery"].includes(current.state))
+    if (isActionOperationDispatchReservationAssertState(current.state))
       resolver.assertDispatchReserved?.({
         proposal: current.proposal,
         approval: current.approval,
@@ -216,24 +233,25 @@ export function beginActionDispatch(
     const snapshot = runtime.get(proposalId);
     if (
       snapshot &&
-      ["succeeded", "failed", "needs_recovery"].includes(snapshot.state) &&
+      isActionOperationDomainTerminalState(snapshot.state) &&
       snapshot.approval?.approval_id === approvalId
     )
       return snapshot;
-    if (!snapshot || !["approved", "committing"].includes(snapshot.state))
+    if (!snapshot || !isActionOperationDispatchBeginState(snapshot.state))
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal is not approved for dispatch.",
         proposalId,
       );
     if (snapshot.approval?.approval_id !== approvalId)
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal approval does not match dispatch.",
         proposalId,
       );
     const now = iso(runtime.now());
-    if (snapshot.state === "approved") assertDispatchLease(runtime.files, lock, snapshot, now);
+    if (snapshot.state === ACTION_OPERATION_STATE.APPROVED)
+      assertDispatchLease(runtime.files, lock, snapshot, now);
     const operationId = deriveOperationId(snapshot.proposal, snapshot.approval.approval_id);
     const dispatch = runtime.files.readDispatch(operationId);
     if (!dispatch) throw new Error("durable dispatch record is required before committing");
@@ -250,15 +268,15 @@ export function beginActionDispatch(
       dispatch,
     });
     let committing = snapshot;
-    if (snapshot.state === "approved") {
+    if (snapshot.state === ACTION_OPERATION_STATE.APPROVED) {
       const event = materializeAuthorityEvent(
         snapshot.proposal,
         snapshot.events.length,
         snapshot.events.at(-1)?.event_digest ?? null,
         {
-          kind: "state-transition",
-          from: "approved",
-          to: "committing",
+          kind: ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION,
+          from: ACTION_OPERATION_STATE.APPROVED,
+          to: ACTION_OPERATION_STATE.COMMITTING,
           operation_id: dispatch.operation_id,
           dispatch_record_digest: dispatch.dispatch_record_digest,
           domain_terminal_digest: null,
@@ -294,10 +312,10 @@ export function recordActionTerminal(
 ): ActionAuthoritySnapshotV1 {
   return runtime.files.withLock(`action-terminal:${proposalId}`, (lock) => {
     const snapshot = runtime.get(proposalId);
-    if (snapshot && ["succeeded", "failed"].includes(snapshot.state)) return snapshot;
-    if (!snapshot || !["committing", "needs_recovery"].includes(snapshot.state))
+    if (snapshot && isActionOperationResolvedDomainState(snapshot.state)) return snapshot;
+    if (!snapshot || !isActionOperationTerminalResolutionState(snapshot.state))
       throw new ActionConflictError(
-        "stale_proposal",
+        PUBLIC_ERROR_CODE.STALE_PROPOSAL,
         "Proposal has no committing operation.",
         proposalId,
       );
@@ -310,17 +328,20 @@ export function recordActionTerminal(
       proposal: snapshot.proposal,
       approval: snapshot.approval,
       dispatch,
-      current_state: snapshot.state as "committing" | "needs_recovery",
+      current_state: snapshot.state,
     });
     assertDomainTerminalProof(terminal, dispatch);
-    if (snapshot.state === "needs_recovery" && terminal.outcome === "needs_recovery")
+    if (
+      snapshot.state === ACTION_OPERATION_STATE.NEEDS_RECOVERY &&
+      terminal.outcome === ACTION_OPERATION_STATE.NEEDS_RECOVERY
+    )
       return snapshot;
     const event = materializeAuthorityEvent(
       snapshot.proposal,
       snapshot.events.length,
       snapshot.events.at(-1)?.event_digest ?? null,
       {
-        kind: "state-transition",
+        kind: ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION,
         from: snapshot.state,
         to: terminal.outcome,
         operation_id: snapshot.operation_id,

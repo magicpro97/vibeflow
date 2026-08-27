@@ -1,4 +1,9 @@
 import { randomBytes } from "node:crypto";
+import { AGENT_HOST_TOOL } from "../../core/agent-contract.js";
+import {
+  ENGINE_SESSION_MODE,
+  supportsExactNativeSessionResume,
+} from "../../dispatch/session-contract.js";
 import {
   type EngineChunk,
   type OperationLifecycleState,
@@ -7,18 +12,20 @@ import {
 import type { PolicyEmission, TraceCorrelation } from "../trace/types.js";
 import type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
 export type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
+import { projectConversationAgentTurnResult } from "./agent-turn-output-projection.js";
 import { reconcileAttemptHistory } from "./attempt-history-reconciliation.js";
 import { publishAttemptResumeBinding } from "./attempt-resume-publication.js";
 import type { AttemptRuntimeOptions } from "./attempt-runtime-options.js";
+import { startAttemptRevisionBarrier } from "./attempt-runtime-revision-barrier.js";
 import { prepareInitialRevisionLane, startAndAdmitAttempt } from "./attempt-start-admission.js";
 import { renderAttemptPrompt, resolveAttemptTurnPrompt } from "./attempt-turn-delivery.js";
 import { publishAttemptTurnDelivery } from "./attempt-turn-publication.js";
+import { AGENT_ACTION_CANDIDATE_ROLE } from "./conversation-agent-action-candidate-contract.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import { assertAttemptEmission, snapshotRuntimeValue } from "./emission-authority.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
 import type { RegisteredOperation } from "./operation-registry.js";
-import { startInitialRevisionLaneBarrier } from "./revision-initial-lane-runtime.js";
 import type { AttemptEmission, AttemptRef, PolicyAttempt, PolicyAttemptRequest } from "./types.js";
-
 const MAX_CHUNKS = 4096;
 const MAX_CHUNK_BYTES = 1024 * 1024;
 export class AttemptRuntime {
@@ -33,15 +40,7 @@ export class AttemptRuntime {
     plan: RevisionPreparationPlanV1,
     authorityOperationId: string,
   ): Promise<boolean> {
-    if (!this.options.revisionLanes) throw new Error("revision lane authority is absent");
-    return startInitialRevisionLaneBarrier({
-      options: this.options,
-      authority: this.options.revisionLanes,
-      live,
-      operation,
-      plan,
-      authorityOperationId,
-    });
+    return startAttemptRevisionBarrier(this.options, live, operation, plan, authorityOperationId);
   }
   launch(
     live: AttemptConversationAuthority,
@@ -113,10 +112,11 @@ export class AttemptRuntime {
     const ref = reservedRef ?? (randomBytes(32).toString("base64url") as AttemptRef);
     const resolved = materialized.resolved;
     const roleName = resolved.role.spec.name;
-    if (request.purpose === "evaluator" && roleName !== "brainstorm-evaluator") {
+    const evaluatorRole = roleName === AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR;
+    if (request.purpose === "evaluator" && !evaluatorRole) {
       throw new Error("evaluator attempt requires evaluator role");
     }
-    if (request.purpose !== "evaluator" && roleName === "brainstorm-evaluator") {
+    if (request.purpose !== "evaluator" && evaluatorRole) {
       throw new Error("non-evaluator attempt cannot use evaluator role");
     }
     const revisionLane = prepareInitialRevisionLane(
@@ -128,9 +128,17 @@ export class AttemptRuntime {
     if (revisionLane) attemptId = revisionLane.attempt_key;
     const isolatedHistory = request.purpose === "baseline" || request.purpose === "evaluator";
     const resumeOrdinal = ++live.resumeCounter.value;
-    const resume = isolatedHistory ? undefined : live.resumeBindings.get(request.participantId);
-    if (resume && resume.engine !== resolved.engine) throw new Error("resume engine mismatch");
-    if (!isolatedHistory && materialized.spawn.sessionMode === "exact" && !resume) {
+    const persistedResume = isolatedHistory
+      ? undefined
+      : live.resumeBindings.get(request.participantId);
+    if (persistedResume && persistedResume.engine !== resolved.engine)
+      throw new Error("resume engine mismatch");
+    const resume = supportsExactNativeSessionResume(resolved.engine) ? persistedResume : undefined;
+    if (
+      !isolatedHistory &&
+      materialized.spawn.sessionMode === ENGINE_SESSION_MODE.EXACT &&
+      !resume
+    ) {
       throw new Error("exact session requires persisted resume authority");
     }
     const deliveredPrompt = resolveAttemptTurnPrompt({
@@ -148,13 +156,17 @@ export class AttemptRuntime {
         proposeAction:
           request.purpose !== "baseline" &&
           request.purpose !== "evaluator" &&
-          manifestBinding.input.roleRef !== "brainstorm-evaluator" &&
-          manifestBinding.host_tools?.includes("propose_action") === true,
+          manifestBinding.input.roleRef !== AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR &&
+          manifestBinding.host_tools?.includes(AGENT_HOST_TOOL.PROPOSE_ACTION) === true,
       },
     );
     const spawn = createSpawnOptionsProjection({
       ...materialized.spawn,
-      sessionMode: isolatedHistory ? "fresh" : resume ? "exact" : materialized.spawn.sessionMode,
+      sessionMode: isolatedHistory
+        ? ENGINE_SESSION_MODE.FRESH
+        : resume
+          ? ENGINE_SESSION_MODE.EXACT
+          : materialized.spawn.sessionMode,
       rendered_prompt: prompt,
     });
     const base: TraceCorrelation = {
@@ -213,7 +225,7 @@ export class AttemptRuntime {
           {
             idempotency_key: `attempt:${attemptId}:lifecycle:${state}`,
             event: {
-              type: "operation_lifecycle",
+              type: CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE,
               payload: { operation_id: live.operationId, attempt_id: attemptId, state },
             },
           },
@@ -342,11 +354,12 @@ export class AttemptRuntime {
             attemptId,
             resumeOrdinal,
             captured,
+            ...(resume ? { requestedExactResume: resume } : {}),
             isolatedHistory,
             retained: this.options.isRetained(live.manifest.conversation_id, live.operationId),
             ...(request.delivery ? { delivery: request.delivery.receipt } : {}),
           });
-        return result;
+        return projectConversationAgentTurnResult(result);
       } finally {
         if (revisionLane && !revisionSettled)
           this.options.revisionLanes?.effectUnknown(
@@ -376,7 +389,6 @@ export class AttemptRuntime {
       },
     });
   }
-
   async reconcile(
     live: AttemptConversationAuthority,
     operation: RegisteredOperation,

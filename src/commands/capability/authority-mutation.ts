@@ -1,6 +1,14 @@
 import { validateRegistryTrustChange } from "../../actions/candidate-nested-validation.js";
+import { CAPABILITY_CLI_COMMAND } from "../../actions/capability-cli-contract.js";
+import { CAPABILITY_TRUST_TRANSITION } from "../../actions/capability-security-contract.js";
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import { exactObject, validateIdempotencyKey } from "../../actions/index.js";
 import { validateGrantInput } from "../../actions/permission-validation.js";
+import {
+  type AUTHORITY_HOST_ACTION_KINDS,
+  isAuthorityAction as isAuthorityHostActionKind,
+} from "../../actions/proposal-content-validation.js";
+import { ACTION_PLANNING_NETWORK_READ_VALUE } from "../../actions/public-action-contract.js";
 import { DIGEST } from "../../actions/record-primitives.js";
 import type { HostActionRequestV1 } from "../../actions/request-types.js";
 import { validateHostActionRequest } from "../../actions/validation.js";
@@ -13,6 +21,7 @@ import type {
   FabricCliAuthorityMutationCommandV1,
   FabricCliMutationRequestV1,
 } from "../../capabilities/wire/cli.js";
+import { CAPABILITY_SCOPE, isCapabilityScope } from "../../core/capability-contract.js";
 import { readStrictJsonSource } from "./io.js";
 import {
   CapabilityCliUsageError,
@@ -24,21 +33,13 @@ import { ephemeralIdempotencyKey } from "./runtime.js";
 
 type AuthorityAction = Extract<
   HostActionRequestV1,
-  {
-    type:
-      | "grant.create"
-      | "grant.renew"
-      | "grant.revoke"
-      | "policy.update_authority"
-      | "secret.revoke"
-      | "registry.trust_key";
-  }
+  { type: (typeof AUTHORITY_HOST_ACTION_KINDS)[number] }
 >;
 const TRUST_TRANSITIONS = {
-  "authority.trust.add": "added",
-  "authority.trust.rescope": "rescoped",
-  "authority.trust.deprecate": "deprecated",
-  "authority.trust.revoke": "revoked",
+  [CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_ADD]: CAPABILITY_TRUST_TRANSITION.ADDED,
+  [CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_RESCOPE]: CAPABILITY_TRUST_TRANSITION.RESCOPED,
+  [CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_DEPRECATE]: CAPABILITY_TRUST_TRANSITION.DEPRECATED,
+  [CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_REVOKE]: CAPABILITY_TRUST_TRANSITION.REVOKED,
 } as const;
 
 export function authorityMutationInput(
@@ -54,20 +55,21 @@ export function authorityMutationInput(
       command: parsed.command,
       request: decodeAuthorityRequestFile(parsed.requestFile, parsed.command, reader),
     };
-  if (parsed.command === "authority.repair") {
+  if (parsed.command === CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR) {
     return {
       schema_version: "1.0",
-      command: "authority.repair",
-      scope: parsed.scope ?? "project",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR,
+      scope: parsed.scope ?? CAPABILITY_SCOPE.PROJECT,
       conversation_id: parsed.conversationId ?? null,
     };
   }
   const direct = parsed as ParsedAuthorityDirectMutationV1;
-  if (direct.command === "authority.secret.revoke") return directSecretRevoke(direct);
+  if (direct.command === CAPABILITY_CLI_COMMAND.AUTHORITY_SECRET_REVOKE)
+    return directSecretRevoke(direct);
   const action = directAuthorityAction(direct, reader);
   const command = direct.command as Exclude<
     CapabilityCliMutationRequestExecutionV1["command"],
-    "authority.secret.revoke"
+    typeof CAPABILITY_CLI_COMMAND.AUTHORITY_SECRET_REVOKE
   >;
   return {
     schema_version: "1.0",
@@ -76,7 +78,7 @@ export function authorityMutationInput(
       schema_version: "1.0",
       idempotency_key: authorityIdempotencyKey(direct.idempotencyKey),
       scope: scopeForAuthorityAction(action),
-      planning_options: { network_read: "forbid" },
+      planning_options: { network_read: ACTION_PLANNING_NETWORK_READ_VALUE.FORBID },
       action,
     },
   };
@@ -84,7 +86,10 @@ export function authorityMutationInput(
 
 function decodeAuthorityRequestFile(
   path: string,
-  command: Exclude<FabricCliAuthorityMutationCommandV1, "authority.repair">,
+  command: Exclude<
+    FabricCliAuthorityMutationCommandV1,
+    typeof CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR
+  >,
   reader: (() => Uint8Array | string) | undefined,
 ): FabricCliMutationRequestV1 {
   const row = exactObject(
@@ -96,7 +101,7 @@ function decodeAuthorityRequestFile(
   if (row.schema_version !== "1.0")
     throw new CapabilityCliUsageError("unsupported request-file schema_version");
   const planning = exactObject(row.planning_options, ["network_read"], [], "$.planning_options");
-  if (planning.network_read !== "forbid")
+  if (planning.network_read !== ACTION_PLANNING_NETWORK_READ_VALUE.FORBID)
     throw new CapabilityCliUsageError(
       'authority request-file planning_options.network_read must be "forbid"',
     );
@@ -105,13 +110,15 @@ function decodeAuthorityRequestFile(
     throw new CapabilityCliUsageError(
       "request-file action does not match the selected authority command",
     );
+  if (!isCapabilityScope(row.scope))
+    throw new CapabilityCliUsageError("request-file scope is invalid");
   if (scopeForAuthorityAction(action) !== row.scope)
     throw new CapabilityCliUsageError("request-file scope does not match request action scope");
   return {
     schema_version: "1.0",
     idempotency_key: validateIdempotencyKey(row.idempotency_key),
-    scope: row.scope === "user" ? "user" : "project",
-    planning_options: { network_read: "forbid" },
+    scope: row.scope,
+    planning_options: { network_read: ACTION_PLANNING_NETWORK_READ_VALUE.FORBID },
     action,
   };
 }
@@ -121,29 +128,29 @@ function directAuthorityAction(
   reader: (() => Uint8Array | string) | undefined,
 ): AuthorityAction {
   switch (parsed.command) {
-    case "authority.grant.create": {
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_CREATE: {
       rejectOuterScope(parsed.command, parsed.scope);
       const grant = requireGrantFile(parsed.grantFile, reader);
-      return validateHostActionRequest({ type: "grant.create", grant }) as AuthorityAction;
+      return validateAuthorityActionRequest({ type: HOST_ACTION_KIND.GRANT_CREATE, grant });
     }
-    case "authority.grant.renew": {
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_RENEW: {
       rejectOuterScope(parsed.command, parsed.scope);
       const grant = requireGrantFile(parsed.grantFile, reader);
       if (!parsed.grantId)
         throw new CapabilityCliUsageError("authority grant renew requires --grant-id");
-      return validateHostActionRequest({
-        type: "grant.renew",
+      return validateAuthorityActionRequest({
+        type: HOST_ACTION_KIND.GRANT_RENEW,
         grant_id: parsed.grantId,
         grant,
-      }) as AuthorityAction;
+      });
     }
-    case "authority.grant.revoke":
-      return validateHostActionRequest({
-        type: "grant.revoke",
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_REVOKE:
+      return validateAuthorityActionRequest({
+        type: HOST_ACTION_KIND.GRANT_REVOKE,
         scope: requireScope(parsed.command, parsed.scope),
         grant_id: requireValue(parsed.grantId, "authority grant revoke requires --grant-id"),
-      }) as AuthorityAction;
-    case "authority.policy.update": {
+      });
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_POLICY_UPDATE: {
       const replacement = exactObject(
         readStrictJsonSource(
           requireValue(
@@ -157,23 +164,23 @@ function directAuthorityAction(
         [],
         "$",
       );
-      return validateHostActionRequest({
-        type: "policy.update_authority",
+      return validateAuthorityActionRequest({
+        type: HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY,
         scope: requireScope(parsed.command, parsed.scope),
         replacement_authority_subtree: replacement.replacement_authority_subtree,
-      }) as AuthorityAction;
+      });
     }
-    case "authority.trust.add":
-    case "authority.trust.rescope":
-    case "authority.trust.deprecate":
-    case "authority.trust.revoke": {
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_ADD:
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_RESCOPE:
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_DEPRECATE:
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_REVOKE: {
       const scope = requireScope(parsed.command, parsed.scope);
       const change = requireTrustFile(parsed.trustFile, reader, trustTransition(parsed.command));
-      return validateHostActionRequest({
-        type: "registry.trust_key",
+      return validateAuthorityActionRequest({
+        type: HOST_ACTION_KIND.REGISTRY_TRUST_KEY,
         scope,
         change,
-      }) as AuthorityAction;
+      });
     }
     default:
       throw new CapabilityCliUsageError(
@@ -185,7 +192,7 @@ function directAuthorityAction(
 function directSecretRevoke(
   parsed: ParsedAuthorityDirectMutationV1,
 ): Omit<CapabilityCliAuthoritySecretRevokeExecutionV1, "context" | "approve"> {
-  if (parsed.command !== "authority.secret.revoke")
+  if (parsed.command !== CAPABILITY_CLI_COMMAND.AUTHORITY_SECRET_REVOKE)
     throw new CapabilityCliUsageError("expected authority secret revoke");
   const scope = requireScope(parsed.command, parsed.scope);
   const byCandidate = parsed.candidateId || parsed.candidateDigest;
@@ -207,7 +214,7 @@ function directSecretRevoke(
       throw new CapabilityCliUsageError("--candidate-digest must be a full sha256 digest");
     return {
       schema_version: "1.0",
-      command: "authority.secret.revoke",
+      command: CAPABILITY_CLI_COMMAND.AUTHORITY_SECRET_REVOKE,
       scope,
       idempotency_key: authorityIdempotencyKey(parsed.idempotencyKey),
       secret: { kind: "candidate", candidate_id: candidateId, candidate_digest: candidateDigest },
@@ -215,7 +222,7 @@ function directSecretRevoke(
   }
   return {
     schema_version: "1.0",
-    command: "authority.secret.revoke",
+    command: CAPABILITY_CLI_COMMAND.AUTHORITY_SECRET_REVOKE,
     scope,
     idempotency_key: authorityIdempotencyKey(parsed.idempotencyKey),
     secret: {
@@ -239,14 +246,20 @@ function requireGrantFile(
     "authority grant file",
   );
   validateGrantInput(source, "$");
-  return source as Extract<HostActionRequestV1, { type: "grant.create" }>["grant"];
+  return source as Extract<
+    HostActionRequestV1,
+    { type: typeof HOST_ACTION_KIND.GRANT_CREATE }
+  >["grant"];
 }
 
 function requireTrustFile(
   path: string | undefined,
   reader: (() => Uint8Array | string) | undefined,
   expectedTransition: Extract<
-    Extract<HostActionRequestV1, { type: "registry.trust_key" }>["change"]["transition"],
+    Extract<
+      HostActionRequestV1,
+      { type: typeof HOST_ACTION_KIND.REGISTRY_TRUST_KEY }
+    >["change"]["transition"],
     string
   >,
 ) {
@@ -256,7 +269,10 @@ function requireTrustFile(
     "authority trust file",
   );
   validateRegistryTrustChange(source, "$");
-  const row = source as Extract<HostActionRequestV1, { type: "registry.trust_key" }>["change"];
+  const row = source as Extract<
+    HostActionRequestV1,
+    { type: typeof HOST_ACTION_KIND.REGISTRY_TRUST_KEY }
+  >["change"];
   if (row.transition !== expectedTransition)
     throw new CapabilityCliUsageError(
       `authority trust file transition must be ${JSON.stringify(expectedTransition)}`,
@@ -265,32 +281,47 @@ function requireTrustFile(
 }
 
 function scopeForAuthorityAction(action: AuthorityAction): Scope {
-  return action.type === "grant.create" || action.type === "grant.renew"
+  return action.type === HOST_ACTION_KIND.GRANT_CREATE ||
+    action.type === HOST_ACTION_KIND.GRANT_RENEW
     ? action.grant.scope
     : action.scope;
 }
 
+function isAuthorityActionRequest(action: HostActionRequestV1): action is AuthorityAction {
+  return isAuthorityHostActionKind(action.type);
+}
+
+function validateAuthorityActionRequest(value: unknown): AuthorityAction {
+  const action = validateHostActionRequest(value);
+  if (!isAuthorityActionRequest(action))
+    throw new CapabilityCliUsageError("authority action escaped the authority domain");
+  return action;
+}
+
 function matchesAuthorityCommand(
-  command: Exclude<FabricCliAuthorityMutationCommandV1, "authority.repair">,
+  command: Exclude<
+    FabricCliAuthorityMutationCommandV1,
+    typeof CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR
+  >,
   action: HostActionRequestV1,
 ): action is AuthorityAction {
   switch (command) {
-    case "authority.grant.create":
-      return action.type === "grant.create";
-    case "authority.grant.renew":
-      return action.type === "grant.renew";
-    case "authority.grant.revoke":
-      return action.type === "grant.revoke";
-    case "authority.policy.update":
-      return action.type === "policy.update_authority";
-    case "authority.secret.revoke":
-      return action.type === "secret.revoke";
-    case "authority.trust.add":
-    case "authority.trust.rescope":
-    case "authority.trust.deprecate":
-    case "authority.trust.revoke":
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_CREATE:
+      return action.type === HOST_ACTION_KIND.GRANT_CREATE;
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_RENEW:
+      return action.type === HOST_ACTION_KIND.GRANT_RENEW;
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_GRANT_REVOKE:
+      return action.type === HOST_ACTION_KIND.GRANT_REVOKE;
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_POLICY_UPDATE:
+      return action.type === HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY;
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_SECRET_REVOKE:
+      return action.type === HOST_ACTION_KIND.SECRET_REVOKE;
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_ADD:
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_RESCOPE:
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_DEPRECATE:
+    case CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_REVOKE:
       return (
-        action.type === "registry.trust_key" &&
+        action.type === HOST_ACTION_KIND.REGISTRY_TRUST_KEY &&
         action.change.transition === trustTransition(command)
       );
   }

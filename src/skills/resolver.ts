@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { Skill } from "../core.js";
 import { CTX_DIR } from "../core.js";
+import { SKILL_STATUS } from "../core/skill-contract.js";
 import type { ProjectProfile } from "../scanner.js";
 import { discoverSkills, matchSkillsForFile } from "./registry.js";
 
@@ -94,7 +95,7 @@ function satisfier(
   const find = (pool: Skill[]): Skill | undefined =>
     pool.find((s) => s.name === reader) ?? matchSkillsForFile(pool, filename)[0]?.skill;
 
-  const verifiedHit = find(local.filter((s) => s.status === "verified"));
+  const verifiedHit = find(local.filter((s) => s.status === SKILL_STATUS.VERIFIED));
   if (verifiedHit) return { skill: verifiedHit, verified: true };
 
   // An unverified match is only actionable if it lives in the canonical store,
@@ -106,8 +107,8 @@ function satisfier(
   const unverifiedHit = find(
     local.filter(
       (s) =>
-        s.status !== "verified" &&
-        s.status !== "deprecated" &&
+        s.status !== SKILL_STATUS.VERIFIED &&
+        s.status !== SKILL_STATUS.DEPRECATED &&
         s.dir
           .split(/[\\/]/)
           .join("/")

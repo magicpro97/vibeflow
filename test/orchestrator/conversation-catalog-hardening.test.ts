@@ -5,6 +5,7 @@ import {
   materializeDispatchRecord,
   materializeProposal,
 } from "../../src/actions/index.js";
+import { ACTION_AUTHORITY_REPAIR_DOMAIN } from "../../src/actions/internal-action-vocabulary-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../../src/durability/index.js";
 import { CatalogCursorCodec } from "../../src/orchestrator/conversation/catalog-cursor.js";
 import { materializeCatalogGeneration } from "../../src/orchestrator/conversation/catalog-generation.js";
@@ -17,6 +18,10 @@ import {
   normalizeConversationCatalogQuery,
   safePublicRoleReference,
 } from "../../src/orchestrator/conversation/catalog-types.js";
+import {
+  CONVERSATION_CATALOG_LOCK_IDENTITY,
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+} from "../../src/orchestrator/conversation/conversation-catalog-contract.js";
 import { deriveLineageAssociations } from "../../src/orchestrator/conversation/lineage-association.js";
 import { validateLineageHeadForRead } from "../../src/orchestrator/conversation/lineage-head-reader.js";
 import { deriveConversationLineages } from "../../src/orchestrator/conversation/lineage-reader.js";
@@ -906,13 +911,17 @@ test("conversation lock binds the highest semantic record and ignores projection
   active.journal_records = [semantic, projection];
   active.journal_head.last_seq = 2;
   const identity = digestV1("VF-JOURNAL-IDENTITY\0v1\0", {
-    schema_version: "1.0",
-    owner: { kind: "authority", authority_scope: "conversation", scope_id: "root" },
-    repair_domain: "conversation-journal",
-    journal_encoding: "conversation-jsonl-v1",
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+    owner: {
+      kind: CONVERSATION_CATALOG_LOCK_IDENTITY.OWNER_KIND,
+      authority_scope: CONVERSATION_CATALOG_LOCK_IDENTITY.AUTHORITY_SCOPE,
+      scope_id: "root",
+    },
+    repair_domain: ACTION_AUTHORITY_REPAIR_DOMAIN.CONVERSATION_JOURNAL,
+    journal_encoding: CONVERSATION_CATALOG_LOCK_IDENTITY.JOURNAL_ENCODING,
     vffr_domain: null,
     logical_key: {
-      kind: "conversation-journal",
+      kind: CONVERSATION_CATALOG_LOCK_IDENTITY.LOGICAL_KEY_KIND,
       root_session_id: "root",
       conversation_id: "root",
       revision_id: "revision-root",

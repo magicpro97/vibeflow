@@ -2,6 +2,11 @@ import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import type { ArtifactRegistry } from "../trace/artifacts.js";
 import type { PublicStoredTraceEvent } from "../trace/types.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import {
+  CONVERSATION_INTERACTION_ACTOR_KIND,
+  CONVERSATION_INTERACTION_SCHEMA_VERSION,
+  type ConversationInteractionActorKind,
+} from "./conversation-interaction-contract.js";
 import type {
   PublicMessageLocatorV1,
   PublicQuoteProjectionV1,
@@ -9,6 +14,13 @@ import type {
 } from "./conversation-interaction-types.js";
 import { assertPublicMessageLocatorV1 } from "./conversation-interaction-validation.js";
 import { assertPublicQuoteReferenceV1 } from "./conversation-interaction-validation.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+  type ConversationMessageQueueTargetParticipantsV1,
+} from "./conversation-message-queue-contract.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import { type ValidatedLineageNodeV1, deriveConversationLineages } from "./lineage-reader.js";
 import { projectConversationEvents } from "./policy-registry.js";
 import { readConversationSourceInventory } from "./source-inventory.js";
@@ -23,12 +35,12 @@ export interface ResolvedPublicMessageV1 {
   created_at: string;
   revision_ordinal: number;
   public_seq: number;
-  target_participants: "all" | string[];
+  target_participants: ConversationMessageQueueTargetParticipantsV1;
   quote_refs: PublicQuoteReferenceV1[];
 }
 
 export interface PublicMessageActorV1 {
-  kind: "human" | "participant";
+  kind: ConversationInteractionActorKind;
   public_id: string;
   participant_id: string | null;
   source_event_id: string | null;
@@ -92,8 +104,9 @@ function ancestry(
   return selected;
 }
 
-function targets(value: unknown): "all" | string[] {
-  if (value === "all") return "all";
+function targets(value: unknown): ConversationMessageQueueTargetParticipantsV1 {
+  if (value === CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL)
+    return CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL;
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
     throw new Error("public message target authority changed");
   return value.map(String);
@@ -156,14 +169,14 @@ export class ConversationMessageAuthorityV1 {
     );
     const output: ResolvedPublicMessageV1[] = [];
     for (const event of events) {
-      if (event.event.type === "user_message") {
+      if (event.event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE) {
         const targetParticipants = targets(event.event.payload.target_participants);
         const projection = {
-          schema_version: "1.0",
-          target_kind: "user-message",
+          schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
+          target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.USER_MESSAGE,
           event_id: event.event_id,
           public_seq: event.seq,
-          author_public_id: "human",
+          author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
           content: event.event.payload.content,
           target_participants: targetParticipants,
           quote_refs: event.event.payload.quote_refs ?? [],
@@ -174,8 +187,14 @@ export class ConversationMessageAuthorityV1 {
           return structuredClone(quote);
         });
         output.push({
-          locator: locator(rootSessionId, revision, event, "user-message", projection),
-          author_public_id: "human",
+          locator: locator(
+            rootSessionId,
+            revision,
+            event,
+            CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.USER_MESSAGE,
+            projection,
+          ),
+          author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
           preview_text: preview(event.event.payload.content),
           created_at: event.ts,
           revision_ordinal: revision.node.revision_ordinal,
@@ -188,20 +207,26 @@ export class ConversationMessageAuthorityV1 {
       const response = responses.get(event.event_id);
       if (!response) continue;
       const projection = {
-        schema_version: "1.0",
-        target_kind: "completed-agent-response",
+        schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
+        target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
         event_id: event.event_id,
         created_at: event.ts,
         response,
       };
       output.push({
-        locator: locator(rootSessionId, revision, event, "completed-agent-response", projection),
+        locator: locator(
+          rootSessionId,
+          revision,
+          event,
+          CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
+          projection,
+        ),
         author_public_id: response.author_public_id,
         preview_text: preview(response.answer ?? response.claim ?? ""),
         created_at: event.ts,
         revision_ordinal: revision.node.revision_ordinal,
         public_seq: event.seq,
-        target_participants: "all",
+        target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
         quote_refs: [],
       });
     }
@@ -228,8 +253,8 @@ export class ConversationMessageAuthorityV1 {
       candidate.root_session_id !== inventory.root_session_id ||
       !canonicalJsonBytes(target.locator).equals(canonicalJsonBytes(candidate)) ||
       (source && comparePosition(target, source) >= 0) ||
-      (actor.kind === "participant" &&
-        target.target_participants !== "all" &&
+      (actor.kind === CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT &&
+        target.target_participants !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL &&
         !target.target_participants.includes(actor.participant_id ?? ""))
     )
       throw new Error("public message reference is unavailable");

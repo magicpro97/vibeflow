@@ -1,4 +1,5 @@
 import { canonicalJsonBytes } from "../durability/index.js";
+import { ACTOR_KIND, CREDENTIAL_CLASS } from "./public-action-contract.js";
 import { ActionValidationError, boundedString, exactObject, safeInteger } from "./strict-json.js";
 import type { PublicActor } from "./types.js";
 
@@ -49,13 +50,9 @@ export function assertTimestamp(value: unknown, path: string): number {
 
 export function assertActor(value: unknown, path: string): PublicActor {
   const row = exactObject(value, ["kind", "public_actor_id", "credential_class"], [], path);
-  if (!["human-browser", "human-cli", "agent", "system-recovery"].includes(row.kind as string))
+  if (!Object.values(ACTOR_KIND).some((candidate) => candidate === row.kind))
     throw new ActionValidationError("invalid actor kind", `${path}.kind`);
-  if (
-    !["loopback-session", "interactive-tty", "automation-grant", "recovery"].includes(
-      row.credential_class as string,
-    )
-  )
+  if (!Object.values(CREDENTIAL_CLASS).some((candidate) => candidate === row.credential_class))
     throw new ActionValidationError("invalid credential class", `${path}.credential_class`);
   assertOpaqueId(row.public_actor_id, `${path}.public_actor_id`, 256);
   return value as PublicActor;

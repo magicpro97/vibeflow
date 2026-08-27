@@ -1,3 +1,6 @@
+import { isCapabilityScope } from "../core/capability-contract.js";
+import { CONVERSATION_PUBLIC_PROFILE } from "../orchestrator/conversation/conversation-public-wire-contract.js";
+import { HOST_ACTION_KIND, type HostActionKind, isHostActionKind } from "./host-action-contract.js";
 import type { HostActionV1 } from "./internal-action-types.js";
 import {
   validateCompactionInput,
@@ -6,46 +9,74 @@ import {
 } from "./internal-candidate-validation.js";
 import { validateRepairPlan } from "./internal-repair-validation.js";
 import {
+  ACTION_PREVIEW_PROJECTOR_VERSION,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
+import {
   assertDigest,
   assertOpaqueId,
   assertPackageId,
   assertTimestamp,
 } from "./record-primitives.js";
-import { isHostActionKind } from "./request-types.js";
 import { ActionValidationError, boundedString, exactObject, safeInteger } from "./strict-json.js";
 import { validateHostActionRequest } from "./validation.js";
 
-const STAGED = new Set([
-  "conversation.publish_suspected_literal",
-  "conversation.abandon_revision_operation",
-  "conversation.retry_revision_operation",
-  "conversation.reconcile_revision_operation",
-  "context.compact",
-  "capability.adopt",
-  "policy.update_authority",
-  "secret.revoke",
-  "authority.repair",
-]);
-const KEYS: Record<string, readonly string[]> = {
-  "conversation.publish_suspected_literal": ["binding"],
-  "conversation.abandon_revision_operation": ["revision_operation_id", "expected_header_digest"],
-  "conversation.retry_revision_operation": [
+const fields = <const Fields extends readonly string[]>(...values: Fields): Readonly<Fields> =>
+  Object.freeze(values);
+
+type InternalStagedActionKind =
+  | typeof HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
+  | typeof HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION
+  | typeof HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION
+  | typeof HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION
+  | typeof HOST_ACTION_KIND.CONTEXT_COMPACT
+  | typeof HOST_ACTION_KIND.CAPABILITY_ADOPT
+  | typeof HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY
+  | typeof HOST_ACTION_KIND.SECRET_REVOKE
+  | typeof HOST_ACTION_KIND.AUTHORITY_REPAIR;
+
+type InternalStagedActionFieldMap = {
+  readonly [Kind in InternalStagedActionKind]: readonly Exclude<
+    keyof Extract<HostActionV1, { type: Kind }>,
+    "type"
+  >[];
+};
+
+export const INTERNAL_STAGED_ACTION_FIELDS = Object.freeze({
+  [HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL]: fields("binding"),
+  [HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION]: fields(
+    "revision_operation_id",
+    "expected_header_digest",
+  ),
+  [HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION]: fields(
     "revision_operation_id",
     "expected_header_digest",
     "expected_head_digest",
-  ],
-  "conversation.reconcile_revision_operation": [
+  ),
+  [HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION]: fields(
     "revision_operation_id",
     "expected_header_digest",
     "expected_state_digest",
     "expected_effect_action_operation_id",
-  ],
-  "context.compact": ["oversized_candidate", "profile", "compaction_input"],
-  "capability.adopt": ["scope", "candidate"],
-  "policy.update_authority": ["scope", "change"],
-  "secret.revoke": ["scope", "private_binding_ref", "expected_binding_digest"],
-  "authority.repair": ["plan"],
-};
+  ),
+  [HOST_ACTION_KIND.CONTEXT_COMPACT]: fields("oversized_candidate", "profile", "compaction_input"),
+  [HOST_ACTION_KIND.CAPABILITY_ADOPT]: fields("scope", "candidate"),
+  [HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY]: fields("scope", "change"),
+  [HOST_ACTION_KIND.SECRET_REVOKE]: fields(
+    "scope",
+    "private_binding_ref",
+    "expected_binding_digest",
+  ),
+  [HOST_ACTION_KIND.AUTHORITY_REPAIR]: fields("plan"),
+} satisfies InternalStagedActionFieldMap);
+
+export const INTERNAL_STAGED_ACTION_KINDS = Object.freeze(
+  Object.keys(INTERNAL_STAGED_ACTION_FIELDS) as InternalStagedActionKind[],
+);
+
+function isInternalStagedActionKind(type: HostActionKind): type is InternalStagedActionKind {
+  return INTERNAL_STAGED_ACTION_KINDS.some((candidate) => candidate === type);
+}
 
 export function validateInternalHostAction(value: unknown): HostActionV1 {
   const initial = exactObject(
@@ -56,45 +87,50 @@ export function validateInternalHostAction(value: unknown): HostActionV1 {
   );
   if (typeof initial.type !== "string" || !isHostActionKind(initial.type))
     throw new ActionValidationError("unsupported internal action", "$.action.type");
-  if (!STAGED.has(initial.type)) {
+  if (!isInternalStagedActionKind(initial.type)) {
     const action = validateHostActionRequest(value) as HostActionV1;
     assertCanonicalActionArrays(action);
     return action;
   }
-  const row = exactObject(value, ["type", ...(KEYS[initial.type] ?? [])], [], "$.action");
+  const row = exactObject(
+    value,
+    ["type", ...INTERNAL_STAGED_ACTION_FIELDS[initial.type]],
+    [],
+    "$.action",
+  );
   switch (initial.type) {
-    case "conversation.publish_suspected_literal":
+    case HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL:
       literalBinding(row.binding);
       break;
-    case "conversation.abandon_revision_operation":
-    case "conversation.retry_revision_operation":
-    case "conversation.reconcile_revision_operation":
-      for (const key of KEYS[initial.type] ?? [])
+    case HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION:
+    case HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION:
+    case HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION:
+      for (const key of INTERNAL_STAGED_ACTION_FIELDS[initial.type])
         if (key.endsWith("_digest")) assertDigest(row[key], `$.action.${key}`);
         else assertOpaqueId(row[key], `$.action.${key}`);
       break;
-    case "context.compact":
-      if (row.profile !== "vf-public-compaction/1")
+    case HOST_ACTION_KIND.CONTEXT_COMPACT:
+      if (row.profile !== CONVERSATION_PUBLIC_PROFILE.COMPACTION)
         throw new ActionValidationError("invalid compaction profile", "$.action.profile");
       validateOversizedCandidate(row.oversized_candidate, "$.action.oversized_candidate");
       validateCompactionInput(row.compaction_input, "$.action.compaction_input");
       break;
-    case "capability.adopt":
+    case HOST_ACTION_KIND.CAPABILITY_ADOPT:
       capabilityScope(row.scope, "$.action.scope");
       validateLegacyCandidate(row.candidate, row.scope, "$.action.candidate");
       break;
-    case "policy.update_authority":
+    case HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY:
       capabilityScope(row.scope, "$.action.scope");
       policyChange(row.change);
       if ((row.change as { scope?: unknown }).scope !== row.scope)
         throw new ActionValidationError("policy scope mismatch", "$.action.change.scope");
       break;
-    case "secret.revoke":
+    case HOST_ACTION_KIND.SECRET_REVOKE:
       capabilityScope(row.scope, "$.action.scope");
       boundedString(row.private_binding_ref, "$.action.private_binding_ref");
       assertDigest(row.expected_binding_digest, "$.action.expected_binding_digest");
       break;
-    case "authority.repair":
+    case HOST_ACTION_KIND.AUTHORITY_REPAIR:
       validateRepairPlan(row.plan);
       break;
   }
@@ -118,7 +154,10 @@ function literalBinding(value: unknown): void {
     [],
     "$.action.binding",
   );
-  if (row.schema_version !== "1.0" || row.projector_version !== "vf-public-projector/1")
+  if (
+    row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION ||
+    row.projector_version !== ACTION_PREVIEW_PROJECTOR_VERSION
+  )
     throw new ActionValidationError("invalid literal binding version", "$.action.binding");
   assertOpaqueId(row.private_staging_id, "$.action.binding.private_staging_id");
   for (const key of [
@@ -170,11 +209,11 @@ function policyChange(value: unknown): void {
 }
 
 function assertCanonicalActionArrays(action: HostActionV1): void {
-  if (action.type === "conversation.add_participant")
+  if (action.type === HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT)
     sorted(action.participant.skill_refs, "$.action.participant.skill_refs");
-  if (action.type === "conversation.update_participant" && action.changes.skill_refs)
+  if (action.type === HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT && action.changes.skill_refs)
     sorted(action.changes.skill_refs, "$.action.changes.skill_refs");
-  if (action.type === "conversation.associate_lineages") {
+  if (action.type === HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES) {
     if (action.root_session_ids.length < 2)
       throw new ActionValidationError(
         "association requires at least two roots",
@@ -182,7 +221,11 @@ function assertCanonicalActionArrays(action: HostActionV1): void {
       );
     sorted(action.root_session_ids, "$.action.root_session_ids");
   }
-  if (["capability.install", "capability.update", "capability.configure"].includes(action.type)) {
+  if (
+    action.type === HOST_ACTION_KIND.CAPABILITY_INSTALL ||
+    action.type === HOST_ACTION_KIND.CAPABILITY_UPDATE ||
+    action.type === HOST_ACTION_KIND.CAPABILITY_CONFIGURE
+  ) {
     const inputs =
       "inputs" in action && action.inputs ? action.inputs.map((row) => row.input_id) : [];
     sorted(inputs, "$.action.inputs");
@@ -202,8 +245,7 @@ function bytewise(left: string, right: string): number {
 }
 
 function capabilityScope(value: unknown, path: string): void {
-  if (value !== "project" && value !== "user")
-    throw new ActionValidationError("invalid capability scope", path);
+  if (!isCapabilityScope(value)) throw new ActionValidationError("invalid capability scope", path);
 }
 
 function jsonValue(value: unknown, path: string, depth = 0): void {

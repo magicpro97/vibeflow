@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { type ActionProposalV1, assertProposal } from "../../actions/index.js";
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import {
   acquireProcessLock,
   canonicalJson,
@@ -9,9 +11,10 @@ import {
   digestHex,
   privateFileBytes,
 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { executionClosureDigest } from "../planning/digests.js";
 import { validateCapabilityPlanningGraph } from "../planning/execution-graph-validation.js";
+import { CAPABILITY_EXECUTION_LEDGER_MODE } from "../planning/execution-ledger-contract.js";
 import {
   actionBlobRef,
   actionJsonRef,
@@ -40,7 +43,7 @@ import type { CapabilityActionGraphV1, CapabilityActionPlanBindingV1 } from "./t
 const MAX_OBJECT = 8 * 1024 * 1024;
 
 function fail(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function parseCanonical<T>(path: string, label: string, maxBytes = MAX_OBJECT): T {
@@ -60,15 +63,15 @@ function parseCanonical<T>(path: string, label: string, maxBytes = MAX_OBJECT): 
 export class CapabilityActionObjectStoreV1 {
   constructor(
     readonly roots: CapabilityRuntimeActionRootsV1,
-    readonly packagesFor: (scope: "project" | "user") => CapabilityExecutionPackageReaderV1,
+    readonly packagesFor: (scope: CapabilityScope) => CapabilityExecutionPackageReaderV1,
   ) {}
 
   persistGraph(input: CapabilityDurablePlanningGraphV1): void {
     const graph = validateCapabilityPlanningGraph(input);
-    if (graph.ledger.mode !== "durable-proposal")
+    if (graph.ledger.mode !== CAPABILITY_EXECUTION_LEDGER_MODE.DURABLE_PROPOSAL)
       throw new CapabilityRuntimeError(
         "transient capability graph cannot be persisted",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     const root = this.roots.path(graph.execution_closure.action_root_locator);
     const lock = acquireProcessLock(join(root, "actions", "v1", "writer.lock"), {
@@ -111,7 +114,7 @@ export class CapabilityActionObjectStoreV1 {
     const root = this.roots.path(
       proposal.action_root_locator as Exclude<
         typeof proposal.action_root_locator,
-        { kind: "recovery-bootstrap" }
+        { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
       >,
     );
     const executionClosure = parseCanonical<CapabilityExecutionObjectClosureV1>(
@@ -200,7 +203,7 @@ export class CapabilityActionObjectStoreV1 {
     );
     return {
       schema_version: "1.0",
-      mode: "durable-proposal",
+      mode: CAPABILITY_EXECUTION_LEDGER_MODE.DURABLE_PROPOSAL,
       json_objects: jsonObjects,
       private_input_bindings: privateInputs,
       raw_blobs: rawBlobs,

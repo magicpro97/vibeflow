@@ -1,4 +1,6 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type { ActionProposalRequestV1, ActionRequestAuthorityV1 } from "../../actions/index.js";
+import { PUBLIC_OPERATION_REVISION_PHASE } from "../../actions/protocol-contract.js";
 import type { ConversationRevisionAuthorityOptions } from "./revision-authority.js";
 import {
   type DeferredRevisionCommitInputV1,
@@ -53,7 +55,7 @@ export class ConversationDeferredRevisionAuthority {
     request: ActionProposalRequestV1;
     authority: ActionRequestAuthorityV1;
   }): Promise<{ created: boolean; proposalId: string }> {
-    if (input.request.candidate.type !== "conversation.continue_message")
+    if (input.request.candidate.type !== HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE)
       throw new Error("deferred revision proposal is not a continuation");
     return this.proposeAction(input);
   }
@@ -77,7 +79,7 @@ export class ConversationDeferredRevisionAuthority {
 
   commitContinuation(input: DeferredRevisionCommitInputV1): Promise<{ childId: string }> {
     const action = this.options.home.actions.get(input.proposalId)?.proposal.action;
-    if (action && action.type !== "conversation.continue_message")
+    if (action && action.type !== HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE)
       throw new Error("deferred revision proposal is not a continuation");
     return this.commitAction(input);
   }
@@ -91,8 +93,12 @@ export class ConversationDeferredRevisionAuthority {
       const startState = foldRevisionOperation(
         replay.operation,
         this.options.home.revisions.readEvents(replay.operation.operation_id),
+        { preparationPlan: replay.revisionPlan },
       ).state;
-      if (!["published", "starting"].includes(startState)) {
+      if (
+        startState !== PUBLIC_OPERATION_REVISION_PHASE.PUBLISHED &&
+        startState !== PUBLIC_OPERATION_REVISION_PHASE.STARTING
+      ) {
         this.options.home.revisions.publish(replay.operation.operation_id);
         this.options.artifactStore.publishRevision(
           replay.childId,

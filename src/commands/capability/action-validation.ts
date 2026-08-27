@@ -4,6 +4,7 @@ import { validateCapabilityIntentAction } from "../../capabilities/controller.js
 import { CapabilityRuntimeError } from "../../capabilities/operations/errors.js";
 import type { CapabilityHostActionV1 } from "../../capabilities/planning/types.js";
 import type { FabricCliMutationRequestV1 } from "../../capabilities/wire/cli.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../../core/capability-contract.js";
 
 function isCapabilityHostAction(
   action: ReturnType<typeof validateInternalHostAction>,
@@ -17,7 +18,7 @@ function validateCapabilityCliAction(
   if (!isCapabilityHostAction(action))
     throw new CapabilityRuntimeError(
       "CLI mutation request escaped the capability domain",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
   return validateCapabilityIntentAction(action);
 }

@@ -1,12 +1,11 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
   type ActionProposalRequestV1,
   type ActionRequestAuthorityV1,
-  type BrowserHostActionRequestV1,
   type JsonValue,
   deriveOperationId,
 } from "../../actions/index.js";
 import type { TraceStore } from "../trace/store.js";
-import type { TraceCorrelation } from "../trace/types.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import { conversationLockDigest } from "./catalog-lock.js";
 import {
@@ -17,6 +16,11 @@ import {
   prepareConversationCompactionArtifacts,
   verifyConversationCompactionArtifacts,
 } from "./conversation-compaction-artifacts.js";
+import {
+  type CompactionCandidate,
+  compactionCorrelation,
+  isCompaction,
+} from "./conversation-compaction-correlation.js";
 import {
   findConversationCompactionEvent,
   sameCompactionValue,
@@ -29,17 +33,16 @@ import {
 import { compactionSourceAuthorityMatches } from "./conversation-compaction-source-authority.js";
 import { resolveCompactionSourceEvents } from "./conversation-compaction-source.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import {
+  CONVERSATION_ARTIFACT_TYPE,
+  CONVERSATION_PUBLIC_PROFILE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import { assertReceiptSource } from "./conversation-receipt-native-plans.js";
 import { materializeConversationReceiptProposal } from "./conversation-receipt-planner.js";
 import { handoffSourcePublicHeadDigest } from "./handoff-selection.js";
 import type { ConversationLineageService } from "./lineage-service.js";
 import { revisionPublicTranscript } from "./revision-source.js";
-
-type CompactionCandidate = Extract<BrowserHostActionRequestV1, { type: "context.compact" }>;
-
-function isCompaction(candidate: BrowserHostActionRequestV1): candidate is CompactionCandidate {
-  return candidate.type === "context.compact";
-}
 
 export class ConversationCompactionAuthority {
   constructor(
@@ -113,9 +116,9 @@ export class ConversationCompactionAuthority {
       },
       request: input.request,
       action: {
-        type: "context.compact",
+        type: HOST_ACTION_KIND.CONTEXT_COMPACT,
         oversized_candidate: candidate,
-        profile: "vf-public-compaction/1",
+        profile: CONVERSATION_PUBLIC_PROFILE.COMPACTION,
         compaction_input: structuredClone(request.compaction_input),
       },
       authority: input.authority,
@@ -128,33 +131,11 @@ export class ConversationCompactionAuthority {
     return { created: created.created, proposal_id: created.proposal.proposal_id };
   }
 
-  private correlation(
-    proposalId: string,
-    operationId: string,
-    manifest: {
-      workflow_id: string;
-      conversation_id: string;
-      revision_id: string;
-      run_id: string;
-    },
-  ): TraceCorrelation {
-    const suffix = proposalId.slice("vf-proposal-".length, "vf-proposal-".length + 32);
-    return {
-      workflow_id: manifest.workflow_id,
-      conversation_id: manifest.conversation_id,
-      revision_id: manifest.revision_id,
-      run_id: manifest.run_id,
-      turn_id: `compaction-turn-${suffix}`,
-      operation_id: operationId,
-      attempt_id: `compaction-attempt-${suffix}`,
-    };
-  }
-
   async commit(proposalId: string): Promise<void> {
     const snapshot = this.options.home.actions.get(proposalId);
     const stored = this.options.home.actionReceipts.readPlan(proposalId);
     const action = snapshot?.proposal.action;
-    if (!snapshot?.approval || !stored || action?.type !== "context.compact")
+    if (!snapshot?.approval || !stored || action?.type !== HOST_ACTION_KIND.CONTEXT_COMPACT)
       throw new Error("context compaction approval is absent");
     const operationId =
       snapshot.operation_id ?? deriveOperationId(snapshot.proposal, snapshot.approval.approval_id);
@@ -307,14 +288,18 @@ export class ConversationCompactionAuthority {
     let event = existing;
     if (!event) {
       event = await this.options.traceStore.append(
-        this.correlation(proposalId, dispatch.operation_id, resolved.requested.source.manifest),
+        compactionCorrelation(
+          proposalId,
+          dispatch.operation_id,
+          resolved.requested.source.manifest,
+        ),
         {
           idempotency_key: `action-context-compaction:${proposalId}`,
           event: {
-            type: "artifact_created",
+            type: CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED,
             payload: {
               artifact_id: construction.artifact_id,
-              artifact_type: "compaction",
+              artifact_type: CONVERSATION_ARTIFACT_TYPE.COMPACTION,
               ref: prepared.compaction_ref,
             },
           },
@@ -323,8 +308,8 @@ export class ConversationCompactionAuthority {
         candidate.source.last_seq,
       );
     } else if (
-      event.event.type !== "artifact_created" ||
-      event.event.payload.artifact_type !== "compaction" ||
+      event.event.type !== CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED ||
+      event.event.payload.artifact_type !== CONVERSATION_ARTIFACT_TYPE.COMPACTION ||
       event.event.payload.artifact_id !== construction.artifact_id ||
       event.event.payload.ref !== prepared.compaction_ref
     ) {
@@ -334,7 +319,7 @@ export class ConversationCompactionAuthority {
     this.options.fault?.("after-trace-append");
     const after = this.options.lineages.resolve(candidate.source.conversation_id);
     const expected = materializeConversationActionBinding({
-      action_type: "context.compact",
+      action_type: HOST_ACTION_KIND.CONTEXT_COMPACT,
       plan_digest: snapshot.proposal.plan_digest,
       phase: "expected",
       facts: sortedCompactionFacts([
@@ -351,7 +336,7 @@ export class ConversationCompactionAuthority {
       ]),
     });
     const observed = materializeConversationActionBinding({
-      action_type: "context.compact",
+      action_type: HOST_ACTION_KIND.CONTEXT_COMPACT,
       plan_digest: snapshot.proposal.plan_digest,
       phase: "observed",
       facts: sortedCompactionFacts([
@@ -371,7 +356,7 @@ export class ConversationCompactionAuthority {
       operation_id: dispatch.operation_id,
       proposal_id: proposalId,
       approval_id: snapshot.approval.approval_id,
-      action_type: "context.compact",
+      action_type: HOST_ACTION_KIND.CONTEXT_COMPACT,
       plan_digest: snapshot.proposal.plan_digest,
       expected_authority_binding_digest: expected.binding_digest,
       observed_authority_binding_digest: observed.binding_digest,

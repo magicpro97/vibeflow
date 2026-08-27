@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { join, relative, sep } from "node:path";
+import { CAPABILITY_SCOPE } from "../../core/capability-contract.js";
 import {
   canonicalJsonBytes,
   createOrVerifyPrivateFile,
@@ -77,7 +78,7 @@ function writeNewIdentity(
   const draft = {
     schema_version: "1.0" as const,
     scope: paths.scope,
-    identity_id: `${paths.scope === "project" ? "vf-project" : "vf-user-authority"}-${entropy.toString("hex")}`,
+    identity_id: `${paths.scope === CAPABILITY_SCOPE.PROJECT ? "vf-project" : "vf-user-authority"}-${entropy.toString("hex")}`,
     created_at: (options.now ?? (() => new Date().toISOString()))(),
     content_digest: "",
   };
@@ -90,7 +91,7 @@ function writeNewIdentity(
     scope_identity_digest: identity.content_digest,
   });
   const bytes = canonicalJsonBytes(identity);
-  if (paths.scope === "project") {
+  if (paths.scope === CAPABILITY_SCOPE.PROJECT) {
     const held = bindProjectIdentityPortableCas(authorityLock, paths, identity.content_digest);
     compareAndSwapPortableBytes(paths.identity, null, bytes, held);
   } else createOrVerifyPrivateFile(paths.identity, bytes, { lock: authorityLock.processLock });
@@ -240,7 +241,7 @@ function activate(
       };
     }
 
-    const cloneLockAllowed = paths.scope === "project" && !createdIdentity;
+    const cloneLockAllowed = paths.scope === CAPABILITY_SCOPE.PROJECT && !createdIdentity;
     if (dependencies.length > 0 || (currentLockBefore && !cloneLockAllowed))
       quarantineActivation(paths, processLock, "partial-activation-with-dependent-state", [
         rawCheckpoint,

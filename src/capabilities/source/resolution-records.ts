@@ -1,4 +1,15 @@
+import {
+  CAPABILITY_MANIFEST_PLATFORM_ARCHES,
+  CAPABILITY_MANIFEST_PLATFORM_LIBCS,
+  CAPABILITY_MANIFEST_PLATFORM_OS,
+  CAPABILITY_MANIFEST_PLATFORM_OSES,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
+import {
+  CAPABILITY_REGISTRY_ENVELOPE_STATUS,
+  CAPABILITY_SOURCE_KIND,
+} from "../../actions/capability-security-contract.js";
 import type { EngineName } from "../../actions/types.js";
+import { ENGINES } from "../../core/agent-contract.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
 import type {
   CapabilityConflictV1,
@@ -50,8 +61,6 @@ export interface ResolutionCandidateV1 {
 
 const COMPATIBILITY_RECORDS = new WeakSet<object>();
 const RESOLUTION_CANDIDATES = new WeakSet<object>();
-const ENGINES = ["claude", "codex", "copilot", "opencode", "antigravity"] as const;
-
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
@@ -62,10 +71,10 @@ function deepFreeze<T>(value: T): T {
 
 function validatePlatform(platform: PlatformConstraintV1): void {
   exactKeys(platform, ["os", "arch", "libc"], [], "compatibility.platform");
-  enumeration(platform.os, ["darwin", "linux", "win32"] as const, "compatibility.platform.os");
-  enumeration(platform.arch, ["arm64", "x64"] as const, "compatibility.platform.arch");
-  if (platform.os === "linux") {
-    if (platform.libc !== null && platform.libc !== "glibc" && platform.libc !== "musl")
+  enumeration(platform.os, CAPABILITY_MANIFEST_PLATFORM_OSES, "compatibility.platform.os");
+  enumeration(platform.arch, CAPABILITY_MANIFEST_PLATFORM_ARCHES, "compatibility.platform.arch");
+  if (platform.os === CAPABILITY_MANIFEST_PLATFORM_OS.LINUX) {
+    if (platform.libc !== null && !CAPABILITY_MANIFEST_PLATFORM_LIBCS.includes(platform.libc))
       throw new CapabilityValidationError("unsupported Linux libc", "compatibility.platform.libc");
   } else if (platform.libc !== null)
     throw new CapabilityValidationError(
@@ -138,9 +147,12 @@ export function createResolutionCompatibilityRecord(
 }
 
 function sourceIdentity(pin: PackagePinV1): string {
-  if (pin.source.kind === "registry") return `registry:${pin.source.registry_origin}`;
-  if (pin.source.kind === "git") return `git:${pin.source.canonical_url}`;
-  if (pin.source.kind === "local-dev") return `local-dev:${pin.source.repo_relative_alias}`;
+  if (pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY)
+    return `${CAPABILITY_SOURCE_KIND.REGISTRY}:${pin.source.registry_origin}`;
+  if (pin.source.kind === CAPABILITY_SOURCE_KIND.GIT)
+    return `${CAPABILITY_SOURCE_KIND.GIT}:${pin.source.canonical_url}`;
+  if (pin.source.kind === CAPABILITY_SOURCE_KIND.LOCAL_DEV)
+    return `${CAPABILITY_SOURCE_KIND.LOCAL_DEV}:${pin.source.repo_relative_alias}`;
   return `legacy:${pin.source.legacy_source}:${pin.source.inspection_evidence_digest}`;
 }
 
@@ -151,10 +163,13 @@ export function createResolutionCandidate(input: {
   compatibility: ValidatedResolutionCompatibilityV1;
 }): ResolutionCandidateV1 {
   const pin = validateImmutablePackagePin(input.pin);
-  if (pin.source.kind === "registry") {
+  if (pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY) {
     const verification = assertVerifiedRegistryPackagePin(pin);
     const authority = assertSignatureVerifiedRegistryEnvelope(verification);
-    if (authority.mode !== "resolution" || verification.status !== "verified")
+    if (
+      authority.mode !== "resolution" ||
+      verification.status !== CAPABILITY_REGISTRY_ENVELOPE_STATUS.VERIFIED
+    )
       throw new CapabilityValidationError(
         "registry resolution candidate lacks current resolution authority",
         "resolution_candidate.pin",

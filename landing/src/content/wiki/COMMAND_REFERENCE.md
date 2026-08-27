@@ -2,7 +2,7 @@
 title: Command Reference
 description: Complete reference of all shipped `vf` CLI commands and their flags, including conversations, orchestration, skills, hooks, and verification.
 category: reference
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 ---
 
 # Command Reference
@@ -31,12 +31,22 @@ The shipped `vf` surface. See `USER_GUIDE.md` for a verifiable walkthrough.
 ## Start the UI
 
 ```bash
-npx @magicpro97/vibeflow      # or, after global install: vf / vf ui
+npx @magicpro97/vibeflow      # AI-first Home on 127.0.0.1:7799
+vf ui                         # same stable default
+vf ui --port 0                # explicitly request an OS-selected free port
 ```
 
 Starts a local server bound to `127.0.0.1`, opens the browser, and serves AI-first Home:
 the searchable session rail, central conversation pane, details inspector, and
-trace/capabilities drawers. Flags: `--port <n>`, `--no-open`.
+trace/capabilities drawers. `vf` and `vf ui` both default to `7799`; `--port 0` is the
+ephemeral option. A busy fixed port offers an interactive free-port fallback and stops in
+non-interactive use. Flags: `--port <n>`, `--host <addr>`, `--no-open`.
+
+Any non-loopback `--host` enables the LAN boundary. The owner browser exchanges a single-use
+bootstrap URL for an `HttpOnly` LAN page-session cookie; unauthenticated root loads return
+`401`, and replaying the bootstrap fails. With `--no-open`, the CLI prints that owner-only URL
+once instead of persisting it. The authorized page receives a separate CSRF token for legacy
+API headers/non-conversation SSE; neither page authority authenticates Conversation Home.
 
 ## Check the environment
 
@@ -67,9 +77,9 @@ inspection. It never steals a lock or kills a process from PID alone.
 ## Initialize a workflow
 
 ```bash
-vf init                  # scan repo + generate canonical context for all engines
+vf init                  # TTY: ask intake questions, then generate context
 vf init --engine claude  # only one engine's files
-vf init --interactive    # terminal intake questionnaire (TTY only)
+vf init --no-ask         # skip the TTY questionnaire
 vf init --memory         # force the claude-mem install (skip the prompt)
 vf init --no-memory      # skip the claude-mem install (skip the prompt)
 vf init --dry-run        # print what would be written
@@ -107,8 +117,9 @@ Owned launches release their terminal record only after process exit/quiescence 
 | Linux | `posix-process-group` | `cooperative-lineage` | Isolated process group plus boot id and `/proc` start ticks; a descendant can escape the group. |
 | macOS | `posix-process-group` | `cooperative-lineage` | Isolated process group plus exact `libproc` seconds/microseconds identity; a descendant can escape the group. |
 
-The Windows contract is covered by injected platform regression tests in this tree. This
-documentation does not claim a live Windows canary for the current evidence set.
+The Windows contract is covered by injected platform regression tests. A real
+`windows-latest` smoke job is configured in CI, but live Windows evidence remains pending
+until that job is green; a local macOS/Linux run is not a Windows canary.
 
 ## Conversations
 
@@ -124,28 +135,36 @@ preserved for an explicit send-as-new action. Add an agent with **Agent** or the
 **Remove**, the participant-details `−` action, or the prepared `-@participant` command.
 Quote chips are ordered, can move earlier or later, and reactions are
 restricted to 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, and ❗.
+An admission failure that was not acknowledged remains an explicit retryable queue row.
+Retry is user-triggered and reuses the exact request plus idempotency key; it does not clear
+or replace a newer composer draft. The rejected row is current Home UI state, not
+browser-storage persistence.
 
 ### Engine capability matrix
 
 The runtime names in this tree are Claude, Codex, Copilot, OpenCode, and Antigravity. The
 matrix below reflects the exact conversation/runtime behavior enforced by the current adapters.
 
-| Engine | Fresh execution | Tool/sandbox enforcement | Exact native resume | History reconciliation | Phase/admission |
-|--------|-----------------|--------------------------|---------------------|------------------------|-----------------|
-| Claude | yes | full | yes (`-p -r <session_id>`) | supported | Phase 1 built-in read-only yes; phase 2+ yes |
-| Codex | yes | partial: sandbox yes, rendered tools denied | yes (`exec resume <thread_id>`) | supported | Phase 1 built-in read-only yes; phase 2+ yes |
-| Copilot | yes | full | unavailable; no native resume path | unavailable | Phase 1 no; phase 2+ yes when ready/admitted |
-| OpenCode | yes | no: conversation launches reject requested tools or sandbox | no exact-id resume; most-recent `--continue` only | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
-| Antigravity | yes | no: conversation launches reject requested tools or sandbox | yes (`--conversation <conversation_id>`) | unavailable | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Engine | Fresh execution | Tool/sandbox enforcement | Exact native resume | Own-history policy | Phase/admission |
+|--------|-----------------|--------------------------|---------------------|--------------------|-----------------|
+| Claude | yes | full | yes (`-p -r <session_id>`) | native history when exact; bounded public replay otherwise | Phase 1 built-in read-only yes; phase 2+ yes |
+| Codex | yes | partial: sandbox yes, rendered tools denied | yes (`exec resume <thread_id>`) | native history when exact; bounded public replay otherwise | Phase 1 built-in read-only yes; phase 2+ yes |
+| Copilot | yes | full | unavailable; no proved by-id path | bounded public replay | Phase 1 no; phase 2+ yes when ready/admitted |
+| OpenCode | yes | no: conversation launches reject requested tools or sandbox | yes (`run --session <validated ses_...> --format json`) | native history when exact; bounded public replay otherwise | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Antigravity | yes | no: conversation launches reject requested tools or sandbox | unavailable; no evidenced exact binding | bounded public replay | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 
 Exact native resume is the by-id conversation/session path. `VF-TURN/1` delivers turns with
 `delivery_mode: "exact-delta"` when the runtime can prove the prior public cursor and the
 interaction cursor; in that case it sends only newly applicable public user messages plus concise
 peer responses and reactions. It does not re-send the recipient's own earlier response because
 that response remains in the CLI's native session history. When proof is unavailable or stale,
-the runtime falls back to `delivery_mode: "full-history"` and re-sends the applicable canonical
-public context. A fresh/full turn may also carry the content-addressed `VF-HANDOFF/1` shared
-handoff. Phase 1 admits only built-in read-only Claude/Codex bindings; phase 2+ requires a
+the runtime uses `delivery_mode: "full-history"`, re-sends applicable canonical user/peer
+context, and includes up to eight of the recipient's own public responses. Each own-history
+summary is capped at 2 KiB UTF-8 and carries source digest, provenance, and count/truncation
+metadata. A fresh/full turn may also carry the content-addressed `VF-HANDOFF/1` shared
+handoff. Exact by-id authority exists only for Claude, Codex, and OpenCode; Copilot and
+Antigravity fail closed from exact mode instead of silently starting fresh. Phase 1 admits
+only built-in read-only Claude/Codex bindings; phase 2+ requires a
 verified engine and live canonical
 isolation for repo overlays.
 
@@ -279,8 +298,8 @@ Normal JSON and artifact requests require the process-local, `HttpOnly`, `SameSi
 CSRF token. The SSE endpoint accepts only its 256-bit, single-conversation stream token; it
 does not accept the session cookie as an SSE credential. Tokens expire after 15 minutes and
 are renewed through the session-authenticated endpoint. The conversation workspace is
-intentionally unavailable on `--host 0.0.0.0`: LAN page loads receive no conversation session
-cookie, so conversation routes fail closed with `401`.
+intentionally unavailable on every non-loopback bind: LAN page loads receive no conversation
+session cookie, so conversation routes fail closed with `401` even after LAN page bootstrap.
 
 Resume SSE with either `Last-Event-ID: N` or `?since=N`. If both are supplied they must
 match. The server replays records with `seq > N` in ascending order, emits a snapshot at the
@@ -538,7 +557,8 @@ user-owned git hooks are preserved and must be integrated manually.
 
 ### require_approval in web UI context
 When `VF_HOOK_MODE=default` and `.vibeflow/.ui-port` exists, `require_approval`
-pauses the engine until the user resolves the inline Home approval action.
+pauses the engine until the user resolves the inline Home approval action. On a LAN bind, the
+discovery record points hook CLI traffic to a separate loopback-only listener and stores no bearer.
 
 ### VF_HOOK_MODE env var
 Set automatically by vf orchestrate based on flags:

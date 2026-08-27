@@ -1,7 +1,18 @@
 import type { ActionAuthorityResolverV1 } from "./authority-proofs.js";
 import { assertDomainTerminalProof } from "./authority-proofs.js";
 import { actionIdempotencyKeyDigest, actionIdempotencyScopeDigest } from "./idempotency.js";
+import { ACTION_IDEMPOTENCY_BINDING_STATE } from "./persistence-contract.js";
 import type { ActionFilePersistence, ActionIdempotencyBindingV1 } from "./persistence.js";
+import {
+  ACTION_AUTHORITY_EVENT_KIND,
+  ACTION_PRODUCER_REQUEST_BINDING_KIND,
+  isActionOperationDomainTerminalState,
+} from "./protocol-contract.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_CLASSES,
+  ACTION_DECISION,
+  ACTOR_KIND,
+} from "./public-action-contract.js";
 import { materializeDispatchRecord } from "./records.js";
 import { foldActionAuthority } from "./state.js";
 import {
@@ -49,7 +60,10 @@ function assertVisibleIdempotency(
   files: ActionFilePersistence,
   snapshot: ActionAuthoritySnapshotV1,
 ): ActionIdempotencyBindingV1 {
-  if (snapshot.proposal.producer_request_binding.kind !== "canonical-action-request")
+  if (
+    snapshot.proposal.producer_request_binding.kind !==
+    ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST
+  )
     throw new Error("ordinary action authority has no canonical request binding");
   const chains = files.idempotencyChainsForProposal(snapshot.proposal.proposal_id);
   if (chains.length !== 1) throw new Error("action authority has no unique idempotency closure");
@@ -58,8 +72,8 @@ function assertVisibleIdempotency(
   const visible = chain?.[1];
   if (
     chain?.length !== 2 ||
-    prepared?.state !== "prepared" ||
-    visible?.state !== "visible" ||
+    prepared?.state !== ACTION_IDEMPOTENCY_BINDING_STATE.PREPARED ||
+    visible?.state !== ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE ||
     visible.proposal_digest !== snapshot.proposal.proposal_digest ||
     visible.canonical_request_digest !== snapshot.proposal.producer_request_binding.digest ||
     visible.idempotency_key_digest !==
@@ -80,9 +94,9 @@ function assertConsumedChallenge(
 ): void {
   const approval = snapshot.approval;
   if (!approval) return;
-  const challenged =
-    approval.challenge_class === "fresh-user-scope" ||
-    approval.challenge_class === "public-literal";
+  const challenged = ACTION_APPROVAL_CHALLENGE_CLASSES.some(
+    (challengeClass) => challengeClass === approval.challenge_class,
+  );
   if (!challenged) {
     if (approval.challenge_digest !== null)
       throw new Error("unchallenged approval carries a challenge digest");
@@ -104,8 +118,8 @@ export function assertConsumedChallengeMatchesVisible(
   const approval = snapshot.approval;
   const reviewerOwnsChallenge =
     frame.principal_digest === visible.principal_digest ||
-    (snapshot.proposal.requested_by.kind === "agent" &&
-      approval?.decided_by.kind === "human-browser" &&
+    (snapshot.proposal.requested_by.kind === ACTOR_KIND.AGENT &&
+      approval?.decided_by.kind === ACTOR_KIND.HUMAN_BROWSER &&
       isBoundHumanBrowserController({
         principal_digest: frame.principal_digest,
         control_session_digest: frame.control_session_digest,
@@ -131,7 +145,7 @@ function assertDispatchAndTerminal(
   validateTerminal = true,
 ): void {
   const approval = snapshot.approval;
-  if (!approval || approval.decision !== "approved") return;
+  if (!approval || approval.decision !== ACTION_DECISION.APPROVED) return;
   const operationId = snapshot.operation_id;
   if (!operationId) return;
   const dispatch = files.readDispatch(operationId);
@@ -149,15 +163,17 @@ function assertDispatchAndTerminal(
   assertDispatchHeaderRule(snapshot.proposal, dispatch.domain_header_digest);
   if (!snapshot.domain_terminal_digest) return;
   const terminalEvent = snapshot.events.at(-1);
-  if (!terminalEvent || terminalEvent.payload.kind !== "state-transition")
+  if (!terminalEvent || terminalEvent.payload.kind !== ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION)
     throw new Error("action terminal event is missing");
   if (!validateTerminal) return;
   if (!resolver) throw new Error("domain terminal authority resolver is required for read");
+  if (!isActionOperationDomainTerminalState(snapshot.state))
+    throw new Error("domain terminal digest has a nonterminal action state");
   const proof = resolver.validateRecordedTerminal({
     proposal: snapshot.proposal,
     approval,
     dispatch,
-    outcome: snapshot.state as "succeeded" | "failed" | "needs_recovery",
+    outcome: snapshot.state,
     domain_terminal_digest: snapshot.domain_terminal_digest,
     recorded_at: terminalEvent.recorded_at,
   });

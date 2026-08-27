@@ -1,9 +1,11 @@
+import type { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
+import type { AuthorizableActionKind } from "../../actions/host-action-contract.js";
+import type { ACTION_EFFECT_CLASS } from "../../actions/public-action-contract.js";
 import type {
   ActionEffectClass,
   ActionPlanningOptionsV1,
   CapabilityScope,
   EngineName,
-  HostActionKind,
   PublicActor,
 } from "../../actions/types.js";
 import type {
@@ -13,6 +15,7 @@ import type {
 import type { PermissionBindingV1 } from "../permissions/types.js";
 import type { CapabilityExecutionPrivateInputRecordV1 } from "../private-input/types.js";
 import type { PackageAuthenticityBindingV1 } from "../source/types.js";
+import type { CapabilityExecutionLedgerMode } from "./execution-ledger-contract.js";
 import type { CapabilityAdapterPlanV1, CapabilityProjectionSnapshotV1 } from "./types.js";
 
 export type CapabilityExecutionObjectSchemaIdV1 =
@@ -127,7 +130,7 @@ export interface CapabilitySourceAccessRequestContextV1 {
   interactivity: "foreground-control" | "background" | "non-interactive";
   requested_by: PublicActor;
   principal_digest: string;
-  authorization_action_type: HostActionKind | "capability.discover" | null;
+  authorization_action_type: AuthorizableActionKind | null;
 }
 
 export interface CapabilitySourceAccessDescriptorV1 {
@@ -137,16 +140,24 @@ export interface CapabilitySourceAccessDescriptorV1 {
   authorization_mode: "automatic" | "interactive-control";
   target_engines: EngineName[];
   source:
-    | { kind: "registry"; registry_origin: string; package_url: string }
-    | { kind: "git"; canonical_url: string; commit_oid: string }
-    | { kind: "local-dev"; repo_relative_alias: string }
     | {
-        kind: "legacy-adopt";
+        kind: typeof CAPABILITY_SOURCE_KIND.REGISTRY;
+        registry_origin: string;
+        package_url: string;
+      }
+    | { kind: typeof CAPABILITY_SOURCE_KIND.GIT; canonical_url: string; commit_oid: string }
+    | { kind: typeof CAPABILITY_SOURCE_KIND.LOCAL_DEV; repo_relative_alias: string }
+    | {
+        kind: typeof CAPABILITY_SOURCE_KIND.LEGACY_ADOPT;
         phase: "inspect";
         legacy_source: import("../../actions/legacy-adopt-types.js").LegacySourceV1;
         engine: EngineName | null;
       }
-    | { kind: "legacy-adopt"; phase: "candidate"; candidate_digest: string };
+    | {
+        kind: typeof CAPABILITY_SOURCE_KIND.LEGACY_ADOPT;
+        phase: "candidate";
+        candidate_digest: string;
+      };
   credential: {
     schema_version: "1.0";
     scope: CapabilityScope;
@@ -171,11 +182,14 @@ export interface CapabilitySourceAccessAuthorityBindingV1 {
   effect_classes: Array<
     Extract<
       ActionEffectClass,
-      "pure-local-read" | "local-read-with-cache" | "network-read" | "process-probe"
+      | typeof ACTION_EFFECT_CLASS.PURE_LOCAL_READ
+      | typeof ACTION_EFFECT_CLASS.LOCAL_READ_WITH_CACHE
+      | typeof ACTION_EFFECT_CLASS.NETWORK_READ
+      | typeof ACTION_EFFECT_CLASS.PROCESS_PROBE
     >
   >;
   authorization:
-    | { kind: "confirmation-free"; reason: "pure-local-read" }
+    | { kind: "confirmation-free"; reason: typeof ACTION_EFFECT_CLASS.PURE_LOCAL_READ }
     | {
         kind: "grant";
         grant_id: string;
@@ -255,7 +269,7 @@ export interface CapabilityPlanningPrivateInputV1 {
 
 export interface CapabilityPlanningLedgerV1 {
   schema_version: "1.0";
-  mode: "transient-preview" | "durable-proposal";
+  mode: CapabilityExecutionLedgerMode;
   json_objects: CapabilityPlanningJsonObjectV1[];
   private_input_bindings: CapabilityPlanningPrivateInputV1[];
   raw_blobs: CapabilityPlanningRawBlobV1[];

@@ -2,17 +2,21 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   acquireProcessLock,
-  canonicalJsonBytes,
   createOrVerifyPrivateFile,
   digestHex,
-  digestV1,
   ensurePrivateDirectory,
   privateFileBytes,
 } from "../../durability/index.js";
 import type { TraceStore } from "../trace/store.js";
 import {
+  CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
   CONVERSATION_MESSAGE_QUEUE_LIMITS,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+  type ConversationMessageQueueRecoveryFaultV1,
+  type ConversationMessageQueueRecoveryReportV1,
+  type ConversationMessageQueueTargetParticipantsV1,
+  isConversationMessageQueueRootMarkerFileName,
 } from "./conversation-message-queue-contract.js";
 import type { ConversationMessageQueueMutationResultV1 } from "./conversation-message-queue-mutations.js";
 import type {
@@ -25,6 +29,10 @@ import type {
   PublicQueuedUserMessageV1,
 } from "./conversation-message-queue-records.js";
 import { queueIdempotencyKeyDigest } from "./conversation-message-queue-records.js";
+import {
+  conversationMessageQueueRootFromMarkerBytes,
+  materializeConversationMessageQueueRootMarker,
+} from "./conversation-message-queue-root-marker.js";
 import { ConversationMessageQueueStoreV1 } from "./conversation-message-queue-store.js";
 import { ConversationMessageQueueTraceAuthorityV1 } from "./conversation-message-queue-trace-authority.js";
 import type { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
@@ -33,12 +41,6 @@ import type { ConversationUserMessageAuthorityV1 } from "./conversation-user-mes
 import { lineageStorageKey } from "./lineage-storage-key.js";
 import type { MessageRequest } from "./types.js";
 export type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-trace-authority.js";
-
-interface QueueRootMarkerV1 {
-  schema_version: typeof CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION;
-  root_session_id: string;
-  marker_digest: string;
-}
 
 type QueueListener = (event: PublicConversationMessageQueueInvalidationV1) => void;
 
@@ -49,6 +51,7 @@ export class ConversationMessageQueueRuntimeV1 {
   private readonly registryRoot: string;
   private readonly registryLock: string;
   private kickDispatcher: ((rootSessionId: string) => void) | null = null;
+  private latestRecovery: ConversationMessageQueueRecoveryReportV1 | null = null;
 
   constructor(
     private readonly input: {
@@ -216,7 +219,8 @@ export class ConversationMessageQueueRuntimeV1 {
         idempotency_key: idempotencyKey,
         expected_authority_digest: resolved.authority.authority_digest,
         content: request.content,
-        target_participants: request.target_participants ?? "all",
+        target_participants:
+          request.target_participants ?? CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
         quote_refs: structuredClone(request.quote_refs ?? []),
         private_context_present: false,
       },
@@ -238,8 +242,22 @@ export class ConversationMessageQueueRuntimeV1 {
     this.kickDispatcher?.(rootSessionId);
   }
 
-  recover(): void {
-    for (const root of this.registeredRoots()) this.kick(root);
+  recover(): ConversationMessageQueueRecoveryReportV1 {
+    const registered = this.registeredRoots();
+    for (const root of registered.root_session_ids) this.kick(root);
+    const report: ConversationMessageQueueRecoveryReportV1 = {
+      schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+      recovered_root_count: registered.root_session_ids.length,
+      observed_fault_count: registered.observed_fault_count,
+      faults_truncated: registered.observed_fault_count > registered.faults.length,
+      faults: registered.faults,
+    };
+    this.latestRecovery = structuredClone(report);
+    return report;
+  }
+
+  latestRecoveryReport(): ConversationMessageQueueRecoveryReportV1 | null {
+    return this.latestRecovery ? structuredClone(this.latestRecovery) : null;
   }
 
   storeAuthority(rootSessionId: string): ConversationMessageQueueStoreV1 {
@@ -264,10 +282,10 @@ export class ConversationMessageQueueRuntimeV1 {
 
   private resolveTargets(
     bindings: readonly { participant_id: string }[],
-    targets: "all" | string[],
+    targets: ConversationMessageQueueTargetParticipantsV1,
   ): string[] {
     const current = bindings.map(({ participant_id }) => participant_id);
-    if (targets === "all") return current;
+    if (targets === CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL) return current;
     if (!targets.length || targets.some((target) => !current.includes(target)))
       throw new Error("unknown target participant");
     return [...targets];
@@ -315,49 +333,57 @@ export class ConversationMessageQueueRuntimeV1 {
   }
 
   private registerRoot(rootSessionId: string): void {
-    const markerBase = {
-      schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
-      root_session_id: rootSessionId,
-    };
-    const marker: QueueRootMarkerV1 = {
-      ...markerBase,
-      marker_digest: digestV1("VF-CONVERSATION-MESSAGE-QUEUE-ROOT\0v1\0", markerBase),
-    };
+    const marker = materializeConversationMessageQueueRootMarker(rootSessionId);
     const lock = acquireProcessLock(this.registryLock, {
       operation: "message-queue-register-root",
     });
     try {
-      createOrVerifyPrivateFile(
-        join(this.registryRoot, `${digestHex(lineageStorageKey(rootSessionId))}.json`),
-        canonicalJsonBytes(marker),
-        { lock, maxBytes: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxRootMarkerBytes },
-      );
+      createOrVerifyPrivateFile(join(this.registryRoot, marker.file_name), marker.bytes, {
+        lock,
+        maxBytes: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxRootMarkerBytes,
+      });
     } finally {
       lock.release();
     }
   }
 
-  private registeredRoots(): string[] {
-    return readdirSync(this.registryRoot)
-      .filter((name) => /^[0-9a-f]{64}\.json$/.test(name))
-      .map((name) => {
+  private registeredRoots(): {
+    root_session_ids: string[];
+    faults: ConversationMessageQueueRecoveryFaultV1[];
+    observed_fault_count: number;
+  } {
+    const rootSessionIds: string[] = [];
+    const faults: ConversationMessageQueueRecoveryFaultV1[] = [];
+    let observedFaultCount = 0;
+    const names = readdirSync(this.registryRoot)
+      .filter(isConversationMessageQueueRootMarkerFileName)
+      .sort();
+    for (const name of names) {
+      let rootSessionId: string | null = null;
+      try {
         const bytes = privateFileBytes(
           join(this.registryRoot, name),
           CONVERSATION_MESSAGE_QUEUE_LIMITS.maxRootMarkerBytes,
         );
-        if (!bytes) throw new Error("message queue root marker disappeared");
-        const marker = JSON.parse(
-          new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-        ) as QueueRootMarkerV1;
-        const { marker_digest: _digest, ...base } = marker;
-        if (
-          !canonicalJsonBytes(marker).equals(bytes) ||
-          marker.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
-          digestV1("VF-CONVERSATION-MESSAGE-QUEUE-ROOT\0v1\0", base) !== marker.marker_digest ||
-          `${digestHex(lineageStorageKey(marker.root_session_id))}.json` !== name
-        )
-          throw new Error("message queue root marker is corrupt");
-        return marker.root_session_id;
-      });
+        if (bytes) rootSessionId = conversationMessageQueueRootFromMarkerBytes(name, bytes);
+      } catch {
+        // The bounded typed projection below is the only public recovery fault surface.
+      }
+      if (rootSessionId !== null) {
+        rootSessionIds.push(rootSessionId);
+        continue;
+      }
+      observedFaultCount += 1;
+      if (faults.length < CONVERSATION_MESSAGE_QUEUE_LIMITS.maxRecoveryFaults)
+        faults.push({
+          marker_name: name,
+          error_code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_AUTHORITY_CORRUPT,
+        });
+    }
+    return {
+      root_session_ids: rootSessionIds,
+      faults,
+      observed_fault_count: observedFaultCount,
+    };
   }
 }

@@ -1,4 +1,8 @@
 import { existsSync } from "node:fs";
+import {
+  ACTION_OPERATION_STATE,
+  type ActionOperationDomainTerminalState,
+} from "../../actions/protocol-contract.js";
 import type { CapabilityEffectDescriptorV1 } from "../adapters/types.js";
 import type {
   CapabilityAdapterPlanV1,
@@ -15,13 +19,22 @@ import {
 import { capabilityOperationPaths } from "../storage/paths.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
-import type {
-  AdapterReceiptV1,
-  CapabilityOperationV1,
-  CapabilityWalEventV1,
-  CapabilityWalPayloadV1,
+import {
+  type AdapterReceiptV1,
+  CAPABILITY_ADAPTER_RECEIPT_ACTIVE_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_ADAPTER_RECEIPT_UNOBSERVED_STATES,
+  CAPABILITY_OPERATION_RECOVERY_PHASE,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityAdapterReceiptActiveStateV1,
+  type CapabilityAdapterReceiptEvidenceStateV1,
+  type CapabilityOperationRecoveryPhaseV1,
+  type CapabilityOperationV1,
+  type CapabilityWalEventV1,
+  type CapabilityWalPayloadV1,
+  isCapabilityAdapterReceiptStateIn,
 } from "../wire/operation.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import { capabilityOperationPlanClosure } from "./operation-closure.js";
 import {
   type CapabilityRefusalAppendInputV1,
@@ -106,21 +119,26 @@ export class CapabilityOperationJournalV1 {
     const adapterPlan = plan.adapter_plans.find((item) => item.plan_id === planId);
     const step = adapterPlan?.steps.find((item) => item.step_id === stepId);
     if (!adapterPlan || !step)
-      throw new CapabilityRuntimeError("receipt references unknown plan step", "integrity-failure");
+      throw new CapabilityRuntimeError(
+        "receipt references unknown plan step",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+      );
     this.append(
       operationId,
       {
-        kind: "adapter-step",
+        kind: CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP,
         receipt: createReceipt({
           operation_id: operationId,
           plan: adapterPlan,
           step,
           state,
           prepared_at: plan.created_at,
-          observed_at:
-            state === "prepared" || state === "effect_in_progress"
-              ? null
-              : (input.observedAt ?? this.options.now()),
+          observed_at: isCapabilityAdapterReceiptStateIn(
+            CAPABILITY_ADAPTER_RECEIPT_UNOBSERVED_STATES,
+            state,
+          )
+            ? null
+            : (input.observedAt ?? this.options.now()),
           evidence_digest: evidence,
           error_code: error,
         }),
@@ -135,7 +153,7 @@ export class CapabilityOperationJournalV1 {
     planId: string;
     stepId: string;
     descriptor: CapabilityEffectDescriptorV1;
-    state: "applied" | "failed" | "uncertain" | "reversed";
+    state: CapabilityAdapterReceiptEvidenceStateV1;
     error: string | null;
     observedAt: string;
     held: CapabilityScopeLockV1;
@@ -145,7 +163,7 @@ export class CapabilityOperationJournalV1 {
     if (!adapterPlan || !step)
       throw new CapabilityRuntimeError(
         "receipt evidence references unknown plan step",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     const evidence = receiptEvidenceRecord({
       fabricPlan: input.plan,
@@ -172,18 +190,30 @@ export class CapabilityOperationJournalV1 {
 
   terminal(
     operationId: string,
-    state: "succeeded" | "failed" | "needs_recovery",
+    state: ActionOperationDomainTerminalState,
     reason: string | null,
     held: CapabilityScopeLockV1,
   ): void {
     const current = foldCapabilityWal(
       readCapabilityWal(this.options.storage.paths, operationId),
     ).state;
-    if (current === "needs_recovery" && state === "needs_recovery") return;
-    const from = current === "needs_recovery" ? "needs_recovery" : "committing";
+    if (
+      current === ACTION_OPERATION_STATE.NEEDS_RECOVERY &&
+      state === ACTION_OPERATION_STATE.NEEDS_RECOVERY
+    )
+      return;
+    const from =
+      current === ACTION_OPERATION_STATE.NEEDS_RECOVERY
+        ? ACTION_OPERATION_STATE.NEEDS_RECOVERY
+        : ACTION_OPERATION_STATE.COMMITTING;
     this.append(
       operationId,
-      { kind: "operation-transition", from, to: state, reason_code: reason },
+      {
+        kind: CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION,
+        from,
+        to: state,
+        reason_code: reason,
+      },
       held,
     );
   }
@@ -208,7 +238,7 @@ export class CapabilityOperationJournalV1 {
     if (!descriptor)
       throw new CapabilityRuntimeError(
         "operation descriptor closure is missing",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     return descriptor;
   }
@@ -218,11 +248,15 @@ export class CapabilityOperationJournalV1 {
       readCapabilityWal(this.options.storage.paths, operationId)
         .filter(
           (event) =>
-            event.payload.kind === "adapter-step" &&
+            event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP &&
             event.payload.receipt.plan_id === planId &&
             event.payload.receipt.step_id === stepId,
         )
-        .map((event) => (event.payload.kind === "adapter-step" ? event.payload.receipt : null))
+        .map((event) =>
+          event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP
+            ? event.payload.receipt
+            : null,
+        )
         .filter((receipt): receipt is AdapterReceiptV1 => receipt !== null)
         .at(-1) ?? null
     );
@@ -230,8 +264,8 @@ export class CapabilityOperationJournalV1 {
 
   unresolvedReceipt(operationId: string):
     | (AdapterReceiptV1 & {
-        state: "prepared" | "effect_in_progress" | "reverse_in_progress" | "uncertain";
-        recovery_phase: "forward" | "rollback";
+        state: CapabilityAdapterReceiptActiveStateV1;
+        recovery_phase: CapabilityOperationRecoveryPhaseV1;
       })
     | null {
     const latest = new Map<
@@ -239,34 +273,28 @@ export class CapabilityOperationJournalV1 {
       { receipt: AdapterReceiptV1; predecessor: AdapterReceiptV1["state"] | null }
     >();
     for (const event of readCapabilityWal(this.options.storage.paths, operationId))
-      if (event.payload.kind === "adapter-step") {
+      if (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP) {
         const receipt = event.payload.receipt;
         const key = `${receipt.plan_id}\0${receipt.step_id}`;
         latest.set(key, { receipt, predecessor: latest.get(key)?.receipt.state ?? null });
       }
     const unresolved = [...latest.values()].find(({ receipt }) =>
-      ["prepared", "effect_in_progress", "reverse_in_progress", "uncertain"].includes(
-        receipt.state,
-      ),
+      isCapabilityAdapterReceiptStateIn(CAPABILITY_ADAPTER_RECEIPT_ACTIVE_STATES, receipt.state),
     );
     if (!unresolved) return null;
     const { receipt, predecessor } = unresolved;
     const state = receipt.state;
-    if (
-      state !== "prepared" &&
-      state !== "effect_in_progress" &&
-      state !== "reverse_in_progress" &&
-      state !== "uncertain"
-    )
+    if (!isCapabilityAdapterReceiptStateIn(CAPABILITY_ADAPTER_RECEIPT_ACTIVE_STATES, state))
       return null;
     return {
       ...receipt,
       state,
       recovery_phase:
-        state === "reverse_in_progress" ||
-        (state === "uncertain" && predecessor === "reverse_in_progress")
-          ? "rollback"
-          : "forward",
+        state === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSE_IN_PROGRESS ||
+        (state === CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN &&
+          predecessor === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSE_IN_PROGRESS)
+          ? CAPABILITY_OPERATION_RECOVERY_PHASE.ROLLBACK
+          : CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD,
     };
   }
 }

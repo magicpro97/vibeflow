@@ -1,4 +1,5 @@
 import type { EngineName } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { CapabilityMetadataV1 } from "../manifest/types.js";
 import type { ResolvedCapabilityPackageV1 } from "../planning/types.js";
 import type { PackagePinV1 } from "../source/types.js";
@@ -29,7 +30,7 @@ export interface CapabilityDiscoveryReaderV1 {
 
 export interface CapabilityQueryRequestV1 {
   view: "search" | "list" | "status" | "detail";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   query?: string;
   package_id?: string;
   engines?: EngineName[];
@@ -39,7 +40,7 @@ export interface CapabilityQueryRequestV1 {
 }
 
 export interface CapabilityDetailRequestV1 {
-  scope: "project" | "user";
+  scope: CapabilityScope;
   package_id: string;
   package_pin_digest?: string;
   version?: string;
@@ -58,7 +59,7 @@ export interface CapabilityPackageReaderV1 {
 }
 
 export interface CapabilityPrivateInputPresenceRequestV1 {
-  scope: "project" | "user";
+  scope: CapabilityScope;
   package_id: string;
   package_pin_digest: string;
   manifest_digest: string;

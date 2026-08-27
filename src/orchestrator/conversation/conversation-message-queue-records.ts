@@ -2,6 +2,7 @@ import { digestHex, digestV1 } from "../../durability/index.js";
 import type { PublicQuoteReferenceV1 } from "./conversation-interaction-types.js";
 import {
   type CONVERSATION_MESSAGE_QUEUE_EVENT_KIND,
+  type CONVERSATION_MESSAGE_QUEUE_FIELD,
   type CONVERSATION_MESSAGE_QUEUE_LIMITS,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   type CONVERSATION_MESSAGE_QUEUE_STATE,
@@ -9,13 +10,30 @@ import {
   type ConversationMessageQueueSchemaVersionV1,
   type ConversationMessageQueueStaleReasonV1,
   type ConversationMessageQueueStateV1,
+  type ConversationMessageQueueTargetParticipantsV1,
 } from "./conversation-message-queue-contract.js";
+import type {
+  EditQueuedUserMessageRequestV1,
+  EnqueueConversationUserMessageRequestV1,
+  PublicQueuedUserMessageV1,
+} from "./conversation-message-queue-wire.js";
+import type {
+  CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION,
+  ConversationPrivateContextSourceKindV1,
+} from "./conversation-private-context-broker-wire.js";
 
 export {
   CONVERSATION_MESSAGE_QUEUE_LIMITS,
   type ConversationMessageQueueStaleReasonV1,
   type ConversationMessageQueueStateV1,
 } from "./conversation-message-queue-contract.js";
+export type {
+  ConversationMessageQueueSnapshotV1,
+  EditQueuedUserMessageRequestV1,
+  EnqueueConversationUserMessageRequestV1,
+  PublicConversationMessageQueueInvalidationV1,
+  PublicQueuedUserMessageV1,
+} from "./conversation-message-queue-wire.js";
 
 export interface ConversationMessageQueueAuthorityV1 {
   schema_version: ConversationMessageQueueSchemaVersionV1;
@@ -27,60 +45,6 @@ export interface ConversationMessageQueueAuthorityV1 {
   participant_set_digest: string;
   active_operation_digest: string | null;
   authority_digest: string;
-}
-
-export interface EnqueueConversationUserMessageRequestV1 {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  idempotency_key: string;
-  expected_authority_digest: string;
-  content: string;
-  target_participants: "all" | string[];
-  quote_refs: PublicQuoteReferenceV1[];
-  private_context_present: boolean;
-}
-
-export interface EditQueuedUserMessageRequestV1 {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  idempotency_key: string;
-  expected_item_digest: string;
-  content: string;
-}
-
-export interface PublicQueuedUserMessageV1 {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  queue_item_id: string;
-  queue_sequence: number;
-  root_session_id: string;
-  author_public_id: "human";
-  content: string;
-  content_digest: string;
-  target_participants: "all" | string[];
-  quote_refs: PublicQuoteReferenceV1[];
-  private_context_present: boolean;
-  predecessor_queue_item_id: string | null;
-  admitted_authority_digest: string;
-  effective_authority_digest: string;
-  state: ConversationMessageQueueStateV1;
-  stale_reason: ConversationMessageQueueStaleReasonV1 | null;
-  admitted_at: string;
-  updated_at: string;
-  item_digest: string;
-}
-
-export interface ConversationMessageQueueSnapshotV1 {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  root_session_id: string;
-  current_authority_digest: string;
-  max_nonterminal_items: typeof CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems;
-  items: PublicQueuedUserMessageV1[];
-}
-
-export interface PublicConversationMessageQueueInvalidationV1 {
-  schema_version: ConversationMessageQueueSchemaVersionV1;
-  root_session_id: string;
-  queue_item_id: string;
-  state: ConversationMessageQueueStateV1;
-  item_digest: string;
 }
 
 export interface PrivateConversationMessageQueueClaimOwnerV1 {
@@ -116,7 +80,7 @@ export interface PrivateConversationMessageQueueContextBindingV1 {
   queue_sequence: number;
   owner_principal_digest: string;
   enqueue_idempotency_key_digest: string;
-  source_kind: "private-file-range";
+  source_kind: ConversationPrivateContextSourceKindV1;
   source_record_ref: string;
   source_record_digest: string;
   source_reservation_digest: string;
@@ -135,12 +99,12 @@ export type PrivateConversationMessageQueueContextDispositionV1 = {
 } & (
   | {
       queue_outcome: typeof CONVERSATION_MESSAGE_QUEUE_STATE.DELIVERED;
-      disposition: "consumed";
+      disposition: typeof CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION.CONSUMED;
       public_event_id: string;
     }
   | {
       queue_outcome: typeof CONVERSATION_MESSAGE_QUEUE_STATE.STALE;
-      disposition: "released";
+      disposition: typeof CONVERSATION_PRIVATE_CONTEXT_QUEUE_DISPOSITION.RELEASED;
       public_event_id: null;
     }
 );
@@ -236,12 +200,15 @@ export interface PrivateConversationMessageQueueIdempotencyBindingV1 {
 }
 
 export const queueAuthorityDigest = (
-  value: Omit<ConversationMessageQueueAuthorityV1, "authority_digest">,
+  value: Omit<
+    ConversationMessageQueueAuthorityV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.AUTHORITY_DIGEST
+  >,
 ): string => digestV1("VF-CONVERSATION-MESSAGE-QUEUE-AUTHORITY\0v1\0", value);
 
 export const queuedMessageContentDigest = (input: {
   content: string;
-  target_participants: "all" | string[];
+  target_participants: ConversationMessageQueueTargetParticipantsV1;
   quote_refs: PublicQuoteReferenceV1[];
   private_context_present: boolean;
 }): string =>
@@ -251,7 +218,7 @@ export const queuedMessageContentDigest = (input: {
   });
 
 export const queuedMessageItemDigest = (
-  value: Omit<PublicQueuedUserMessageV1, "item_digest">,
+  value: Omit<PublicQueuedUserMessageV1, typeof CONVERSATION_MESSAGE_QUEUE_FIELD.ITEM_DIGEST>,
 ): string => digestV1("VF-QUEUED-USER-MESSAGE\0v1\0", value);
 
 export const queueIdempotencyKeyDigest = (idempotencyKey: string): string =>
@@ -303,23 +270,38 @@ export function queuedMessagePublicEventId(item: PublicQueuedUserMessageV1): str
 }
 
 export const queueClaimOwnerDigest = (
-  value: Omit<PrivateConversationMessageQueueClaimOwnerV1, "owner_digest">,
+  value: Omit<
+    PrivateConversationMessageQueueClaimOwnerV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.OWNER_DIGEST
+  >,
 ): string => digestV1("VF-CONVERSATION-MESSAGE-QUEUE-CLAIM-OWNER\0v1\0", value);
 
 export const queuePrivateContextBindingDigest = (
-  value: Omit<PrivateConversationMessageQueueContextBindingV1, "private_context_binding_digest">,
+  value: Omit<
+    PrivateConversationMessageQueueContextBindingV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.PRIVATE_CONTEXT_BINDING_DIGEST
+  >,
 ): string => digestV1("VF-CONVERSATION-MESSAGE-QUEUE-PRIVATE-CONTEXT\0v1\0", value);
 
 export const queuePrivateContextDispositionDigest = (
-  value: Omit<PrivateConversationMessageQueueContextDispositionV1, "disposition_digest">,
+  value: Omit<
+    PrivateConversationMessageQueueContextDispositionV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.DISPOSITION_DIGEST
+  >,
 ): string => digestV1("VF-CONVERSATION-MESSAGE-QUEUE-PRIVATE-CONTEXT-DISPOSITION\0v1\0", value);
 
 export const queueDeliveryProofDigest = (
-  value: Omit<PrivateConversationMessageQueueDeliveryProofV1, "proof_digest">,
+  value: Omit<
+    PrivateConversationMessageQueueDeliveryProofV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.PROOF_DIGEST
+  >,
 ): string => digestV1("VF-CONVERSATION-MESSAGE-QUEUE-DELIVERY-PROOF\0v1\0", value);
 
 export const queueEventDigest = (
-  value: Omit<PrivateConversationMessageQueueEventV1, "event_digest">,
+  value: Omit<
+    PrivateConversationMessageQueueEventV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.EVENT_DIGEST
+  >,
 ): string => digestV1("VF-CONVERSATION-MESSAGE-QUEUE-EVENT\0v1\0", value);
 
 export const queueIdempotencyFileKey = (input: {
@@ -337,13 +319,19 @@ export const queueIdempotencyFileKey = (input: {
   });
 
 export const queueIdempotencyBindingDigest = (
-  value: Omit<PrivateConversationMessageQueueIdempotencyBindingV1, "binding_digest">,
+  value: Omit<
+    PrivateConversationMessageQueueIdempotencyBindingV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.BINDING_DIGEST
+  >,
 ): string => digestV1("VF-CONVERSATION-MESSAGE-QUEUE-IDEMPOTENCY-BINDING\0v1\0", value);
 
 export const enqueueQueueRequestDigest = (input: {
   principal_digest: string;
   root_session_id: string;
-  request: Omit<EnqueueConversationUserMessageRequestV1, "idempotency_key">;
+  request: Omit<
+    EnqueueConversationUserMessageRequestV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.IDEMPOTENCY_KEY
+  >;
 }): string =>
   digestV1("VF-CONVERSATION-MESSAGE-QUEUE-ENQUEUE-REQUEST\0v1\0", {
     schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
@@ -354,7 +342,10 @@ export const editQueueRequestDigest = (input: {
   principal_digest: string;
   root_session_id: string;
   queue_item_id: string;
-  request: Omit<EditQueuedUserMessageRequestV1, "idempotency_key">;
+  request: Omit<
+    EditQueuedUserMessageRequestV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.IDEMPOTENCY_KEY
+  >;
 }): string =>
   digestV1("VF-CONVERSATION-MESSAGE-QUEUE-EDIT-REQUEST\0v1\0", {
     schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,

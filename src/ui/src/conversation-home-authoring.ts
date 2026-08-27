@@ -1,3 +1,7 @@
+import {
+  CONVERSATION_INTERACTION_LIMITS,
+  CONVERSATION_REACTION_EMOJI,
+} from "../../orchestrator/conversation/conversation-interaction-contract.js";
 import type {
   HomeCanonicalMessageReference,
   HomeCanonicalQuoteReference,
@@ -6,20 +10,26 @@ import type {
   HomeReactionSummary,
 } from "./conversation-home-types.js";
 
-export const HOME_QUOTE_LIMIT = 8;
+export const HOME_QUOTE_LIMIT = CONVERSATION_INTERACTION_LIMITS.maxQuotes;
 
-export const HOME_REACTION_OPTIONS: Array<{ emoji: HomeReactionEmoji; label: string }> = [
-  { emoji: "👍", label: "Approve" },
-  { emoji: "👎", label: "Needs changes" },
-  { emoji: "❤️", label: "Appreciate" },
-  { emoji: "🎉", label: "Celebrate" },
-  { emoji: "👀", label: "Watching" },
-  { emoji: "🤔", label: "Question" },
-  { emoji: "✅", label: "Confirmed" },
-  { emoji: "❗", label: "Urgent" },
-];
+export const HOME_REACTION_OPTIONS = Object.freeze([
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.APPROVE, label: "Approve" }),
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.NEEDS_CHANGES, label: "Needs changes" }),
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.APPRECIATE, label: "Appreciate" }),
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.CELEBRATE, label: "Celebrate" }),
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.WATCHING, label: "Watching" }),
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.QUESTION, label: "Question" }),
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.CONFIRMED, label: "Confirmed" }),
+  Object.freeze({ emoji: CONVERSATION_REACTION_EMOJI.URGENT, label: "Urgent" }),
+] as const satisfies readonly { emoji: HomeReactionEmoji; label: string }[]);
 
-export type HomeQuoteStatus = "ready" | "missing" | "stale" | "foreign";
+export const HOME_QUOTE_STATUS = Object.freeze({
+  READY: "ready",
+  MISSING: "missing",
+  STALE: "stale",
+  FOREIGN: "foreign",
+} as const);
+export type HomeQuoteStatus = (typeof HOME_QUOTE_STATUS)[keyof typeof HOME_QUOTE_STATUS];
 
 export interface HomeVisibleQuoteSource {
   source_key: string;
@@ -80,19 +90,19 @@ export function resolveHomeQuoteStatus(
 ): { status: HomeQuoteStatus; message: string } {
   if (!activeRootId || activeRootId !== reference.root_session_id)
     return {
-      status: "foreign",
+      status: HOME_QUOTE_STATUS.FOREIGN,
       message:
         "This quote belongs to a different conversation rail. Remove it or return to that session.",
     };
   if (!visible)
     return {
-      status: "missing",
+      status: HOME_QUOTE_STATUS.MISSING,
       message:
         "This quote is not loaded in the visible timeline right now. Load the relevant history or remove it.",
     };
   if (visible.author !== reference.author || visible.excerpt !== reference.excerpt)
     return {
-      status: "stale",
+      status: HOME_QUOTE_STATUS.STALE,
       message:
         "This quote no longer matches the visible source message. Re-select it from the timeline.",
     };
@@ -101,7 +111,7 @@ export function resolveHomeQuoteStatus(
     visible.content_digest !== reference.content_digest
   )
     return {
-      status: "stale",
+      status: HOME_QUOTE_STATUS.STALE,
       message:
         "This quote no longer matches the immutable public locator. Re-select it from the timeline.",
     };
@@ -112,11 +122,11 @@ export function resolveHomeQuoteStatus(
     !visible.content_digest
   )
     return {
-      status: "missing",
+      status: HOME_QUOTE_STATUS.MISSING,
       message:
         "This quote preview is still waiting on a typed public locator. Refresh the conversation or remove it.",
     };
-  return { status: "ready", message: "Ready to send." };
+  return { status: HOME_QUOTE_STATUS.READY, message: "Ready to send." };
 }
 
 export function homeReactionLabel(emoji: HomeReactionEmoji): string {

@@ -10,6 +10,7 @@ import {
 import {
   CONVERSATION_MESSAGE_QUEUE_LIMITS,
   CONVERSATION_MESSAGE_QUEUE_STATE,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
 } from "./conversation-message-queue-contract.js";
 import type { FoldedConversationMessageQueueV1 } from "./conversation-message-queue-fold.js";
 import {
@@ -87,12 +88,16 @@ export class ConversationMessageQueuePrivateObjectStoreV1 {
       this.bindingPath(digest),
       CONVERSATION_MESSAGE_QUEUE_LIMITS.maxObjectBytes,
     );
-    return bytes === null
-      ? null
-      : decodeCanonicalQueueRecord<PrivateConversationMessageQueueContextBindingV1>(
-          bytes,
-          assertQueueContextBindingV1,
-        );
+    if (bytes === null) return null;
+    const binding = decodeCanonicalQueueRecord<PrivateConversationMessageQueueContextBindingV1>(
+      bytes,
+      assertQueueContextBindingV1,
+    );
+    if (binding.private_context_binding_digest !== digest)
+      throw new ConversationMessageQueueCorruptError(
+        "queue private context binding content address changed",
+      );
+    return binding;
   }
 
   readDisposition(digest: string): PrivateConversationMessageQueueContextDispositionV1 | null {
@@ -100,12 +105,17 @@ export class ConversationMessageQueuePrivateObjectStoreV1 {
       this.dispositionPath(digest),
       CONVERSATION_MESSAGE_QUEUE_LIMITS.maxObjectBytes,
     );
-    return bytes === null
-      ? null
-      : decodeCanonicalQueueRecord<PrivateConversationMessageQueueContextDispositionV1>(
-          bytes,
-          assertQueueContextDispositionV1,
-        );
+    if (bytes === null) return null;
+    const disposition =
+      decodeCanonicalQueueRecord<PrivateConversationMessageQueueContextDispositionV1>(
+        bytes,
+        assertQueueContextDispositionV1,
+      );
+    if (disposition.disposition_digest !== digest)
+      throw new ConversationMessageQueueCorruptError(
+        "queue private context disposition content address changed",
+      );
+    return disposition;
   }
 
   validateFold(fold: FoldedConversationMessageQueueV1): void {
@@ -124,6 +134,7 @@ export class ConversationMessageQueuePrivateObjectStoreV1 {
       if (
         !binding ||
         !revalidated ||
+        binding.private_context_binding_digest !== row.private_context_binding_digest ||
         binding.root_session_id !== row.item.root_session_id ||
         binding.queue_item_id !== row.item.queue_item_id ||
         binding.queue_sequence !== row.item.queue_sequence ||
@@ -132,7 +143,7 @@ export class ConversationMessageQueuePrivateObjectStoreV1 {
         binding.source_record_digest !== revalidated.source_record_digest ||
         binding.source_reservation_digest !== revalidated.source_reservation_digest ||
         !same(binding.target_participant_ids, revalidated.target_participant_ids) ||
-        (row.item.target_participants !== "all" &&
+        (row.item.target_participants !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL &&
           !same(revalidated.target_participant_ids, row.item.target_participants))
       )
         throw new ConversationMessageQueueCorruptError(
@@ -150,7 +161,12 @@ export class ConversationMessageQueuePrivateObjectStoreV1 {
       }
       const expected = row.private_context_disposition;
       const durable = expected ? this.readDisposition(expected.disposition_digest) : null;
-      if (!expected || !durable || !same(expected, durable))
+      if (
+        !expected ||
+        !durable ||
+        durable.disposition_digest !== expected.disposition_digest ||
+        !same(expected, durable)
+      )
         throw new ConversationMessageQueueCorruptError(
           "terminal queue private context disposition is missing or changed",
         );

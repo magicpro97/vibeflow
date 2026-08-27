@@ -1,6 +1,13 @@
 import type { Engine } from "../core.js";
+import { CONVERSATION_OPERATION_STATE } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import { type AttemptEvidenceReservation, persistFailedAttemptEvidence } from "./attempt-handle.js";
 import { sanitizePublicValue } from "./public-redaction.js";
+import {
+  ENGINE_ATTEMPT_START_OUTCOME,
+  ENGINE_IDENTITY,
+  ENGINE_NATIVE_SESSION_STATUS,
+  type EngineAttemptStartOutcome,
+} from "./session-contract.js";
 import type {
   EngineSessionResult,
   InternalResumeBinding,
@@ -12,7 +19,7 @@ import type { AttemptStartAuthorityStore } from "./start-authority.js";
 export function persistSynchronousStartFailure(input: {
   store: AttemptStartAuthorityStore;
   attemptId: string;
-  engine: Engine | "unknown";
+  engine: Engine | typeof ENGINE_IDENTITY.UNKNOWN;
   lifecycle: readonly OperationLifecycleState[];
   nativeSessionId: string | undefined;
   privateValues: readonly string[];
@@ -20,7 +27,7 @@ export function persistSynchronousStartFailure(input: {
   evidence: { attemptId: string; internalRef: string } | undefined;
   writer: EngineSessionAdapterOptions["writeEvidence"];
   failure: Error;
-  outcome: "proved-absent" | "unknown";
+  outcome: Exclude<EngineAttemptStartOutcome, typeof ENGINE_ATTEMPT_START_OUTCOME.ACCEPTED>;
 }): { attemptId: string; internalRef: string } | undefined {
   let binding = input.evidence;
   const evidence = sanitizePublicValue(
@@ -32,7 +39,7 @@ export function persistSynchronousStartFailure(input: {
       error_kind: "engine_start",
       ok: false,
       reason: input.failure.message,
-      native_session_status: "unavailable",
+      native_session_status: ENGINE_NATIVE_SESSION_STATUS.UNAVAILABLE,
     },
     input.nativeSessionId ? [input.nativeSessionId] : [],
     input.privateValues,
@@ -46,7 +53,7 @@ export function persistSynchronousStartFailure(input: {
       binding = { attemptId: input.attemptId, internalRef: ref };
     },
   );
-  if (input.engine === "unknown" || !binding) return binding;
+  if (input.engine === ENGINE_IDENTITY.UNKNOWN || !binding) return binding;
   input.store.record({
     attempt_id: input.attemptId,
     engine: input.engine,
@@ -68,19 +75,23 @@ export function recordCompletedStartOutcome(input: {
   const resume = input.resume;
   const accepted =
     input.result.ok &&
-    input.result.state === "completed" &&
-    input.lifecycle.includes("acknowledged") &&
+    input.result.state === CONVERSATION_OPERATION_STATE.COMPLETED &&
+    input.lifecycle.includes(CONVERSATION_OPERATION_STATE.ACKNOWLEDGED) &&
     resume?.attemptId === input.result.attemptId &&
     resume.engine === input.result.engine;
   const provedAbsent =
-    !input.lifecycle.includes("acknowledged") &&
+    !input.lifecycle.includes(CONVERSATION_OPERATION_STATE.ACKNOWLEDGED) &&
     !resume &&
     !input.result.ok &&
-    input.result.state === "ambiguous";
+    input.result.state === CONVERSATION_OPERATION_STATE.AMBIGUOUS;
   input.store.record({
     attempt_id: input.result.attemptId,
     engine: input.result.engine,
-    outcome: accepted ? "accepted" : provedAbsent ? "proved-absent" : "unknown",
+    outcome: accepted
+      ? ENGINE_ATTEMPT_START_OUTCOME.ACCEPTED
+      : provedAbsent
+        ? ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT
+        : ENGINE_ATTEMPT_START_OUTCOME.UNKNOWN,
     native_session_id: accepted && resume ? resume.nativeSessionId : null,
     evidence_ref: input.evidence.internalRef,
   });

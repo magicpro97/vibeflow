@@ -1,3 +1,6 @@
+import type { CapabilityGrantTransition } from "../../actions/capability-security-contract.js";
+import type { CredentialClass } from "../../actions/public-action-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { RuntimeEnforcementV1 } from "../manifest/types.js";
 import type { CapabilityPermissionKindScopeV1 } from "../manifest/types.js";
 
@@ -24,12 +27,12 @@ export interface PermissionBindingV1 {
 export interface EffectiveGrantFrameV1 {
   grant_id: string;
   frame_digest: string;
-  transition: "issued" | "renewed" | "revoked";
+  transition: CapabilityGrantTransition;
   principal: {
     public_actor_id: string;
-    credential_class: "loopback-session" | "interactive-tty" | "automation-grant" | "recovery";
+    credential_class: CredentialClass;
   };
-  scope: "project" | "user";
+  scope: CapabilityScope;
   action_types: string[];
   target_engines: string[];
   permissions: GrantedPermissionBindingV1[];
@@ -40,7 +43,7 @@ export interface EffectiveGrantFrameV1 {
 
 export interface ValidatedGrantAuthorityPrefixV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   authority_epoch: number;
   authority_head_digest: string;

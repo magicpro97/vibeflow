@@ -35,14 +35,15 @@ export class ConversationHandoffTooLargeError extends Error {
   constructor(readonly candidate: PublicOversizedHandoffCandidateV1) {
     super("The shared conversation context is too large and needs reviewed compaction.");
     this.public_error = publicActionError({
-      code: "handoff_too_large",
+      code: PUBLIC_ERROR_CODE.HANDOFF_TOO_LARGE,
       message: this.message,
       correlation_id: candidate.candidate_id,
       retryable: false,
-      recovery_action: "edit",
+      recovery_action: PUBLIC_RECOVERY_ACTION.EDIT,
       details: { candidate },
     });
   }
 }
 import type { PublicOversizedHandoffCandidateV1 } from "../../actions/error-details.js";
 import { type PublicApiErrorV1, publicActionError } from "../../actions/errors.js";
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../../actions/public-error-contract.js";

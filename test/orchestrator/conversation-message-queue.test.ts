@@ -7,10 +7,12 @@ import { pathToFileURL } from "node:url";
 import { canonicalJsonBytes, digestV1 } from "../../src/durability/index.js";
 import {
   materializeConversationMessageQueueAuthorityV1,
+  materializeConversationMessageQueueClaimOwnerV1,
   materializeConversationMessageQueueContextBindingV1,
   materializeConversationMessageQueueDeliveryProofV1,
   materializeQueuePrivateContextDispositionV1,
 } from "../../src/orchestrator/conversation/conversation-message-queue-authority.js";
+import { CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE } from "../../src/orchestrator/conversation/conversation-message-queue-contract.js";
 import { assertQueueClaimOwnerV1 } from "../../src/orchestrator/conversation/conversation-message-queue-private-validation.js";
 import {
   type ConversationMessageQueueAuthorityV1,
@@ -75,7 +77,7 @@ function request(
     idempotency_key: idempotencyKey,
     expected_authority_digest: current.authority_digest,
     content,
-    target_participants: "all",
+    target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     quote_refs: [],
     private_context_present: privateContextPresent,
   };
@@ -764,6 +766,7 @@ describe("durable conversation message queue core", () => {
     for (const invalid of [
       { ...owner, host: "høst" },
       { ...owner, process_start_identity: "start\nidentity" },
+      { ...owner, process_start_identity: "not-an-identity" },
     ]) {
       expect(() =>
         assertQueueClaimOwnerV1({
@@ -772,6 +775,13 @@ describe("durable conversation message queue core", () => {
         }),
       ).toThrow("invalid conversation message queue claim owner");
     }
+    const { durable_operation_id: durableOperationId, ...processOwner } = owner;
+    expect(() =>
+      materializeConversationMessageQueueClaimOwnerV1(
+        { ...processOwner, process_start_identity: "not-an-identity" },
+        durableOperationId,
+      ),
+    ).toThrow("invalid conversation message queue claim owner");
   });
 
   test("quarantines a noncanonical referenced head instead of reconstructing browser state", async () => {

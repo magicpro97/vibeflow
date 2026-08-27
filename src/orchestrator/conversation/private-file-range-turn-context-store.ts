@@ -14,16 +14,21 @@ import {
   type ResolvedPrivateFileRangeV1,
   assertPrivateFileRangeHandoffBindingV1,
 } from "./private-file-range-staging-store.js";
+import {
+  CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION,
+  CONVERSATION_TURN_PRIVATE_CONTEXT_KIND,
+  type ConversationTurnPrivateContextKind,
+  isConversationTurnPrivateContextKind,
+} from "./turn-delivery-contract.js";
 
 const MAX_RECORD = 256 * 1024;
 const TARGET_LIMIT = 64;
 const KEY_LIMIT = 256;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
-type ContextKind = "conversation-create" | "user-message";
 
 export interface PersistedPrivateFileRangeTurnContextV1 {
-  schema_version: "1.0";
-  context_kind: ContextKind;
+  schema_version: typeof CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION;
+  context_kind: ConversationTurnPrivateContextKind;
   conversation_id: string;
   context_key: string;
   target_participant_ids: string[];
@@ -38,11 +43,11 @@ export interface PersistedPrivateFileRangeTurnContextV1 {
 
 function locatorDigest(
   conversationId: string,
-  contextKind: ContextKind,
+  contextKind: ConversationTurnPrivateContextKind,
   contextKey: string,
 ): string {
   return digestV1("VF-PRIVATE-FILE-RANGE-TURN-CONTEXT-LOCATOR\0v1\0", {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION,
     conversation_id: conversationId,
     context_kind: contextKind,
     context_key: contextKey,
@@ -78,7 +83,7 @@ function assertTimestamp(value: string): string {
 
 function buildRecord(input: {
   conversationId: string;
-  contextKind: ContextKind;
+  contextKind: ConversationTurnPrivateContextKind;
   contextKey: string;
   targetParticipantIds: readonly string[];
   createdAt: string;
@@ -91,7 +96,7 @@ function buildRecord(input: {
   if (fileBytes.length === 0 || fileBytes.length > 64 * 1024)
     throw new Error("private file range context content is empty or oversized");
   const withoutDigest = {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION,
     context_kind: input.contextKind,
     conversation_id: assertKey(input.conversationId),
     context_key: assertKey(input.contextKey),
@@ -101,7 +106,7 @@ function buildRecord(input: {
     file_range: {
       ...structuredClone(input.fileRange),
       content_utf8_sha256: digestV1("VF-PRIVATE-FILE-RANGE-CONTENT\0v1\0", {
-        schema_version: "1.0",
+        schema_version: CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION,
         content: input.fileRange.content,
       }),
       content_byte_length: fileBytes.length,
@@ -119,7 +124,10 @@ function validateRecord(record: PersistedPrivateFileRangeTurnContextV1): void {
   assertKey(record.context_key);
   assertTargets(record.target_participant_ids);
   assertTimestamp(record.created_at);
-  if (record.context_kind !== "conversation-create" && record.context_kind !== "user-message") {
+  if (
+    record.schema_version !== CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION ||
+    !isConversationTurnPrivateContextKind(record.context_kind)
+  ) {
     throw new Error("private file range turn context kind is invalid");
   }
   if (
@@ -162,7 +170,11 @@ export class PrivateFileRangeTurnContextStoreV1 {
     }
   }
 
-  private path(conversationId: string, contextKind: ContextKind, contextKey: string): string {
+  private path(
+    conversationId: string,
+    contextKind: ConversationTurnPrivateContextKind,
+    contextKey: string,
+  ): string {
     return join(
       this.root,
       `${digestHex(locatorDigest(conversationId, contextKind, contextKey))}.json`,
@@ -171,7 +183,7 @@ export class PrivateFileRangeTurnContextStoreV1 {
 
   private write(input: {
     conversationId: string;
-    contextKind: ContextKind;
+    contextKind: ConversationTurnPrivateContextKind;
     contextKey: string;
     targetParticipantIds: readonly string[];
     createdAt: string;
@@ -198,7 +210,11 @@ export class PrivateFileRangeTurnContextStoreV1 {
     handoff: PrivateFileRangeHandoffBindingV1;
     fileRange: ResolvedPrivateFileRangeV1;
   }): PersistedPrivateFileRangeTurnContextV1 {
-    return this.write({ ...input, contextKind: "conversation-create", contextKey: "create" });
+    return this.write({
+      ...input,
+      contextKind: CONVERSATION_TURN_PRIVATE_CONTEXT_KIND.CONVERSATION_CREATE,
+      contextKey: "create",
+    });
   }
 
   writeMessage(input: {
@@ -211,25 +227,33 @@ export class PrivateFileRangeTurnContextStoreV1 {
   }): PersistedPrivateFileRangeTurnContextV1 {
     return this.write({
       ...input,
-      contextKind: "user-message",
+      contextKind: CONVERSATION_TURN_PRIVATE_CONTEXT_KIND.USER_MESSAGE,
       contextKey: input.messageKey,
     });
   }
 
   readCreate(conversationId: string): PersistedPrivateFileRangeTurnContextV1 | null {
-    return this.read(conversationId, "conversation-create", "create");
+    return this.read(
+      conversationId,
+      CONVERSATION_TURN_PRIVATE_CONTEXT_KIND.CONVERSATION_CREATE,
+      "create",
+    );
   }
 
   readMessage(
     conversationId: string,
     messageKey: string,
   ): PersistedPrivateFileRangeTurnContextV1 | null {
-    return this.read(conversationId, "user-message", messageKey);
+    return this.read(
+      conversationId,
+      CONVERSATION_TURN_PRIVATE_CONTEXT_KIND.USER_MESSAGE,
+      messageKey,
+    );
   }
 
   private read(
     conversationId: string,
-    contextKind: ContextKind,
+    contextKind: ConversationTurnPrivateContextKind,
     contextKey: string,
   ): PersistedPrivateFileRangeTurnContextV1 | null {
     const bytes = privateFileBytes(this.path(conversationId, contextKind, contextKey), MAX_RECORD);

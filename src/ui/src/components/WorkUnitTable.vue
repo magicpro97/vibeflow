@@ -31,7 +31,7 @@
           <tr
             class="border-b border-neutral-800/40 cursor-pointer transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20 focus-visible:ring-inset"
             :class="[
-              u.status === 'running' ? 'running-row' : 'hover:bg-white/[0.02]',
+              u.status === WORK_UNIT_STATUS.RUNNING ? 'running-row' : 'hover:bg-white/[0.02]',
               expanded.has(u.name) ? 'bg-white/[0.02]' : '',
             ]"
             tabindex="0"
@@ -48,7 +48,7 @@
                 <!-- Running accent bar -->
                 <div
                   class="w-0.5 self-stretch rounded-r mr-2 flex-shrink-0 transition-all"
-                  :class="u.status === 'running' ? 'bg-white/20 running-border' : 'bg-transparent'"
+                  :class="u.status === WORK_UNIT_STATUS.RUNNING ? 'bg-white/20 running-border' : 'bg-transparent'"
                 />
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
@@ -80,7 +80,7 @@
                     <!-- #524: transition-all animates BOTH width and bg-color on status change -->
                     <div
                       class="h-full transition-all duration-700"
-                      :class="u.status === 'running' ? 'bg-white/40' : 'bg-neutral-600'"
+                      :class="u.status === WORK_UNIT_STATUS.RUNNING ? 'bg-white/40' : 'bg-neutral-600'"
                       :style="{ width: u.confidence ? `${Math.min(100, u.confidence * 100)}%` : '0%' }"
                     />
                   </div>
@@ -96,7 +96,7 @@
               >
                 <!-- Pulse dot for running -->
                 <span
-                  v-if="u.status === 'running'"
+                  v-if="u.status === WORK_UNIT_STATUS.RUNNING"
                   class="w-1.5 h-1.5 rounded-full bg-white/50 pulse-dot flex-shrink-0"
                 />
                 {{ u.status }}
@@ -168,14 +168,16 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import { REQUIRED_WORK_UNIT_GATES, WORK_UNIT_STATUS } from "../../../core/workflow-contract.js";
 import { api } from "../api.js";
 import { unitColor } from "../lib/unit-color.js";
-import type { GateState, TimelineEntry, WorkUnit } from "../types.js";
+import { gateClass, workUnitStatusClass } from "../lib/workflow-presentation.js";
+import type { TimelineEntry, WorkUnit } from "../types.js";
 import InfoTip from "./InfoTip.vue";
 import WorkUnitExpandedDetails from "./WorkUnitExpandedDetails.vue";
 
 const props = defineProps<{ units: WorkUnit[]; emptyText?: string }>();
-const GATE_KEYS = ["build", "lint", "test", "review"] as const;
+const GATE_KEYS = REQUIRED_WORK_UNIT_GATES;
 
 const expanded = ref(new Set<string>());
 
@@ -212,29 +214,7 @@ async function fetchTimeline(name: string) {
   }
 }
 
-function gateClass(g: GateState | undefined) {
-  if (!g) return "bg-neutral-800/40 text-neutral-700";
-  return (
-    {
-      pass: "bg-white/70",
-      fail: "bg-red-500/60",
-      running: "bg-white/30 animate-pulse",
-      pending: "bg-neutral-700",
-    }[g] ?? "bg-neutral-700"
-  );
-}
-
-function statusClass(status: string) {
-  return (
-    {
-      pending: "bg-neutral-800/60 text-neutral-500",
-      running: "bg-neutral-800/60 text-neutral-300",
-      verifying: "bg-neutral-800/60 text-neutral-400",
-      done: "bg-neutral-800/40 text-neutral-300",
-      blocked: "bg-neutral-800/40 text-neutral-600",
-    }[status] ?? "bg-neutral-800/60 text-neutral-500"
-  );
-}
+const statusClass = workUnitStatusClass;
 </script>
 
 <style scoped>

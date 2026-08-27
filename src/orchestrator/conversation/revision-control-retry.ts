@@ -1,13 +1,20 @@
+import {
+  ACTION_OPERATION_STATE,
+  PUBLIC_OPERATION_PARTICIPANT_START_PHASE,
+  PUBLIC_OPERATION_REVISION_PHASE,
+} from "../../actions/protocol-contract.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import type {
   RevisionOperationV1,
   RevisionPreparationPlanV1,
 } from "./lineage-revision-operation.js";
 import type { RevisionLaneRetryResultV1 } from "./revision-lane-retry-runtime.js";
+import { REVISION_OPERATION_EVENT_PAYLOAD_KIND } from "./revision-operation-event-contract.js";
 import {
   type ParticipantStartReceiptV1,
   materializeParticipantStartReceipt,
   participantStartAttemptKey,
+  participantStartUsesProcessLease,
 } from "./revision-participant-receipt.js";
 import { type RevisionOperationEventV1, materializeRevisionEvent } from "./revision-planner.js";
 
@@ -18,7 +25,7 @@ function later(left: string, right: string): string {
 function latestReceipts(events: readonly RevisionOperationEventV1[]) {
   const latest = new Map<string, ParticipantStartReceiptV1>();
   for (const event of events)
-    if (event.payload.kind === "participant-start")
+    if (event.payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.PARTICIPANT_START)
       latest.set(event.payload.receipt.participant_id, event.payload.receipt);
   return latest;
 }
@@ -26,7 +33,7 @@ function latestReceipts(events: readonly RevisionOperationEventV1[]) {
 function receiptHistories(events: readonly RevisionOperationEventV1[]) {
   const histories = new Map<string, ParticipantStartReceiptV1[]>();
   for (const event of events) {
-    if (event.payload.kind !== "participant-start") continue;
+    if (event.payload.kind !== REVISION_OPERATION_EVENT_PAYLOAD_KIND.PARTICIPANT_START) continue;
     const receipt = event.payload.receipt;
     histories.set(receipt.participant_id, [
       ...(histories.get(receipt.participant_id) ?? []),
@@ -48,7 +55,7 @@ function appendReceipt(input: {
     input.operation,
     input.events,
     {
-      kind: "participant-start",
+      kind: REVISION_OPERATION_EVENT_PAYLOAD_KIND.PARTICIPANT_START,
       authorized_by_action_operation_id: input.actionOperationId,
       effect_action_operation_id: input.actionOperationId,
       receipt: input.receipt,
@@ -73,7 +80,7 @@ function receiptFor(input: {
     participant_id: input.participant.participant_id,
     start_generation: input.generation,
   });
-  const processEvidence = input.participant.reconciliation_mode === "vf-process-lease";
+  const processEvidence = participantStartUsesProcessLease(input.participant.reconciliation_mode);
   return materializeParticipantStartReceipt({
     operation_id: input.operation.operation_id,
     participant_id: input.participant.participant_id,
@@ -129,7 +136,11 @@ export async function executeRevisionRetry(input: {
     prior.size !== input.plan.participant_starts.length ||
     input.plan.participant_starts.some(({ participant_id }) => {
       const receipt = prior.get(participant_id);
-      return !receipt || !["failed", "canceled"].includes(receipt.state);
+      return (
+        !receipt ||
+        (receipt.state !== PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED &&
+          receipt.state !== PUBLIC_OPERATION_PARTICIPANT_START_PHASE.CANCELED)
+      );
     })
   )
     throw new Error("revision retry requires an exact failed and quiescent prior lane set");
@@ -143,7 +154,7 @@ export async function executeRevisionRetry(input: {
       operation: input.operation,
       participant,
       generation,
-      state: "prepared",
+      state: PUBLIC_OPERATION_PARTICIPANT_START_PHASE.PREPARED,
       preparedAt,
       observedAt: null,
     });
@@ -153,7 +164,7 @@ export async function executeRevisionRetry(input: {
       operation: input.operation,
       participant,
       generation,
-      state: "effect_in_progress",
+      state: PUBLIC_OPERATION_PARTICIPANT_START_PHASE.EFFECT_IN_PROGRESS,
       preparedAt,
       observedAt: null,
     });
@@ -174,7 +185,7 @@ export async function executeRevisionRetry(input: {
       participant_id: participant.participant_id,
       start_generation: generations.get(participant.participant_id) as number,
       attempt_key: attemptKeys.get(participant.participant_id) as string,
-      outcome: "uncertain",
+      outcome: PUBLIC_OPERATION_PARTICIPANT_START_PHASE.UNCERTAIN,
       private_evidence_ref: null,
       private_evidence_digest: null,
       observed_at: input.now(),
@@ -194,12 +205,12 @@ export async function executeRevisionRetry(input: {
       ref: result.private_evidence_ref,
       digest: result.private_evidence_digest,
     };
-    if (result.outcome === "accepted") {
+    if (result.outcome === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED) {
       const observed = receiptFor({
         operation: input.operation,
         participant,
         generation,
-        state: "observed",
+        state: PUBLIC_OPERATION_PARTICIPANT_START_PHASE.OBSERVED,
         preparedAt,
         observedAt: result.observed_at,
         evidence,
@@ -209,7 +220,7 @@ export async function executeRevisionRetry(input: {
         operation: input.operation,
         participant,
         generation,
-        state: "accepted",
+        state: PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED,
         preparedAt,
         observedAt: result.observed_at,
         evidence,
@@ -222,19 +233,38 @@ export async function executeRevisionRetry(input: {
         generation,
         state: result.outcome,
         preparedAt,
-        observedAt: result.outcome === "uncertain" ? result.observed_at : null,
+        observedAt:
+          result.outcome === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.UNCERTAIN
+            ? result.observed_at
+            : null,
         evidence,
       });
       events = appendReceipt({ ...input, events, receipt: terminal, at: result.observed_at });
     }
   }
   const lanes = latestReceipts(events);
-  const accepted = [...lanes.values()].every(({ state }) => state === "accepted");
+  const accepted = [...lanes.values()].every(
+    ({ state }) => state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED,
+  );
   const failed =
-    [...lanes.values()].some(({ state }) => state === "failed") &&
-    [...lanes.values()].every(({ state }) => state === "failed" || state === "canceled");
-  const destination = accepted ? "started" : failed ? "start_failed" : "needs_recovery";
-  const outcome = accepted ? "succeeded" : failed ? "failed" : "needs_recovery";
+    [...lanes.values()].some(
+      ({ state }) => state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED,
+    ) &&
+    [...lanes.values()].every(
+      ({ state }) =>
+        state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.FAILED ||
+        state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.CANCELED,
+    );
+  const destination = accepted
+    ? PUBLIC_OPERATION_REVISION_PHASE.STARTED
+    : failed
+      ? PUBLIC_OPERATION_REVISION_PHASE.START_FAILED
+      : PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY;
+  const outcome = accepted
+    ? ACTION_OPERATION_STATE.SUCCEEDED
+    : failed
+      ? ACTION_OPERATION_STATE.FAILED
+      : ACTION_OPERATION_STATE.NEEDS_RECOVERY;
   const reason = accepted ? null : failed ? "retry_start_failed" : "retry_start_uncertain";
   if (accepted && !input.publishAccepted?.({ operation: input.operation, plan: input.plan, lanes }))
     throw new Error("accepted revision retry lanes were not authoritatively published");
@@ -242,8 +272,8 @@ export async function executeRevisionRetry(input: {
     input.operation,
     events,
     {
-      kind: "state-transition",
-      from: "starting",
+      kind: REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION,
+      from: PUBLIC_OPERATION_REVISION_PHASE.STARTING,
       to: destination,
       authorized_by_action_operation_id: input.actionOperationId,
       effect_action_operation_id: input.actionOperationId,

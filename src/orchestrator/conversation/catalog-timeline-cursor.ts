@@ -1,6 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import { CatalogCursorError } from "./catalog-cursor.js";
+import {
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_CURSOR_ERROR_CODE,
+  CONVERSATION_CURSOR_KIND,
+} from "./conversation-catalog-contract.js";
 import type { LineageNodeIdentityV1 } from "./lineage-types.js";
 import {
   assertLineageNodeIdentityV1,
@@ -18,8 +24,8 @@ export interface TimelineCursorTupleV1 {
 }
 
 interface TimelineCursorPayloadV1 {
-  schema_version: "1.0";
-  kind: "conversation-timeline";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
+  kind: typeof CONVERSATION_CURSOR_KIND.TIMELINE;
   scope_id: string;
   root_session_id: string;
   head_digest: string;
@@ -39,7 +45,7 @@ export interface TimelineCursorBindingV1 {
 }
 
 export class StaleTimelineCursorError extends Error {
-  readonly code = "stale_timeline_cursor" as const;
+  readonly code = PUBLIC_ERROR_CODE.STALE_TIMELINE_CURSOR;
   constructor(
     readonly restart_cursor: string,
     readonly head: LineageNodeIdentityV1,
@@ -75,12 +81,22 @@ function assertTuple(value: unknown): asserts value is TimelineCursorTupleV1 {
     (value.public_sequence as number) < 0 ||
     !isSafeCatalogIdentifier(value.item_id)
   )
-    throw new CatalogCursorError("invalid_cursor", "invalid timeline cursor tuple");
+    throw new CatalogCursorError(
+      CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+      "invalid timeline cursor tuple",
+    );
 }
 
 function assertPayload(value: unknown): asserts value is TimelineCursorPayloadV1 {
-  if (plain(value) && typeof value.schema_version === "string" && value.schema_version !== "1.0")
-    throw new CatalogCursorError("unsupported_schema_version", "unsupported cursor schema version");
+  if (
+    plain(value) &&
+    typeof value.schema_version === "string" &&
+    value.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION
+  )
+    throw new CatalogCursorError(
+      PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION,
+      "unsupported cursor schema version",
+    );
   if (
     !plain(value) ||
     !exact(value, [
@@ -93,8 +109,8 @@ function assertPayload(value: unknown): asserts value is TimelineCursorPayloadV1
       "schema_version",
       "scope_id",
     ]) ||
-    value.schema_version !== "1.0" ||
-    value.kind !== "conversation-timeline" ||
+    value.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION ||
+    value.kind !== CONVERSATION_CURSOR_KIND.TIMELINE ||
     !isSafeCatalogIdentifier(value.scope_id) ||
     !isSafeCatalogIdentifier(value.root_session_id) ||
     !isLineageDigest(value.head_digest) ||
@@ -104,7 +120,10 @@ function assertPayload(value: unknown): asserts value is TimelineCursorPayloadV1
     (value.limit as number) < 1 ||
     (value.limit as number) > 100
   )
-    throw new CatalogCursorError("invalid_cursor", "invalid timeline cursor payload");
+    throw new CatalogCursorError(
+      CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+      "invalid timeline cursor payload",
+    );
   if (value.last !== null) assertTuple(value.last);
 }
 
@@ -127,8 +146,8 @@ export class TimelineCursorCodec {
   encode(binding: TimelineCursorBindingV1): string {
     assertLineageNodeIdentityV1(binding.head);
     return this.encodePayload({
-      schema_version: "1.0",
-      kind: "conversation-timeline",
+      schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+      kind: CONVERSATION_CURSOR_KIND.TIMELINE,
       scope_id: binding.scope_id,
       root_session_id: binding.root_session_id,
       head_digest: binding.head_digest,
@@ -140,17 +159,26 @@ export class TimelineCursorCodec {
 
   private decode(cursor: string): TimelineCursorPayloadV1 {
     if (typeof cursor !== "string" || Buffer.byteLength(cursor) > MAX_CURSOR_BYTES)
-      throw new CatalogCursorError("invalid_cursor", "invalid timeline cursor encoding");
+      throw new CatalogCursorError(
+        CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+        "invalid timeline cursor encoding",
+      );
     const pieces = cursor.split(".");
     if (pieces.length !== 2 || !pieces[0] || !pieces[1])
-      throw new CatalogCursorError("invalid_cursor", "invalid timeline cursor encoding");
+      throw new CatalogCursorError(
+        CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+        "invalid timeline cursor encoding",
+      );
     let bytes: Buffer;
     let signature: Buffer;
     try {
       bytes = Buffer.from(pieces[0], "base64url");
       signature = Buffer.from(pieces[1], "base64url");
     } catch {
-      throw new CatalogCursorError("invalid_cursor", "invalid timeline cursor encoding");
+      throw new CatalogCursorError(
+        CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+        "invalid timeline cursor encoding",
+      );
     }
     if (
       bytes.toString("base64url") !== pieces[0] ||
@@ -158,7 +186,10 @@ export class TimelineCursorCodec {
       signature.length !== 32 ||
       !timingSafeEqual(signature, createHmac("sha256", this.key).update(bytes).digest())
     )
-      throw new CatalogCursorError("invalid_cursor", "invalid timeline cursor signature");
+      throw new CatalogCursorError(
+        CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+        "invalid timeline cursor signature",
+      );
     let value: unknown;
     try {
       value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -166,7 +197,10 @@ export class TimelineCursorCodec {
       if (canonical.length !== bytes.length || !timingSafeEqual(canonical, bytes))
         throw new Error("non-canonical cursor");
     } catch {
-      throw new CatalogCursorError("invalid_cursor", "invalid timeline cursor payload");
+      throw new CatalogCursorError(
+        CONVERSATION_CURSOR_ERROR_CODE.INVALID_CURSOR,
+        "invalid timeline cursor payload",
+      );
     }
     assertPayload(value);
     return value;
@@ -179,7 +213,10 @@ export class TimelineCursorCodec {
       decoded.root_session_id !== current.root_session_id ||
       decoded.limit !== current.limit
     )
-      throw new CatalogCursorError("cursor_binding_mismatch", "timeline cursor request changed");
+      throw new CatalogCursorError(
+        CONVERSATION_CURSOR_ERROR_CODE.BINDING_MISMATCH,
+        "timeline cursor request changed",
+      );
     if (decoded.head_digest !== current.head_digest || decoded.head_epoch !== current.head_epoch)
       throw new StaleTimelineCursorError(
         this.encode({ ...current, last: null }),

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
 import { canonicalJsonBytes } from "../../durability/index.js";
+import {
+  CONVERSATION_PUBLIC_ARTIFACT_KIND,
+  CONVERSATION_PUBLIC_ARTIFACT_RESOLVER,
+  CONVERSATION_PUBLIC_OMITTED_EVENTS_ARTIFACT_ID_PREFIX,
+  CONVERSATION_PUBLIC_OMITTED_EVENTS_MEDIA_TYPE,
+  CONVERSATION_PUBLIC_SCHEMA_VERSION,
+} from "./conversation-public-wire-contract.js";
 import type {
   PublicArtifactReferenceV1,
   PublicEventRangeV1,
@@ -25,15 +32,15 @@ function materializeRange(events: PublicHandoffEventV1[]): OmittedPublicEventArt
   const first = events[0];
   const last = events.at(-1);
   if (!first || !last) throw new Error("empty omitted public event range");
-  const bytes = canonicalJsonBytes({ schema_version: "1.0", events });
+  const bytes = canonicalJsonBytes({ schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION, events });
   const contentSha = createHash("sha256").update(bytes).digest("hex");
   const artifact: PublicArtifactReferenceV1 = {
-    artifact_id: `vf-omitted-public-events-${contentSha}`,
-    artifact_kind: "omitted-public-events",
-    media_type: "application/vnd.vibeflow.public-events+json",
+    artifact_id: `${CONVERSATION_PUBLIC_OMITTED_EVENTS_ARTIFACT_ID_PREFIX}${contentSha}`,
+    artifact_kind: CONVERSATION_PUBLIC_ARTIFACT_KIND.OMITTED_EVENTS,
+    media_type: CONVERSATION_PUBLIC_OMITTED_EVENTS_MEDIA_TYPE,
     byte_length: bytes.length,
     content_sha256: contentSha,
-    resolver: "conversation-artifact-v1",
+    resolver: CONVERSATION_PUBLIC_ARTIFACT_RESOLVER.CONVERSATION,
   };
   return {
     bytes,

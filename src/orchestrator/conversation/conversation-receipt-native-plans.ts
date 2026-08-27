@@ -1,6 +1,8 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type { ActionProposalRequestV1, BrowserHostActionRequestV1 } from "../../actions/index.js";
 import { digestV1 } from "../../durability/index.js";
 import { conversationLockDigest } from "./catalog-lock.js";
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import { materializeStopControlEffectClosure } from "./conversation-control-effect-planner.js";
 import type { ConversationControlEffectStore } from "./conversation-control-effect-store.js";
 import type { OrdinaryConversationOperationAuthorityV1 } from "./conversation-operation-fold.js";
@@ -14,7 +16,7 @@ import type {
 
 export interface ConversationControlPlanV1 {
   schema_version: "1.0";
-  action_type: "conversation.stop_operation";
+  action_type: typeof HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION;
   root_session_id: string;
   target_operation_id: string;
   expected_operation_header_digest: string;
@@ -57,7 +59,7 @@ export function assertReceiptSource(
     )
       throw new Error("lineage recovery authority changed");
   } else if (
-    resolved.head.head_status !== "committed" ||
+    resolved.head.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
     resolved.head.active?.conversation_id !== requested.node.conversation_id ||
     resolved.head.active.revision_id !== requested.node.revision_id
   )
@@ -66,14 +68,19 @@ export function assertReceiptSource(
 
 export function materializeSelectionPlan(
   resolved: ResolvedConversationLineageV1,
-  candidate: Extract<BrowserHostActionRequestV1, { type: "conversation.select_lineage_head" }>,
+  candidate: Extract<
+    BrowserHostActionRequestV1,
+    { type: typeof HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD }
+  >,
   createdAt: string,
 ): LineageHeadSelectionPlanV1 {
   if (
-    resolved.head.head_status === "committed" ||
+    resolved.head.head_status === CONVERSATION_HEAD_STATUS.COMMITTED ||
     candidate.root_session_id !== resolved.lineage.root_session_id
   )
-    throw new ConversationReceiptCandidateUnavailableError("conversation.select_lineage_head");
+    throw new ConversationReceiptCandidateUnavailableError(
+      HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD,
+    );
   const selected = resolved.lineage.nodes.find(
     (node) =>
       node.node.conversation_id === candidate.candidate_conversation_id &&
@@ -85,7 +92,9 @@ export function materializeSelectionPlan(
       ),
   );
   if (!selected)
-    throw new ConversationReceiptCandidateUnavailableError("conversation.select_lineage_head");
+    throw new ConversationReceiptCandidateUnavailableError(
+      HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD,
+    );
   const leaves = resolved.head.candidate_heads.map((leaf) => {
     const node = resolved.lineage.nodes.find(
       (candidateNode) =>
@@ -123,13 +132,18 @@ export function materializeSelectionPlan(
 
 export function materializeAssociationPlan(
   lineages: ConversationLineageService,
-  candidate: Extract<BrowserHostActionRequestV1, { type: "conversation.associate_lineages" }>,
+  candidate: Extract<
+    BrowserHostActionRequestV1,
+    { type: typeof HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES }
+  >,
   createdAt: string,
 ): LineageAssociationPlanV1 {
   const root_bindings = candidate.root_session_ids.map((id) => {
     const resolved = lineages.resolve(id);
     if (resolved.lineage.root_session_id !== id)
-      throw new ConversationReceiptCandidateUnavailableError("conversation.associate_lineages");
+      throw new ConversationReceiptCandidateUnavailableError(
+        HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES,
+      );
     return {
       root_session_id: id,
       expected_head_digest: resolved.head.content_digest,
@@ -155,7 +169,10 @@ export function materializeAssociationPlan(
 
 export function materializeControlPlan(
   resolved: ResolvedConversationLineageV1,
-  candidate: Extract<BrowserHostActionRequestV1, { type: "conversation.stop_operation" }>,
+  candidate: Extract<
+    BrowserHostActionRequestV1,
+    { type: typeof HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION }
+  >,
   createdAt: string,
   controlEffects: ConversationControlEffectStore,
   operationAuthority: OrdinaryConversationOperationAuthorityV1,

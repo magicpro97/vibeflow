@@ -14,7 +14,7 @@ ${c.bold("Mutation examples:")}
   vf capability install acme.reviewer --scope project --for codex --dry-run
   vf capability configure acme.reviewer --scope project --set threshold=3
   vf capability adopt inspect --scope project --source mcp-managed-sidecar
-  vf capability private-input bind acme.reviewer --scope project --input api_key --values-stdin
+  vf capability private-input bind acme.reviewer --scope project --input api_key --values-stdin --idempotency-key private-input-1
 
 ${c.bold("Notes:")}
   --request-file is mutually exclusive with direct mutation flags

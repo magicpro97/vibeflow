@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import type { Engine } from "../core.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { CONVERSATION_OPERATION_STATE as OPERATION_STATE } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import {
   createAttemptHandle,
   createProcessTerminator,
@@ -13,16 +15,18 @@ import type { OwnedProcessTerminalKind } from "./owned-process-contract.js";
 import { supportsOwnedRuntime } from "./owned-process-launch.js";
 import { createOwnedProcessPlatform } from "./owned-process-platform.js";
 import { type OwnedProcessController, OwnedProcessRecordStore } from "./owned-process-runtime.js";
-import { parseEngineSummary } from "./prompt.js";
-import {
-  publicEngineSummary,
-  sanitizePublicEngineText,
-  sanitizePublicValue,
-} from "./public-redaction.js";
 import { reconcileSessionHistory } from "./session-argv.js";
+import {
+  ENGINE_ATTEMPT_START_OUTCOME,
+  ENGINE_IDENTITY,
+  ENGINE_OUTPUT_STREAM,
+  ENGINE_SESSION_MODE,
+  ENGINE_SESSION_PROTOCOL,
+} from "./session-contract.js";
 import { type SessionLaunchPreparation, prepareSessionLaunch } from "./session-launch-prep.js";
 import { SessionStdoutState } from "./session-output.js";
 import { noteOwnedOutputDrainFailure, reapOwnedSessionRootExit } from "./session-owned-runtime.js";
+import { projectSessionCompletion } from "./session-result.js";
 import {
   persistSynchronousStartFailure,
   recordCompletedStartOutcome,
@@ -52,7 +56,6 @@ export function createEngineSessionAdapter(
   const startedAttempts = new Set<string>();
   const evidenceRoot = config.evidenceRoot ?? join(process.cwd(), ".vibeflow", "attempts");
   const startAuthorityStore = new AttemptStartAuthorityStore(evidenceRoot);
-  const startAuthority = createDurableAttemptStartAuthorityReaderV1(startAuthorityStore);
   const ownedRuntimeSupported = supportsOwnedRuntime(spawnProcess);
   const ownedRuntimeStore = ownedRuntimeSupported
     ? new OwnedProcessRecordStore(evidenceRoot)
@@ -61,7 +64,7 @@ export function createEngineSessionAdapter(
     ? (config.ownedProcessPlatform ?? createOwnedProcessPlatform())
     : undefined;
   return {
-    startAuthority,
+    startAuthority: createDurableAttemptStartAuthorityReaderV1(startAuthorityStore),
     start(request): AttemptHandle {
       const { attemptId, spawn, nativeSessionId, signal, onChunk, onLifecycle } = request;
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(attemptId)) {
@@ -95,11 +98,16 @@ export function createEngineSessionAdapter(
           contain,
           recordOnFailure,
         );
-      let engine: Engine | "unknown" = "unknown";
+      let engine: Engine | typeof ENGINE_IDENTITY.UNKNOWN = ENGINE_IDENTITY.UNKNOWN;
       let claimedProjection: typeof spawn.isolation = spawn.isolation;
       let claimedLease: ReturnType<typeof claimIsolationLease> | undefined;
       let initialPrivate: string[] = [];
-      const persistStartFailure = (failure: Error, outcome: "proved-absent" | "unknown") => {
+      const persistStartFailure = (
+        failure: Error,
+        outcome:
+          | typeof ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT
+          | typeof ENGINE_ATTEMPT_START_OUTCOME.UNKNOWN,
+      ) => {
         evidenceBinding =
           persistSynchronousStartFailure({
             store: startAuthorityStore,
@@ -151,7 +159,7 @@ export function createEngineSessionAdapter(
       } catch (error) {
         const failure = normalizedAttemptError(error);
         try {
-          persistStartFailure(failure, "proved-absent");
+          persistStartFailure(failure, ENGINE_ATTEMPT_START_OUTCOME.PROVED_ABSENT);
         } finally {
           if (claimedProjection) void releaseIsolationLease(claimedProjection).catch(() => {});
         }
@@ -166,7 +174,7 @@ export function createEngineSessionAdapter(
           stdinText: invocation.input,
           detached:
             (config.spawn === undefined || config.ownsProcessGroup === true) &&
-            process.platform !== "win32",
+            process.platform !== RUNTIME_PLATFORM.WINDOWS,
           ...(ownedRuntime ? { ownedRuntime } : {}),
         });
       } catch (error) {
@@ -174,19 +182,22 @@ export function createEngineSessionAdapter(
         try {
           ownedRuntime?.finalize(null, "spawn failure");
           invocation.cleanupOnFailure?.();
-          persistStartFailure(failure, "unknown");
+          persistStartFailure(failure, ENGINE_ATTEMPT_START_OUTCOME.UNKNOWN);
         } finally {
           if (claimedProjection) void releaseIsolationLease(claimedProjection).catch(() => {});
         }
         throw failure;
       }
 
-      let resumeBinding: InternalResumeBinding | undefined =
-        spawn.sessionMode === "exact" && nativeSessionId
-          ? { attemptId, engine: spawn.engine, nativeSessionId }
-          : undefined;
-      const stdout = new SessionStdoutState(config.protocol, spawn.engine);
-      const privateValues = [...initialPrivate, ...inheritedPrivateValues];
+      const requestedResumeId =
+        spawn.sessionMode === ENGINE_SESSION_MODE.EXACT ? nativeSessionId : undefined;
+      let resumeBinding: InternalResumeBinding | undefined;
+      const stdout = new SessionStdoutState(config.protocol, spawn.engine, requestedResumeId);
+      const privateValues = [
+        ...initialPrivate,
+        ...inheritedPrivateValues,
+        ...(requestedResumeId ? [requestedResumeId] : []),
+      ];
       let acknowledgementSeen = false;
       let acknowledged = false;
       let terminationReason: string | undefined;
@@ -199,7 +210,7 @@ export function createEngineSessionAdapter(
         process: processHandle,
         killProcessGroup:
           (config.spawn === undefined || config.ownsProcessGroup === true) &&
-          process.platform !== "win32",
+          process.platform !== RUNTIME_PLATFORM.WINDOWS,
         graceMs: config.graceMs ?? 3000,
         onReason: (reason) => {
           terminationRequested = true;
@@ -217,12 +228,12 @@ export function createEngineSessionAdapter(
       };
       const callbackReason = () =>
         callbackError ? `callback failed: ${callbackError.message}` : undefined;
-      transition("dispatched", true);
+      transition(OPERATION_STATE.DISPATCHED, true);
       if (callbackError) void terminateProcess(callbackReason());
       const acknowledge = () => {
         if (acknowledgementSeen) return;
         acknowledgementSeen = true;
-        acknowledged = transition("acknowledged", true);
+        acknowledged = transition(OPERATION_STATE.ACKNOWLEDGED, true);
         if (!acknowledged) void terminateProcess(callbackReason());
       };
       const resetIdle = () => {
@@ -240,6 +251,9 @@ export function createEngineSessionAdapter(
       }
       const { readStream } = createSessionStreamObserver({
         attemptId,
+        clearResumeBinding: () => {
+          resumeBinding = undefined;
+        },
         engine: spawn.engine,
         onAcknowledged: acknowledge,
         onActivity: resetIdle,
@@ -255,6 +269,7 @@ export function createEngineSessionAdapter(
           if (ownedRuntime) void terminateProcess("authenticated terminal record");
         },
         privateValues,
+        ...(requestedResumeId ? { requestedResumeId } : {}),
         readResumeBinding: () => resumeBinding,
         stdout,
         writeResumeBinding: (binding) => {
@@ -274,8 +289,8 @@ export function createEngineSessionAdapter(
         config.graceMs ?? 3000,
       );
       const drains = Promise.all([
-        readStream(processHandle.stdout, "stdout"),
-        readStream(processHandle.stderr, "stderr"),
+        readStream(processHandle.stdout, ENGINE_OUTPUT_STREAM.STDOUT),
+        readStream(processHandle.stderr, ENGINE_OUTPUT_STREAM.STDERR),
       ]).catch(async (error) => {
         terminalError = normalizedAttemptError(error);
         await terminateProcess(`engine stream failed: ${terminalError.message}`);
@@ -290,7 +305,12 @@ export function createEngineSessionAdapter(
           invocation.cleanup?.();
           const exitCode = rootOutcome?.exitCode ?? processExitCode;
           terminationReason ??= noteOwnedOutputDrainFailure(rootOutcome, ownedRuntime);
-          if (config.protocol === "bridge" && exitCode === 0 && !acknowledgementSeen) acknowledge();
+          if (
+            config.protocol === ENGINE_SESSION_PROTOCOL.BRIDGE &&
+            exitCode === 0 &&
+            !acknowledgementSeen
+          )
+            acknowledge();
           const processRelease = ownedRuntime?.finalize(
             exitCode,
             authenticatedTerminal
@@ -304,15 +324,15 @@ export function createEngineSessionAdapter(
             (!terminationRequested || terminationReason === "authenticated terminal record") &&
             (!ownedRuntime || Boolean(processRelease)) &&
             (authenticatedTerminal !== null || exitCode === 0)
-              ? "completed"
-              : "ambiguous";
-          const terminalObserved = transition(state, true, state === "ambiguous");
-          if (state === "completed" && !terminalObserved) {
-            state = "ambiguous";
-            transition("ambiguous", true);
+              ? OPERATION_STATE.COMPLETED
+              : OPERATION_STATE.AMBIGUOUS;
+          const terminalObserved = transition(state, true, state === OPERATION_STATE.AMBIGUOUS);
+          if (state === OPERATION_STATE.COMPLETED && !terminalObserved) {
+            state = OPERATION_STATE.AMBIGUOUS;
+            transition(OPERATION_STATE.AMBIGUOUS, true);
           }
           const rawReason =
-            state === "completed"
+            state === OPERATION_STATE.COMPLETED
               ? undefined
               : (terminationReason ??
                 callbackReason() ??
@@ -321,52 +341,27 @@ export function createEngineSessionAdapter(
                   : exitCode === 0
                     ? undefined
                     : `engine exited ${exitCode}`));
-          const nativeIds = resumeBinding?.nativeSessionId ? [resumeBinding.nativeSessionId] : [];
-          const output = stdout.publicOutput(nativeIds, privateValues);
-          const reason = rawReason
-            ? sanitizePublicEngineText(rawReason, nativeIds, privateValues)
-            : undefined;
-          const ok =
-            state === "completed" &&
-            (authenticatedTerminal !== null || (exitCode === 0 && !rawReason));
-          const evidence = sanitizePublicValue(
-            {
-              attempt_id: attemptId,
-              engine: spawn.engine,
-              lifecycle: [...lifecycle],
-              state,
-              ok,
-              reason: reason ?? null,
-              native_session_status: resumeBinding ? "captured" : "unavailable",
-              process_release: processRelease ?? null,
-              isolation_evidence_ref: spawn.isolation?.evidence_ref ?? null,
-              provenance: spawn.provenance,
-              trace_metadata: spawn.trace_metadata,
-            },
-            nativeIds,
+          const { evidence, result } = projectSessionCompletion({
+            attemptId,
+            engine: spawn.engine,
+            lifecycle,
+            state,
+            rawReason,
+            resume: resumeBinding,
             privateValues,
-          );
+            processRelease,
+            isolationEvidenceRef: spawn.isolation?.evidence_ref ?? null,
+            provenance: spawn.provenance,
+            traceMetadata: spawn.trace_metadata,
+            stdout,
+            authenticatedTerminal,
+            exitCode,
+          });
           if (reservation) reservation.finalize(evidence);
           else if (config.writeEvidence) {
             const internalRef = await config.writeEvidence(attemptId, evidence);
             evidenceBinding = { attemptId, internalRef };
           }
-          const result: EngineSessionResult = {
-            attemptId,
-            engine: spawn.engine,
-            ok,
-            state,
-            lifecycle: [...lifecycle],
-            output,
-            summary: publicEngineSummary(
-              parseEngineSummary(output),
-              resumeBinding?.nativeSessionId,
-              privateValues,
-            ),
-            reason,
-            evidenceStatus: "persisted",
-            nativeSessionStatus: resumeBinding ? "captured" : "unavailable",
-          };
           if (!ownedRuntime || processRelease) {
             recordCompletedStartOutcome({
               store: startAuthorityStore,

@@ -1,3 +1,4 @@
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import { validateLineageHeadAuthorityChain } from "./lineage-head-authority.js";
 import type { ConversationLineageReadV1 } from "./lineage-reader.js";
 import {
@@ -56,21 +57,21 @@ export function validateLineageHeadForRead(
   if (value.candidate_heads.some((candidate) => !leaves.has(nodeKey(candidate))))
     throw new Error("lineage head candidate is not a leaf");
   if (
-    value.head_status === "ambiguous" &&
+    value.head_status === CONVERSATION_HEAD_STATUS.AMBIGUOUS &&
     (value.candidate_heads.length !== leaves.size ||
       value.candidate_heads.some((candidate) => !leaves.has(nodeKey(candidate))))
   )
     throw new Error("ambiguous lineage head omits a leaf");
-  if (value.head_status === "unclaimed" && leaves.size !== 1)
+  if (value.head_status === CONVERSATION_HEAD_STATUS.UNCLAIMED && leaves.size !== 1)
     throw new Error("unclaimed lineage head requires exactly one leaf");
   if (value.head_epoch === 0) {
     const expected = lineage.initial_head_candidate;
     if (!expected) throw new Error("initial lineage head has no eligible leaf");
-    if (value.head_status === "unclaimed") {
+    if (value.head_status === CONVERSATION_HEAD_STATUS.UNCLAIMED) {
       const candidate = value.candidate_heads[0];
       if (
         !candidate ||
-        expected.head_status !== "committed" ||
+        expected.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
         !expected.active ||
         nodeKey(candidate) !== nodeKey(expected.active) ||
         !validInitialSnapshotTime(value, lineage, expected)

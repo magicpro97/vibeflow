@@ -2,19 +2,20 @@
 title: Deployment
 description: How to deploy VibeFlow to git and npm — versioning, tarball verification, and publishing steps.
 category: how-to
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # VibeFlow — Deploy Plan (git + npm)
 
-Status of the package as verified by `npm pack --dry-run`:
-- `@magicpro97/vibeflow@0.7.0`, tarball **77 kB** / unpacked 252 kB.
-- Ships only: `dist/cli.js` (built), `README.md`, `LICENSE`, `docs/**`, `package.json`.
-- **No** `src/`, `test/`, `.vibeflow/`, `.env`, or secrets in the tarball (the `files` allow-list +
-  `.gitignore` keep them out). Verified.
+Treat package contents, size, version, tests, and coverage as live release evidence, not
+constants in this document. Before each publish, run `npm pack --dry-run` and inspect the
+current `package.json` `files` allow-list. The tarball must include the built CLI, README,
+license, docs, and declared runtime assets, and must exclude `src/`, `test/`, `.vibeflow/`,
+`.env`, and secrets.
 - `bin: { vf: ./dist/cli.js }`, `prepublishOnly: bun run build`, `publishConfig.access: public`,
   `engines.node >=18`, MIT license, `repository`/`homepage`/`bugs` fields present.
-- `bun run check` (typecheck+lint+test) green: **1285 tests, 100% line coverage**.
+- Record the exact fresh `bun run check` and `bun run coverage:check` outputs. Do not claim a
+  test count or coverage percentage from an older release.
 
 ## ⚠️ MUST CONFIRM before publishing
 1. **Repository URL** — I set `repository.url` to `git+https://github.com/magicpro97/vibeflow.git`
@@ -24,7 +25,8 @@ Status of the package as verified by `npm pack --dry-run`:
    exists on npm and you're a member, OR rename to an unscoped/owned name. Confirm you own the
    scope (`npm org ls vibeflow` / check npmjs.com). `publishConfig.access:"public"` is already set
    for a scoped public publish.
-3. **Version** — `0.7.0` is the current pre-1.0 release. `release-please` is wired (PR #51 follow-up); the next version bump will be done by the release-please bot on merge to `main`. Manual: bump `package.json:version`, run `release-please-config.json` generation, tag.
+3. **Version** — use the current `package.json` version and release-please state; never copy a
+   historical version from this guide into a tag or smoke command.
 
 ## Git deploy (do first)
 1. **Create the GitHub repo** (manual or `gh repo create <owner>/vibeflow --public --source=. --remote=origin`).
@@ -41,24 +43,24 @@ Status of the package as verified by `npm pack --dry-run`:
 ## npm deploy (after git)
 1. **Auth**: `npm login` (or `npm whoami` to confirm) — user runs this (interactive). For CI,
    an `NPM_TOKEN` + `npm publish` step.
-2. **Dry-run once more**: `npm publish --dry-run` — confirm the 77 kB tarball contents shown above.
+2. **Dry-run once more**: `npm publish --dry-run` — inspect the current size and contents.
 3. **Build is automatic**: `prepublishOnly` runs `bun run build` → `dist/cli.js`. Ensure `dist/` is
    NOT gitignored away from the publish (it's in `files`; npm builds it fresh via prepublishOnly,
    so a missing committed `dist/` is fine).
 4. **Publish**: `npm publish` (scope access already public). 
-5. **Smoke-test the published bin**: in a throwaway dir, `npx @magicpro97/vibeflow@0.7.0 doctor` →
+5. **Smoke-test the published bin**: in a throwaway dir, `npx @magicpro97/vibeflow@<version> doctor` →
    should print the environment check. Also `npx @magicpro97/vibeflow doctor --probe` if engines installed.
 
 ## Pre-publish checklist (gate — all must hold)
 - [ ] `repository`/`homepage`/`bugs` URLs corrected to the real repo (item ⚠️1).
 - [ ] `@vibeflow` npm scope owned/confirmed (item ⚠️2), or package renamed.
-- [ ] `bun run check` green (currently true: 1285 tests, 100% line coverage).
-- [ ] `npm pack --dry-run` shows no src/test/secret files (currently true).
+- [ ] Fresh `bun run check` and `bun run coverage:check` outputs are recorded without rounding or stale percentages.
+- [ ] Fresh `npm pack --dry-run` shows no src/test/secret files.
 - [ ] `git push -u origin main` succeeded + `vX.Y.Z` tag pushed.
 - [ ] `LICENSE` present (true) and README install line matches the final package name.
 
 ## Verification (post-deploy)
-- `npx @magicpro97/vibeflow@0.7.0 doctor` exits 0 and prints the tool check.
+- `npx @magicpro97/vibeflow@<version> doctor` exits 0 and prints the tool check.
 - The GitHub repo shows the 8-commit history; the npm page renders README + the docs links resolve.
 - `git clone <repo> && cd vibeflow && bun install && bun run check` reproduces green from a fresh
   clone (proves the repo is self-contained, zero-runtime-deps).
@@ -72,6 +74,10 @@ Cross-platform support is enforced in three layers:
 2. biome.json              # formatter.lineEnding = "lf" — formatter normalises newlines
 3. hook scripts            # risk classification + path joins use path.sep, never `/` or `\`
 ```
+
+The workflow also defines a real `windows-latest` PID, Job Object, release, and orphan smoke
+job. Treat live Windows evidence as pending until that job passes for the release commit; a
+local macOS/Linux result does not prove the Windows path.
 
 The `.gitattributes` file pins line endings so Windows checkouts + autocrlf
 cannot rewrite `*.ts` / `*.js` / `*.json` source. Biome's `lineEnding: "lf"`

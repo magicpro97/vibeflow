@@ -189,7 +189,7 @@ const samples: TraceEvent[] = [
   { type: "artifact_created", payload: { artifact_id: "a", artifact_type: "plan", ref: "r" } },
   {
     type: "artifact_updated",
-    payload: { artifact_id: "a", artifact_type: "anything", ref: "r", previous_ref: "p" },
+    payload: { artifact_id: "a", artifact_type: "plan", ref: "r", previous_ref: "p" },
   },
   {
     type: "native_history_reconciled",
@@ -1054,6 +1054,20 @@ test("rejects malformed nested values, exact envelopes, and private fields", asy
         },
       },
       { ...created, payload: { artifact_id: "a", artifact_type: "bad", ref: "r" } },
+      {
+        type: "synthesis_completed",
+        payload: { decision_matrix_ref: null, baseline_comparison_ref: "r" },
+      },
+      { type: "artifact_created", payload: { artifact_id: "a", artifact_type: "plan", ref: null } },
+      {
+        type: "artifact_updated",
+        payload: {
+          artifact_id: "a",
+          artifact_type: "anything",
+          ref: "r",
+          previous_ref: "p",
+        },
+      },
       { type: "unknown", payload: {} },
       { type: "user_message", payload: { content: "x", target_participants: "all" }, extra: true },
       { type: "user_message", payload: { content: "x", target_participants: "all", raw_env: "x" } },

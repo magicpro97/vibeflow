@@ -6,6 +6,7 @@
 // below are byte-identical to the originals in orchestrate.ts.
 
 import { spawnSync as _spawnSync } from "node:child_process";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 
 // ponytail: inlined from seams.ts (#391) — once-only tip state
 export const tipState = { shown: false };
@@ -21,7 +22,7 @@ export function focusTerminal(
     termProgram?: string;
   } = {},
 ): void {
-  if ((inject.platform ?? process.platform) !== "darwin") return;
+  if ((inject.platform ?? process.platform) !== RUNTIME_PLATFORM.DARWIN) return;
   const run =
     inject.run ??
     ((c, a) => {

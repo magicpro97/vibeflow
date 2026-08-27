@@ -437,6 +437,34 @@ describe("installNodeBunShim", () => {
     await cookies.stop();
   });
 
+  test("settles readiness from the exact listening or startup error event", async () => {
+    const harness = makeHarness();
+    const listening = harness.shim.serve({
+      fetch() {
+        return { status: 204, headers: iterableHeaders(null), body: null };
+      },
+    });
+    const listeningServer = serverAt(harness.servers, 0);
+    expect(listeningServer.listenerCount("listening")).toBe(1);
+    expect(listeningServer.listenerCount("error")).toBe(1);
+    listeningServer.emit("listening");
+    await listening.ready;
+    expect(listeningServer.listenerCount("listening")).toBe(0);
+    expect(listeningServer.listenerCount("error")).toBe(0);
+
+    const failed = harness.shim.serve({
+      fetch() {
+        return { status: 204, headers: iterableHeaders(null), body: null };
+      },
+    });
+    const failedServer = serverAt(harness.servers, 1);
+    const startupError = new Error("listen failed");
+    failedServer.emit("error", startupError);
+    await expect(failed.ready).rejects.toBe(startupError);
+    expect(failedServer.listenerCount("listening")).toBe(0);
+    expect(failedServer.listenerCount("error")).toBe(0);
+  });
+
   test("settles response backpressure through drain, close and destroyed paths", async () => {
     for (const mode of ["drain", "close", "destroyed"] as const) {
       const harness = makeHarness();

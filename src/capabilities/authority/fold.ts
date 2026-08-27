@@ -1,3 +1,8 @@
+import {
+  CAPABILITY_AUTHORITY_CHANGE,
+  CAPABILITY_GRANT_TRANSITION,
+} from "../../actions/capability-security-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import { CapabilityValidationError, bytewise } from "../wire/primitives.js";
 import {
@@ -33,7 +38,7 @@ export interface GrantFoldV1 {
 
 export function foldGrantFrames(
   frames: readonly GrantFrameV1[],
-  scope: "project" | "user",
+  scope: CapabilityScope,
   scopeIdentityDigest: string,
 ): GrantFoldV1 {
   const latest = new Map<string, GrantFrameV1>();
@@ -54,17 +59,21 @@ export function foldGrantFrames(
         `frames[${index}].authority_epoch`,
       );
     const prior = latest.get(frame.grant_id);
-    if (frame.transition === "issued" ? prior !== undefined : prior === undefined)
+    if (
+      frame.transition === CAPABILITY_GRANT_TRANSITION.ISSUED
+        ? prior !== undefined
+        : prior === undefined
+    )
       throw new CapabilityValidationError(
         "grant transition has invalid predecessor",
         `frames[${index}]`,
       );
-    if (prior?.transition === "revoked")
+    if (prior?.transition === CAPABILITY_GRANT_TRANSITION.REVOKED)
       throw new CapabilityValidationError(
         "revoked grant authority is terminal",
         `frames[${index}]`,
       );
-    if (frame.transition === "revoked" && prior) {
+    if (frame.transition === CAPABILITY_GRANT_TRANSITION.REVOKED && prior) {
       const stable = (value: GrantFrameV1) => ({
         grant_id: value.grant_id,
         scope: value.scope,
@@ -94,11 +103,26 @@ export function foldGrantFrames(
 }
 
 export type AuthorityTransitionEvidenceV1 =
-  | { change: "grant-changed"; grant_frames: readonly GrantFrameV1[] }
-  | { change: "policy-changed"; policy_frames: readonly PolicyAuthorityFrameV1[] }
-  | { change: "secret-revoked"; secret_frames: readonly SecretRevocationFrameV1[] }
-  | { change: "registry-trust-changed"; trust_frames: readonly RegistryTrustKeyFrameV1[] }
-  | { change: "authority-repaired"; checkpoint_head: AuthorityEpochHeadV1 };
+  | {
+      change: typeof CAPABILITY_AUTHORITY_CHANGE.GRANT_CHANGED;
+      grant_frames: readonly GrantFrameV1[];
+    }
+  | {
+      change: typeof CAPABILITY_AUTHORITY_CHANGE.POLICY_CHANGED;
+      policy_frames: readonly PolicyAuthorityFrameV1[];
+    }
+  | {
+      change: typeof CAPABILITY_AUTHORITY_CHANGE.SECRET_REVOKED;
+      secret_frames: readonly SecretRevocationFrameV1[];
+    }
+  | {
+      change: typeof CAPABILITY_AUTHORITY_CHANGE.REGISTRY_TRUST_CHANGED;
+      trust_frames: readonly RegistryTrustKeyFrameV1[];
+    }
+  | {
+      change: typeof CAPABILITY_AUTHORITY_CHANGE.AUTHORITY_REPAIRED;
+      checkpoint_head: AuthorityEpochHeadV1;
+    };
 
 function assertStagedEventIdentity(
   record: {
@@ -134,7 +158,7 @@ function validateTransitionEvidence(
 ): void {
   if (!evidence || evidence.change !== event.change)
     throw new CapabilityValidationError("authority event evidence kind mismatch", "evidence");
-  if (evidence.change === "grant-changed") {
+  if (evidence.change === CAPABILITY_AUTHORITY_CHANGE.GRANT_CHANGED) {
     const folded = foldGrantFrames(evidence.grant_frames, event.scope, event.scope_identity_digest);
     const staged = evidence.grant_frames.at(-1);
     const priorFold = foldGrantFrames(
@@ -161,7 +185,7 @@ function validateTransitionEvidence(
         "evidence",
       );
     assertStagedEventIdentity(staged, event);
-  } else if (evidence.change === "policy-changed") {
+  } else if (evidence.change === CAPABILITY_AUTHORITY_CHANGE.POLICY_CHANGED) {
     const folded = foldPolicyFrames(
       evidence.policy_frames,
       event.scope,
@@ -195,7 +219,7 @@ function validateTransitionEvidence(
         "evidence",
       );
     assertStagedEventIdentity(staged, event);
-  } else if (evidence.change === "secret-revoked") {
+  } else if (evidence.change === CAPABILITY_AUTHORITY_CHANGE.SECRET_REVOKED) {
     const digest = foldSecretRevocations(
       evidence.secret_frames,
       event.scope,
@@ -218,7 +242,7 @@ function validateTransitionEvidence(
         "evidence",
       );
     assertStagedEventIdentity(staged, event);
-  } else if (evidence.change === "registry-trust-changed") {
+  } else if (evidence.change === CAPABILITY_AUTHORITY_CHANGE.REGISTRY_TRUST_CHANGED) {
     foldTrustFrames(evidence.trust_frames);
     const staged = evidence.trust_frames.at(-1);
     if (
@@ -256,7 +280,7 @@ function validateTransitionEvidence(
 
 export function foldSecretRevocations(
   frames: readonly SecretRevocationFrameV1[],
-  scope: "project" | "user",
+  scope: CapabilityScope,
   scopeIdentityDigest: string,
 ): string {
   let previous: string | null = null;
@@ -324,11 +348,11 @@ export function applyAuthorityEvent(
       "event.prior_state",
     );
   const expectedChanges: Record<AuthorityEpochEventV1["change"], string[]> = {
-    "grant-changed": ["grant_head_digest", "grant_digest"],
-    "policy-changed": ["policy_head_digest", "policy_digest"],
-    "secret-revoked": ["secret_revocation_digest"],
-    "registry-trust-changed": ["trust_head_digest", "trust_epoch"],
-    "authority-repaired": [],
+    [CAPABILITY_AUTHORITY_CHANGE.GRANT_CHANGED]: ["grant_head_digest", "grant_digest"],
+    [CAPABILITY_AUTHORITY_CHANGE.POLICY_CHANGED]: ["policy_head_digest", "policy_digest"],
+    [CAPABILITY_AUTHORITY_CHANGE.SECRET_REVOKED]: ["secret_revocation_digest"],
+    [CAPABILITY_AUTHORITY_CHANGE.REGISTRY_TRUST_CHANGED]: ["trust_head_digest", "trust_epoch"],
+    [CAPABILITY_AUTHORITY_CHANGE.AUTHORITY_REPAIRED]: [],
   };
   const changed = changedFields(event).sort(bytewise);
   const allowed = expectedChanges[event.change].sort(bytewise);

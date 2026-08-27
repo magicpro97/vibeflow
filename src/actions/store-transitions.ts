@@ -7,6 +7,14 @@ import {
 } from "./authority-proofs.js";
 import { ActionConflictError } from "./errors.js";
 import type { ActionFilePersistence } from "./persistence.js";
+import {
+  ACTION_AUTHORITY_EVENT_KIND,
+  ACTION_OPERATION_STATE,
+  type ActionOperationReviewInvalidationState,
+  isActionOperationProposalOpenState,
+} from "./protocol-contract.js";
+import { ACTION_DECISION } from "./public-action-contract.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import { materializeAuthorityEvent } from "./records.js";
 import type {
   ActionApprovalV1,
@@ -28,14 +36,21 @@ export function revalidateReview(
   nowEpoch: number,
   snapshot: ActionAuthoritySnapshotV1,
   authority: ActionRequestAuthorityV1,
-  decision: "approved" | "denied",
+  decision: ActionApprovalV1["decision"],
   lock: ProcessLock,
 ): ReviewAuthorityProofV1 {
   const now = iso(nowEpoch);
   if (Date.parse(snapshot.proposal.expires_at) <= Date.parse(now)) {
-    appendProposalTerminal(files, lock, snapshot, "expired", now, "proposal-expired");
+    appendProposalTerminal(
+      files,
+      lock,
+      snapshot,
+      ACTION_OPERATION_STATE.EXPIRED,
+      now,
+      "proposal-expired",
+    );
     throw new ActionConflictError(
-      "stale_proposal",
+      PUBLIC_ERROR_CODE.STALE_PROPOSAL,
       "Proposal expired before review.",
       snapshot.proposal.proposal_id,
     );
@@ -67,9 +82,12 @@ export function appendApproval(
       snapshot.events.length,
       snapshot.events.at(-1)?.event_digest ?? null,
       {
-        kind: "approval-decision",
-        from: "pending_review",
-        to: approval.decision === "approved" ? "approved" : "denied",
+        kind: ACTION_AUTHORITY_EVENT_KIND.APPROVAL_DECISION,
+        from: ACTION_OPERATION_STATE.PENDING_REVIEW,
+        to:
+          approval.decision === ACTION_DECISION.APPROVED
+            ? ACTION_OPERATION_STATE.APPROVED
+            : ACTION_OPERATION_STATE.DENIED,
         approval,
       },
       approval.decided_at,
@@ -88,9 +106,16 @@ export function assertDispatchLease(
     Date.parse(snapshot.approval?.expires_at ?? ""),
   );
   if (!Number.isFinite(expiry) || expiry <= Date.parse(now)) {
-    appendProposalTerminal(files, lock, snapshot, "expired", now, "approval-expired");
+    appendProposalTerminal(
+      files,
+      lock,
+      snapshot,
+      ACTION_OPERATION_STATE.EXPIRED,
+      now,
+      "approval-expired",
+    );
     throw new ActionConflictError(
-      "stale_proposal",
+      PUBLIC_ERROR_CODE.STALE_PROPOSAL,
       "Approval expired before dispatch.",
       snapshot.proposal.proposal_id,
     );
@@ -104,9 +129,16 @@ export function handleStaleResolver(
   error: unknown,
 ): never {
   if (!(error instanceof ActionAuthorityStaleError)) throw error;
-  appendProposalTerminal(files, lock, snapshot, "stale", error.recorded_at, error.reason_code);
+  appendProposalTerminal(
+    files,
+    lock,
+    snapshot,
+    ACTION_OPERATION_STATE.STALE,
+    error.recorded_at,
+    error.reason_code,
+  );
   throw new ActionConflictError(
-    "stale_proposal",
+    PUBLIC_ERROR_CODE.STALE_PROPOSAL,
     "Proposal authority changed before commit.",
     snapshot.proposal.proposal_id,
   );
@@ -116,11 +148,11 @@ export function appendProposalTerminal(
   files: ActionFilePersistence,
   lock: ProcessLock,
   snapshot: ActionAuthoritySnapshotV1,
-  to: "expired" | "stale",
+  to: ActionOperationReviewInvalidationState,
   recordedAt: string,
   reasonCode: string,
 ): void {
-  if (snapshot.state !== "pending_review" && snapshot.state !== "approved")
+  if (!isActionOperationProposalOpenState(snapshot.state))
     throw new Error("proposal-only terminal transition has an invalid source");
   const previousAt = Date.parse(
     snapshot.events.at(-1)?.recorded_at ?? snapshot.proposal.created_at,
@@ -134,7 +166,7 @@ export function appendProposalTerminal(
       snapshot.events.length,
       snapshot.events.at(-1)?.event_digest ?? null,
       {
-        kind: "state-transition",
+        kind: ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION,
         from: snapshot.state,
         to,
         operation_id: null,

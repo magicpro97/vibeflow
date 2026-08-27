@@ -1,13 +1,25 @@
-export const REACTION_EMOJIS = ["👍", "👎", "❤️", "🎉", "👀", "🤔", "✅", "❗"] as const;
+import type {
+  CONVERSATION_INTERACTION_ENTRY_KIND,
+  CONVERSATION_INTERACTION_SCHEMA_VERSION,
+  ConversationInteractionActorKind,
+  ConversationInteractionState,
+  ConversationReactionOperationKind,
+  ReactionEmojiV1,
+} from "./conversation-interaction-contract.js";
+import type { ConversationMessageQueueQuoteTargetKindV1 } from "./conversation-message-queue-contract.js";
 
-export type ReactionEmojiV1 = (typeof REACTION_EMOJIS)[number];
+export {
+  CONVERSATION_REACTION_EMOJI,
+  REACTION_EMOJIS,
+  type ReactionEmojiV1,
+} from "./conversation-interaction-contract.js";
 
 export interface PublicMessageLocatorV1 {
   root_session_id: string;
   conversation_id: string;
   revision_id: string;
   target_event_id: string;
-  target_kind: "user-message" | "completed-agent-response";
+  target_kind: ConversationMessageQueueQuoteTargetKindV1;
   content_digest: string;
 }
 
@@ -29,12 +41,12 @@ export interface PublicReactionProjectionV1 {
 }
 
 export interface ConversationReactionOperationV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_INTERACTION_SCHEMA_VERSION;
   operation_id: string;
   root_session_id: string;
   actor_public_id: string;
-  actor_kind: "human" | "participant";
-  operation: "add" | "remove";
+  actor_kind: ConversationInteractionActorKind;
+  operation: ConversationReactionOperationKind;
   target: PublicMessageLocatorV1;
   emoji: ReactionEmojiV1;
   prior_interaction_head_digest: string;
@@ -43,7 +55,7 @@ export interface ConversationReactionOperationV1 {
 }
 
 export interface ConversationParticipantSocialIntentV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_INTERACTION_SCHEMA_VERSION;
   intent_id: string;
   root_session_id: string;
   actor_participant_id: string;
@@ -57,11 +69,17 @@ export interface ConversationParticipantSocialIntentV1 {
 }
 
 export type ConversationInteractionEntryV1 =
-  | { kind: "reaction-operation"; operation: ConversationReactionOperationV1 }
-  | { kind: "participant-social-intent"; intent: ConversationParticipantSocialIntentV1 };
+  | {
+      kind: typeof CONVERSATION_INTERACTION_ENTRY_KIND.REACTION_OPERATION;
+      operation: ConversationReactionOperationV1;
+    }
+  | {
+      kind: typeof CONVERSATION_INTERACTION_ENTRY_KIND.PARTICIPANT_SOCIAL_INTENT;
+      intent: ConversationParticipantSocialIntentV1;
+    };
 
 export interface ConversationInteractionFrameV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_INTERACTION_SCHEMA_VERSION;
   root_session_id: string;
   sequence: number;
   previous_frame_digest: string | null;
@@ -70,7 +88,7 @@ export interface ConversationInteractionFrameV1 {
 }
 
 export interface ConversationInteractionHeadV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_INTERACTION_SCHEMA_VERSION;
   root_session_id: string;
   sequence: number;
   last_frame_digest: string | null;
@@ -79,7 +97,7 @@ export interface ConversationInteractionHeadV1 {
 }
 
 export interface ConversationInteractionFoldV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_INTERACTION_SCHEMA_VERSION;
   root_session_id: string;
   head_digest: string;
   head_sequence: number;
@@ -90,7 +108,7 @@ export interface ConversationInteractionFoldV1 {
 }
 
 export interface AgentReactionRequestV1 {
-  operation: "add" | "remove";
+  operation: ConversationReactionOperationKind;
   target: PublicMessageLocatorV1;
   emoji: ReactionEmojiV1;
 }
@@ -102,8 +120,8 @@ export interface AgentSocialIntentRequestV1 {
 }
 
 export interface ConversationInteractionProjectionV1 {
-  schema_version: "1.0";
-  state: "ready" | "degraded";
+  schema_version: typeof CONVERSATION_INTERACTION_SCHEMA_VERSION;
+  state: ConversationInteractionState;
   root_session_id: string;
   interaction_head_digest: string | null;
   interaction_head_sequence: number;
@@ -118,7 +136,7 @@ export interface ConversationInteractionProjectionV1 {
 }
 
 export interface ConversationTimelineInteractionV1 {
-  state: "ready" | "degraded";
+  state: ConversationInteractionState;
   message_locator: PublicMessageLocatorV1 | null;
   quote_refs: Array<{
     quoting_message_id: string;

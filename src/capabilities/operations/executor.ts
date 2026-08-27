@@ -1,4 +1,9 @@
 import { existsSync } from "node:fs";
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
+import {
+  CAPABILITY_PLAN_STATUS,
+  CAPABILITY_RUNTIME_ERROR_CODE,
+} from "../../core/capability-contract.js";
 import { validateCapabilityPlanningGraph } from "../planning/execution-graph-validation.js";
 import type {
   CapabilityDurablePlanningGraphV1,
@@ -7,6 +12,11 @@ import type {
 import { writeCapabilityOperationHeader } from "../storage/operation-store.js";
 import { capabilityOperationPaths } from "../storage/paths.js";
 import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
+import {
+  CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_OPERATION_RECOVERY_PHASE,
+} from "../wire/operation.js";
 import { capabilityRecoveryFrontier } from "./authority-frontier.js";
 import { reconcileCrashPartialEffect } from "./crash-reconciliation.js";
 import { CapabilityRuntimeError, runtimeCodeForRefusal } from "./errors.js";
@@ -79,12 +89,12 @@ export class CapabilityOperationExecutorV1 {
     if (plan.scope !== this.options.storage.paths.scope)
       throw new CapabilityRuntimeError(
         "plan scope is not owned by this executor",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
-    if (plan.status === "action-required")
+    if (plan.status === CAPABILITY_PLAN_STATUS.ACTION_REQUIRED)
       throw new CapabilityRuntimeError(
         "plan requires manual/native/unsupported action",
-        "action-required",
+        CAPABILITY_RUNTIME_ERROR_CODE.ACTION_REQUIRED,
       );
     this.assertMutationAuthorities();
     const operationId = this.operationId(graph, request.authorization);
@@ -141,11 +151,11 @@ export class CapabilityOperationExecutorV1 {
       });
       if (preflight) return preflight;
       const recoveringFromNeedsRecovery =
-        this.#journal.operationState(operationId) === "needs_recovery";
+        this.#journal.operationState(operationId) === ACTION_OPERATION_STATE.NEEDS_RECOVERY;
       const unresolved = this.#journal.unresolvedReceipt(operationId);
       // A durable prepared receipt proves that no effect frontier was entered.
       // continueCapabilityOperation advances that exact receipt without appending a duplicate.
-      if (unresolved && unresolved.state !== "prepared") {
+      if (unresolved && unresolved.state !== CAPABILITY_ADAPTER_RECEIPT_STATE.PREPARED) {
         const unresolvedState = unresolved.state;
         const reconciled = capabilityRecoveryFrontier({
           graph,
@@ -156,7 +166,9 @@ export class CapabilityOperationExecutorV1 {
               plan,
               unresolved.plan_id,
               unresolved.step_id,
-              unresolved.recovery_phase === "rollback" ? "rollback" : "intent",
+              unresolved.recovery_phase === CAPABILITY_OPERATION_RECOVERY_PHASE.ROLLBACK
+                ? CAPABILITY_OPERATION_RECOVERY_PHASE.ROLLBACK
+                : "intent",
             );
             const privatePayload = this.options.broker.resolvePrivatePayload(
               descriptor.private_payload_binding,
@@ -174,21 +186,21 @@ export class CapabilityOperationExecutorV1 {
                   privatePayload,
                   broker: this.options.broker,
                 })
-              : unresolved.recovery_phase === "forward" &&
+              : unresolved.recovery_phase === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD &&
                   observed === descriptor.resource.expected_postimage_sha256
-                ? "applied"
-                : unresolved.recovery_phase === "rollback" &&
+                ? CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED
+                : unresolved.recovery_phase === CAPABILITY_OPERATION_RECOVERY_PHASE.ROLLBACK &&
                     observed === descriptor.resource.expected_preimage_sha256
-                  ? "reversed"
-                  : unresolved.recovery_phase === "forward" &&
+                  ? CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSED
+                  : unresolved.recovery_phase === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD &&
                       observed === descriptor.resource.expected_preimage_sha256
-                    ? "failed"
-                    : "uncertain";
+                    ? CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED
+                    : CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN;
             const receiptError =
-              state === "failed"
-                ? "effect-not-applied"
-                : state === "uncertain"
-                  ? "third-state"
+              state === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED
+                ? CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE.EFFECT_NOT_APPLIED
+                : state === CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN
+                  ? CAPABILITY_ADAPTER_RECEIPT_ERROR_CODE.THIRD_STATE
                   : null;
             const observedAt = this.options.now();
             this.#journal.appendReceipt({
@@ -216,15 +228,25 @@ export class CapabilityOperationExecutorV1 {
           },
         });
         if (
-          reconciled === "failed" ||
-          reconciled === "reversed" ||
-          (recoveringFromNeedsRecovery && reconciled === "applied")
+          reconciled === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED ||
+          reconciled === CAPABILITY_ADAPTER_RECEIPT_STATE.REVERSED ||
+          (recoveringFromNeedsRecovery && reconciled === CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED)
         ) {
-          return this.failAfterRollback(graph, operationId, held, "apply-failed");
+          return this.failAfterRollback(
+            graph,
+            operationId,
+            held,
+            CAPABILITY_RUNTIME_ERROR_CODE.APPLY_FAILED,
+          );
         }
-        if (reconciled === "uncertain") {
+        if (reconciled === CAPABILITY_ADAPTER_RECEIPT_STATE.UNCERTAIN) {
           if (!recoveringFromNeedsRecovery)
-            this.#journal.terminal(operationId, "needs_recovery", "scope-needs-recovery", held);
+            this.#journal.terminal(
+              operationId,
+              ACTION_OPERATION_STATE.NEEDS_RECOVERY,
+              CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+              held,
+            );
           return foldCapabilityOperation(this.options.storage, operationId, this.actionAuthority());
         }
       }
@@ -289,14 +311,20 @@ export class CapabilityOperationExecutorV1 {
     const current = this.options.storage.readStatus();
     const currentDigest = current.lock?.content_digest ?? null;
     if (current.state === "corrupt")
-      throw new CapabilityRuntimeError("capability scope needs recovery", "scope-needs-recovery");
+      throw new CapabilityRuntimeError(
+        "capability scope needs recovery",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+      );
     if (currentDigest !== plan.base_lock_digest)
-      throw new CapabilityRuntimeError("capability base generation changed", "scope-base-stale");
+      throw new CapabilityRuntimeError(
+        "capability base generation changed",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_BASE_STALE,
+      );
     const pointer = readCapabilityHealthCurrent(this.options.storage);
     if (current.lock !== null && pointer === null)
       throw new CapabilityRuntimeError(
         "capability base lock has no selected health inventory",
-        "scope-needs-recovery",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
       );
     if (pointer)
       readCapabilityHealthInventory(this.options.storage, pointer.inventory_digest, current.lock);
@@ -320,7 +348,7 @@ export class CapabilityOperationExecutorV1 {
     if (!this.options.sourceAuthority || !this.options.actionAuthority)
       throw new CapabilityRuntimeError(
         "capability mutation authorities are unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
   }
 
@@ -329,7 +357,7 @@ export class CapabilityOperationExecutorV1 {
     if (!authority)
       throw new CapabilityRuntimeError(
         "capability action authority is unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     return authority;
   }

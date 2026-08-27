@@ -1,3 +1,4 @@
+import { HOOK_DECISION, type HookConfirmationDecision } from "../core/hook-contract.js";
 // In-memory map of pending hook approvals.
 // Key = unique id (crypto.randomUUID). Value = resolver function + callback.
 // No timer — waits indefinitely until resolved or server restarts.
@@ -7,8 +8,8 @@ interface PendingHook {
   id: string;
   input: HookInput;
   result: HookResult;
-  resolve: (decision: "allow" | "block") => void;
-  callbacks: Array<(decision: "allow" | "block") => void>;
+  resolve: (decision: HookConfirmationDecision) => void;
+  callbacks: Array<(decision: HookConfirmationDecision) => void>;
 }
 
 const pending = new Map<string, PendingHook>();
@@ -17,13 +18,13 @@ export function registerPending(
   id: string,
   input: HookInput,
   result: HookResult,
-): Promise<"allow" | "block"> {
+): Promise<HookConfirmationDecision> {
   return new Promise((resolve) => {
     pending.set(id, { id, input, result, resolve, callbacks: [] });
   });
 }
 
-export function resolvePending(id: string, decision: "allow" | "block"): boolean {
+export function resolvePending(id: string, decision: HookConfirmationDecision): boolean {
   const p = pending.get(id);
   if (!p) return false;
   pending.delete(id);
@@ -39,11 +40,14 @@ export function getPending(id: string): Omit<PendingHook, "resolve" | "callbacks
 }
 
 /** Register a one-shot callback that fires when resolvePending(id) is called. */
-export function onPendingResolved(id: string, cb: (decision: "allow" | "block") => void): void {
+export function onPendingResolved(
+  id: string,
+  cb: (decision: HookConfirmationDecision) => void,
+): void {
   const p = pending.get(id);
   if (!p) {
     // Already resolved (race) — fire immediately with block as safe default
-    cb("block");
+    cb(HOOK_DECISION.BLOCK);
     return;
   }
   p.callbacks.push(cb);

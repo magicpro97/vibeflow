@@ -1,4 +1,9 @@
 import {
+  ACTION_AUTHORITY_BINDING_MODE,
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+  ACTION_PRODUCER_REQUEST_BINDING_KIND,
+  ACTION_ROOT_LOCATOR_KIND,
   type ActionRequestAuthorityV1,
   type CanonicalActionRequestV1,
   canonicalActionRequestDigest,
@@ -45,7 +50,10 @@ export function standaloneCapabilityCanonicalRequest(
     principal_digest: authority.principal_digest,
     authority_scope_digest: authority.authority_scope_digest,
     scope: request.scope,
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     action: structuredClone(request.action),
   };
 }
@@ -68,15 +76,18 @@ export function materializeStandaloneCapabilityProposal(input: {
     origin_event_id: null,
     domain: "capability",
     action_root_locator: {
-      kind: "capability",
+      kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
       scope: request.scope,
       scope_identity_digest: service.options.storage.scopeIdentityDigest,
     },
     producer_request_binding: {
-      kind: "canonical-action-request",
+      kind: ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST,
       digest: canonicalActionRequestDigest(canonical_request),
     },
-    planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+    planning_options: {
+      mode: ACTION_PLANNING_MODE.DURABLE,
+      network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+    },
     execution_object_closure_digest: plan.execution_closure_digest,
     base: {
       root_session_id: null,
@@ -92,7 +103,7 @@ export function materializeStandaloneCapabilityProposal(input: {
       capability_lock_digest: plan.base_lock_digest,
       capability_parent_generation_digests: plan.base_lock_digest ? [plan.base_lock_digest] : [],
       user_prerequisites: prerequisites(plan),
-      authority_binding_mode: "current",
+      authority_binding_mode: ACTION_AUTHORITY_BINDING_MODE.CURRENT,
       authority_epoch: plan.runtime_closure.authority.authority_epoch,
       authority_head_digest: plan.runtime_closure.authority.authority_head_digest,
       repair_authorization_binding_digest: null,

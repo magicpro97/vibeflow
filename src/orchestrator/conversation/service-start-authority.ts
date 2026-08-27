@@ -1,5 +1,9 @@
 import { canonicalJsonBytes } from "../../durability/index.js";
 import {
+  CONVERSATION_TERMINAL_LIFECYCLE,
+  type ConversationTerminalLifecycleV1,
+} from "./conversation-public-wire-contract.js";
+import {
   bindingAuthorities,
   configurationEmissions,
   isTerminalLifecycle,
@@ -70,7 +74,7 @@ function assertAllocation(value: ConversationAllocatedIdentityV1): void {
 function terminalResult(
   manifest: ConversationManifest,
   operationId: string,
-  lifecycle: "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED",
+  lifecycle: ConversationTerminalLifecycleV1,
 ): ConversationCreateResult {
   return {
     conversation_id: manifest.conversation_id,
@@ -78,11 +82,11 @@ function terminalResult(
     result: {
       operation_id: operationId,
       status:
-        lifecycle === "COMPLETED"
+        lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED
           ? "completed"
-          : lifecycle === "STOPPED"
+          : lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.STOPPED
             ? "stopped"
-            : lifecycle === "FAILED"
+            : lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.FAILED
               ? "failed"
               : "aborted",
       artifact_refs: [],

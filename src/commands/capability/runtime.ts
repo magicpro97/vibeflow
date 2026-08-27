@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { actionIdempotencyScopeDigest } from "../../actions/idempotency.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { ActionRequestAuthorityV1 } from "../../actions/types.js";
 import {
   type CapabilityRuntimeFactoryV1,
@@ -7,6 +8,7 @@ import {
 } from "../../capabilities/runtime-factory.js";
 import type { CapabilityFabricServiceV1 } from "../../capabilities/service.js";
 import { VERSION } from "../../core.js";
+import { CAPABILITY_SCOPE } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type { Scope } from "./parser-types.js";
 
@@ -26,7 +28,7 @@ export interface CapabilityCommandRuntimeOptions {
 }
 
 export function commandScope(scope: Scope | undefined): Scope {
-  return scope ?? "project";
+  return scope ?? CAPABILITY_SCOPE.PROJECT;
 }
 
 export function commandRuntime(
@@ -62,7 +64,7 @@ export function cliAuthority(
       actor,
     }),
     authority_scope_digest: actionIdempotencyScopeDigest({
-      kind: "capability",
+      kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
       scope,
       scope_identity_digest,
     }),

@@ -1,7 +1,9 @@
+import { CAPABILITY_SOURCE_KIND } from "../../actions/capability-security-contract.js";
 import { actionIdempotencyScopeDigest } from "../../actions/idempotency.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { ActionRequestAuthorityV1, EngineName } from "../../actions/types.js";
 import { canonicalJson } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { FilesystemCapabilityPackageCacheV1 } from "../source/package-cache-reader.js";
 import { bytewise } from "../wire/primitives.js";
 import { capabilityClosurePackageSet } from "./closure-packages.js";
@@ -39,13 +41,16 @@ export function bindCapabilityIntentExecutionClosure(input: {
   )
     throw new CapabilityRuntimeError(
       "source request authority belongs to another action root",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
   const context = capabilitySourceRequestContext({
     action: input.action,
     planningOptions: input.planningOptions,
     authority: input.requestAuthority,
-    origin: input.actionRootLocator.kind === "conversation" ? "conversation" : "standalone",
+    origin:
+      input.actionRootLocator.kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION
+        ? "conversation"
+        : "standalone",
   });
   const sourceBound = capabilityClosurePackageSet(input.desired, input.effects).map((pkg) => {
     const engines = input.targets
@@ -60,7 +65,9 @@ export function bindCapabilityIntentExecutionClosure(input: {
       policyDigest: input.runtimeAuthority.policy_digest,
       now: input.now,
       legacyCandidateDigest:
-        pkg.pin.source.kind === "legacy-adopt" ? input.legacyCandidateDigest : null,
+        pkg.pin.source.kind === CAPABILITY_SOURCE_KIND.LEGACY_ADOPT
+          ? input.legacyCandidateDigest
+          : null,
     });
   });
   const privateBound = bindCapabilityExecutionPrivateInputs({
@@ -76,7 +83,7 @@ export function bindCapabilityIntentExecutionClosure(input: {
     if (!bound || canonicalJson(bound.pin) !== canonicalJson(pkg.pin))
       throw new CapabilityRuntimeError(
         "execution binding escaped the resolved package set",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     return bound;
   };

@@ -1,3 +1,4 @@
+import { ROLE_MODEL, ROLE_SANDBOX, ROLE_WORKFLOW_TOOL_INTENTS } from "../core/role-contract.js";
 import type { ProjectProfile } from "../scanner.js";
 import { type RoleSpec, conversationRoleSpecs } from "./role.js";
 
@@ -269,54 +270,54 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       description:
         "CLI specialist. Use proactively for any CLI flag, subcommand, or help-text work in this repo.",
       body: cliEngineBody(ctx),
-      tools: ["read", "write", "edit", "bash", "grep", "glob"],
-      model: "sonnet",
-      sandbox: "workspace-write",
+      tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+      model: ROLE_MODEL.SONNET,
+      sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
       name: "web-ui",
       description:
         "Web UI specialist. Use for the local web console, intake wizard, and live log streaming.",
       body: webUiBody(ctx),
-      tools: ["read", "write", "edit", "bash", "grep", "glob"],
-      model: "sonnet",
-      sandbox: "workspace-write",
+      tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+      model: ROLE_MODEL.SONNET,
+      sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
       name: "skill-author",
       description:
         "Skill author. Use for creating, validating, syncing, and importing skills in .vibeflow/skills/.",
       body: skillAuthorBody(ctx),
-      tools: ["read", "write", "edit", "bash", "grep", "glob"],
-      model: "sonnet",
-      sandbox: "workspace-write",
+      tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+      model: ROLE_MODEL.SONNET,
+      sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
       name: "preflight-engine",
       description:
         "Preflight specialist. Use for engine readiness, probe cache, and pre-dispatch quota gates.",
       body: preflightEngineBody(ctx),
-      tools: ["read", "write", "edit", "bash", "grep", "glob"],
-      model: "sonnet",
-      sandbox: "workspace-write",
+      tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+      model: ROLE_MODEL.SONNET,
+      sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
       name: "dispatch-runner",
       description:
         "Dispatch specialist. Use for work-unit orchestration, engine launching, and evidence recording.",
       body: dispatchRunnerBody(ctx),
-      tools: ["read", "write", "edit", "bash", "grep", "glob"],
-      model: "sonnet",
-      sandbox: "workspace-write",
+      tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+      model: ROLE_MODEL.SONNET,
+      sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
       name: "doc-writer",
       description:
         "Documentation specialist. Use for README, docs/, AGENTS.md, and changelog maintenance.",
       body: docWriterBody(ctx),
-      tools: ["read", "write", "edit", "bash", "grep", "glob"],
-      model: "haiku",
-      sandbox: "workspace-write",
+      tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+      model: ROLE_MODEL.HAIKU,
+      sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     ...conversationRoleSpecs(),
   ];

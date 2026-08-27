@@ -1,4 +1,5 @@
 import type { ComputedRef, Ref, ShallowRef } from "vue";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import { conversationHomeApi } from "./conversation-home-api.js";
 import {
   homeTimelineItemKey,
@@ -6,6 +7,7 @@ import {
   staleHomeCursor,
 } from "./conversation-home-pagination.js";
 import { mergeHomePendingPage } from "./conversation-home-query-active.js";
+import type { HomeQueryApiAuthority } from "./conversation-home-query-authority.js";
 import { readableHomeError } from "./conversation-home-runtime.js";
 import type { ActivationToken } from "./conversation-home-state.js";
 import type {
@@ -26,7 +28,10 @@ interface HomeActivePaginationInput {
   restart(rootSessionId: string): Promise<void>;
 }
 
-export function createHomeActivePaginationRuntime(input: HomeActivePaginationInput) {
+export function createHomeActivePaginationRuntime(
+  input: HomeActivePaginationInput,
+  api: HomeQueryApiAuthority = conversationHomeApi,
+) {
   let timelineController: AbortController | null = null;
   let pendingController: AbortController | null = null;
 
@@ -72,10 +77,7 @@ export function createHomeActivePaginationRuntime(input: HomeActivePaginationInp
     timelineController = controller;
     input.paging.timeline.loadingMore = true;
     try {
-      const response = await conversationHomeApi.timeline(
-        { rootSessionId, cursor, limit: 50 },
-        controller.signal,
-      );
+      const response = await api.timeline({ rootSessionId, cursor, limit: 50 }, controller.signal);
       if (
         !token.isCurrent() ||
         controller.signal.aborted ||
@@ -98,7 +100,8 @@ export function createHomeActivePaginationRuntime(input: HomeActivePaginationInp
     } catch (error) {
       if (controller.signal.aborted || !token.isCurrent() || generation !== input.generation())
         return;
-      if (staleHomeCursor(error) === "stale_timeline_cursor") await input.restart(rootSessionId);
+      if (staleHomeCursor(error) === PUBLIC_ERROR_CODE.STALE_TIMELINE_CURSOR)
+        await input.restart(rootSessionId);
       else input.activationError.value = readableHomeError(error);
     } finally {
       if (timelineController === controller) timelineController = null;
@@ -123,11 +126,7 @@ export function createHomeActivePaginationRuntime(input: HomeActivePaginationInp
     pendingController = controller;
     input.paging.pending.loadingMore = true;
     try {
-      const response = await conversationHomeApi.pending(
-        conversationId,
-        { cursor, limit: 50 },
-        controller.signal,
-      );
+      const response = await api.pending(conversationId, { cursor, limit: 50 }, controller.signal);
       if (
         !token.isCurrent() ||
         controller.signal.aborted ||
@@ -141,7 +140,7 @@ export function createHomeActivePaginationRuntime(input: HomeActivePaginationInp
     } catch (error) {
       if (controller.signal.aborted || !token.isCurrent() || generation !== input.generation())
         return;
-      if (staleHomeCursor(error) === "stale_pending_proposal_cursor")
+      if (staleHomeCursor(error) === PUBLIC_ERROR_CODE.STALE_PENDING_PROPOSAL_CURSOR)
         await input.restart(rootSessionId);
       else input.activationError.value = readableHomeError(error);
     } finally {

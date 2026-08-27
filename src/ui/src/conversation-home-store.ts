@@ -1,5 +1,13 @@
 import { defineStore } from "pinia";
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from "vue";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
+import {
+  CONVERSATION_CATALOG_HEALTH,
+  CONVERSATION_HEAD_STATUS,
+  type ConversationCatalogHealth,
+} from "../../orchestrator/conversation/conversation-catalog-contract.js";
+import { CONVERSATION_MESSAGE_QUEUE_STATE } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
+import { CONVERSATION_CLIENT_STREAM_STATE } from "../../orchestrator/conversation/conversation-sse-contract.js";
 import { createHomeActionMutationRuntime } from "./conversation-home-action-runtime.js";
 import { createHomeCommandRuntime } from "./conversation-home-command-runtime.js";
 import { createHomeMessageQueueRuntime } from "./conversation-home-message-queue-runtime.js";
@@ -7,6 +15,7 @@ import type {
   HomeMessageQueueSnapshot,
   HomeOptimisticQueuedMessage,
   HomeQueuedMessageEditBinding,
+  HomeRetryableQueuedMessage,
 } from "./conversation-home-message-queue-types.js";
 import { createHomePrivateContextRuntime } from "./conversation-home-private-context-runtime.js";
 import { createHomeQueryRuntime } from "./conversation-home-query-runtime.js";
@@ -34,7 +43,7 @@ function browserOnline(value: unknown): boolean {
 export const useConversationHomeStore = defineStore("conversation-home", () => {
   const sessions = ref<HomeSessionSummary[]>([]);
   const sessionQuery = ref("");
-  const catalogHealth = ref<"ready" | "rebuilding" | "degraded">("ready");
+  const catalogHealth = ref<ConversationCatalogHealth>(CONVERSATION_CATALOG_HEALTH.READY);
   const catalogLoading = ref(true);
   const catalogError = ref("");
   const activeRootId = ref<string | null>(null);
@@ -52,6 +61,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   const submittingToken = ref<string | null>(null);
   const messageQueue = shallowRef<HomeMessageQueueSnapshot | null>(null);
   const optimisticMessages = ref<HomeOptimisticQueuedMessage[]>([]);
+  const retryableMessages = ref<HomeRetryableQueuedMessage[]>([]);
   const queuedMessageEdit = shallowRef<HomeQueuedMessageEditBinding | null>(null);
   const queuedMessageEditSaving = ref(false);
   const queueSendAsNew = ref(false);
@@ -61,7 +71,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   const privateContextDiscarding = ref(false);
   const capabilities = ref<HomeCapabilityItem[]>([]);
   const capabilityQuery = ref("");
-  const capabilityScope = ref<"project" | "user">("project");
+  const capabilityScope = ref<CapabilityScope>(CAPABILITY_SCOPE.PROJECT);
   const capabilityLoading = ref(false);
   const capabilityError = ref("");
   const quoteRefs = ref<HomeQuoteReference[]>([]);
@@ -71,7 +81,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   const challenges = ref<Record<string, HomePendingChallenge>>({});
   const actionBusy = ref<Record<string, boolean>>({});
   const actionBusyTokens = ref<Record<string, string>>({});
-  const streamStatus = ref<HomeConversationStreamStatus>("idle");
+  const streamStatus = ref<HomeConversationStreamStatus>(CONVERSATION_CLIENT_STREAM_STATE.IDLE);
   const streamError = ref("");
   const paging: HomePagingState = reactive({
     catalog: { nextCursor: null, loadingMore: false },
@@ -93,7 +103,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   );
   const activeRevision = computed(() =>
     authoritativeHead.value?.root_session_id === activeRootId.value &&
-    authoritativeHead.value.head_status === "committed"
+    authoritativeHead.value.head_status === CONVERSATION_HEAD_STATUS.COMMITTED
       ? authoritativeHead.value.active
       : null,
   );
@@ -130,6 +140,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     composerError,
     snapshot: messageQueue,
     optimistic: optimisticMessages,
+    retryable: retryableMessages,
     edit: queuedMessageEdit,
     editSaving: queuedMessageEditSaving,
     sendAsNew: queueSendAsNew,
@@ -157,7 +168,9 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
       optimisticMessages.value.length > 0 ||
       Boolean(
         messageQueue.value?.items.some(
-          (item) => item.state === "queued" || item.state === "claimed",
+          (item) =>
+            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED ||
+            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED,
         ),
       ),
     activationLoading,
@@ -242,7 +255,9 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
       optimisticMessages.value.length > 0 ||
       Boolean(
         messageQueue.value?.items.some(
-          (item) => item.state === "queued" || item.state === "claimed",
+          (item) =>
+            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED ||
+            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED,
         ),
       ),
     () => queryRuntime.reconcileActiveStream(),
@@ -258,6 +273,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     challenges,
     actionBusy,
     actionBusyTokens,
+    reconcileOperation: queryRuntime.reconcileActionOperation,
   });
 
   function newConversation(): void {
@@ -273,7 +289,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     activationError.value = "";
     composerError.value = "";
     reactionBusy.value = {};
-    streamStatus.value = "idle";
+    streamStatus.value = CONVERSATION_CLIENT_STREAM_STATE.IDLE;
     streamError.value = "";
   }
 
@@ -361,6 +377,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
       return messageQueueRuntime.beginEdit(queueItemId);
     },
     cancelQueuedMessageEdit: messageQueueRuntime.cancelEdit,
+    retryQueuedMessage: messageQueueRuntime.retry,
     setOnline(value: boolean) {
       online.value = value;
       if (!value) {

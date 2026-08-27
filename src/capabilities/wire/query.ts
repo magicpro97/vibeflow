@@ -1,21 +1,9 @@
 import type { EngineName, RecoveryAction } from "../../actions/types.js";
+import type { CapabilityScope, CapabilityStatusV1 } from "../../core/capability-contract.js";
 import type { CapabilityInputDeclarationV1 } from "../manifest/types.js";
 import type { PackagePinV1 } from "../source/types.js";
 
-export type CapabilityStatusV1 =
-  | "absent"
-  | "ready"
-  | "degraded"
-  | "blocked"
-  | "failed"
-  | "unknown"
-  | "stale"
-  | "drifted"
-  | "orphaned"
-  | "unmanaged"
-  | "manual"
-  | "unsupported"
-  | "needs-recovery";
+export type { CapabilityStatusV1 } from "../../core/capability-contract.js";
 
 export interface CapabilityQueryItemV1 {
   package_id: string;
@@ -25,7 +13,7 @@ export interface CapabilityQueryItemV1 {
   version: string | null;
   package_pin_digest: string | null;
   content_sha256: string | null;
-  scope: "project" | "user" | null;
+  scope: CapabilityScope | null;
   status: CapabilityStatusV1;
   source_kind: PackagePinV1["source"]["kind"] | null;
   source_trust: PackagePinV1["trust"] | null;
@@ -54,7 +42,7 @@ export interface CapabilityQueryResponseV1 {
 export interface CapabilityQuerySourceV1 {
   schema_version: "1.0";
   view: "search" | "list" | "status" | "detail";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   discovery_generation_digest: string | null;
   capability_lock_digest: string | null;

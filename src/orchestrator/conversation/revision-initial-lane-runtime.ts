@@ -1,3 +1,4 @@
+import { ENGINE_SESSION_MODE } from "../../dispatch/session-contract.js";
 import { createSpawnOptionsProjection } from "../../dispatch/session-types.js";
 import type { AttemptRuntimeOptions } from "./attempt-runtime-options.js";
 import type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
@@ -61,7 +62,7 @@ export async function startInitialRevisionLaneBarrier(input: {
           attemptId: token.attempt_key,
           spawn: createSpawnOptionsProjection({
             ...binding.spawn,
-            sessionMode: "fresh",
+            sessionMode: ENGINE_SESSION_MODE.FRESH,
             rendered_prompt: `${binding.spawn.rendered_prompt.trimEnd()}\n\n${shared}\n`,
           }),
           signal: input.operation.signal,

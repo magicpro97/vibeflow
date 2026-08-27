@@ -1,23 +1,38 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_OPERATION_STATE,
   type ActionAuthoritySnapshotV1,
+  type ActionOperationDomainTerminalState,
   type DurableActionAuthorityReaderV1,
   type HostActionV1,
+  PUBLIC_OPERATION_REVISION_PHASE,
   assertDurableActionAuthorityReaderV1,
   deriveOperationId,
+  isActionOperationDomainTerminalState,
 } from "../../actions/index.js";
+import { ACTION_DECISION, ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import type { RevisionOperationV1 } from "./lineage-revision-operation.js";
+import { REVISION_OPERATION_EVENT_PAYLOAD_KIND } from "./revision-operation-event-contract.js";
 import type { RevisionOperationEventV1 } from "./revision-planner.js";
 
 const REVISION_MUTATIONS = new Set<HostActionV1["type"]>([
-  "conversation.add_participant",
-  "conversation.remove_participant",
-  "conversation.update_participant",
-  "conversation.update_settings",
-  "conversation.continue_message",
+  HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_REMOVE_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT,
+  HOST_ACTION_KIND.CONVERSATION_UPDATE_SETTINGS,
+  HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE,
 ]);
 
-function terminalOutcome(state: ActionAuthoritySnapshotV1["state"]) {
-  return state === "succeeded" || state === "failed" || state === "needs_recovery" ? state : null;
+const REVISION_CONTROL_ACTIONS = new Set<HostActionV1["type"]>([
+  HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION,
+  HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION,
+  HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION,
+]);
+
+function terminalOutcome(
+  state: ActionAuthoritySnapshotV1["state"],
+): ActionOperationDomainTerminalState | null {
+  return isActionOperationDomainTerminalState(state) ? state : null;
 }
 
 function actionSnapshot(input: {
@@ -34,8 +49,8 @@ function actionSnapshot(input: {
   if (
     !snapshot ||
     !approval ||
-    approval.decision !== "approved" ||
-    snapshot.proposal.domain !== "conversation" ||
+    approval.decision !== ACTION_DECISION.APPROVED ||
+    snapshot.proposal.domain !== ACTION_DOMAIN.CONVERSATION ||
     snapshot.proposal.base.root_session_id !== input.operation.root_session_id ||
     deriveOperationId(snapshot.proposal, approval.approval_id) !== input.actionOperationId
   )
@@ -55,11 +70,7 @@ function actionSnapshot(input: {
   } else {
     const action = snapshot.proposal.action;
     if (
-      ![
-        "conversation.abandon_revision_operation",
-        "conversation.retry_revision_operation",
-        "conversation.reconcile_revision_operation",
-      ].includes(action.type) ||
+      !REVISION_CONTROL_ACTIONS.has(action.type) ||
       !("revision_operation_id" in action) ||
       action.revision_operation_id !== input.operation.operation_id
     )
@@ -69,7 +80,7 @@ function actionSnapshot(input: {
     if (
       snapshot.operation_id !== input.actionOperationId ||
       snapshot.dispatch_record_digest !== dispatch.dispatch_record_digest ||
-      dispatch.domain !== "conversation" ||
+      dispatch.domain !== ACTION_DOMAIN.CONVERSATION ||
       dispatch.domain_header_digest !== input.operation.header_digest ||
       dispatch.proposal_digest !== snapshot.proposal.proposal_digest ||
       dispatch.approval_id !== approval.approval_id ||
@@ -80,7 +91,7 @@ function actionSnapshot(input: {
       throw new Error("revision action dispatch authority changed");
   } else if (
     input.actionOperationId !== input.operation.operation_id ||
-    snapshot.state !== "approved"
+    snapshot.state !== ACTION_OPERATION_STATE.APPROVED
   )
     throw new Error("revision action has no committing dispatch");
   return snapshot;
@@ -88,16 +99,21 @@ function actionSnapshot(input: {
 
 function expectedControlAction(event: RevisionOperationEventV1): HostActionV1["type"] | null {
   const payload = event.payload;
-  if (payload.kind === "reconciliation-result") return "conversation.reconcile_revision_operation";
-  if (payload.kind !== "state-transition") return null;
-  if (payload.from === "start_failed" && payload.to === "starting")
-    return "conversation.retry_revision_operation";
-  if (payload.from === "needs_recovery") return "conversation.reconcile_revision_operation";
+  if (payload.kind === REVISION_OPERATION_EVENT_PAYLOAD_KIND.RECONCILIATION_RESULT)
+    return HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION;
+  if (payload.kind !== REVISION_OPERATION_EVENT_PAYLOAD_KIND.STATE_TRANSITION) return null;
   if (
-    payload.to === "abandoned" &&
+    payload.from === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED &&
+    payload.to === PUBLIC_OPERATION_REVISION_PHASE.STARTING
+  )
+    return HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION;
+  if (payload.from === PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY)
+    return HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION;
+  if (
+    payload.to === PUBLIC_OPERATION_REVISION_PHASE.ABANDONED &&
     payload.authorized_by_action_operation_id !== payload.effect_action_operation_id
   )
-    return "conversation.abandon_revision_operation";
+    return HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION;
   return null;
 }
 
@@ -111,7 +127,7 @@ export function validateRevisionActionAuthorityChain(input: {
   const snapshots = new Map<string, ActionAuthoritySnapshotV1>();
   const terminals = new Map<
     string,
-    Array<{ event: RevisionOperationEventV1; outcome: "succeeded" | "failed" | "needs_recovery" }>
+    Array<{ event: RevisionOperationEventV1; outcome: ActionOperationDomainTerminalState }>
   >();
   const resolve = (id: string) => {
     let snapshot = snapshots.get(id);
@@ -137,7 +153,7 @@ export function validateRevisionActionAuthorityChain(input: {
       throw new Error("revision action has no committing dispatch");
     if (
       effect !== input.operation.operation_id &&
-      effectSnapshot.proposal.action.type !== "conversation.retry_revision_operation"
+      effectSnapshot.proposal.action.type !== HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION
     )
       throw new Error("revision effect is not authorized by a retry action");
     const control = expectedControlAction(event);
@@ -146,7 +162,8 @@ export function validateRevisionActionAuthorityChain(input: {
       if (!control || authorizerSnapshot.proposal.action.type !== control)
         throw new Error("revision control authorizer is broader than its event");
     } else if (control && effectSnapshot.proposal.action.type !== control) {
-      const family = control === "conversation.retry_revision_operation" ? "retry" : "control";
+      const family =
+        control === HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION ? "retry" : "control";
       throw new Error(`revision ${family} action does not authorize its control transition`);
     }
     if (!("action_terminals" in payload)) continue;

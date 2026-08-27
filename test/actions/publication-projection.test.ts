@@ -480,6 +480,18 @@ describe("publication authority and domain projection", () => {
         event(operationId, 1, "succeeded", "revision:prepared", "succeeded"),
       ]),
     ).not.toThrow();
+    expect(() =>
+      validateOperationBatches(reconcile, [
+        dispatch,
+        event(operationId, 1, "failed", "revision:started", "failed"),
+      ]),
+    ).toThrow(/phase.*state/i);
+    expect(() =>
+      validateOperationBatches(reconcile, [
+        dispatch,
+        event(operationId, 1, "failed", "revision:needs_recovery", "failed"),
+      ]),
+    ).not.toThrow();
   });
 });
 
@@ -576,7 +588,13 @@ function targetEvent(
       : outcome === "reversed" || outcome === "omitted"
         ? "reversed"
         : "failed";
-  return { ...event(operationId, sequence, state, phase, status), target: { ...target, outcome } };
+  const projected = event(operationId, sequence, state, phase, status);
+  if (!projected.progress) throw new Error("target event fixture is missing progress");
+  return {
+    ...projected,
+    progress: projected.progress,
+    target: { ...target, outcome },
+  };
 }
 
 function capabilitySnapshot(state: "succeeded" | "failed"): {

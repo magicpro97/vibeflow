@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { join, resolve } from "node:path";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import type { ProcessLock } from "../../durability/index.js";
 import {
   canonicalJsonBytes,
@@ -27,7 +28,7 @@ import { CapabilityValidationError, exactKeys } from "../wire/primitives.js";
 export interface FabricAuthorityActivationReceiptV1 {
   schema_version: "1.0";
   identity_kind: "project-authority" | "user-authority";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   bootstrap_identity_digest: null;
   initial_authority_head_digest: string;
@@ -40,7 +41,7 @@ export function activationReceiptPath(paths: CapabilityStorePathsV1): string {
     paths.privateRoot,
     "activation",
     "v1",
-    `${paths.scope === "project" ? "project-authority" : "user-authority"}.json`,
+    `${paths.scope === CAPABILITY_SCOPE.PROJECT ? "project-authority" : "user-authority"}.json`,
   );
 }
 
@@ -138,7 +139,9 @@ export function materializeActivationReceipt(
   const draft = {
     schema_version: "1.0" as const,
     identity_kind:
-      identity.scope === "project" ? ("project-authority" as const) : ("user-authority" as const),
+      identity.scope === CAPABILITY_SCOPE.PROJECT
+        ? ("project-authority" as const)
+        : ("user-authority" as const),
     scope: identity.scope,
     scope_identity_digest: identity.content_digest,
     bootstrap_identity_digest: null,
@@ -208,7 +211,7 @@ export function materializeInitialAuthorityHead(
 }
 
 export function readActivationIdentity(paths: CapabilityStorePathsV1): Buffer | null {
-  return paths.scope === "project"
+  return paths.scope === CAPABILITY_SCOPE.PROJECT
     ? readProjectionFile(paths.identity)
     : privateFileBytes(paths.identity, 1024 * 1024);
 }

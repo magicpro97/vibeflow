@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileSafe } from "../../core.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { headFileKey } from "./helpers.js";
 import type {
   CliBindingRecordV1,
@@ -55,7 +55,7 @@ export class CliPrivateInputDurableStoreV1 {
     } catch {
       throw new CapabilityRuntimeError(
         `failed to decode durable private-input record at ${path}`,
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     }
   }

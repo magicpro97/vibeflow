@@ -6,6 +6,8 @@ import type {
   PrivateActionRootLocatorV1,
 } from "../actions/index.js";
 import { actionIdempotencyScopeDigest } from "../actions/index.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../actions/protocol-contract.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../core/capability-contract.js";
 import { canonicalJson } from "../durability/index.js";
 import { digestV1 } from "../durability/index.js";
 import type { ConversationActionService } from "../orchestrator/conversation/conversation-action-service.js";
@@ -17,7 +19,7 @@ import { CapabilityActionObjectStoreV1 } from "./action-domain/object-store.js";
 import { FilesystemCapabilityEffectBrokerV1 } from "./adapters/filesystem-broker.js";
 import { FilesystemLegacyMarkerReaderV1 } from "./legacy/filesystem-reader.js";
 import { LegacyAdoptInspectionIssuerV1 } from "./legacy/issuance.js";
-import { CapabilityRuntimeError } from "./operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./operations/errors.js";
 import { DefaultCapabilityIntentMaterializerV1 } from "./planning/intent-materializer.js";
 import { CliCapabilityPrivateInputAuthorityV1 } from "./private-input/authority.js";
 import type { CapabilityDetailRequestV1, CapabilityQueryRequestV1 } from "./query/types.js";
@@ -59,7 +61,10 @@ function canonicalDirectory(path: string, label: string): string {
   try {
     return realpathSync(resolve(path));
   } catch {
-    throw new CapabilityRuntimeError(`${label} is unavailable`, "service-unavailable");
+    throw new CapabilityRuntimeError(
+      `${label} is unavailable`,
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+    );
   }
 }
 
@@ -69,7 +74,10 @@ function canonicalFutureDirectory(path: string, label: string): string {
   try {
     return join(realpathSync(dirname(absolute)), basename(absolute));
   } catch {
-    throw new CapabilityRuntimeError(`${label} parent is unavailable`, "service-unavailable");
+    throw new CapabilityRuntimeError(
+      `${label} parent is unavailable`,
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+    );
   }
 }
 
@@ -80,8 +88,8 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
   readonly userVibeflowRoot: string;
   readonly actionRoots: CapabilityRuntimeActionRootsV1;
   readonly actionObjects: CapabilityActionObjectStoreV1;
-  readonly #services = new Map<"project" | "user", CapabilityFabricServiceV1>();
-  readonly #packages = new Map<"project" | "user", FilesystemCapabilityPackageCacheV1>();
+  readonly #services = new Map<CapabilityScope, CapabilityFabricServiceV1>();
+  readonly #packages = new Map<CapabilityScope, FilesystemCapabilityPackageCacheV1>();
   readonly #now: () => string;
   readonly #broker: FilesystemCapabilityEffectBrokerV1;
   readonly #transitionResolver;
@@ -119,7 +127,10 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
   }
 
   bindActionAuthority(
-    locator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+    locator: Exclude<
+      PrivateActionRootLocatorV1,
+      { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+    >,
     reader: DurableActionAuthorityReaderV1,
   ): void {
     this.actionRoots.bind(locator, reader);
@@ -132,22 +143,22 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
     return new CapabilityConversationActionDomainV1(this, actions, options);
   }
 
-  packageCache(scope: "project" | "user"): FilesystemCapabilityPackageCacheV1 {
+  packageCache(scope: CapabilityScope): FilesystemCapabilityPackageCacheV1 {
     this.service(scope);
     const packages = this.#packages.get(scope);
     if (!packages)
       throw new CapabilityRuntimeError(
         "capability package cache composition is unavailable",
-        "service-unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
       );
     return packages;
   }
 
-  service(scope: "project" | "user"): CapabilityFabricServiceV1 {
+  service(scope: CapabilityScope): CapabilityFabricServiceV1 {
     const prior = this.#services.get(scope);
     if (prior) return prior;
     const paths =
-      scope === "project"
+      scope === CAPABILITY_SCOPE.PROJECT
         ? projectCapabilityPaths(this.projectRoot)
         : userCapabilityPaths(this.userVibeflowRoot);
     const identity = readActivatedCapabilityIdentityV1(paths);
@@ -160,7 +171,7 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
     if (current.scope_identity_digest !== identity.content_digest)
       throw new CapabilityRuntimeError(
         "capability runtime activation changed during composition",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     const storage = new CapabilityStorageV1(paths, identity.content_digest, {
       now: this.#now,
@@ -186,7 +197,7 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
         scope_identity_digest: identity.content_digest,
       }),
       authorityScopeDigest: actionIdempotencyScopeDigest({
-        kind: "capability",
+        kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
         scope,
         scope_identity_digest: identity.content_digest,
       }),
@@ -268,7 +279,7 @@ export function productionCapabilityRuntimeV1(
     if (prior.optionFingerprint !== optionFingerprint || prior.clock !== (options.now ?? null))
       throw new CapabilityRuntimeError(
         "capability runtime root already has different production options",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     return prior.factory;
   }

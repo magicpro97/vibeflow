@@ -12,6 +12,11 @@
 // work-unit ledger. The function is exported so the CLI dispatch
 // (`import { units } from "../commands.js"`) keeps working.
 
+import {
+  GATE_STATE,
+  REQUIRED_WORK_UNIT_GATES,
+  isWorkUnitStatus,
+} from "../core/workflow-contract.js";
 import type { WorkUnit } from "./_shared.js";
 import { CTX_DIR, appendWaiverAudit, c, cwd, mutateUnits, out, readState } from "./_shared.js";
 
@@ -46,9 +51,7 @@ export function units(
       }
       for (const u of state.work_units) {
         const g = u.gates;
-        const gs = (["build", "lint", "test", "review"] as const)
-          .map((k) => `${k}:${gateColor(g[k])}`)
-          .join(" ");
+        const gs = REQUIRED_WORK_UNIT_GATES.map((k) => `${k}:${gateColor(g[k])}`).join(" ");
         out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}`);
         out("vf", `  ${gs}`);
       }
@@ -197,7 +200,7 @@ export function units(
         return 2;
       }
       const patch: Partial<WorkUnit> & { name: string } = { name };
-      if (typeof flags.status === "string") patch.status = flags.status as WorkUnit["status"];
+      if (isWorkUnitStatus(flags.status)) patch.status = flags.status;
       if (typeof flags.confidence === "string") patch.confidence = Number(flags.confidence);
       if (typeof flags.spec === "string") patch.spec = flags.spec;
       if (typeof flags.scope === "string") {
@@ -282,8 +285,8 @@ function dependencyNames(value: string): string[] {
 }
 
 function gateColor(s: string): string {
-  if (s === "pass") return c.green(s);
-  if (s === "fail") return c.red(s);
-  if (s === "running") return c.yellow(s);
+  if (s === GATE_STATE.PASS) return c.green(s);
+  if (s === GATE_STATE.FAIL) return c.red(s);
+  if (s === GATE_STATE.RUNNING) return c.yellow(s);
   return c.dim(s);
 }

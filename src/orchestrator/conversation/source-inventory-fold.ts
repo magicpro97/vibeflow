@@ -5,6 +5,7 @@ import type {
   PublicStoredTraceEvent,
 } from "../trace/types.js";
 import type { ConversationArtifactEntry } from "./artifact-store.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import { reviewedActionEventIds } from "./conversation-reviewed-action.js";
 import type { ConversationReviewedActionAuthorityV1 } from "./conversation-reviewed-action.js";
 import { foldConversation } from "./fold.js";
@@ -22,12 +23,15 @@ export function foldConversationJournal(
     const stored = structuredClone(record.stored_event) as unknown as Record<string, unknown>;
     const event = stored.event as { type: string; payload: Record<string, unknown> };
     if (event.type === "capability_action_projection") {
-      stored.event = { type: "coordinator_decision", payload: { projection_only: true } };
+      stored.event = {
+        type: CONVERSATION_TRACE_EVENT_KIND.COORDINATOR_DECISION,
+        payload: { projection_only: true },
+      };
     }
     const publicSessionRef =
       record.native_session_id === null
         ? null
-        : event.type === "native_history_reconciled" &&
+        : event.type === CONVERSATION_TRACE_EVENT_KIND.NATIVE_HISTORY_RECONCILED &&
             typeof event.payload.public_session_ref === "string"
           ? event.payload.public_session_ref
           : "vf-fold-session";

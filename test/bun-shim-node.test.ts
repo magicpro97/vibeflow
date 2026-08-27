@@ -36,10 +36,7 @@ describe.skipIf(!nodeBinary)("Node Bun.serve compatibility shim", () => {
           return new Response("ok");
         },
       });
-      const deadline = Date.now() + 2_000;
-      while (!server.port && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      await server.ready;
       if (!server.port) throw new Error("server did not start");
 
       let socket;

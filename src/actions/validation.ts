@@ -1,8 +1,14 @@
+import { type Engine, isAgentEngine } from "../core/agent-contract.js";
+import { type CapabilityScope, isCapabilityScope } from "../core/capability-contract.js";
+import { isConversationMessageQueueQuoteTargetKind } from "../orchestrator/conversation/conversation-message-queue-contract.js";
 import {
   validateCompactionInput,
   validateRegistryTrustChange,
 } from "./candidate-nested-validation.js";
+import { isCapabilitySourceKind } from "./capability-security-contract.js";
+import { HOST_ACTION_KIND, type HostActionKind, isHostActionKind } from "./host-action-contract.js";
 import { validateGrantInput } from "./permission-validation.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import {
   assertDigest,
   assertOpaqueId,
@@ -10,60 +16,118 @@ import {
   assertRawSha256,
   assertTimestamp,
 } from "./record-primitives.js";
-import { HOST_ACTION_KINDS, type HostActionRequestV1, isHostActionKind } from "./request-types.js";
+import type { HostActionRequestV1 } from "./request-types.js";
 import { ActionValidationError, boundedString, exactObject, safeInteger } from "./strict-json.js";
-import type { EngineName, JsonValue } from "./types.js";
+import type { JsonValue } from "./types.js";
 
-const ENGINES = new Set<EngineName>(["claude", "codex", "copilot", "opencode", "antigravity"]);
-const SCOPES = new Set(["project", "user"]);
-const DIRECT_KEYS: Record<string, readonly string[]> = {
-  "conversation.add_participant": ["participant"],
-  "conversation.remove_participant": ["participant_id"],
-  "conversation.update_participant": ["participant_id", "changes"],
-  "conversation.update_settings": ["changes"],
-  "conversation.continue_message": ["content", "target_participants"],
-  "conversation.select_lineage_head": [
+const fields = <const Fields extends readonly string[]>(...values: Fields): Readonly<Fields> =>
+  Object.freeze(values);
+
+type HostActionRequiredFieldMap = {
+  readonly [Kind in HostActionKind]: readonly Exclude<
+    keyof Extract<HostActionRequestV1, { type: Kind }>,
+    "type" | "quote_refs"
+  >[];
+};
+
+export const HOST_ACTION_REQUIRED_FIELDS = Object.freeze({
+  [HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT]: fields("participant"),
+  [HOST_ACTION_KIND.CONVERSATION_REMOVE_PARTICIPANT]: fields("participant_id"),
+  [HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT]: fields("participant_id", "changes"),
+  [HOST_ACTION_KIND.CONVERSATION_UPDATE_SETTINGS]: fields("changes"),
+  [HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE]: fields("content", "target_participants"),
+  [HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD]: fields(
     "root_session_id",
     "candidate_conversation_id",
     "candidate_revision_id",
-  ],
-  "conversation.associate_lineages": ["root_session_ids", "reason"],
-  "conversation.publish_suspected_literal": [
+  ),
+  [HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES]: fields("root_session_ids", "reason"),
+  [HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL]: fields(
     "private_staging_id",
     "staging_record_digest",
     "staged_content_digest",
     "findings_digest",
-  ],
-  "conversation.stop_operation": ["operation_id"],
-  "conversation.abandon_revision_operation": ["revision_operation_id"],
-  "conversation.retry_revision_operation": ["revision_operation_id"],
-  "conversation.reconcile_revision_operation": ["revision_operation_id"],
-  "context.compact": [
+  ),
+  [HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION]: fields("operation_id"),
+  [HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION]: fields("revision_operation_id"),
+  [HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION]: fields("revision_operation_id"),
+  [HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION]: fields("revision_operation_id"),
+  [HOST_ACTION_KIND.CONTEXT_COMPACT]: fields(
     "oversized_candidate_id",
     "oversized_candidate_digest",
     "profile",
     "compaction_input",
-  ],
-  "capability.install": ["package", "scope", "requested_targets", "inputs"],
-  "capability.update": ["package_id", "selector", "scope", "requested_targets", "inputs"],
-  "capability.configure": ["package_id", "scope", "inputs"],
-  "capability.retarget": ["package_id", "scope", "requested_targets"],
-  "capability.remove": ["package_id", "scope", "cascade"],
-  "capability.rollback_scope": ["scope", "generation_id"],
-  "capability.restore_package": ["package_id", "scope", "generation_id"],
-  "capability.repair": ["package_id", "scope"],
-  "capability.adopt": ["scope", "candidate_id", "candidate_digest"],
-  "grant.create": ["grant"],
-  "grant.renew": ["grant_id", "grant"],
-  "grant.revoke": ["scope", "grant_id"],
-  "policy.update_authority": ["scope", "replacement_authority_subtree"],
-  "secret.revoke": ["scope", "private_binding_id", "expected_binding_digest"],
-  "registry.trust_key": ["scope", "change"],
-  "authority.repair": ["repair_id", "plan_digest"],
-};
-const OPTIONAL_KEYS: Partial<Record<HostActionRequestV1["type"], readonly string[]>> = {
-  "conversation.continue_message": ["quote_refs"],
-};
+  ),
+  [HOST_ACTION_KIND.CAPABILITY_INSTALL]: fields("package", "scope", "requested_targets", "inputs"),
+  [HOST_ACTION_KIND.CAPABILITY_UPDATE]: fields(
+    "package_id",
+    "selector",
+    "scope",
+    "requested_targets",
+    "inputs",
+  ),
+  [HOST_ACTION_KIND.CAPABILITY_CONFIGURE]: fields("package_id", "scope", "inputs"),
+  [HOST_ACTION_KIND.CAPABILITY_RETARGET]: fields("package_id", "scope", "requested_targets"),
+  [HOST_ACTION_KIND.CAPABILITY_REMOVE]: fields("package_id", "scope", "cascade"),
+  [HOST_ACTION_KIND.CAPABILITY_ROLLBACK_SCOPE]: fields("scope", "generation_id"),
+  [HOST_ACTION_KIND.CAPABILITY_RESTORE_PACKAGE]: fields("package_id", "scope", "generation_id"),
+  [HOST_ACTION_KIND.CAPABILITY_REPAIR]: fields("package_id", "scope"),
+  [HOST_ACTION_KIND.CAPABILITY_ADOPT]: fields("scope", "candidate_id", "candidate_digest"),
+  [HOST_ACTION_KIND.GRANT_CREATE]: fields("grant"),
+  [HOST_ACTION_KIND.GRANT_RENEW]: fields("grant_id", "grant"),
+  [HOST_ACTION_KIND.GRANT_REVOKE]: fields("scope", "grant_id"),
+  [HOST_ACTION_KIND.POLICY_UPDATE_AUTHORITY]: fields("scope", "replacement_authority_subtree"),
+  [HOST_ACTION_KIND.SECRET_REVOKE]: fields(
+    "scope",
+    "private_binding_id",
+    "expected_binding_digest",
+  ),
+  [HOST_ACTION_KIND.REGISTRY_TRUST_KEY]: fields("scope", "change"),
+  [HOST_ACTION_KIND.AUTHORITY_REPAIR]: fields("repair_id", "plan_digest"),
+} satisfies HostActionRequiredFieldMap & Readonly<Record<HostActionKind, readonly string[]>>);
+
+type OptionalFieldActionKind = typeof HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE;
+const HOST_ACTION_OPTIONAL_FIELDS = Object.freeze({
+  [HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE]: fields("quote_refs"),
+} satisfies Readonly<Record<OptionalFieldActionKind, readonly "quote_refs"[]>>);
+const EMPTY_FIELDS = Object.freeze([]) as readonly string[];
+
+function optionalFields(type: HostActionKind): readonly string[] {
+  return type === HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE
+    ? HOST_ACTION_OPTIONAL_FIELDS[type]
+    : EMPTY_FIELDS;
+}
+
+type DigestActionKind =
+  | typeof HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
+  | typeof HOST_ACTION_KIND.CONTEXT_COMPACT
+  | typeof HOST_ACTION_KIND.CAPABILITY_ADOPT
+  | typeof HOST_ACTION_KIND.SECRET_REVOKE
+  | typeof HOST_ACTION_KIND.AUTHORITY_REPAIR;
+const DIGEST_ACTION_FIELDS = Object.freeze({
+  [HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL]: fields(
+    "staging_record_digest",
+    "staged_content_digest",
+    "findings_digest",
+  ),
+  [HOST_ACTION_KIND.CONTEXT_COMPACT]: fields("oversized_candidate_digest"),
+  [HOST_ACTION_KIND.CAPABILITY_ADOPT]: fields("candidate_digest"),
+  [HOST_ACTION_KIND.SECRET_REVOKE]: fields("expected_binding_digest"),
+  [HOST_ACTION_KIND.AUTHORITY_REPAIR]: fields("plan_digest"),
+} satisfies Readonly<Record<DigestActionKind, readonly string[]>>);
+
+function digestActionFields(type: HostActionKind): readonly string[] {
+  switch (type) {
+    case HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL:
+    case HOST_ACTION_KIND.CONTEXT_COMPACT:
+    case HOST_ACTION_KIND.CAPABILITY_ADOPT:
+    case HOST_ACTION_KIND.SECRET_REVOKE:
+    case HOST_ACTION_KIND.AUTHORITY_REPAIR:
+      return DIGEST_ACTION_FIELDS[type];
+    default:
+      return EMPTY_FIELDS;
+  }
+}
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 function stringArray(value: unknown, path: string, allowEmpty = true): string[] {
@@ -89,22 +153,18 @@ function targetParticipants(value: unknown, path: string): void {
     throw new ActionValidationError("target participants are not in canonical order", path);
 }
 
-function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>, path: string): T {
-  if (typeof value !== "string" || !values.has(value as T))
-    throw new ActionValidationError("unsupported enum value", path);
-  return value as T;
-}
-
 function nullableString(value: unknown, path: string): string | null {
   return value === null ? null : boundedString(value, path);
 }
 
-function engine(value: unknown, path: string): EngineName {
-  return enumValue(value, ENGINES, path);
+function engine(value: unknown, path: string): Engine {
+  if (!isAgentEngine(value)) throw new ActionValidationError("unsupported enum value", path);
+  return value;
 }
 
-function scope(value: unknown, path: string): "project" | "user" {
-  return enumValue(value, SCOPES, path) as "project" | "user";
+function scope(value: unknown, path: string): CapabilityScope {
+  if (!isCapabilityScope(value)) throw new ActionValidationError("unsupported enum value", path);
+  return value;
 }
 
 function participant(value: unknown, path: string): void {
@@ -138,12 +198,8 @@ function packageSelector(value: unknown, path: string): void {
     assertRawSha256(row.content_sha256, `${path}.content_sha256`);
   if (row.package_pin_digest !== undefined)
     assertDigest(row.package_pin_digest, `${path}.package_pin_digest`);
-  if (row.source_kind !== undefined)
-    enumValue(
-      row.source_kind,
-      new Set(["registry", "git", "local-dev", "legacy-adopt"]),
-      `${path}.source_kind`,
-    );
+  if (row.source_kind !== undefined && !isCapabilitySourceKind(row.source_kind))
+    throw new ActionValidationError("invalid enum value", `${path}.source_kind`);
 }
 
 function targetSelector(value: unknown, path: string): void {
@@ -190,25 +246,28 @@ export function validateHostActionRequest(value: unknown, browser = false): Host
   const discriminant = exactObject(
     value,
     ["type"],
-    [...Object.values(DIRECT_KEYS).flat(), ...Object.values(OPTIONAL_KEYS).flat()],
+    [
+      ...Object.values(HOST_ACTION_REQUIRED_FIELDS).flat(),
+      ...Object.values(HOST_ACTION_OPTIONAL_FIELDS).flat(),
+    ],
     "$.candidate",
   ).type;
   if (typeof discriminant !== "string" || !isHostActionKind(discriminant))
     throw new ActionValidationError(
       "unsupported action discriminant",
       "$.candidate.type",
-      "target_unsupported",
+      PUBLIC_ERROR_CODE.TARGET_UNSUPPORTED,
     );
-  if (browser && discriminant === "authority.repair")
+  if (browser && discriminant === HOST_ACTION_KIND.AUTHORITY_REPAIR)
     throw new ActionValidationError(
       "target_unsupported: authority.repair is CLI-only",
       "$.candidate.type",
-      "target_unsupported",
+      PUBLIC_ERROR_CODE.TARGET_UNSUPPORTED,
     );
   const row = exactObject(
     value,
-    ["type", ...(DIRECT_KEYS[discriminant] ?? [])],
-    [...(OPTIONAL_KEYS[discriminant] ?? [])],
+    ["type", ...HOST_ACTION_REQUIRED_FIELDS[discriminant]],
+    optionalFields(discriminant),
     "$.candidate",
   );
   validateCandidateFields(discriminant, row);
@@ -220,7 +279,7 @@ function validateCandidateFields(
   row: Record<string, unknown>,
 ): void {
   const path = "$.candidate";
-  const strings = (DIRECT_KEYS[type] ?? []).filter(
+  const strings = HOST_ACTION_REQUIRED_FIELDS[type].filter(
     (key) =>
       ![
         "participant",
@@ -240,22 +299,12 @@ function validateCandidateFields(
       ].includes(key),
   );
   for (const key of strings) if (row[key] !== null) boundedString(row[key], `${path}.${key}`);
-  const digestFields: Partial<Record<HostActionRequestV1["type"], readonly string[]>> = {
-    "conversation.publish_suspected_literal": [
-      "staging_record_digest",
-      "staged_content_digest",
-      "findings_digest",
-    ],
-    "context.compact": ["oversized_candidate_digest"],
-    "capability.adopt": ["candidate_digest"],
-    "secret.revoke": ["expected_binding_digest"],
-    "authority.repair": ["plan_digest"],
-  };
-  for (const key of digestFields[type] ?? []) assertDigest(row[key], `${path}.${key}`);
-  if (type === "conversation.add_participant") participant(row.participant, `${path}.participant`);
-  if (type === "conversation.update_participant")
+  for (const key of digestActionFields(type)) assertDigest(row[key], `${path}.${key}`);
+  if (type === HOST_ACTION_KIND.CONVERSATION_ADD_PARTICIPANT)
+    participant(row.participant, `${path}.participant`);
+  if (type === HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT)
     participantChanges(row.changes, `${path}.changes`);
-  if (type === "conversation.update_settings") {
+  if (type === HOST_ACTION_KIND.CONVERSATION_UPDATE_SETTINGS) {
     const changes = exactObject(
       row.changes,
       [],
@@ -270,7 +319,7 @@ function validateCandidateFields(
     if (changes.baseline_enabled !== undefined && typeof changes.baseline_enabled !== "boolean")
       throw new ActionValidationError("expected boolean", `${path}.changes.baseline_enabled`);
   }
-  if (type === "conversation.continue_message") {
+  if (type === HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE) {
     const content = boundedString(row.content, `${path}.content`, { max: 65_536 });
     if (!content.trim()) throw new ActionValidationError("message content cannot be blank", path);
     targetParticipants(row.target_participants, `${path}.target_participants`);
@@ -302,8 +351,7 @@ function validateCandidateFields(
         ])
           boundedString(quote[key], `${path}.quote_refs[${index}].${key}`, { max: 512 });
         if (
-          (quote.target_kind !== "user-message" &&
-            quote.target_kind !== "completed-agent-response") ||
+          !isConversationMessageQueueQuoteTargetKind(quote.target_kind) ||
           typeof quote.content_digest !== "string" ||
           !DIGEST.test(quote.content_digest)
         )
@@ -318,19 +366,11 @@ function validateCandidateFields(
       }
     }
   }
-  if (type === "conversation.associate_lineages")
+  if (type === HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES)
     stringArray(row.root_session_ids, `${path}.root_session_ids`, false);
-  if (type === "context.compact")
+  if (type === HOST_ACTION_KIND.CONTEXT_COMPACT)
     validateCompactionInput(row.compaction_input, `${path}.compaction_input`);
-  if (
-    type.startsWith("capability.") ||
-    type.startsWith("grant.") ||
-    type === "policy.update_authority" ||
-    type === "secret.revoke" ||
-    type === "registry.trust_key"
-  ) {
-    if (row.scope !== undefined) scope(row.scope, `${path}.scope`);
-  }
+  if (row.scope !== undefined) scope(row.scope, `${path}.scope`);
   if (row.package !== undefined) packageSelector(row.package, `${path}.package`);
   if (row.selector !== undefined) packageSelector(row.selector, `${path}.selector`);
   if (row.requested_targets !== undefined && row.requested_targets !== null)

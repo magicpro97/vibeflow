@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
+import {
+  type CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_HOOK_EVENT,
+  type CapabilityManifestHookEvent,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import type { EngineName } from "../../actions/types.js";
+import { AGENT_ENGINE } from "../../core/agent-contract.js";
+import { CAPABILITY_SCOPE } from "../../core/capability-contract.js";
 import { digestV1Bytes } from "../../durability/canonical.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
 import {
@@ -33,22 +40,23 @@ import type {
 
 const HANDLER_ID = "vf-guardrail";
 const CODEX_FEATURE_BLOCK = "codex-hooks-feature";
-
+const JSON_HOOK_ENGINES: readonly EngineName[] = Object.freeze([
+  AGENT_ENGINE.CLAUDE,
+  AGENT_ENGINE.CODEX,
+  AGENT_ENGINE.ANTIGRAVITY,
+]);
 function rawSha(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
-
 function ownershipKey(input: CapabilityEffectPreparationRequestV1): string {
   const { target, package: pkg, component } = input;
   return `vf:${target.scope}:${target.engine}:${target.participant_id ?? "global"}:${component.type}:${pkg.pin.id}:${component.component_id}`;
 }
-
 function markerPath(key: string): string {
   return `.vibeflow/private/capabilities/ownership/v1/${digestHex(
     digestV1("VF-CAPABILITY-OWNERSHIP-KEY\0v1\0", key),
   )}.json`;
 }
-
 type PayloadDraft = CapabilityPrivateEffectPayloadV1 extends infer T
   ? T extends { payload_digest: string }
     ? Omit<T, "payload_digest">
@@ -175,17 +183,23 @@ function ownedFile(
 
 function parsedConfig(engine: EngineName): Record<string, CapabilityPrivateJsonV1> {
   const source =
-    engine === "claude"
+    engine === AGENT_ENGINE.CLAUDE
       ? claudeHookConfig()
-      : engine === "codex"
+      : engine === AGENT_ENGINE.CODEX
         ? codexHookConfig()
         : antigravityHookConfig(cliPath());
   return JSON.parse(source) as Record<string, CapabilityPrivateJsonV1>;
 }
 
-function nativeEvent(engine: EngineName, event: "pre-tool" | "post-tool"): string {
-  if (engine === "copilot") return event === "pre-tool" ? "preToolUse" : "postToolUse";
-  return event === "pre-tool" ? "PreToolUse" : "PostToolUse";
+type RuntimeHookEvent = Extract<
+  CapabilityManifestHookEvent,
+  typeof CAPABILITY_MANIFEST_HOOK_EVENT.PRE_TOOL | typeof CAPABILITY_MANIFEST_HOOK_EVENT.POST_TOOL
+>;
+
+function nativeEvent(engine: EngineName, event: RuntimeHookEvent): string {
+  if (engine === AGENT_ENGINE.COPILOT)
+    return event === CAPABILITY_MANIFEST_HOOK_EVENT.PRE_TOOL ? "preToolUse" : "postToolUse";
+  return event === CAPABILITY_MANIFEST_HOOK_EVENT.PRE_TOOL ? "PreToolUse" : "PostToolUse";
 }
 
 export function requireCheckedInHookEvent(
@@ -221,16 +235,20 @@ function jsonHook(
   input: CapabilityEffectPreparationRequestV1,
   roots: ProjectionBuilderRootsV1,
 ): BuiltFilesystemProjectionV1 {
-  const component = input.component as Extract<typeof input.component, { type: "hook" }>;
+  const component = input.component as Extract<
+    typeof input.component,
+    { type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK }
+  >;
   const engine = input.target.engine;
-  const event = nativeEvent(engine, component.event as "pre-tool" | "post-tool");
+  const event = nativeEvent(engine, component.event as RuntimeHookEvent);
   const relativePath =
-    engine === "claude"
+    engine === AGENT_ENGINE.CLAUDE
       ? ".claude/settings.json"
-      : engine === "codex"
+      : engine === AGENT_ENGINE.CODEX
         ? ".codex/hooks.json"
         : ".agents/hooks.json";
-  const keyPath = engine === "antigravity" ? ["vibeflow-guardrail", event] : ["hooks", event];
+  const keyPath =
+    engine === AGENT_ENGINE.ANTIGRAVITY ? ["vibeflow-guardrail", event] : ["hooks", event];
   const incoming = requireCheckedInHookEvent(parsedConfig(engine), keyPath, event);
   const rootKind = input.target.scope;
   const root = roots[rootKind];
@@ -248,7 +266,7 @@ function jsonHook(
   >["codex_feature"] = null;
   let beforeFeatureBlock: string | null = null;
   let postFeatureBlock: string | null = null;
-  if (engine === "codex") {
+  if (engine === AGENT_ENGINE.CODEX) {
     const featurePath = ".codex/config.toml";
     const featureBytes = readProjectionFile(boundedProjectionPath(root, featurePath));
     const featureText = featureBytes?.toString("utf8") ?? "";
@@ -324,12 +342,12 @@ function jsonHook(
   };
 }
 
-function copilotBytes(event: "pre-tool" | "post-tool"): Buffer {
+function copilotBytes(event: RuntimeHookEvent): Buffer {
   const full = JSON.parse(copilotHookConfig()) as {
     version: number;
     hooks: Record<string, CapabilityPrivateJsonV1>;
   };
-  const key = nativeEvent("copilot", event);
+  const key = nativeEvent(AGENT_ENGINE.COPILOT, event);
   return canonicalJsonBytes({ version: full.version, hooks: { [key]: full.hooks[key] } });
 }
 
@@ -337,36 +355,44 @@ export function buildHookProjection(
   input: CapabilityEffectPreparationRequestV1,
   roots: ProjectionBuilderRootsV1,
 ): BuiltFilesystemProjectionV1 {
-  const component = input.component as Extract<typeof input.component, { type: "hook" }>;
+  const component = input.component as Extract<
+    typeof input.component,
+    { type: typeof CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK }
+  >;
   if (component.vf_handler_id !== HANDLER_ID)
     throw new CapabilityValidationError(
       "hook handler is not in the checked-in registry",
       component.vf_handler_id,
     );
-  if (component.event !== "pre-tool" && component.event !== "post-tool")
+  if (
+    component.event !== CAPABILITY_MANIFEST_HOOK_EVENT.PRE_TOOL &&
+    component.event !== CAPABILITY_MANIFEST_HOOK_EVENT.POST_TOOL
+  )
     throw new CapabilityValidationError(
       "hook event has no checked-in runtime adapter",
       component.event,
     );
-  if (input.target.engine === "codex" && input.target.scope !== "user")
+  if (input.target.engine === AGENT_ENGINE.CODEX && input.target.scope !== CAPABILITY_SCOPE.USER)
     throw new CapabilityValidationError("Codex hooks are user-global", input.target.scope);
-  if (input.target.engine === "opencode" && component.event !== "pre-tool")
+  if (
+    input.target.engine === AGENT_ENGINE.OPENCODE &&
+    component.event !== CAPABILITY_MANIFEST_HOOK_EVENT.PRE_TOOL
+  )
     throw new CapabilityValidationError(
       "OpenCode adapter has no effective post-tool handler",
       component.event,
     );
-  if (["claude", "codex", "antigravity"].includes(input.target.engine))
-    return jsonHook(input, roots);
+  if (JSON_HOOK_ENGINES.includes(input.target.engine)) return jsonHook(input, roots);
   const post =
     input.operation === "remove"
       ? null
-      : input.target.engine === "copilot"
+      : input.target.engine === AGENT_ENGINE.COPILOT
         ? copilotBytes(component.event)
         : Buffer.from(opencodePluginSource());
   return ownedFile(
     input,
     roots,
-    input.target.engine === "copilot"
+    input.target.engine === AGENT_ENGINE.COPILOT
       ? ".github/hooks/copilot.json"
       : ".opencode/plugins/vf-guard.ts",
     post,

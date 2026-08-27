@@ -115,7 +115,11 @@ describe("coverage anti-patterns (test/ only)", () => {
     // The Superpowers cache-identity regression needs a real nested Git repo:
     // a fake spawner cannot prove `rev-parse --show-toplevel` rejects a child
     // directory that merely inherits its parent's HEAD.
-    .filter((p) => !p.endsWith("superpowers-sync-765.test.ts"));
+    .filter((p) => !p.endsWith("superpowers-sync-765.test.ts"))
+    // This CI-only win32 smoke deliberately crosses a real owner-process boundary:
+    // only an exited OS process can prove the persisted PID becomes an orphan and
+    // that Windows Job Object recovery reaps the exact live tree.
+    .filter((p) => !p.endsWith("dispatch-owned-process-windows-live.test.ts"));
 
   test("no test uses raw Bun.spawn or spawnSync without fakeSpawner", () => {
     for (const f of spawnCheckedFiles) {

@@ -3,12 +3,14 @@ import { digestV1 } from "../../durability/index.js";
 import { TraceLifecycleConflictError } from "../trace/store.js";
 import { projectDryRunResult } from "./boundary-projection.js";
 import { ConversationContinuationRuntime } from "./continuation-runtime.js";
-import {
-  ConversationMessageQueueDispatcherV1,
-  type ConversationQueuedMessageDeliveryHostV1,
-} from "./conversation-message-queue-dispatcher.js";
-import { ConversationMessageQueueRuntimeV1 } from "./conversation-message-queue-runtime.js";
+import type { ConversationQueuedMessageDeliveryHostV1 } from "./conversation-message-queue-dispatcher.js";
+import type { ConversationMessageQueueRuntimeV1 } from "./conversation-message-queue-runtime.js";
 import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-trace-authority.js";
+import {
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_TERMINAL_LIFECYCLE,
+  CONVERSATION_TRANSITION_LIFECYCLE,
+} from "./conversation-public-wire-contract.js";
 import { snapshotRuntimeValue } from "./emission-authority.js";
 import { ConversationAuthorityClosedError } from "./lifecycle-gate.js";
 import {
@@ -37,6 +39,7 @@ import {
   rethrowControlConflict,
 } from "./service-errors.js";
 import { ConversationExecutionRuntime } from "./service-execution-runtime.js";
+import { createConversationServiceMessageQueue } from "./service-message-queue-factory.js";
 import { ConversationPreparedSourcePublicationV1 } from "./service-prepared-publication.js";
 import { ConversationServiceQueueWakeV1 } from "./service-queue-wake.js";
 import { revisionQuiescenceReader } from "./service-revision-quiescence.js";
@@ -134,30 +137,12 @@ export class ConversationOrchestrator
       (manifest, operationId) => this.queueWake.execute(manifest, operationId),
       (conversationId) => this.queueWake.wake(conversationId),
     );
-    const broker = this.options.privateContextBroker;
-    const messages = this.options.messageQueueUserAuthority;
-    const home = this.options.homeAuthorities;
-    const social = this.options.socialAuthority;
-    if (broker && messages && home && social && this.options.artifactRoot) {
-      this.messageQueue = new ConversationMessageQueueRuntimeV1({
-        artifactRoot: this.options.artifactRoot,
-        traceStore: this.options.traceStore,
-        messages,
-        broker,
-        social,
-        now: this.now,
-      });
-      new ConversationMessageQueueDispatcherV1({
-        queue: this.messageQueue,
-        messages,
-        broker,
-        home,
-        delivery: this,
-        now: this.now,
-        schedule: this.schedule,
-      });
-      this.messageQueue.recover();
-    } else this.messageQueue = null;
+    this.messageQueue = createConversationServiceMessageQueue(
+      this.options,
+      this.now,
+      this,
+      this.schedule,
+    );
   }
   async start(
     input: ConversationCreateRequest | RuntimeCreateRequest,
@@ -234,7 +219,7 @@ export class ConversationOrchestrator
         messageKey: key,
       }).catch(rethrowControlConflict);
     }
-    if (state.lifecycle !== "ACTIVE")
+    if (state.lifecycle !== CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE)
       throw new ConversationControlConflictError("message requires ACTIVE");
     if (!this.runtime.operationId(id)) {
       await this.runtime.restoreControl(id).catch(rethrowControlConflict);
@@ -294,30 +279,30 @@ export class ConversationOrchestrator
   async pause(id: string): Promise<PauseResponse> {
     const state = await this.snapshot(id);
     if (!state) throw new ConversationNotFoundError("conversation not found");
-    if (state.lifecycle !== "ACTIVE")
+    if (state.lifecycle !== CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE)
       throw new ConversationControlConflictError("pause requires ACTIVE");
     if (!this.runtime.operationId(id)) {
       await this.runtime.restoreControl(id).catch(rethrowControlConflict);
     }
     try {
-      await this.runtime.transition(id, "PAUSED", state.health);
+      await this.runtime.transition(id, CONVERSATION_TRANSITION_LIFECYCLE.PAUSED, state.health);
     } catch (error) {
       rethrowControlConflict(error);
     }
-    return { paused: true, lifecycle: "PAUSED" };
+    return { paused: true, lifecycle: CONVERSATION_TRANSITION_LIFECYCLE.PAUSED };
   }
   async resume(id: string): Promise<ResumeResponse> {
     const state = await this.snapshot(id);
     if (!state) throw new ConversationNotFoundError("conversation not found");
-    if (state.lifecycle !== "PAUSED")
+    if (state.lifecycle !== CONVERSATION_TRANSITION_LIFECYCLE.PAUSED)
       throw new ConversationControlConflictError("resume requires PAUSED");
     await this.runtime.restore(id).catch(rethrowControlConflict);
     try {
-      await this.runtime.transition(id, "ACTIVE", state.health);
+      await this.runtime.transition(id, CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE, state.health);
     } catch (error) {
       rethrowControlConflict(error);
     }
-    return { resumed: true, active_state: "ACTIVE" };
+    return { resumed: true, active_state: CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE };
   }
   async stop(id: string): Promise<StopResponse> {
     const state = await this.runtime.controlState(id);
@@ -327,21 +312,29 @@ export class ConversationOrchestrator
     if (!this.runtime.operationId(id)) {
       await this.runtime.restoreControl(id).catch(rethrowControlConflict);
     }
-    if (state.lifecycle === "INIT") await this.runtime.configure(id, false);
+    if (state.lifecycle === CONVERSATION_LIFECYCLE.INIT) await this.runtime.configure(id, false);
     const terminal = await this.runtime
-      .terminal(id, "STOPPED", state.health, null, null, "conversation stopped")
+      .terminal(
+        id,
+        CONVERSATION_TERMINAL_LIFECYCLE.STOPPED,
+        state.health,
+        null,
+        null,
+        "conversation stopped",
+      )
       .catch(rethrowControlConflict);
     this.runtime.finish(id);
     this.queueWake.wake(id);
-    if (terminal !== "STOPPED")
+    if (terminal !== CONVERSATION_TERMINAL_LIFECYCLE.STOPPED)
       throw new ConversationControlConflictError("conversation is terminal");
-    return { stopped: true, terminal_state: "STOPPED" };
+    return { stopped: true, terminal_state: CONVERSATION_TERMINAL_LIFECYCLE.STOPPED };
   }
   async resolveApproval(id: string, decision: ApprovalDecision): Promise<ApprovalResolveResult> {
     const captured = snapshotRuntimeValue(decision);
     const state = await this.snapshot(id);
     const probe = await this.runtime.resolveApproval(id, captured, false);
-    if (!probe.requiresRestore || state?.lifecycle !== "ACTIVE") return probe.response;
+    if (!probe.requiresRestore || state?.lifecycle !== CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE)
+      return probe.response;
     try {
       await this.runtime.restore(id);
     } catch (error) {

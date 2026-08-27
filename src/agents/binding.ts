@@ -1,8 +1,11 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { ENGINES, type Engine } from "../core.js";
+import { AGENT_ENGINE, AGENT_ROLE_SOURCE } from "../core/agent-contract.js";
+import { SKILL_SOURCE } from "../core/skill-contract.js";
 import { type EnvPolicy, conversationEnvPolicy } from "../dispatch/env-filter.js";
 import { type ValidatedIsolationLease, validateIsolationLease } from "../dispatch/isolation.js";
+import { isEngineSessionMode } from "../dispatch/session-contract.js";
 import type {
   IsolationLeaseProjection,
   SessionMode,
@@ -64,11 +67,10 @@ const canonicalPreviewBindings = new WeakSet<object>();
 export const isCanonicalPreviewAgentBinding = (value: PreviewAgentBinding): boolean =>
   canonicalPreviewBindings.has(value);
 
-const SESSION_MODES = new Set<SessionMode>(["exact", "replay", "fresh"]);
-
 function assertBindingInput(binding: AgentBinding): void {
   if (!ENGINES.includes(binding.engine)) throw new Error("unsupported conversation engine");
-  if (!SESSION_MODES.has(binding.sessionMode)) throw new Error("invalid conversation session mode");
+  if (!isEngineSessionMode(binding.sessionMode))
+    throw new Error("invalid conversation session mode");
 }
 
 function renderPrompt(
@@ -113,12 +115,12 @@ function assertAdmission(
     throw new Error("conversation phase must be a positive integer");
   }
   if (options.phase === 1) {
-    if (binding.engine !== "claude" && binding.engine !== "codex") {
+    if (binding.engine !== AGENT_ENGINE.CLAUDE && binding.engine !== AGENT_ENGINE.CODEX) {
       throw new Error("Phase 1 admits only built-in read-only Claude/Codex bindings");
     }
     if (
-      resolvedRole.source !== "builtin" ||
-      resolvedSkills.some((skill) => skill.source !== "builtin")
+      resolvedRole.source !== AGENT_ROLE_SOURCE.BUILTIN ||
+      resolvedSkills.some((skill) => skill.source !== SKILL_SOURCE.BUILTIN)
     ) {
       throw new Error("Phase 1 admits only built-in read-only bindings");
     }
@@ -129,7 +131,8 @@ function assertAdmission(
   }
 
   const projectMaterial =
-    resolvedRole.source === "repo" || resolvedSkills.some((skill) => skill.source === "repo");
+    resolvedRole.source === AGENT_ROLE_SOURCE.REPO ||
+    resolvedSkills.some((skill) => skill.source === SKILL_SOURCE.REPO);
   if (validatedIsolation && validatedIsolation.repoRoot !== canonicalRepoRoot) {
     throw new Error("isolation lacks the associated canonical repository");
   }

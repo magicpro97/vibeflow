@@ -1,5 +1,6 @@
 import { canonicalJsonBytes } from "../durability/index.js";
 import { publicActionError } from "./errors.js";
+import { isCapabilityHostActionKind } from "./host-action-contract.js";
 import { validateOperationBatches } from "./operation-batch-validation.js";
 import {
   assertPhaseOwner,
@@ -7,6 +8,20 @@ import {
   isOperationPhase,
   terminalStateForPhase,
 } from "./operation-phase-rules.js";
+import {
+  ACTION_OPERATION_STATE,
+  ACTION_ROOT_LOCATOR_KIND,
+  PUBLIC_OPERATION_FIXED_PHASE,
+  PUBLIC_OPERATION_PROGRESS_STATUS,
+  PUBLIC_TARGET_RESULT_HEALTH,
+  isActionOperationDomainTerminalState,
+  isPublicOperationParticipantTargetPhase,
+  isPublicOperationProgressStatus,
+  isPublicTargetResultHealth,
+  isPublicTargetResultOutcome,
+  publicOperationTargetOutcomes,
+} from "./protocol-contract.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import { assertPublicProjectionSafe } from "./public-safety.js";
 import type {
   ActionOperationEventV1,
@@ -51,21 +66,21 @@ export function foldDomainProjection(
   validateOperationBatches(snapshot, events);
   const last = events.at(-1);
   const capabilityOutbox =
-    snapshot.proposal.action.type.startsWith("capability.") &&
-    snapshot.proposal.action_root_locator.kind === "conversation";
-  if (["succeeded", "failed", "needs_recovery"].includes(snapshot.state) && !last)
+    isCapabilityHostActionKind(snapshot.proposal.action.type) &&
+    snapshot.proposal.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION;
+  if (isActionOperationDomainTerminalState(snapshot.state) && !last)
     throw new Error("terminal action authority has no domain phase closure");
   if (
     last &&
     !capabilityOutbox &&
-    ["succeeded", "failed", "needs_recovery"].includes(snapshot.state) &&
+    isActionOperationDomainTerminalState(snapshot.state) &&
     last.state !== snapshot.state
   )
     throw new Error("terminal operation phase does not match action authority");
   if (
     last &&
     !capabilityOutbox &&
-    ["succeeded", "failed", "needs_recovery"].includes(snapshot.state) &&
+    isActionOperationDomainTerminalState(snapshot.state) &&
     last.occurred_at !== snapshot.events.at(-1)?.recorded_at
   )
     throw new Error("terminal operation phase timestamp does not match domain mirror");
@@ -119,16 +134,25 @@ function validateEvent(
   if (event.target) validateTarget(event.target, snapshot, path);
   validatePhaseState(event, snapshot);
   if (event.error) {
-    if (!["failed", "needs_recovery"].includes(event.state) || index === 0)
+    if (
+      (event.state !== ACTION_OPERATION_STATE.FAILED &&
+        event.state !== ACTION_OPERATION_STATE.NEEDS_RECOVERY) ||
+      index === 0
+    )
       throw new Error("public operation error is not on a terminal boundary");
     const checked = publicActionError(event.error as never).error;
     if (checked.correlation_id !== correlationId)
       throw new Error("operation error correlation mismatch");
-    const expectedError = event.state === "failed" ? "pre_effect_refused" : "scope_needs_recovery";
+    const expectedError =
+      event.state === ACTION_OPERATION_STATE.FAILED
+        ? PUBLIC_ERROR_CODE.PRE_EFFECT_REFUSED
+        : PUBLIC_ERROR_CODE.SCOPE_NEEDS_RECOVERY;
     const expectedPhase =
-      event.state === "failed" ? "operation-failed" : "operation-needs-recovery";
+      event.state === ACTION_OPERATION_STATE.FAILED
+        ? PUBLIC_OPERATION_FIXED_PHASE.OPERATION_FAILED
+        : PUBLIC_OPERATION_FIXED_PHASE.OPERATION_NEEDS_RECOVERY;
     if (
-      !snapshot.proposal.action.type.startsWith("capability.") ||
+      !isCapabilityHostActionKind(snapshot.proposal.action.type) ||
       checked.code !== expectedError ||
       event.progress?.phase !== expectedPhase
     )
@@ -137,8 +161,10 @@ function validateEvent(
   if (
     index > 0 &&
     event.error === null &&
-    ["failed", "needs_recovery"].includes(event.state) &&
-    event.progress?.phase.startsWith("operation-")
+    (event.state === ACTION_OPERATION_STATE.FAILED ||
+      event.state === ACTION_OPERATION_STATE.NEEDS_RECOVERY) &&
+    (event.progress?.phase === PUBLIC_OPERATION_FIXED_PHASE.OPERATION_FAILED ||
+      event.progress?.phase === PUBLIC_OPERATION_FIXED_PHASE.OPERATION_NEEDS_RECOVERY)
   ) {
     // Ordinary terminal failures may intentionally have no public error.
   }
@@ -163,7 +189,7 @@ function validateProgress(
     progress.sequence !== sequence ||
     progress.message_code !== `operation.${progress.phase}` ||
     progress.at !== occurredAt ||
-    !["pending", "running", "succeeded", "failed", "reversed"].includes(progress.status)
+    !isPublicOperationProgressStatus(progress.status)
   )
     throw new Error("operation progress projection mismatch");
   if (progress.status !== expectedOperationStatus(progress.phase, state))
@@ -189,23 +215,9 @@ function validateTarget(
     )
   )
     throw new Error("operation target projection does not match immutable proposal");
-  if (
-    ![
-      "applied",
-      "failed",
-      "manual",
-      "required-user-action",
-      "unsupported",
-      "omitted",
-      "reversed",
-      "degraded",
-      "blocked",
-      "needs-recovery",
-    ].includes(target.outcome)
-  )
+  if (!isPublicTargetResultOutcome(target.outcome))
     throw new Error("invalid public target outcome");
-  if (!["ready", "degraded", "unknown", "stale", "failed"].includes(target.health))
-    throw new Error("invalid public target health");
+  if (!isPublicTargetResultHealth(target.health)) throw new Error("invalid public target health");
   if (target.evidence_digest !== null)
     assertDigest(target.evidence_digest, `${path}.target.evidence_digest`);
 }
@@ -215,44 +227,33 @@ function validatePhaseState(
   snapshot: ActionAuthoritySnapshotV1,
 ): void {
   const phase = event.progress?.phase ?? "";
-  const expected = terminalStateForPhase(phase as PublicOperationProgressV1["phase"]);
+  const expected = terminalStateForPhase(phase);
   if (expected && event.state !== expected) throw new Error("operation phase/state mismatch");
   if (
-    phase === "dispatch" &&
-    (event.state !== "committing" || event.progress?.status !== "running" || event.target !== null)
+    phase === PUBLIC_OPERATION_FIXED_PHASE.DISPATCH &&
+    (event.state !== ACTION_OPERATION_STATE.COMMITTING ||
+      event.progress?.status !== PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING ||
+      event.target !== null)
   )
     throw new Error("dispatch phase projection mismatch");
-  if (phase === "dispatch" && event.occurred_at !== snapshot.approval?.decided_at)
+  if (
+    phase === PUBLIC_OPERATION_FIXED_PHASE.DISPATCH &&
+    event.occurred_at !== snapshot.approval?.decided_at
+  )
     throw new Error("dispatch phase timestamp mismatch");
-  const targetBearing =
-    phase.startsWith("target-") ||
-    [
-      "participant-start:accepted",
-      "participant-start:failed",
-      "participant-start:canceled",
-      "participant-start:uncertain",
-    ].includes(phase);
+  const targetOutcomes = event.progress
+    ? publicOperationTargetOutcomes(event.progress.phase)
+    : null;
+  const targetBearing = targetOutcomes !== null;
   if (targetBearing !== (event.target !== null))
     throw new Error("operation phase target nullability mismatch");
   if (event.target) {
-    const outcomes: Record<string, readonly string[]> = {
-      "target-applied": ["applied"],
-      "target-omitted": ["omitted"],
-      "target-reversed": ["reversed"],
-      "target-degraded": ["degraded"],
-      "target-failed": ["failed"],
-      "target-blocked": ["blocked", "manual", "required-user-action", "unsupported"],
-      "target-needs-recovery": ["needs-recovery"],
-      "participant-start:accepted": ["applied"],
-      "participant-start:failed": ["failed"],
-      "participant-start:canceled": ["reversed"],
-      "participant-start:uncertain": ["needs-recovery"],
-    };
-    if (!outcomes[phase]?.includes(event.target.outcome))
+    if (!targetOutcomes?.includes(event.target.outcome))
       throw new Error("operation phase target outcome mismatch");
     if (
-      phase.startsWith("participant-start:") &&
-      (event.target.health !== "unknown" || event.target.evidence_digest !== null)
+      isPublicOperationParticipantTargetPhase(phase) &&
+      (event.target.health !== PUBLIC_TARGET_RESULT_HEALTH.UNKNOWN ||
+        event.target.evidence_digest !== null)
     )
       throw new Error("participant target projection carries non-authoritative health evidence");
   }

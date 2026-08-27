@@ -1,6 +1,11 @@
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
-import type { PolicyAuthorityFrameV1 } from "./types.js";
+import {
+  POLICY_AUTHORITY_NEXT_STATE,
+  POLICY_AUTHORITY_STATE,
+  type PolicyAuthorityFrameV1,
+} from "./types.js";
 import { validatePolicyFrame } from "./validation.js";
 
 export interface PolicyFoldV1 {
@@ -24,21 +29,25 @@ function stableChange(frame: PolicyAuthorityFrameV1): unknown {
 
 export function foldPolicyFrames(
   frames: readonly PolicyAuthorityFrameV1[],
-  scope: "project" | "user",
+  scope: CapabilityScope,
   scopeIdentityDigest: string,
 ): PolicyFoldV1 {
   let previous: string | null = null;
   let latestObserved: PolicyAuthorityFrameV1 | null = null;
   let groupPrepared: PolicyAuthorityFrameV1 | null = null;
-  const states = ["prepared", "effect_in_progress", "observed"] as const;
   for (const [index, frame] of frames.entries()) {
     validatePolicyFrame(frame);
+    const priorState = frames[index - 1]?.state;
+    const expectedState =
+      priorState === undefined
+        ? POLICY_AUTHORITY_STATE.PREPARED
+        : POLICY_AUTHORITY_NEXT_STATE[priorState];
     if (
       frame.scope !== scope ||
       frame.scope_identity_digest !== scopeIdentityDigest ||
       frame.sequence !== index ||
       frame.previous_frame_digest !== previous ||
-      frame.state !== states[index % 3]
+      frame.state !== expectedState
     )
       throw new CapabilityValidationError(
         "policy journal is not dense/chained/owned or has an illegal state transition",
@@ -64,7 +73,7 @@ export function foldPolicyFrames(
         `frames[${index}]`,
       );
     }
-    if (frame.state === "observed") latestObserved = frame;
+    if (frame.state === POLICY_AUTHORITY_STATE.OBSERVED) latestObserved = frame;
     previous = frame.frame_digest;
   }
   if (frames.length % 3 !== 0)

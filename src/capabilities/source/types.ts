@@ -1,3 +1,12 @@
+import type { LegacySource } from "../../actions/capability-manifest-vocabulary-contract.js";
+import type {
+  CAPABILITY_SIGNATURE_ALGORITHM,
+  CAPABILITY_SOURCE_KIND,
+  CapabilityPackagePinTrust,
+  CapabilityRegistryEnvelopeStatus,
+  CapabilityRegistryTrustKeyState,
+} from "../../actions/capability-security-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { CapabilityMetadataV1 } from "../manifest/types.js";
 
 export interface RegistryPackageStatementV1 {
@@ -16,7 +25,7 @@ export interface RegistrySignatureEnvelopeV1 {
   schema_version: "1.0";
   statement: RegistryPackageStatementV1;
   signature: {
-    algorithm: "Ed25519";
+    algorithm: typeof CAPABILITY_SIGNATURE_ALGORITHM.ED25519;
     key_id: string;
     value_base64url: string;
   };
@@ -38,20 +47,20 @@ export interface RegistryCapabilityIndexV1 {
 
 export interface RegistryTrustKeyV1 {
   key_id: string;
-  algorithm: "Ed25519";
+  algorithm: typeof CAPABILITY_SIGNATURE_ALGORITHM.ED25519;
   public_key_spki_base64: string;
   registry_origin: string;
   publisher_id: string | null;
   valid_from: string;
   valid_until: string;
-  state: "active" | "deprecated" | "revoked";
+  state: CapabilityRegistryTrustKeyState;
   trust_epoch: number;
   frame_digest: string;
 }
 
 export interface RegistryTrustSnapshotV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   authority_epoch: number;
   authority_head_digest: string;
@@ -65,8 +74,8 @@ export interface VerifiedRegistryEnvelopeV1 {
   envelope_digest: string;
   key_id: string;
   statement_expires_at: string;
-  status: "verified" | "stale" | "blocked";
-  scope: "project" | "user";
+  status: CapabilityRegistryEnvelopeStatus;
+  scope: CapabilityScope;
   scope_identity_digest: string;
   authority_epoch: number;
   authority_head_digest: string;
@@ -77,22 +86,17 @@ export interface VerifiedRegistryEnvelopeV1 {
 
 export type PackagePinSourceV1 =
   | {
-      kind: "registry";
+      kind: typeof CAPABILITY_SOURCE_KIND.REGISTRY;
       registry_origin: string;
       source_url: string;
       commit_oid: string | null;
       signature_envelope_digest: string;
     }
-  | { kind: "git"; canonical_url: string; commit_oid: string }
-  | { kind: "local-dev"; repo_relative_alias: string }
+  | { kind: typeof CAPABILITY_SOURCE_KIND.GIT; canonical_url: string; commit_oid: string }
+  | { kind: typeof CAPABILITY_SOURCE_KIND.LOCAL_DEV; repo_relative_alias: string }
   | {
-      kind: "legacy-adopt";
-      legacy_source:
-        | "skill-lock"
-        | "tool-managed-evidence"
-        | "mcp-managed-sidecar"
-        | "hook-sentinel"
-        | "role-marker";
+      kind: typeof CAPABILITY_SOURCE_KIND.LEGACY_ADOPT;
+      legacy_source: LegacySource;
       inspection_evidence_digest: string;
     };
 
@@ -101,7 +105,7 @@ export interface PackagePinV1 {
   version: string;
   source: PackagePinSourceV1;
   content_sha256: string;
-  trust: "verified" | "source-pinned" | "dev-unverified" | "legacy-verified";
+  trust: CapabilityPackagePinTrust;
   nonportable: boolean;
   pin_digest: string;
 }
@@ -120,7 +124,10 @@ export interface PackageAuthenticityBindingV1 {
 
 export interface LegacyInspectionEvidenceV1 {
   schema_version: "1.0";
-  legacy_source: Extract<PackagePinSourceV1, { kind: "legacy-adopt" }>["legacy_source"];
+  legacy_source: Extract<
+    PackagePinSourceV1,
+    { kind: typeof CAPABILITY_SOURCE_KIND.LEGACY_ADOPT }
+  >["legacy_source"];
   raw_identifier_nfc: string;
   adapter_fingerprint: string;
   source_records: Array<{

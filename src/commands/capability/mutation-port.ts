@@ -1,9 +1,17 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
+  ACTION_ROOT_LOCATOR_KIND,
   ActionAuthorityStore,
   createDurableActionAuthorityReaderV1,
   materializeReviewAuthorityProof,
 } from "../../actions/index.js";
 import { validateInternalHostAction } from "../../actions/internal-validation.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_CLASSES,
+  ACTION_DECISION,
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+} from "../../actions/public-action-contract.js";
 import { materializeCapabilityPreview } from "../../capabilities/action-domain/preview.js";
 import type {
   CapabilityCliMutationInputV1,
@@ -18,6 +26,12 @@ import type {
   CapabilityCliResultV1,
   FabricCliCapabilityMutationCommandV1,
 } from "../../capabilities/wire/cli.js";
+import { CAPABILITY_OPERATION_STATUS } from "../../capabilities/wire/operation-state-contract.js";
+import {
+  CAPABILITY_PLAN_STATUS,
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  type CapabilityScope,
+} from "../../core/capability-contract.js";
 import { materializeStandaloneCapabilityProposal } from "./mutation-port-proposal.js";
 import { StandaloneCapabilityActionAuthorityResolver } from "./mutation-port-resolver.js";
 import { resultError } from "./render.js";
@@ -56,12 +70,12 @@ function planResult(
   base: ReturnType<CapabilityFabricServiceV1["options"]["storage"]["readStatus"]>["lock"],
 ): CapabilityCliResultV1 {
   const preview = materializeCapabilityPreview({ action, plan, base });
-  if (plan.status === "no-op") {
+  if (plan.status === CAPABILITY_PLAN_STATUS.NO_OP) {
     return {
       schema_version: "1.0",
       kind: "plan",
       command,
-      status: "no-op",
+      status: CAPABILITY_PLAN_STATUS.NO_OP,
       proposal_id: null,
       proposal_digest: null,
       plan_digest: plan.plan_digest,
@@ -102,7 +116,7 @@ function challengeResult(
     schema_version: "1.0",
     kind: "plan",
     command,
-    status: "action-required",
+    status: CAPABILITY_PLAN_STATUS.ACTION_REQUIRED,
     proposal_id: proposal.proposal_id,
     proposal_digest: proposal.proposal_digest,
     plan_digest: plan.plan_digest,
@@ -123,7 +137,7 @@ function mutationFailed(
     schema_version: "1.0",
     kind: "plan",
     command,
-    status: "failed",
+    status: CAPABILITY_OPERATION_STATUS.FAILED,
     proposal_id: null,
     proposal_digest: null,
     plan_digest: null,
@@ -141,13 +155,16 @@ function mutationResult(
   proposalId: string,
   result: CapabilityOperationResultV1,
 ): CapabilityCliResultV1 {
-  if (result.status === "succeeded" || result.status === "degraded") {
+  if (
+    result.status === CAPABILITY_OPERATION_STATUS.SUCCEEDED ||
+    result.status === CAPABILITY_OPERATION_STATUS.DEGRADED
+  ) {
     if (result.generation_id === null)
       return mutationFailed(
         command,
         new CapabilityRuntimeError(
           "capability operation result omitted generation identity",
-          "integrity-failure",
+          CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
         ),
       );
     return {
@@ -168,15 +185,15 @@ function mutationResult(
   const error = resultError(
     new CapabilityRuntimeError(
       result.reason_code ?? "capability operation failed",
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     ),
   );
-  if (result.status === "needs-recovery") {
+  if (result.status === CAPABILITY_OPERATION_STATUS.NEEDS_RECOVERY) {
     return {
       schema_version: "1.0",
       kind: "mutation",
       command,
-      status: "needs-recovery",
+      status: CAPABILITY_OPERATION_STATUS.NEEDS_RECOVERY,
       changed: result.changed,
       operation_id: result.operation_id,
       proposal_id: proposalId,
@@ -191,7 +208,7 @@ function mutationResult(
     schema_version: "1.0",
     kind: "mutation",
     command,
-    status: "failed",
+    status: CAPABILITY_OPERATION_STATUS.FAILED,
     changed: false,
     operation_id: result.operation_id,
     proposal_id: proposalId,
@@ -204,14 +221,14 @@ function mutationResult(
 }
 
 function internalCapabilityAction(service: CapabilityFabricServiceV1, input: DurableMutationInput) {
-  if (input.request.action.type === "capability.adopt") {
+  if (input.request.action.type === HOST_ACTION_KIND.CAPABILITY_ADOPT) {
     return {
-      type: "capability.adopt",
+      type: HOST_ACTION_KIND.CAPABILITY_ADOPT,
       scope: input.request.scope,
       candidate: service.resolveAdoptCandidate(input.request.action, {
         scope: input.request.scope,
         action_root_locator: {
-          kind: "capability",
+          kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
           scope: input.request.scope,
           scope_identity_digest: service.options.storage.scopeIdentityDigest,
         },
@@ -222,7 +239,7 @@ function internalCapabilityAction(service: CapabilityFabricServiceV1, input: Dur
   if (!isCapabilityHostAction(action))
     throw new CapabilityRuntimeError(
       "CLI mutation request escaped the capability domain",
-      "authorization-mismatch",
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
     );
   return validateCapabilityIntentAction(action);
 }
@@ -231,8 +248,8 @@ export function createCapabilityCliMutationPort(
   options: CapabilityCommandRuntimeOptions,
 ): CapabilityCliMutationPortV1 {
   const runtime = commandRuntime(options);
-  const scopes = new Map<"project" | "user", ScopeMutationRuntime>();
-  const scopeRuntime = (scope: "project" | "user"): ScopeMutationRuntime => {
+  const scopes = new Map<CapabilityScope, ScopeMutationRuntime>();
+  const scopeRuntime = (scope: CapabilityScope): ScopeMutationRuntime => {
     const prior = scopes.get(scope);
     if (prior) return prior;
     const service = runtime.service(scope);
@@ -246,7 +263,7 @@ export function createCapabilityCliMutationPort(
     });
     runtime.actionRoots.bind(
       {
-        kind: "capability",
+        kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
         scope,
         scope_identity_digest: service.options.storage.scopeIdentityDigest,
       },
@@ -275,7 +292,7 @@ export function createCapabilityCliMutationPort(
           input.command,
           new CapabilityRuntimeError(
             "standalone authority CLI mutation runtime is unavailable",
-            "service-unavailable",
+            CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
           ),
         );
       try {
@@ -285,16 +302,19 @@ export function createCapabilityCliMutationPort(
         const graph = scoped.service.prepareIntentGraph({
           schema_version: "1.0",
           action,
-          planning_options: { mode: "durable", network_read: "ordinary-host-policy" },
+          planning_options: {
+            mode: ACTION_PLANNING_MODE.DURABLE,
+            network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
+          },
           action_root_locator: {
-            kind: "capability",
+            kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
             scope: input.request.scope,
             scope_identity_digest: scoped.service.options.storage.scopeIdentityDigest,
           },
           request_authority: authority,
         });
         const base = scoped.service.options.storage.readStatus().lock;
-        if (graph.plan.status !== "planned" || !input.approve)
+        if (graph.plan.status !== CAPABILITY_PLAN_STATUS.PLANNED || !input.approve)
           return planResult(input.command, action, graph.plan, base);
         runtime.actionObjects.persistGraph(graph);
         const { canonical_request, proposal } = materializeStandaloneCapabilityProposal({
@@ -319,15 +339,16 @@ export function createCapabilityCliMutationPort(
           ).toISOString(),
         );
         if (
-          review.required_challenge_class === "fresh-user-scope" ||
-          review.required_challenge_class === "public-literal"
+          ACTION_APPROVAL_CHALLENGE_CLASSES.some(
+            (challengeClass) => challengeClass === review.required_challenge_class,
+          )
         )
           return challengeResult(input.command, action, graph.plan, created.proposal, base);
         const approval = scoped.store.decide({
           proposal_id: created.proposal.proposal_id,
           proposal_digest: created.proposal.proposal_digest,
           authority,
-          decision: "approved",
+          decision: ACTION_DECISION.APPROVED,
           challenge_id: null,
           challenge_response: null,
         });

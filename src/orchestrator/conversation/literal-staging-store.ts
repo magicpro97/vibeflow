@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import type { SuspectedLiteralPublicationBindingV1 } from "../../actions/index.js";
+import { ACTION_PREVIEW_PROJECTOR_VERSION } from "../../actions/public-action-contract.js";
 import {
   type JsonValue,
   type ProcessLock,
@@ -17,6 +18,7 @@ import {
 const MAX_RECORD = 256 * 1024;
 const MAX_CONTENT = 64 * 1024;
 const STAGING = /^vf-literal-[0-9a-f]{64}$/;
+const SUSPECTED_LITERAL_CLASSIFIER_PROFILE = "vf-secret-classifier/1" as const;
 const RULES_DIGEST = digestV1("VF-SUSPECTED-LITERAL-RULES\0v1\0", {
   schema_version: "1.0",
   classifier_profile: "vf-secret-classifier/1",
@@ -40,8 +42,8 @@ export interface SuspectedLiteralStagingRecordV1 {
   private_content_ref: string;
   content_utf8_sha256: string;
   content_byte_length: number;
-  classifier_profile: "vf-secret-classifier/1";
-  projector_version: "vf-public-projector/1";
+  classifier_profile: typeof SUSPECTED_LITERAL_CLASSIFIER_PROFILE;
+  projector_version: typeof ACTION_PREVIEW_PROJECTOR_VERSION;
   rules_digest: string;
   findings: SuspectedLiteralFindingV1[];
   staged_content_digest: string;
@@ -192,8 +194,8 @@ export class LiteralStagingStoreV1 {
       private_content_ref: contentRef,
       content_utf8_sha256: contentSha,
       content_byte_length: bytes.length,
-      classifier_profile: "vf-secret-classifier/1" as const,
-      projector_version: "vf-public-projector/1" as const,
+      classifier_profile: SUSPECTED_LITERAL_CLASSIFIER_PROFILE,
+      projector_version: ACTION_PREVIEW_PROJECTOR_VERSION,
       rules_digest: RULES_DIGEST,
       findings: classified,
       staged_content_digest: stagedDigest,

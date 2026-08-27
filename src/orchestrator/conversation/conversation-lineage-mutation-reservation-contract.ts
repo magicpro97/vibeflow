@@ -1,3 +1,5 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
+
 export const LINEAGE_MUTATION_RESERVATION_SCHEMA_VERSION = "1.0" as const;
 
 export type LineageMutationReservationSchemaVersionV1 =
@@ -28,8 +30,8 @@ export const LINEAGE_MUTATION_KINDS = Object.freeze(
 ) as readonly LineageMutationKindV1[];
 
 export const LINEAGE_MUTATION_ACTION_TYPE = Object.freeze({
-  PUBLIC_LITERAL: "conversation.publish_suspected_literal",
-  CONTEXT_COMPACTION: "context.compact",
+  PUBLIC_LITERAL: HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL,
+  CONTEXT_COMPACTION: HOST_ACTION_KIND.CONTEXT_COMPACT,
 } as const);
 
 export type LineageMutationActionTypeV1 =

@@ -1,4 +1,20 @@
 import { createHash } from "node:crypto";
+import {
+  CAPABILITY_MANIFEST_ACCESS,
+  CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_FILESYSTEM_ROOT,
+  CAPABILITY_MANIFEST_HEALTH_RETRIES,
+  CAPABILITY_MANIFEST_HOOK_EVENT,
+  CAPABILITY_MANIFEST_MCP_TRANSPORT,
+  CAPABILITY_MANIFEST_PERMISSION_KIND,
+  CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENT,
+  CAPABILITY_MANIFEST_SCHEMA_VERSION,
+  LEGACY_SOURCE,
+  LEGACY_SOURCES,
+  LEGACY_SOURCE_HEALTH_PROBE_KIND,
+  LEGACY_SOURCE_PACKAGE_ID_PREFIX,
+  LEGACY_SOURCE_RECORD_KIND,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import { validateLegacyCandidate } from "../../actions/internal-candidate-validation.js";
 import type {
   LegacyManifestPermissionV1,
@@ -8,6 +24,11 @@ import type {
   StrictLegacyAdoptCandidateV1,
 } from "../../actions/legacy-adopt-types.js";
 import { targetId } from "../../actions/proposal-content-validation.js";
+import {
+  PUBLIC_ACTION_TARGET_APPLY_FAILURE,
+  PUBLIC_ACTION_TARGET_HEALTH_FAILURE,
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+} from "../../actions/public-operation-contract.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
 import { parseCapabilityManifest } from "../manifest/validation.js";
 import { issueLegacyInspectionEvidence } from "../source/legacy-adopt-closure.js";
@@ -25,13 +46,7 @@ import type { LegacyAdoptMaterializedInspectionRequestV1, LegacyOwnedMarkerV1 } 
 
 export { projectLegacyAdoptInspection } from "./inspection-projection.js";
 
-const SOURCE_ORDER: LegacySourceV1[] = [
-  "skill-lock",
-  "tool-managed-evidence",
-  "mcp-managed-sidecar",
-  "hook-sentinel",
-  "role-marker",
-];
+const SOURCE_ORDER: readonly LegacySourceV1[] = LEGACY_SOURCES;
 
 function rawSha(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -58,11 +73,9 @@ function managedIdentifier(raw: string): string {
 
 function packageId(marker: FilesystemLegacyOwnedMarkerV1): string {
   const prefix =
-    marker.source === "skill-lock"
-      ? "legacy.skill."
-      : marker.source === "mcp-managed-sidecar"
-        ? `legacy.mcp.${marker.engine}.`
-        : `legacy.hook.${marker.engine}.`;
+    marker.source === LEGACY_SOURCE.SKILL_LOCK
+      ? LEGACY_SOURCE_PACKAGE_ID_PREFIX[marker.source]
+      : `${LEGACY_SOURCE_PACKAGE_ID_PREFIX[marker.source]}${marker.engine}.`;
   return `${prefix}${managedIdentifier(marker.raw_identifier)}`;
 }
 
@@ -70,19 +83,29 @@ function component(marker: FilesystemLegacyOwnedMarkerV1): LegacySyntheticCompon
   const base = { component_id: "legacy", targets: [marker.engine], required: true };
   const payloadSha = rawSha(marker.payload);
   switch (marker.source) {
-    case "skill-lock":
-      return { ...base, type: "skill", bundle_path: "payload/SKILL.md", bundle_sha256: payloadSha };
-    case "mcp-managed-sidecar":
+    case LEGACY_SOURCE.SKILL_LOCK:
       return {
         ...base,
-        type: "mcp",
-        transport: "stdio",
+        type: CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL,
+        bundle_path: "payload/SKILL.md",
+        bundle_sha256: payloadSha,
+      };
+    case LEGACY_SOURCE.MCP_MANAGED_SIDECAR:
+      return {
+        ...base,
+        type: CAPABILITY_MANIFEST_COMPONENT_TYPE.MCP,
+        transport: CAPABILITY_MANIFEST_MCP_TRANSPORT.STDIO,
         executable: { component_id: "legacy", relative_path: "payload/server", sha256: payloadSha },
         args: [],
         secret_slots: [],
       };
-    case "hook-sentinel":
-      return { ...base, type: "hook", event: "pre-tool", vf_handler_id: "legacy-handler" };
+    case LEGACY_SOURCE.HOOK_SENTINEL:
+      return {
+        ...base,
+        type: CAPABILITY_MANIFEST_COMPONENT_TYPE.HOOK,
+        event: CAPABILITY_MANIFEST_HOOK_EVENT.PRE_TOOL,
+        vf_handler_id: "legacy-handler",
+      };
   }
 }
 
@@ -91,33 +114,41 @@ function permissions(
   id: string,
 ): LegacyManifestPermissionV1[] {
   const permission_id = `${id}/owned-0`;
-  if (marker.source === "hook-sentinel")
+  if (marker.source === LEGACY_SOURCE.HOOK_SENTINEL)
     return [
       {
         permission_id,
-        required_enforcement: "engine-enforced",
-        kind: "hook",
-        scope: { engine: marker.engine, hook_point: "pre-tool", participant_id: null },
+        required_enforcement: CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENT.ENGINE_ENFORCED,
+        kind: CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK,
+        scope: {
+          engine: marker.engine,
+          hook_point: CAPABILITY_MANIFEST_HOOK_EVENT.PRE_TOOL,
+          participant_id: null,
+        },
       },
     ];
-  if (marker.source === "skill-lock")
+  if (marker.source === LEGACY_SOURCE.SKILL_LOCK)
     return [
       {
         permission_id,
-        required_enforcement: "sandboxed",
-        kind: "filesystem",
-        scope: { root: "project", access: "write", path_prefix: ".vibeflow" },
+        required_enforcement: CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENT.SANDBOXED,
+        kind: CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM,
+        scope: {
+          root: CAPABILITY_MANIFEST_FILESYSTEM_ROOT.PROJECT,
+          access: CAPABILITY_MANIFEST_ACCESS.WRITE,
+          path_prefix: ".vibeflow",
+        },
       },
     ];
   return [
     {
       permission_id,
-      required_enforcement: "engine-enforced",
-      kind: "config",
+      required_enforcement: CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENT.ENGINE_ENFORCED,
+      kind: CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG,
       scope: {
         engine: marker.engine,
         namespace: "legacy",
-        access: "write",
+        access: CAPABILITY_MANIFEST_ACCESS.WRITE,
         key_prefix: "managed.item0",
       },
     },
@@ -134,11 +165,7 @@ function candidate(
   const { ownership_key, public_target, expected_preimage_sha256 } = marker.owned_resources[0];
   const owned_resources = [{ ownership_key, public_target, expected_preimage_sha256 }];
   const proof = marker.ownership_proof as NonNullable<LegacyOwnedMarkerV1["ownership_proof"]>;
-  const recordKind = {
-    "skill-lock": "lock",
-    "mcp-managed-sidecar": "managed-sidecar",
-    "hook-sentinel": "sentinel",
-  }[marker.source] as "lock" | "managed-sidecar" | "sentinel";
+  const recordKind = LEGACY_SOURCE_RECORD_KIND[marker.source];
   const recordDraft = {
     record_kind: recordKind,
     logical_id: proof.logical_id,
@@ -149,7 +176,7 @@ function candidate(
     record_digest: digestV1("VF-LEGACY-INSPECTION-SOURCE-RECORD\0v1\0", recordDraft),
   };
   const evidenceDraft = {
-    schema_version: "1.0" as const,
+    schema_version: CAPABILITY_MANIFEST_SCHEMA_VERSION,
     legacy_source: marker.source,
     raw_identifier_nfc: marker.raw_identifier.normalize("NFC"),
     adapter_fingerprint: digestV1("VF-LEGACY-ADAPTER-FINGERPRINT\0v1\0", marker.source),
@@ -164,7 +191,7 @@ function candidate(
   const syntheticComponent = component(marker);
   const syntheticPermissions = permissions(marker, id);
   const withoutVersion = {
-    schema_version: "1.0" as const,
+    schema_version: CAPABILITY_MANIFEST_SCHEMA_VERSION,
     id,
     metadata: {
       display_name: id,
@@ -183,15 +210,10 @@ function candidate(
       {
         probe_id: "legacy-health",
         component_ids: ["legacy"],
-        kind:
-          marker.source === "skill-lock"
-            ? ("file-hash" as const)
-            : marker.source === "mcp-managed-sidecar"
-              ? ("mcp-handshake" as const)
-              : ("hook-selftest" as const),
+        kind: LEGACY_SOURCE_HEALTH_PROBE_KIND[marker.source],
         required: true,
         timeout_ms: 5_000,
-        retries: 0 as const,
+        retries: CAPABILITY_MANIFEST_HEALTH_RETRIES[0],
       },
     ],
   };
@@ -204,7 +226,7 @@ function candidate(
   const version = `0.0.0-legacy.${digestHex(versionDigest).slice(0, 12)}`;
   const synthetic_manifest: LegacySyntheticManifestV1 = { ...withoutVersion, version };
   const evidenceBytes = canonicalJsonBytes({
-    schema_version: "1.0",
+    schema_version: CAPABILITY_MANIFEST_SCHEMA_VERSION,
     legacy_source: marker.source,
     owned_resources,
     inspection_evidence_digest,
@@ -213,9 +235,9 @@ function candidate(
     { path: "capability.json", bytes: canonicalJsonBytes(synthetic_manifest) },
     { path: "legacy-adopt-evidence.json", bytes: evidenceBytes },
   ];
-  if (marker.source === "skill-lock")
+  if (marker.source === LEGACY_SOURCE.SKILL_LOCK)
     entries.push({ path: "payload/SKILL.md", bytes: marker.payload });
-  if (marker.source === "mcp-managed-sidecar")
+  if (marker.source === LEGACY_SOURCE.MCP_MANAGED_SIDECAR)
     entries.push({ path: "payload/server", bytes: marker.payload });
   const tree = computePackageTree(entries);
   const parsedManifest = parseCapabilityManifest(
@@ -233,10 +255,14 @@ function candidate(
       engine: marker.engine,
       participant_id: null,
       required: true as const,
-      on_apply_failure: "abort-scope" as const,
-      on_health_failure: "abort-scope" as const,
+      on_apply_failure: PUBLIC_ACTION_TARGET_APPLY_FAILURE.ABORT_SCOPE,
+      on_health_failure: PUBLIC_ACTION_TARGET_HEALTH_FAILURE.ABORT_SCOPE,
     },
-    subject: { kind: "capability" as const, package_id: id, component_id: "legacy" },
+    subject: {
+      kind: PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY,
+      package_id: id,
+      component_id: "legacy",
+    },
   };
   const draft = {
     schema_version: "1.0" as const,

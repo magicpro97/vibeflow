@@ -15,7 +15,7 @@
 
 import { c } from "../core.js";
 import { out } from "../logbus.js";
-import { type DispatchMarker, listMarkers } from "../orchestrator/marker.js";
+import { type DispatchMarker, MARKER_STATUS, listMarkers } from "../orchestrator/marker.js";
 import { readTimeline } from "../orchestrator/timeline.js";
 
 /** Relative "2m ago" style age from an epoch-ms timestamp. Pure. */
@@ -38,7 +38,9 @@ export function formatStatus(markers: DispatchMarker[], now: number = Date.now()
     m.unit,
     m.status,
     // Running/pending units have no confidence yet — render a dash, never "0.00".
-    m.status === "running" || m.status === "pending" ? "—" : m.confidence.toFixed(2),
+    m.status === MARKER_STATUS.RUNNING || m.status === MARKER_STATUS.PENDING
+      ? "—"
+      : m.confidence.toFixed(2),
     String(m.evidence?.length ?? 0),
     relAge(m.updatedAt, now),
     m.issueUrl ?? "—",
@@ -47,7 +49,11 @@ export function formatStatus(markers: DispatchMarker[], now: number = Date.now()
   // Column widths from the raw (uncolored) cells so ANSI codes never skew padding.
   const widths = header.map((_, i) => Math.max(...grid.map((r) => (r[i] ?? "").length)));
   const colorStatus = (s: string): string =>
-    s === "running" ? c.yellow(s) : s === "failed" || s === "blocked" ? c.red(s) : s;
+    s === MARKER_STATUS.RUNNING
+      ? c.yellow(s)
+      : s === MARKER_STATUS.FAILED || s === MARKER_STATUS.BLOCKED
+        ? c.red(s)
+        : s;
   const lines = grid.map((r, ri) =>
     r
       .map((cell, i) => {

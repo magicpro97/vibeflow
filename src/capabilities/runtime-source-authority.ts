@@ -1,5 +1,5 @@
 import { canonicalJson, digestV1 } from "../durability/index.js";
-import { CapabilityRuntimeError } from "./operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./operations/errors.js";
 import type { CapabilityRuntimeSourceAuthorityReaderV1 } from "./operations/types.js";
 import type {
   CapabilityResolvedSourceAuthorityBindingV1,
@@ -21,7 +21,7 @@ export class FilesystemCapabilitySourceAuthorityReaderV1
     if (!Number.isFinite(checked) || new Date(checked).toISOString() !== checkedAt)
       throw new CapabilityRuntimeError(
         "source authority frontier time is invalid",
-        "source-authority-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.SOURCE_AUTHORITY_STALE,
       );
     if (
       plan.scope !== this.packages.options.scope ||
@@ -29,7 +29,7 @@ export class FilesystemCapabilitySourceAuthorityReaderV1
     )
       throw new CapabilityRuntimeError(
         "capability source authority belongs to another scope",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     const resolvedRows = graph.ledger.json_objects
       .filter((row) => row.binding.object_schema_id === "vf.resolved-source-authority-binding/1")
@@ -45,7 +45,7 @@ export class FilesystemCapabilitySourceAuthorityReaderV1
     if (resolvedRows.length !== expectedPackages.length)
       throw new CapabilityRuntimeError(
         "resolved source authority closure cardinality changed",
-        "source-authority-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.SOURCE_AUTHORITY_STALE,
       );
     for (const expected of expectedPackages) {
       const current = this.packages.executionAuthority(expected.pin.pin_digest);
@@ -80,7 +80,7 @@ export class FilesystemCapabilitySourceAuthorityReaderV1
       )
         throw new CapabilityRuntimeError(
           "capability source authority cache or trust head changed",
-          "source-authority-stale",
+          CAPABILITY_RUNTIME_ERROR_CODE.SOURCE_AUTHORITY_STALE,
         );
     }
     return digestV1("VF-RESOLVED-SOURCE-AUTHORITY-SET\0v1\0", resolvedRows);

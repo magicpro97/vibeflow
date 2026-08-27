@@ -1,3 +1,4 @@
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import {
   type DoctorOwnedProcessInject,
   inspectDoctorOwnedProcesses,
@@ -233,7 +234,7 @@ export async function doctor(
         // emitHookFiles always re-emits .githooks/* (VibeFlow-owned, engine-
         // agnostic), so filter to the opencode plugin only — that's what the
         // user came here to fix.
-        const all = emitHookFiles(base, ["opencode"]);
+        const all = emitHookFiles(base, [AGENT_ENGINE.OPENCODE]);
         const written = all.filter((rel) => rel.startsWith(".opencode/"));
         if (written.length > 0) {
           out(
@@ -306,10 +307,10 @@ export async function doctor(
   } else if (probe) {
     const spinner = new Spinner();
     spinner.start("Running engine probes (parallel)…");
-    readiness = await preflightAllAsync(ENGINES, { probe: true, skipCache: refresh });
+    readiness = await preflightAllAsync([...ENGINES], { probe: true, skipCache: refresh });
     spinner.succeed("Engine probes complete");
   } else {
-    readiness = preflightAll(ENGINES, { probe: false, skipCache: refresh });
+    readiness = preflightAll([...ENGINES], { probe: false, skipCache: refresh });
   }
   printReadiness(probe, readiness);
 

@@ -12,6 +12,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { c, writeFileSafe } from "../core.js";
+import { SKILL_STATUS } from "../core/skill-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import { skillBundleHash } from "./bundle-hash.js";
@@ -107,7 +108,9 @@ export function registryInstall(
     return 1;
   }
 
-  const mpEntry = marketplace.find((s) => s.name === skillName && s.status === "verified");
+  const mpEntry = marketplace.find(
+    (s) => s.name === skillName && s.status === SKILL_STATUS.VERIFIED,
+  );
   if (!mpEntry) {
     const available = marketplace.filter((s) => s.name === skillName).map((s) => s.status);
     if (available.length) {

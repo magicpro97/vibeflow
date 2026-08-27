@@ -23,7 +23,6 @@ import {
   isConversationPrivateContextDigest,
   isConversationPrivateContextDiscardNamespace,
 } from "./conversation-private-context-broker-contract.js";
-import { CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS } from "./conversation-private-context-broker-fields.js";
 import type { ConversationPrivateContextBrokerMutationHostV1 } from "./conversation-private-context-broker-mutations.js";
 import {
   createIdempotencyKeyDigest,
@@ -41,6 +40,7 @@ import type {
   PublicConversationPrivateContextPresenceV1,
 } from "./conversation-private-context-broker-types.js";
 import { ConversationPrivateContextBrokerConflictError } from "./conversation-private-context-broker-validation.js";
+import { CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS } from "./conversation-private-context-broker-wire.js";
 
 const presence = (value: boolean): PublicConversationPrivateContextPresenceV1 => ({
   schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,

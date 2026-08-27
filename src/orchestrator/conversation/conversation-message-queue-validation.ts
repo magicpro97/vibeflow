@@ -1,12 +1,16 @@
 import { validateIdempotencyKey } from "../../actions/idempotency.js";
 import { canonicalJsonBytes, digestHex } from "../../durability/index.js";
-import { assertPublicQuoteReferenceV1 } from "./conversation-interaction-validation.js";
 import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
   CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
+  CONVERSATION_MESSAGE_QUEUE_FIELD,
   CONVERSATION_MESSAGE_QUEUE_MUTATION_KIND,
+  CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   CONVERSATION_MESSAGE_QUEUE_STATE,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
   type ConversationMessageQueueConflictCodeV1,
+  type ConversationMessageQueueTargetParticipantsV1,
   isConversationMessageQueueStaleReason,
   isConversationMessageQueueState,
 } from "./conversation-message-queue-contract.js";
@@ -26,20 +30,54 @@ import {
   queuedMessageContentDigest,
   queuedMessageItemDigest,
 } from "./conversation-message-queue-records.js";
-
-const DIGEST = /^sha256:[0-9a-f]{64}$/;
-const QUEUE_ID = /^vf-queued-message-[0-9a-f]{64}$/;
+import {
+  isConversationMessageQueueDigest,
+  isConversationMessageQueueItemId,
+  isConversationMessageQueueReference,
+  isPublicConversationMessageQueueQuoteReferenceWireV1,
+} from "./conversation-message-queue-wire.js";
 
 export class ConversationMessageQueueCorruptError extends Error {
   readonly code = CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_AUTHORITY_CORRUPT;
 }
 
+export interface ConversationMessageQueueConflictContextV1 {
+  readonly root_session_id: string;
+}
+
 export class ConversationMessageQueueConflictError extends Error {
+  readonly code: ConversationMessageQueueConflictCodeV1;
+  readonly context: Readonly<ConversationMessageQueueConflictContextV1> | null;
+
   constructor(
-    readonly code: ConversationMessageQueueConflictCodeV1,
+    code: typeof CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
     message: string,
+    context: Readonly<ConversationMessageQueueConflictContextV1>,
+  );
+  constructor(
+    code: Exclude<
+      ConversationMessageQueueConflictCodeV1,
+      typeof CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL
+    >,
+    message: string,
+    context?: Readonly<ConversationMessageQueueConflictContextV1>,
+  );
+  constructor(
+    code: ConversationMessageQueueConflictCodeV1,
+    message: string,
+    context?: Readonly<ConversationMessageQueueConflictContextV1>,
   ) {
     super(message);
+    this.code = code;
+    if (
+      (code === CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL && context === undefined) ||
+      (context !== undefined &&
+        (!queueRecord(context) ||
+          !queueExactKeys(context, [CONVERSATION_MESSAGE_QUEUE_FIELD.ROOT_SESSION_ID]) ||
+          !isConversationMessageQueueReference(context.root_session_id)))
+    )
+      throw new Error("invalid conversation message queue conflict context");
+    this.context = context ? Object.freeze({ root_session_id: context.root_session_id }) : null;
   }
 }
 
@@ -52,14 +90,9 @@ export function queueExactKeys(value: Record<string, unknown>, keys: readonly st
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-export const isQueueDigest = (value: unknown): value is string =>
-  typeof value === "string" && DIGEST.test(value);
+export const isQueueDigest = isConversationMessageQueueDigest;
 
-export const isQueueReference = (value: unknown, maxBytes = 512): value is string =>
-  typeof value === "string" &&
-  value.length > 0 &&
-  Buffer.byteLength(value, "utf8") <= maxBytes &&
-  !/\p{Cc}/u.test(value);
+export const isQueueReference = isConversationMessageQueueReference;
 
 export const isQueueTimestamp = (value: unknown): value is string =>
   typeof value === "string" &&
@@ -67,8 +100,10 @@ export const isQueueTimestamp = (value: unknown): value is string =>
   !Number.isNaN(Date.parse(value)) &&
   new Date(value).toISOString() === value;
 
-function assertTargets(value: unknown): asserts value is "all" | string[] {
-  if (value === "all") return;
+function assertTargets(
+  value: unknown,
+): asserts value is ConversationMessageQueueTargetParticipantsV1 {
+  if (value === CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL) return;
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
@@ -94,17 +129,7 @@ export function assertConversationMessageQueueAuthorityV1(
 ): asserts value is ConversationMessageQueueAuthorityV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "root_session_id",
-      "conversation_id",
-      "revision_id",
-      "lineage_head_digest",
-      "lineage_head_epoch",
-      "participant_set_digest",
-      "active_operation_digest",
-      "authority_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.AUTHORITY) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueReference(value.root_session_id) ||
     !isQueueReference(value.conversation_id) ||
@@ -128,15 +153,7 @@ export function assertEnqueueConversationUserMessageRequestV1(
 ): asserts value is EnqueueConversationUserMessageRequestV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "idempotency_key",
-      "expected_authority_digest",
-      "content",
-      "target_participants",
-      "quote_refs",
-      "private_context_present",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.ENQUEUE_REQUEST) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueDigest(value.expected_authority_digest) ||
     !Array.isArray(value.quote_refs) ||
@@ -147,7 +164,8 @@ export function assertEnqueueConversationUserMessageRequestV1(
   validateIdempotencyKey(value.idempotency_key);
   assertContent(value.content);
   assertTargets(value.target_participants);
-  value.quote_refs.forEach(assertPublicQuoteReferenceV1);
+  if (!value.quote_refs.every(isPublicConversationMessageQueueQuoteReferenceWireV1))
+    throw new Error("invalid enqueue message request");
 }
 
 export function assertEditQueuedUserMessageRequestV1(
@@ -155,12 +173,7 @@ export function assertEditQueuedUserMessageRequestV1(
 ): asserts value is EditQueuedUserMessageRequestV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "idempotency_key",
-      "expected_item_digest",
-      "content",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EDIT_REQUEST) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueDigest(value.expected_item_digest)
   )
@@ -174,40 +187,21 @@ export function assertPublicQueuedUserMessageV1(
 ): asserts value is PublicQueuedUserMessageV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "queue_item_id",
-      "queue_sequence",
-      "root_session_id",
-      "author_public_id",
-      "content",
-      "content_digest",
-      "target_participants",
-      "quote_refs",
-      "private_context_present",
-      "predecessor_queue_item_id",
-      "admitted_authority_digest",
-      "effective_authority_digest",
-      "state",
-      "stale_reason",
-      "admitted_at",
-      "updated_at",
-      "item_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.PUBLIC_ITEM) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     typeof value.queue_item_id !== "string" ||
-    !QUEUE_ID.test(value.queue_item_id) ||
+    !isConversationMessageQueueItemId(value.queue_item_id) ||
     !Number.isSafeInteger(value.queue_sequence) ||
     (value.queue_sequence as number) < 1 ||
     !isQueueReference(value.root_session_id) ||
-    value.author_public_id !== "human" ||
+    value.author_public_id !== CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN ||
     !isQueueDigest(value.content_digest) ||
     !Array.isArray(value.quote_refs) ||
     value.quote_refs.length > CONVERSATION_MESSAGE_QUEUE_LIMITS.maxQuotes ||
     typeof value.private_context_present !== "boolean" ||
     (value.predecessor_queue_item_id !== null &&
       (typeof value.predecessor_queue_item_id !== "string" ||
-        !QUEUE_ID.test(value.predecessor_queue_item_id))) ||
+        !isConversationMessageQueueItemId(value.predecessor_queue_item_id))) ||
     !isQueueDigest(value.admitted_authority_digest) ||
     !isQueueDigest(value.effective_authority_digest) ||
     !isConversationMessageQueueState(value.state) ||
@@ -222,7 +216,8 @@ export function assertPublicQueuedUserMessageV1(
   assertContent(value.content);
   assertTargets(value.target_participants);
   for (const quote of value.quote_refs) {
-    assertPublicQuoteReferenceV1(quote);
+    if (!isPublicConversationMessageQueueQuoteReferenceWireV1(quote))
+      throw new Error("invalid public queued message");
     if (quote.root_session_id !== value.root_session_id)
       throw new Error("queued-message quote crosses root authority");
   }
@@ -262,12 +257,7 @@ export function assertQueueCurrentV1(
 ): asserts value is PrivateConversationMessageQueueCurrentV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "root_session_id",
-      "last_journal_sequence",
-      "head_event_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.CURRENT) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueReference(value.root_session_id) ||
     !Number.isSafeInteger(value.last_journal_sequence) ||
@@ -282,17 +272,7 @@ export function assertQueueIdempotencyBindingV1(
 ): asserts value is PrivateConversationMessageQueueIdempotencyBindingV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "mutation_kind",
-      "principal_digest",
-      "root_session_id",
-      "idempotency_key_digest",
-      "canonical_request_digest",
-      "queue_item_id",
-      "winning_event_digest",
-      "binding_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.IDEMPOTENCY_BINDING) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     (value.mutation_kind !== CONVERSATION_MESSAGE_QUEUE_MUTATION_KIND.ENQUEUE &&
       value.mutation_kind !== CONVERSATION_MESSAGE_QUEUE_MUTATION_KIND.EDIT) ||
@@ -301,7 +281,7 @@ export function assertQueueIdempotencyBindingV1(
     !isQueueDigest(value.idempotency_key_digest) ||
     !isQueueDigest(value.canonical_request_digest) ||
     typeof value.queue_item_id !== "string" ||
-    !QUEUE_ID.test(value.queue_item_id) ||
+    !isConversationMessageQueueItemId(value.queue_item_id) ||
     !isQueueDigest(value.winning_event_digest) ||
     !isQueueDigest(value.binding_digest)
   )

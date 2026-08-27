@@ -1,3 +1,4 @@
+import { CONVERSATION_REACTION_OPERATION } from "./conversation-interaction-contract.js";
 import type { ConversationReactionOperationV1 } from "./conversation-interaction-types.js";
 
 function activeKey(operation: ConversationReactionOperationV1): string {
@@ -14,7 +15,7 @@ function activeReactions(
   const active = new Map<string, ConversationReactionOperationV1>();
   for (const operation of operations) {
     const key = activeKey(operation);
-    if (operation.operation === "add") active.set(key, operation);
+    if (operation.operation === CONVERSATION_REACTION_OPERATION.ADD) active.set(key, operation);
     else active.delete(key);
   }
   return active;
@@ -28,7 +29,7 @@ export function assertParticipantReactionTransitions(
   for (const operation of next) {
     const active = activeReactions(staged);
     const exact = active.get(activeKey(operation));
-    if (operation.operation === "remove") {
+    if (operation.operation === CONVERSATION_REACTION_OPERATION.REMOVE) {
       if (!exact) throw new Error("reaction remove lacks an active owned reaction");
     } else {
       if (exact) throw new Error("reaction is already active");

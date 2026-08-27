@@ -1,11 +1,12 @@
-import type { Skill, SkillScope } from "../core.js";
+import type { Skill, SkillScope, SkillStatus } from "../core.js";
+import { SKILL_FRESHNESS } from "../core/skill-contract.js";
 import type { RegistryLock } from "./registry-types.js";
 
 export interface SafeSkill {
   name: string;
   description: string;
   version?: string;
-  status: string;
+  status: SkillStatus;
   scope?: SkillScope;
   projectId?: string;
   extends?: string[];
@@ -14,7 +15,7 @@ export interface SafeSkill {
   /** Only set for installed pinned registry skills. */
   registry?: { id: string; version: string; pinned: boolean };
   /** #690: domain ownership metadata (id, role). */
-  domain?: { id?: string; role?: "canonical" | "child" };
+  domain?: Skill["domain"];
   /** #690: lifecycle owners (names/emails). */
   owners?: string[];
   /** #690: true when source anchors are stale. */
@@ -56,7 +57,7 @@ export function toSafeSkills(skills: Skill[], sharedDir: string, lock?: Registry
     registry: registryMap.get(s.name) ?? undefined,
     domain: s.domain,
     owners: s.owners?.length ? s.owners : undefined,
-    stale: s.freshness === "stale" || undefined,
-    staleReason: s.freshness === "stale" ? s.freshnessReason : undefined,
+    stale: s.freshness === SKILL_FRESHNESS.STALE || undefined,
+    staleReason: s.freshness === SKILL_FRESHNESS.STALE ? s.freshnessReason : undefined,
   }));
 }

@@ -1,10 +1,24 @@
 import { describe, expect, test } from "bun:test";
+import { isPlainWireRecord } from "../src/actions/public-wire-primitives.js";
 import { digestV1 } from "../src/durability/index.js";
-import type {
-  ConversationAskCompatibilityRequestV1,
-  ConversationAskCompatibilityResultV1,
+import {
+  CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND,
+  CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND,
+  type ConversationAskCompatibilityRequestV1,
+  type ConversationAskCompatibilityResultV1,
 } from "../src/orchestrator/conversation/conversation-ask-compatibility.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
+  CONVERSATION_MESSAGE_QUEUE_LIMITS,
+  CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION,
+} from "../src/orchestrator/conversation/conversation-message-queue-contract.js";
+import { CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE } from "../src/orchestrator/conversation/conversation-message-queue-error-contract.js";
+import { assertQueueJournalAppendCapacity } from "../src/orchestrator/conversation/conversation-message-queue-journal.js";
 import { ConversationPrivateContextBrokerConflictError } from "../src/orchestrator/conversation/conversation-private-context-broker-validation.js";
+import {
+  ASK_COMPATIBILITY_SSE_EVENT,
+  ASK_SSE_EVENT,
+} from "../src/orchestrator/conversation/conversation-sse-contract.js";
 import {
   type ConversationAskCompatibilityHttpAuthorityV1,
   handleConversationAskCompatibilityRoute,
@@ -68,7 +82,11 @@ describe("Ask conversation compatibility facade", () => {
     }> = [];
     const submit = (input: (typeof captured)[number]): ConversationAskCompatibilityResultV1 => {
       captured.push(input);
-      return { kind: "created", conversation_id: "conversation-created", replayed: false };
+      return {
+        kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.CREATED,
+        conversation_id: "conversation-created",
+        replayed: false,
+      };
     };
     const response = await handleConversationAskCompatibilityRoute(
       authority(submit),
@@ -81,7 +99,7 @@ describe("Ask conversation compatibility facade", () => {
     expect(body).toEqual({
       schema_version: "1.0",
       accepted: true,
-      kind: "created",
+      kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.CREATED,
       conversation_id: "conversation-created",
       replayed: false,
     });
@@ -89,7 +107,7 @@ describe("Ask conversation compatibility facade", () => {
     expect(captured[0]).toMatchObject({
       principal_digest: principal().principal_digest,
       request: {
-        kind: "fresh",
+        kind: CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.FRESH,
         question: fresh.question,
         engine: "codex",
         repo_relative_path: "src/example.ts",
@@ -106,7 +124,11 @@ describe("Ask conversation compatibility facade", () => {
     const response = await handleConversationAskCompatibilityRoute(
       authority((input) => {
         keys.push(input.idempotency_key);
-        return { kind: "created", conversation_id: "conversation-created", replayed: true };
+        return {
+          kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.CREATED,
+          conversation_id: "conversation-created",
+          replayed: true,
+        };
       }),
       request(fresh, { "idempotency-key": "ask-script-retry" }),
       "/repo",
@@ -127,7 +149,7 @@ describe("Ask conversation compatibility facade", () => {
         );
       bindings.set(input.idempotency_key, canonical);
       return {
-        kind: "created",
+        kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.CREATED,
         conversation_id: `conversation-${input.idempotency_key}`,
         replayed: prior !== undefined,
       };
@@ -173,12 +195,12 @@ describe("Ask conversation compatibility facade", () => {
     }): ConversationAskCompatibilityResultV1 => {
       calls += 1;
       expect(input.request).toEqual({
-        kind: "resume",
+        kind: CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.RESUME,
         conversation_id: "conversation-head",
         question: "continue",
       });
       return {
-        kind: "queued",
+        kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.QUEUED,
         conversation_id: "conversation-head",
         root_session_id: "conversation-root",
         queue_item_id: `vf-queued-message-${"a".repeat(64)}`,
@@ -216,7 +238,7 @@ describe("Ask conversation compatibility facade", () => {
     expect(accepted.status).toBe(202);
     expect(await accepted.json()).toMatchObject({
       accepted: true,
-      kind: "queued",
+      kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.QUEUED,
       conversation_id: "conversation-head",
     });
     expect(calls).toBe(1);
@@ -226,7 +248,11 @@ describe("Ask conversation compatibility facade", () => {
     let calls = 0;
     const submit = (): ConversationAskCompatibilityResultV1 => {
       calls += 1;
-      return { kind: "created", conversation_id: "conversation-created", replayed: false };
+      return {
+        kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.CREATED,
+        conversation_id: "conversation-created",
+        replayed: false,
+      };
     };
     expect(
       (
@@ -272,7 +298,7 @@ describe("Ask conversation compatibility facade", () => {
   test("stream compatibility emits accepted metadata and never invokes native token output", async () => {
     const response = await handleConversationAskCompatibilityStream(
       authority(() => ({
-        kind: "queued",
+        kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.QUEUED,
         conversation_id: "conversation-head",
         root_session_id: "conversation-root",
         queue_item_id: `vf-queued-message-${"b".repeat(64)}`,
@@ -286,17 +312,71 @@ describe("Ask conversation compatibility facade", () => {
     expect(response.status).toBe(202);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     const text = await response.text();
-    expect(text).toContain("event: accepted");
-    expect(text).toContain("event: done");
-    expect(text).not.toContain("event: token");
+    expect(text).toContain(`event: ${ASK_COMPATIBILITY_SSE_EVENT.ACCEPTED}`);
+    expect(text).toContain(`event: ${ASK_COMPATIBILITY_SSE_EVENT.DONE}`);
+    expect(text).not.toContain(`event: ${ASK_SSE_EVENT.TOKEN}`);
     expect(text).not.toContain("answer");
+  });
+
+  test("contains queue-full for JSON and stream with the typed durable root", async () => {
+    const durableRoot = "durable-root-session";
+    const submit = (): ConversationAskCompatibilityResultV1 => {
+      assertQueueJournalAppendCapacity(
+        CONVERSATION_MESSAGE_QUEUE_LIMITS.maxJournalEvents,
+        durableRoot,
+      );
+      throw new Error("expected journal capacity conflict");
+    };
+    const body = { resume: true, conversation_id: "conversation-head", question: "continue" };
+    const json = await handleConversationAskCompatibilityRoute(
+      authority(submit),
+      request(body),
+      "/repo",
+    );
+    const stream = await handleConversationAskCompatibilityStream(
+      authority(submit),
+      new Request("http://local/api/ask/stream"),
+      "/repo",
+      body,
+      "ask-stream-full",
+    );
+    for (const response of [json, stream]) {
+      expect(response.status).toBe(429);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      const payload: unknown = await response.json();
+      if (!isPlainWireRecord(payload) || !isPlainWireRecord(payload.error))
+        throw new Error("expected queue error envelope");
+      expect(Object.keys(payload)).toEqual(["schema_version", "error"]);
+      expect(Object.keys(payload.error).sort()).toEqual(
+        ["code", "message", "correlation_id", "retryable", "recovery_action", "details"].sort(),
+      );
+      expect(payload).toMatchObject({
+        error: {
+          code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
+          message:
+            CONVERSATION_MESSAGE_QUEUE_CANONICAL_ERROR_MESSAGE[
+              CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL
+            ],
+          retryable: true,
+          recovery_action: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.RETRY,
+          details: {
+            root_session_id: durableRoot,
+            max_nonterminal_items: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems,
+          },
+        },
+      });
+    }
   });
 
   test("production mutation router reaches only the conversation Ask authority", async () => {
     let calls = 0;
     const ask = authority(() => {
       calls += 1;
-      return { kind: "created", conversation_id: "conversation-created", replayed: false };
+      return {
+        kind: CONVERSATION_ASK_COMPATIBILITY_RESULT_KIND.CREATED,
+        conversation_id: "conversation-created",
+        replayed: false,
+      };
     });
     const req = request(fresh);
     const response = await handleMutationRoute(

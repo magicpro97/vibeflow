@@ -7,6 +7,7 @@
 
 import { join } from "node:path";
 import { c, writeFileSafe } from "../core.js";
+import { PENDING_REQUIRED_WORK_UNIT_GATES, WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import type { DispatchResult } from "../dispatch.js";
 import { out } from "../logbus.js";
 import { recoveryHint, restoreIgnored } from "../safety/checkpoint.js";
@@ -87,10 +88,10 @@ export function handleUnitFailure(prot: UnitEvidenceRuntime, base: string): void
 /** Blocked outcome for a unit skipped because an upstream rate limit was already hit. */
 export function skippedByQuota(): UnitOutcome {
   return {
-    status: "blocked",
+    status: WORK_UNIT_STATUS.BLOCKED,
     confidence: 0,
     evidence: [],
-    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+    gates: { ...PENDING_REQUIRED_WORK_UNIT_GATES },
   };
 }
 

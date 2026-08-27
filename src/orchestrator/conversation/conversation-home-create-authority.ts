@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import {
   acquireProcessLock,
   canonicalJsonBytes,
@@ -137,7 +138,7 @@ export class ConversationHomeCreateAuthorityV1 {
         current.canonical_request_digest !== canonicalRequestDigest
       ) {
         throw new ConversationPrivateContextBrokerConflictError(
-          "idempotency_conflict",
+          PUBLIC_ERROR_CODE.IDEMPOTENCY_CONFLICT,
           "conversation create idempotency key conflict",
         );
       }
@@ -178,7 +179,7 @@ export class ConversationHomeCreateAuthorityV1 {
           current.canonical_request_digest !== canonicalRequestDigest
         )
           throw new ConversationPrivateContextBrokerConflictError(
-            "idempotency_conflict",
+            PUBLIC_ERROR_CODE.IDEMPOTENCY_CONFLICT,
             "conversation create idempotency key conflict",
           );
         return {

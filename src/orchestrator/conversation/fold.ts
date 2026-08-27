@@ -6,6 +6,14 @@ import type {
 } from "../trace/types.js";
 
 import {
+  CONVERSATION_ASSESSMENT_STAGE,
+  CONVERSATION_DECISION_OUTCOME,
+  CONVERSATION_HEALTH,
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_ROUND_PHASE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
+import {
   type ReviewedActionEventAuthorityV1,
   assertReviewedActionEventAuthorityV1,
 } from "./conversation-reviewed-action.js";
@@ -16,6 +24,7 @@ import {
   publicRound,
   respondersComplete,
 } from "./fold-round.js";
+import { validateConversationTerminalEvent } from "./fold-terminal.js";
 import {
   applyState,
   exact,
@@ -32,7 +41,6 @@ import {
   validateParticipantBound,
   validateParticipantCorrelation,
   validateTerminalAppend,
-  validateTerminalScore,
 } from "./fold-validation.js";
 import type { ConversationSnapshot, RoundAssessment } from "./types.js";
 export { ConversationFoldError } from "./fold-validation.js";
@@ -61,8 +69,8 @@ export function foldConversation(
   const rounds: FoldRoundState[] = [];
   const roundIds = new Set<string>();
   let activeRound: FoldRoundState | undefined;
-  let lifecycle: ConversationLifecycle = "INIT";
-  let health: ConversationHealth = "healthy";
+  let lifecycle: ConversationLifecycle = CONVERSATION_LIFECYCLE.INIT;
+  let health: ConversationHealth = CONVERSATION_HEALTH.HEALTHY;
   let terminalRecorded = false;
   let consensusScore: number | null = null;
   for (const record of records.slice(1)) {
@@ -72,7 +80,7 @@ export function foldConversation(
       record,
       reviewedPostTerminalEvents?.has(record.event_id) === true,
     );
-    if (record.event.type === "conversation_configured") {
+    if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED) {
       return fail("duplicate conversation configuration");
     }
     if (record.public_session_ref !== null) {
@@ -80,7 +88,7 @@ export function foldConversation(
       const participant = participantId ? participants.get(participantId) : undefined;
       if (!participant) return fail("public session lacks a configured participant");
       if (
-        record.event.type === "native_history_reconciled" &&
+        record.event.type === CONVERSATION_TRACE_EVENT_KIND.NATIVE_HISTORY_RECONCILED &&
         record.event.payload.public_session_ref !== record.public_session_ref
       ) {
         return fail("public session projection mismatch");
@@ -88,11 +96,11 @@ export function foldConversation(
       participant.public_session_ref = record.public_session_ref as OpaqueSessionRef;
     }
     switch (record.event.type) {
-      case "participant_bound": {
+      case CONVERSATION_TRACE_EVENT_KIND.PARTICIPANT_BOUND: {
         validateParticipantBound(record, participants).bound = true;
         break;
       }
-      case "state_change": {
+      case CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE: {
         ({ lifecycle, health } = applyState(
           lifecycle,
           health,
@@ -101,24 +109,25 @@ export function foldConversation(
         ));
         break;
       }
-      case "round_boundary": {
+      case CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY: {
         const { round_id: roundId, phase } = record.event.payload;
         validateCoordinatorCorrelation(record);
         if (
           direct ||
           !text(roundId) ||
-          (phase !== "start" && phase !== "end") ||
-          lifecycle !== "ACTIVE"
+          (phase !== CONVERSATION_ROUND_PHASE.START && phase !== CONVERSATION_ROUND_PHASE.END) ||
+          lifecycle !== CONVERSATION_LIFECYCLE.ACTIVE
         ) {
           return fail("invalid round boundary");
         }
-        if (phase === "start") {
+        if (phase === CONVERSATION_ROUND_PHASE.START) {
           if (activeRound || roundIds.has(roundId)) {
             return fail("round is already active or duplicated");
           }
           if (rounds.length >= configured.maxRounds) return fail("maximum rounds exceeded");
           const previous = rounds.at(-1)?.decision;
-          if (previous && previous.outcome !== "continue") return fail("prior round is terminal");
+          if (previous && previous.outcome !== CONVERSATION_DECISION_OUTCOME.CONTINUE)
+            return fail("prior round is terminal");
           activeRound = createRound(roundId);
           rounds.push(activeRound);
           roundIds.add(roundId);
@@ -131,10 +140,16 @@ export function foldConversation(
           return fail("ended round lacks every participant response");
         if (!precommitsComplete(activeRound, responderIds))
           return fail("ended round lacks every participant precommit");
-        if (!activeRound.stages.has("blind") || !activeRound.stages.has("full")) {
+        if (
+          !activeRound.stages.has(CONVERSATION_ASSESSMENT_STAGE.BLIND) ||
+          !activeRound.stages.has(CONVERSATION_ASSESSMENT_STAGE.FULL)
+        ) {
           return fail("ended round lacks blind/full assessment");
         }
-        if (!activeRound.decision || activeRound.decision.outcome === "abort") {
+        if (
+          !activeRound.decision ||
+          activeRound.decision.outcome === CONVERSATION_DECISION_OUTCOME.ABORT
+        ) {
           return fail("ended round lacks non-abort consensus");
         }
         activeRound.complete = true;
@@ -142,12 +157,12 @@ export function foldConversation(
         activeRound = undefined;
         break;
       }
-      case "precommit": {
+      case CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT: {
         const payload = record.event.payload as unknown;
         if (
           !object(payload) ||
           !exact(payload, ["round_id", "participant_id", "answer", "evidence"]) ||
-          lifecycle !== "ACTIVE" ||
+          lifecycle !== CONVERSATION_LIFECYCLE.ACTIVE ||
           !activeRound ||
           payload.round_id !== activeRound.round_id ||
           !text(payload.participant_id) ||
@@ -168,7 +183,7 @@ export function foldConversation(
         activeRound.precommits.add(payload.participant_id);
         break;
       }
-      case "agent_response_delta": {
+      case CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA: {
         const payload = record.event.payload as unknown;
         if (
           !object(payload) ||
@@ -180,7 +195,7 @@ export function foldConversation(
             "final_evidence",
             "completes_response",
           ]) ||
-          lifecycle !== "ACTIVE" ||
+          lifecycle !== CONVERSATION_LIFECYCLE.ACTIVE ||
           !text(payload.round_id) ||
           !text(payload.participant_id) ||
           record.participant_id !== payload.participant_id ||
@@ -205,8 +220,8 @@ export function foldConversation(
         if (
           !direct &&
           (!precommitsComplete(activeRound, responderIds) ||
-            !activeRound.stages.has("blind") ||
-            activeRound.stages.has("full") ||
+            !activeRound.stages.has(CONVERSATION_ASSESSMENT_STAGE.BLIND) ||
+            activeRound.stages.has(CONVERSATION_ASSESSMENT_STAGE.FULL) ||
             activeRound.decision !== null)
         ) {
           return fail("response delta requires blind assessment after every precommit");
@@ -243,7 +258,7 @@ export function foldConversation(
         }
         break;
       }
-      case "evaluator_assessment": {
+      case CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT: {
         const payload = record.event.payload as unknown;
         if (
           !object(payload) ||
@@ -264,21 +279,33 @@ export function foldConversation(
         ) {
           return fail("invalid evaluator correlation");
         }
-        if (lifecycle !== "ACTIVE" || !activeRound || payload.round_id !== activeRound.round_id) {
+        if (
+          lifecycle !== CONVERSATION_LIFECYCLE.ACTIVE ||
+          !activeRound ||
+          payload.round_id !== activeRound.round_id
+        ) {
           return fail("assessment lacks active round");
         }
-        if (stage !== "blind" && stage !== "full") return fail("malformed evaluator assessment");
+        if (
+          stage !== CONVERSATION_ASSESSMENT_STAGE.BLIND &&
+          stage !== CONVERSATION_ASSESSMENT_STAGE.FULL
+        )
+          return fail("malformed evaluator assessment");
         if (activeRound.stages.has(stage)) return fail("duplicate evaluator assessment");
-        if (stage === "full" && !activeRound.stages.has("blind")) {
+        if (
+          stage === CONVERSATION_ASSESSMENT_STAGE.FULL &&
+          !activeRound.stages.has(CONVERSATION_ASSESSMENT_STAGE.BLIND)
+        ) {
           return fail("blind assessment must occur before full assessment");
         }
         if (
-          (stage === "blind" &&
+          (stage === CONVERSATION_ASSESSMENT_STAGE.BLIND &&
             (!precommitsComplete(activeRound, responderIds) || activeRound.responses.size > 0)) ||
-          (stage === "full" && !respondersComplete(activeRound, responderIds))
+          (stage === CONVERSATION_ASSESSMENT_STAGE.FULL &&
+            !respondersComplete(activeRound, responderIds))
         ) {
           const reason =
-            stage === "blind"
+            stage === CONVERSATION_ASSESSMENT_STAGE.BLIND
               ? "blind assessment requires every precommit before responses"
               : "full assessment requires every completed participant response";
           return fail(reason);
@@ -291,22 +318,27 @@ export function foldConversation(
         });
         break;
       }
-      case "consensus_update": {
+      case CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE: {
         const payload = record.event.payload;
         validateCoordinatorCorrelation(record);
         if (
           direct ||
-          lifecycle !== "ACTIVE" ||
+          lifecycle !== CONVERSATION_LIFECYCLE.ACTIVE ||
           !activeRound ||
           payload.round_id !== activeRound.round_id
         ) {
           return fail("consensus lacks active round");
         }
-        if (!activeRound.stages.has("blind") || !activeRound.stages.has("full")) {
+        if (
+          !activeRound.stages.has(CONVERSATION_ASSESSMENT_STAGE.BLIND) ||
+          !activeRound.stages.has(CONVERSATION_ASSESSMENT_STAGE.FULL)
+        ) {
           return fail("blind/full assessment required before consensus");
         }
         if (activeRound.decision) return fail("duplicate consensus update");
-        const full = activeRound.assessments.find((item) => item.stage === "full");
+        const full = activeRound.assessments.find(
+          (item) => item.stage === CONVERSATION_ASSESSMENT_STAGE.FULL,
+        );
         if (!full) return fail("full assessment required before canonical decision");
         const next = validateCanonicalDecision(
           payload.decision,
@@ -317,42 +349,32 @@ export function foldConversation(
         activeRound.decision = next;
         break;
       }
-      case "conversation_terminal": {
-        const payload = record.event.payload as unknown;
-        if (
-          !object(payload) ||
-          !exact(payload, ["lifecycle", "terminal", "final_score"]) ||
-          !terminal(lifecycle) ||
-          payload.lifecycle !== lifecycle ||
-          payload.terminal !== true
-        ) {
-          return fail("terminal record must match terminal lifecycle");
-        }
-        validateTerminalScore(
+      case CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL: {
+        validateConversationTerminalEvent(
+          record,
           lifecycle,
           configured.policy,
-          payload.final_score,
           consensusScore,
           rounds.at(-1)?.decision ?? null,
         );
         terminalRecorded = true;
         break;
       }
-      case "coordinator_decision":
-      case "skill_injected":
-      case "tool_action":
-      case "user_message":
-      case "baseline_result":
-      case "synthesis_completed":
-      case "dry_run_result":
-      case "error":
-      case "operation_lifecycle":
-      case "approval_requested":
-      case "approval_resolved":
-      case "caller_cancelled":
-      case "artifact_created":
-      case "artifact_updated":
-      case "native_history_reconciled":
+      case CONVERSATION_TRACE_EVENT_KIND.COORDINATOR_DECISION:
+      case CONVERSATION_TRACE_EVENT_KIND.SKILL_INJECTED:
+      case CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION:
+      case CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE:
+      case CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT:
+      case CONVERSATION_TRACE_EVENT_KIND.SYNTHESIS_COMPLETED:
+      case CONVERSATION_TRACE_EVENT_KIND.DRY_RUN_RESULT:
+      case CONVERSATION_TRACE_EVENT_KIND.ERROR:
+      case CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE:
+      case CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED:
+      case CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED:
+      case CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED:
+      case CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED:
+      case CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED:
+      case CONVERSATION_TRACE_EVENT_KIND.NATIVE_HISTORY_RECONCILED:
         break;
       default:
         return fail("unsupported trace event");

@@ -1,5 +1,21 @@
+import { isAgentEngine } from "../core/agent-contract.js";
 import { canonicalJsonBytes } from "../durability/index.js";
 import type { HostRenderedPreviewV1 } from "./preview-types.js";
+import {
+  ACTION_CONFIG_DIFF_MODES,
+  ACTION_DEPENDENCY_CHANGES,
+  ACTION_EFFECT_CLASSES,
+  ACTION_HEALTH_PLAN_KINDS,
+  ACTION_HEALTH_PLAN_RETRIES,
+  ACTION_PERMISSION_CHANGES,
+  ACTION_PERMISSION_ENFORCEMENT,
+  ACTION_PREVIEW_PROJECTOR_VERSION,
+  ACTION_TARGET_DISPOSITION_EXECUTION_VALUE,
+  ACTION_TARGET_MANUAL_REASON_CODES,
+  ACTION_TARGET_REQUIRED_USER_ACTION_REASON_CODES,
+  ACTION_TARGET_UNSUPPORTED_REASON_CODES,
+} from "./public-action-contract.js";
+import { PUBLIC_RECOVERY_ACTIONS } from "./public-error-contract.js";
 import { assertPublicProjectionSafe, isPublicConfigTarget } from "./public-safety.js";
 import {
   assertDigest,
@@ -11,48 +27,26 @@ import {
 import { ActionValidationError, boundedString, exactObject, safeInteger } from "./strict-json.js";
 import type { ActionProposalDraftV1 } from "./types.js";
 
-const EFFECTS = [
-  "pure-local-read",
-  "local-read-with-cache",
-  "network-read",
-  "process-probe",
-  "project-write",
-  "user-write",
-  "external-compensatable",
-  "external-irreversible",
-] as const;
-const RECOVERY = [
-  "retry",
-  "edit",
-  "refresh-proposal",
-  "restart-pagination",
-  "complete-challenge",
-  "select-lineage-head",
-  "rebuild-catalog",
-  "resume-by-id",
-  "inspect-trace",
-  "resolve-again",
-  "rollback",
-  "repair",
-  "repair-authority",
-  "verified-abandon",
-  "reconcile-revision",
-  "adopt",
-  "renew-grant",
-  "authorize-source",
-  "disable",
-  "retarget",
-  "complete-manual-step",
-  "export-redacted-diagnostics",
-] as const;
-const HEALTH_KINDS = new Set([
-  "binary-version",
-  "file-hash",
-  "mcp-handshake",
-  "hook-selftest",
-  "role-parse",
-  "engine-config",
-]);
+const EFFECTS = ACTION_EFFECT_CLASSES;
+const RECOVERY = PUBLIC_RECOVERY_ACTIONS;
+const HEALTH_KINDS = new Set(ACTION_HEALTH_PLAN_KINDS);
+const HEALTH_RETRIES = new Set(ACTION_HEALTH_PLAN_RETRIES);
+const PERMISSION_CHANGES = new Set(ACTION_PERMISSION_CHANGES);
+const PERMISSION_ENFORCEMENTS = new Set(ACTION_PERMISSION_ENFORCEMENT);
+const DEPENDENCY_CHANGES = new Set(ACTION_DEPENDENCY_CHANGES);
+const CONFIG_DIFF_MODES = new Set(ACTION_CONFIG_DIFF_MODES);
+const TARGET_DISPOSITION_REASON_CODES: Readonly<
+  Record<
+    HostRenderedPreviewV1["target_dispositions"][number]["execution"],
+    readonly (string | null)[]
+  >
+> = Object.freeze({
+  [ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST]: Object.freeze([null] as const),
+  [ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.MANUAL]: ACTION_TARGET_MANUAL_REASON_CODES,
+  [ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.REQUIRED_USER_ACTION]:
+    ACTION_TARGET_REQUIRED_USER_ACTION_REASON_CODES,
+  [ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.UNSUPPORTED]: ACTION_TARGET_UNSUPPORTED_REASON_CODES,
+});
 
 export function validateProposalPreview(draft: ActionProposalDraftV1): void {
   const preview = exactObject(
@@ -84,7 +78,7 @@ export function validateProposalPreview(draft: ActionProposalDraftV1): void {
   boundedString(preview.title, "$.proposal.preview.title", { max: 256 });
   boundedString(preview.summary, "$.proposal.preview.summary", { max: 8_192 });
   if (
-    preview.projector_version !== "vf-public-projector/1" ||
+    preview.projector_version !== ACTION_PREVIEW_PROJECTOR_VERSION ||
     preview.action_type !== draft.action.type
   )
     invalid("preview identity mismatch");
@@ -162,13 +156,8 @@ function validateDispositions(
     const path = `$.proposal.preview.target_dispositions[${index}]`;
     exactObject(row, ["target_id", "execution", "reason_code"], [], path);
     assertOpaqueId(row.target_id, `${path}.target_id`);
-    const matrix: Record<string, readonly unknown[]> = {
-      host: [null],
-      manual: ["manual-config-change", "manual-runtime-setup", "disclosed-not-enforced"],
-      "required-user-action": ["native-install-required", "external-confirmation-required"],
-      unsupported: ["adapter-unavailable", "enforcement-unavailable", "target-unsupported"],
-    };
-    if (!matrix[row.execution]?.includes(row.reason_code)) invalid("invalid target disposition");
+    if (!TARGET_DISPOSITION_REASON_CODES[row.execution]?.includes(row.reason_code))
+      invalid("invalid target disposition");
     return row.target_id;
   });
   ordered(identities, "target dispositions");
@@ -183,14 +172,8 @@ function validatePermissions(value: HostRenderedPreviewV1["permission_delta"]): 
     exactObject(row, ["permission_id", "change", "public_scope", "enforcement"], [], path);
     assertOpaqueId(row.permission_id, `${path}.permission_id`);
     boundedString(row.public_scope, `${path}.public_scope`, { max: 512 });
-    if (!new Set(["add", "remove", "expand", "narrow", "unchanged"]).has(row.change))
-      invalid("invalid permission change");
-    if (
-      !new Set(["brokered", "sandboxed", "engine-enforced", "disclosed-not-enforced"]).has(
-        row.enforcement,
-      )
-    )
-      invalid("invalid permission enforcement");
+    if (!PERMISSION_CHANGES.has(row.change)) invalid("invalid permission change");
+    if (!PERMISSION_ENFORCEMENTS.has(row.enforcement)) invalid("invalid permission enforcement");
     return [row.permission_id, row.public_scope, row.enforcement, row.change].join("\0");
   });
   ordered(identities, "permission deltas");
@@ -202,8 +185,7 @@ function validateDependencies(value: HostRenderedPreviewV1["dependency_delta"]):
     const path = `$.proposal.preview.dependency_delta[${index}]`;
     exactObject(row, ["package_id", "change", "from_version", "to_version"], [], path);
     assertOpaqueId(row.package_id, `${path}.package_id`);
-    if (!new Set(["add", "remove", "update", "unchanged"]).has(row.change))
-      invalid("invalid dependency change");
+    if (!DEPENDENCY_CHANGES.has(row.change)) invalid("invalid dependency change");
     for (const key of ["from_version", "to_version"] as const)
       if (row[key] !== null) assertOpaqueId(row[key], `${path}.${key}`, 128);
     return [row.package_id, row.change, row.from_version ?? "", row.to_version ?? ""].join("\0");
@@ -237,8 +219,7 @@ function validateConfigDiffs(
       invalid("config diff target is not canonical public form");
     const ids = assertStringArray(row.target_ids, `${path}.target_ids`, { max: 64, sorted: true });
     if (ids.some((id) => !targetIds.includes(id))) invalid("config diff names an unknown target");
-    if (!new Set(["surgical", "full-file", "manual"]).has(row.mode))
-      invalid("invalid config diff mode");
+    if (!CONFIG_DIFF_MODES.has(row.mode)) invalid("invalid config diff mode");
     assertDigest(row.before_digest, `${path}.before_digest`);
     assertDigest(row.after_digest, `${path}.after_digest`);
     for (const key of ["bounded_before", "bounded_after"] as const)
@@ -254,14 +235,8 @@ function validateEnforcement(value: HostRenderedPreviewV1["enforcement"]): void 
     const path = `$.proposal.preview.enforcement[${index}]`;
     exactObject(row, ["permission_id", "engine", "enforcement", "explanation"], [], path);
     assertOpaqueId(row.permission_id, `${path}.permission_id`);
-    if (!new Set(["claude", "codex", "copilot", "opencode", "antigravity"]).has(row.engine))
-      invalid("invalid enforcement engine");
-    if (
-      !new Set(["brokered", "sandboxed", "engine-enforced", "disclosed-not-enforced"]).has(
-        row.enforcement,
-      )
-    )
-      invalid("invalid enforcement mode");
+    if (!isAgentEngine(row.engine)) invalid("invalid enforcement engine");
+    if (!PERMISSION_ENFORCEMENTS.has(row.enforcement)) invalid("invalid enforcement mode");
     boundedString(row.explanation, `${path}.explanation`, { max: 2_048 });
     return `${row.permission_id}\0${row.engine}\0${row.enforcement}`;
   });
@@ -303,7 +278,7 @@ function validateHealth(value: HostRenderedPreviewV1["health_plan"], targetIds: 
     const validFor = safeInteger(row.evidence_valid_for_ms, `${path}.evidence_valid_for_ms`);
     if (timeout < 1 || timeout > 300_000 || validFor < 1 || validFor > 86_400_000)
       invalid("health timing exceeds bound");
-    if (![0, 1, 2].includes(row.retries)) invalid("invalid health retry count");
+    if (!HEALTH_RETRIES.has(row.retries)) invalid("invalid health retry count");
     return `${row.probe_id}\0${ids.join("\0")}`;
   });
   ordered(identities, "health plans");

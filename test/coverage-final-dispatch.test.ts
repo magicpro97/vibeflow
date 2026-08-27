@@ -81,6 +81,45 @@ function completedProcess(stdout: string[]): EngineProcess {
   };
 }
 
+const OWNED_RUNTIME_FIXTURE_PID = Object.freeze({
+  SUPERVISOR: 4241,
+  CLI: 4242,
+} as const);
+
+const OWNED_RUNTIME_FIXTURE_IDENTITY = Object.freeze({
+  OWNER: "freebsd:fixture-owner",
+  SUPERVISOR: "freebsd:fixture-supervisor",
+  CLI: "freebsd:fixture-cli",
+} as const);
+
+function ownedRuntimeFixturePlatform(): OwnedProcessPlatform {
+  return {
+    strategy: "posix-session",
+    platform: "freebsd",
+    observe: (pid) => {
+      if (pid === process.pid)
+        return { pid, identity: OWNED_RUNTIME_FIXTURE_IDENTITY.OWNER, pgid: pid, sid: null };
+      if (pid === OWNED_RUNTIME_FIXTURE_PID.SUPERVISOR)
+        return {
+          pid,
+          identity: OWNED_RUNTIME_FIXTURE_IDENTITY.SUPERVISOR,
+          pgid: OWNED_RUNTIME_FIXTURE_PID.SUPERVISOR,
+          sid: null,
+        };
+      if (pid === OWNED_RUNTIME_FIXTURE_PID.CLI)
+        return {
+          pid,
+          identity: OWNED_RUNTIME_FIXTURE_IDENTITY.CLI,
+          pgid: OWNED_RUNTIME_FIXTURE_PID.SUPERVISOR,
+          sid: null,
+        };
+      return null;
+    },
+    terminateExactTree: () => undefined,
+    proveQuiescent: () => true,
+  };
+}
+
 function spawnProjection(
   engine: SpawnOptionsProjection["engine"],
   overrides: Partial<SpawnOptionsProjection> = {},
@@ -266,17 +305,14 @@ describe("final session runtime coverage", () => {
 
   test("authenticated Claude terminal finalizes the owned runtime as released", async () => {
     const root = tempRoot("vf-final-authenticated-terminal-");
-    const platform: OwnedProcessPlatform = {
-      strategy: "posix-session",
-      platform: process.platform,
-      observe: (pid) =>
-        pid === process.pid ? { pid, identity: "test-owner", pgid: pid, sid: null } : null,
-      terminateExactTree: () => undefined,
-      proveQuiescent: () => true,
-    };
+    const platform = ownedRuntimeFixturePlatform();
     const spawn = markOwnedRuntimeSpawner(((argv, options) => {
       expect(argv[0]).toContain("claude");
       expect(options.ownedRuntime).toBeDefined();
+      options.ownedRuntime?.bindLaunch(
+        OWNED_RUNTIME_FIXTURE_PID.SUPERVISOR,
+        OWNED_RUNTIME_FIXTURE_PID.CLI,
+      );
       return completedProcess([
         `${JSON.stringify({
           type: "result",
@@ -403,15 +439,14 @@ describe("final session runtime coverage", () => {
 
   test("non-authenticated owned exit uses the ordinary engine release reason", async () => {
     const root = tempRoot("vf-final-ordinary-owned-exit-");
-    const platform: OwnedProcessPlatform = {
-      strategy: "posix-session",
-      platform: process.platform,
-      observe: (pid) =>
-        pid === process.pid ? { pid, identity: "ordinary-owner", pgid: pid, sid: null } : null,
-      terminateExactTree: () => undefined,
-      proveQuiescent: () => true,
-    };
-    const spawn = markOwnedRuntimeSpawner((() => completedProcess([])) as EngineProcessSpawner);
+    const platform = ownedRuntimeFixturePlatform();
+    const spawn = markOwnedRuntimeSpawner(((_argv, options) => {
+      options.ownedRuntime?.bindLaunch(
+        OWNED_RUNTIME_FIXTURE_PID.SUPERVISOR,
+        OWNED_RUNTIME_FIXTURE_PID.CLI,
+      );
+      return completedProcess([]);
+    }) as EngineProcessSpawner);
     const result = await createEngineSessionAdapter({
       evidenceRoot: root,
       ownedProcessPlatform: platform,

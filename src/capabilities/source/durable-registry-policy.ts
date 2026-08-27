@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import { readProjectionFile } from "../adapters/filesystem-io.js";
 import { foldGrantFrames, foldPolicyFrames, foldSecretRevocations } from "../authority/index.js";
@@ -30,9 +31,9 @@ export interface DurableAuthorityDomainJournalsV1 {
 function settingsPath(input: {
   private_root: string;
   identity_path: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
 }): string {
-  return input.scope === "project"
+  return input.scope === CAPABILITY_SCOPE.PROJECT
     ? join(dirname(input.identity_path), "SETTINGS.json")
     : join(dirname(input.private_root), "SETTINGS.json");
 }
@@ -40,7 +41,7 @@ function settingsPath(input: {
 export function readDurableSettingsPolicyState(input: {
   private_root: string;
   identity_path: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
 }): DurableSettingsPolicyStateV1 {
   const bytes = readProjectionFile(settingsPath(input));

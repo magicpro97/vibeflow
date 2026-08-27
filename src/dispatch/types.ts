@@ -1,6 +1,7 @@
 import type { Engine } from "../core.js";
 import type { EnvPolicy } from "./env-filter.js";
 import type { OwnedProcessPlatform } from "./owned-process-platform.js";
+import type { DispatchMode, EnginePromptMode } from "./session-contract.js";
 
 // Re-export of `Bun.spawn` under a stable name so the test seam (`AsyncSpawnerOpts.spawn`)
 // can be typed as `typeof bunSpawn` and tests can pass any function with the same
@@ -89,7 +90,7 @@ export interface DispatchResult {
   /** Immutable evidence identity. Legacy callers may omit it and receive a generated UUID. */
   attemptId?: string;
   engine: Engine;
-  mode: "bridge" | "cli" | "dry";
+  mode: DispatchMode;
   ok: boolean;
   raw: string;
   summary?: EngineSummary;
@@ -185,7 +186,7 @@ export interface EngineInvocation {
   cmd: string;
   args: string[];
   /** Copilot CLI requires the prompt as the `-p` option value; other engines read stdin. */
-  promptMode?: "stdin" | "arg";
+  promptMode?: EnginePromptMode;
   /** Non-fatal advisory surfaced to the caller (does not block dispatch). */
   warning?: string;
 }

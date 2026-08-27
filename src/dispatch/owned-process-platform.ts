@@ -3,9 +3,16 @@ import { createRequire } from "node:module";
 import { win32 as windowsPath } from "node:path";
 import { processStartIdentity } from "../durability/index.js";
 import {
+  PROCESS_START_IDENTITY_PREFIX,
+  RUNTIME_PLATFORM,
+  formatProcessStartIdentity,
+  isProcessStartIdentity,
+} from "../durability/process-identity-contract.js";
+import {
   OWNED_PROCESS_PRESENCE_KIND,
   OWNED_PROCESS_PROOF_STRENGTH,
   OWNED_PROCESS_QUIESCENCE_SCOPE,
+  OWNED_PROCESS_RECORD_FIELD,
   OWNED_PROCESS_STRATEGY,
   OWNED_PROCESS_TIMING_MS,
   OWNED_WINDOWS_LIMIT,
@@ -136,10 +143,16 @@ function windowsProbe(pid: number, runtime: OwnedProcessPlatformRuntime): OwnedP
         },
       )
       .trim();
-    if (!creation) return { kind: OWNED_PROCESS_PRESENCE_KIND.UNKNOWN };
+    const identity = formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.WINDOWS, creation);
+    if (!isProcessStartIdentity(identity)) return { kind: OWNED_PROCESS_PRESENCE_KIND.UNKNOWN };
     return {
       kind: OWNED_PROCESS_PRESENCE_KIND.PRESENT,
-      observation: { pid, identity: `win32:${creation}`, pgid: null, sid: null },
+      observation: {
+        pid,
+        identity,
+        pgid: null,
+        sid: null,
+      },
     };
   } catch (error) {
     return (error as NodeJS.ErrnoException & { status?: number }).status ===
@@ -221,7 +234,7 @@ export function createOwnedProcessPlatform(
   const platform = runtimeOverrides.platform ?? process.platform;
   const windowsSystemRoot =
     runtimeOverrides.windowsSystemRoot ??
-    (platform === "win32"
+    (platform === RUNTIME_PLATFORM.WINDOWS
       ? (() => {
           try {
             return resolveOwnedWindowsSystemRoot(runtimeOverrides.resolveWindowsSystemRoot);
@@ -238,7 +251,7 @@ export function createOwnedProcessPlatform(
     windowsSystemRoot,
     ...runtimeOverrides,
   };
-  if (runtime.platform === "win32") {
+  if (runtime.platform === RUNTIME_PLATFORM.WINDOWS) {
     return {
       strategy: OWNED_PROCESS_STRATEGY.WINDOWS_TREE,
       platform: runtime.platform,
@@ -284,27 +297,25 @@ export function createOwnedProcessPlatform(
         );
       },
       proveQuiescent: (record, _mode, hint) => {
-        const supervisor = !record.supervisor_pid
+        const supervisorPid = record[OWNED_PROCESS_RECORD_FIELD.SUPERVISOR_PID];
+        const supervisorIdentity = record[OWNED_PROCESS_RECORD_FIELD.SUPERVISOR_IDENTITY];
+        const cliPid = record[OWNED_PROCESS_RECORD_FIELD.CLI_PID];
+        const cliIdentity = record[OWNED_PROCESS_RECORD_FIELD.CLI_IDENTITY];
+        const supervisor = !supervisorPid
           ? { kind: OWNED_PROCESS_PRESENCE_KIND.ABSENT }
-          : windowsProbe(record.supervisor_pid, runtime);
-        const cli = !record.cli_pid
+          : windowsProbe(supervisorPid, runtime);
+        const cli = !cliPid
           ? { kind: OWNED_PROCESS_PRESENCE_KIND.ABSENT }
-          : windowsProbe(record.cli_pid, runtime);
+          : windowsProbe(cliPid, runtime);
         if (
           supervisor.kind === OWNED_PROCESS_PRESENCE_KIND.UNKNOWN ||
           cli.kind === OWNED_PROCESS_PRESENCE_KIND.UNKNOWN ||
           (supervisor.kind === OWNED_PROCESS_PRESENCE_KIND.PRESENT &&
-            !observationMatches(
-              record.supervisor_pid as number,
-              record.supervisor_identity as string,
-              supervisor.observation,
-            )) ||
+            (!supervisorPid ||
+              !supervisorIdentity ||
+              !observationMatches(supervisorPid, supervisorIdentity, supervisor.observation))) ||
           (cli.kind === OWNED_PROCESS_PRESENCE_KIND.PRESENT &&
-            !observationMatches(
-              record.cli_pid as number,
-              record.cli_identity as string,
-              cli.observation,
-            ))
+            (!cliPid || !cliIdentity || !observationMatches(cliPid, cliIdentity, cli.observation)))
         ) {
           return null;
         }
@@ -314,9 +325,11 @@ export function createOwnedProcessPlatform(
         )
           return false;
         if (
-          record.quiescence_scope === OWNED_PROCESS_QUIESCENCE_SCOPE.WINDOWS_JOB &&
-          record.proof_strength === OWNED_PROCESS_PROOF_STRENGTH.KERNEL_CONTAINED &&
-          record.supervisor_pid !== null
+          record[OWNED_PROCESS_RECORD_FIELD.QUIESCENCE_SCOPE] ===
+            OWNED_PROCESS_QUIESCENCE_SCOPE.WINDOWS_JOB &&
+          record[OWNED_PROCESS_RECORD_FIELD.PROOF_STRENGTH] ===
+            OWNED_PROCESS_PROOF_STRENGTH.KERNEL_CONTAINED &&
+          supervisorPid !== null
         ) {
           return true;
         }
@@ -346,18 +359,21 @@ export function createOwnedProcessPlatform(
       runtime.kill(-root.pid, force ? "SIGKILL" : "SIGTERM");
     },
     terminateExactCliFallback: (record, cli, force) => {
+      const supervisorPid = record[OWNED_PROCESS_RECORD_FIELD.SUPERVISOR_PID];
       const fresh = posixProbe(cli.pid, runtime);
       if (
-        !record.supervisor_pid ||
+        !supervisorPid ||
         fresh.kind !== OWNED_PROCESS_PRESENCE_KIND.PRESENT ||
         !observationMatches(cli.pid, cli.identity, fresh.observation) ||
-        fresh.observation.pgid !== record.supervisor_pid
+        fresh.observation.pgid !== supervisorPid
       ) {
         throw new Error("owned POSIX CLI identity changed before fallback termination");
       }
-      runtime.kill(-record.supervisor_pid, force ? "SIGKILL" : "SIGTERM");
+      runtime.kill(-supervisorPid, force ? "SIGKILL" : "SIGTERM");
     },
-    proveQuiescent: (record) =>
-      record.supervisor_pid ? posixGroupEmpty(record.supervisor_pid, runtime) : true,
+    proveQuiescent: (record) => {
+      const supervisorPid = record[OWNED_PROCESS_RECORD_FIELD.SUPERVISOR_PID];
+      return supervisorPid ? posixGroupEmpty(supervisorPid, runtime) : true;
+    },
   };
 }

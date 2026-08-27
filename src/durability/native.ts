@@ -10,6 +10,7 @@ import {
   native,
   syscallFailure,
 } from "./native-runtime.js";
+import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 export interface PinnedDirectory {
   fd: number;
@@ -22,7 +23,7 @@ const LOCK_EX = 2;
 const LOCK_NB = 4;
 const LOCK_UN = 8;
 const F_GETPATH = 50;
-const AT_REMOVEDIR = process.platform === "darwin" ? 0x80 : 0x200;
+const AT_REMOVEDIR = process.platform === RUNTIME_PLATFORM.DARWIN ? 0x80 : 0x200;
 const DIRECTORY_FLAGS =
   fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW | O_CLOEXEC;
 const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefined;
@@ -32,7 +33,7 @@ export function canonicalDurabilityPath(input: string): string {
     durabilityError("unsafe_path", "durability path contains NUL or is not a string");
   if (!isAbsolute(input)) durabilityError("unsafe_path", "durability path must be absolute");
   let path = resolve(input);
-  if (process.platform !== "darwin") return path;
+  if (process.platform !== RUNTIME_PLATFORM.DARWIN) return path;
   for (const [alias, target] of [
     ["/var", "/private/var"],
     ["/tmp", "/private/tmp"],
@@ -182,7 +183,7 @@ export function pinnedDirectoryPathForRuntime(
   fd: number,
   runtime: PinnedDirectoryRuntimeV1,
 ): string {
-  if (runtime.platform === "linux") {
+  if (runtime.platform === RUNTIME_PLATFORM.LINUX) {
     let observed: string;
     try {
       observed = fs.readlinkSync(`/proc/self/fd/${fd}`);

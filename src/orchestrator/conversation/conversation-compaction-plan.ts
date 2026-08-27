@@ -1,5 +1,10 @@
 import type { OversizedHandoffCandidateV1, PublicCompactionInputV1 } from "../../actions/index.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
+import {
+  CONVERSATION_PUBLIC_ARTIFACT_DELIVERY,
+  CONVERSATION_PUBLIC_PROFILE,
+  CONVERSATION_PUBLIC_SCHEMA_VERSION,
+} from "./conversation-public-wire-contract.js";
 import { type PublicHandoffEventV1, buildOmittedPublicEventRanges } from "./handoff-omission.js";
 import {
   contextHandoffPromptDigest,
@@ -18,7 +23,7 @@ import type { OversizedHandoffRejectedProjectionV1 } from "./oversized-handoff-s
 import {
   REVISION_INTERACTION_CURSOR_MEDIA_TYPE,
   REVISION_QUOTE_GRAPH_MEDIA_TYPE,
-} from "./revision-handoff-context.js";
+} from "./revision-handoff-contract.js";
 
 type PublicEvent = PublicHandoffEventV1;
 
@@ -123,8 +128,8 @@ export function constructContextCompaction(input: {
   )
     throw new Error("oversized projection omission authority is absent");
   const artifactPreimage = {
-    schema_version: "1.0" as const,
-    profile: "vf-public-compaction/1" as const,
+    schema_version: CONVERSATION_PUBLIC_SCHEMA_VERSION,
+    profile: CONVERSATION_PUBLIC_PROFILE.COMPACTION,
     source: structuredClone(input.candidate.source),
     source_public_head_digest: input.candidate.source_public_head_digest,
     oversized_candidate_digest: input.candidate.candidate_digest,
@@ -170,7 +175,7 @@ export function constructContextCompaction(input: {
       ),
       ...omitted.map(({ range }) => ({
         artifact: structuredClone(range.artifact),
-        delivery: "conversation-artifact-resolver" as const,
+        delivery: CONVERSATION_PUBLIC_ARTIFACT_DELIVERY.RESOLVER,
         public_text: null,
       })),
     ].sort((left, right) => compare(left.artifact.artifact_id, right.artifact.artifact_id)),

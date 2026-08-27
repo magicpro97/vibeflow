@@ -478,6 +478,45 @@ describe("runtime integrity handoff coverage", () => {
       [fx.pkg.pin.id, second.pin.id].sort(),
     );
   });
+
+  test("rehydrates non-secret manifest defaults without exposing secret declarations", () => {
+    const fx = runtimeFixture((manifest) => {
+      manifest.inputs = [
+        {
+          input_id: "api-token",
+          label: "API token",
+          type: "secret-handle",
+          required: false,
+          default_value: null,
+          enum_values: [],
+          min: null,
+          max: null,
+          pattern: null,
+        },
+        {
+          input_id: "enabled",
+          label: "Enabled",
+          type: "boolean",
+          required: false,
+          default_value: true,
+          enum_values: [],
+          min: null,
+          max: null,
+          pattern: null,
+        },
+      ];
+    });
+    const cache = new FilesystemCapabilityPackageCacheV1({
+      scope: "project",
+      scopeIdentityDigest: fx.authority.scope_identity_digest,
+      privateRoot: fx.storage.paths.privateRoot,
+      authority: () => fx.authority,
+      now: () => NOW,
+    });
+    const cached = cache.readByPin(fx.pkg.pin.pin_digest);
+    expect(cached?.public_inputs).toEqual([{ input_id: "enabled", value: true }]);
+    expect(cached?.secret_input_ids).toEqual(["api-token"]);
+  });
 });
 
 describe("source authority integration and quarantine coverage", () => {

@@ -1,5 +1,7 @@
 import { join } from "node:path";
+import { CAPABILITY_AUTHORITY_CHANGE } from "../../actions/capability-security-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import {
   canonicalJson,
   canonicalJsonBytes,
@@ -127,7 +129,7 @@ function optionalJournal<T>(path: string, options: Parameters<typeof readVffrFil
 
 function readJournals(
   authorityRoot: string,
-  scope: "project" | "user",
+  scope: CapabilityScope,
   scopeIdentityDigest: string,
 ): AuthorityJournalsV1 {
   const identity = (payload: Record<string, unknown>) =>
@@ -203,7 +205,7 @@ function evidenceFor(
   prior: AuthorityEpochHeadV1,
   privateRoot: string,
 ): AuthorityTransitionEvidenceV1 {
-  if (event.change === "grant-changed")
+  if (event.change === CAPABILITY_AUTHORITY_CHANGE.GRANT_CHANGED)
     return {
       change: event.change,
       grant_frames: prefixThrough(
@@ -212,7 +214,7 @@ function evidenceFor(
         "grant transition evidence",
       ),
     };
-  if (event.change === "policy-changed")
+  if (event.change === CAPABILITY_AUTHORITY_CHANGE.POLICY_CHANGED)
     return {
       change: event.change,
       policy_frames: prefixThrough(
@@ -221,7 +223,7 @@ function evidenceFor(
         "policy transition evidence",
       ),
     };
-  if (event.change === "secret-revoked")
+  if (event.change === CAPABILITY_AUTHORITY_CHANGE.SECRET_REVOKED)
     return {
       change: event.change,
       secret_frames: prefixThrough(
@@ -233,7 +235,7 @@ function evidenceFor(
         "secret transition evidence",
       ),
     };
-  if (event.change === "registry-trust-changed")
+  if (event.change === CAPABILITY_AUTHORITY_CHANGE.REGISTRY_TRUST_CHANGED)
     return {
       change: event.change,
       trust_frames: journals.trust.slice(0, event.next_state.trust_epoch),
@@ -244,7 +246,7 @@ function evidenceFor(
 export function readDurableAuthorityState(input: {
   private_root: string;
   identity_path: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   initial_authority_head_digest: string;
   authority_transition_resolver: DurableAuthorityTransitionResolverV1;

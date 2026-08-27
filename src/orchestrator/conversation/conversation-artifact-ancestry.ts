@@ -6,6 +6,11 @@ import type { ConversationArtifactEntry } from "./artifact-store.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import { ConversationHandoffService } from "./conversation-handoff-service.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import {
+  CONVERSATION_PUBLIC_ARTIFACT_KIND,
+  CONVERSATION_PUBLIC_ARTIFACT_RESOLVER,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import type { PublicArtifactReferenceV1 } from "./handoff-types.js";
 import { deriveConversationLineages } from "./lineage-reader.js";
 import { readConversationSourceInventory } from "./source-inventory.js";
@@ -92,7 +97,8 @@ export function resolvePublishedArtifactEventReference(input: {
     const events = node.records.filter(({ stored_event: stored }) => {
       const event = stored.event;
       return (
-        (event.type === "artifact_created" || event.type === "artifact_updated") &&
+        (event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED ||
+          event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED) &&
         event.payload.ref === resolved.internalRef
       );
     });
@@ -100,9 +106,9 @@ export function resolvePublishedArtifactEventReference(input: {
     if (!events.length || !entry) continue;
     if (
       events.length !== 1 ||
-      (events[0]?.stored_event.event.type === "artifact_created" &&
+      (events[0]?.stored_event.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED &&
         events[0].stored_event.event.payload.artifact_id !== entry.artifact_id) ||
-      (events[0]?.stored_event.event.type === "artifact_updated" &&
+      (events[0]?.stored_event.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED &&
         (events[0].stored_event.event.payload.artifact_id !== entry.artifact_id ||
           events[0].stored_event.event.payload.previous_ref !== entry.previous_ref))
     )
@@ -118,11 +124,11 @@ export function resolvePublishedArtifactEventReference(input: {
       internal_ref: resolved.internalRef,
       reference: {
         artifact_id: input.artifact_id,
-        artifact_kind: "conversation-artifact",
+        artifact_kind: CONVERSATION_PUBLIC_ARTIFACT_KIND.CONVERSATION,
         media_type: "application/octet-stream",
         byte_length: content.byteLength,
         content_sha256: contentSha,
-        resolver: "conversation-artifact-v1",
+        resolver: CONVERSATION_PUBLIC_ARTIFACT_RESOLVER.CONVERSATION,
       },
     });
   }

@@ -12,136 +12,52 @@ import {
   privateFileBytes,
   readVffrFile,
 } from "../../durability/index.js";
-
-const MAX_RECORD = 256 * 1024;
-const MAX_CONTENT = 64 * 1024;
-export const PRIVATE_FILE_RANGE_MAX_FRAMES = 8;
-const STAGING = /^vf-file-range-[0-9a-f]{64}$/;
-const PATH_LIMIT = 4 * 1024;
-
-export interface PrivateFileRangeHandoffBindingV1 {
-  schema_version: "1.0";
-  handoff_id: string;
-  handoff_record_digest: string;
-  repo_relative_path: string;
-  start_line: number;
-  end_line: number;
-  line_count: number;
-  staged_at: string;
-  expires_at: string;
-}
-
-// biome-ignore format: production file ceiling
-const validLine = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1;
-// biome-ignore format: production file ceiling
-const validTimestamp = (value: unknown): value is string =>
-  typeof value === "string" && Number.isFinite(Date.parse(value)) && value.endsWith("Z") && value.includes("T");
-// biome-ignore format: production file ceiling
-const hasControlCharacter = (value: string): boolean => Array.from(value).some((character) => character.charCodeAt(0) < 0x20 || character.charCodeAt(0) === 0x7f);
-// biome-ignore format: production file ceiling
-const validRepoRelativePath = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= PATH_LIMIT && !hasControlCharacter(value) && !value.includes("\\") && !value.startsWith("/") && !value.startsWith("~") && value.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
-
-export function assertPrivateFileRangeHandoffBindingV1(
-  value: unknown,
-): asserts value is PrivateFileRangeHandoffBindingV1 {
-  const bindingValue = value as Partial<PrivateFileRangeHandoffBindingV1> | null;
-  if (
-    !bindingValue ||
-    bindingValue.schema_version !== "1.0" ||
-    typeof bindingValue.handoff_id !== "string" ||
-    !STAGING.test(bindingValue.handoff_id) ||
-    typeof bindingValue.handoff_record_digest !== "string" ||
-    !/^sha256:[0-9a-f]{64}$/.test(bindingValue.handoff_record_digest) ||
-    !validRepoRelativePath(bindingValue.repo_relative_path) ||
-    !validLine(bindingValue.start_line) ||
-    !validLine(bindingValue.end_line) ||
-    bindingValue.end_line < bindingValue.start_line ||
-    !Number.isSafeInteger(bindingValue.line_count) ||
-    (bindingValue.line_count ?? 0) !== bindingValue.end_line - bindingValue.start_line + 1 ||
-    !validTimestamp(bindingValue.staged_at) ||
-    !validTimestamp(bindingValue.expires_at) ||
-    Date.parse(bindingValue.expires_at) <= Date.parse(bindingValue.staged_at)
-  ) {
-    throw new Error("invalid private file range handoff binding");
-  }
-}
+import {
+  type PrivateFileRangeStageInputV1,
+  buildPrivateFileRangeStage,
+  buildPrivateFileRangeStagingFrame,
+  privateFileRangeHandoffBinding,
+} from "./private-file-range-staging-builders.js";
+import {
+  PRIVATE_FILE_RANGE_MAX_FRAMES,
+  PRIVATE_FILE_RANGE_STAGING_DIGEST_DOMAIN,
+  PRIVATE_FILE_RANGE_STAGING_IDENTIFIER_PREFIX,
+  PRIVATE_FILE_RANGE_STAGING_LIMIT,
+  PRIVATE_FILE_RANGE_STAGING_PATTERN,
+  PRIVATE_FILE_RANGE_STAGING_SCHEMA_VERSION,
+  PRIVATE_FILE_RANGE_STAGING_STATE,
+  PRIVATE_FILE_RANGE_STAGING_STORAGE,
+  type PrivateFileRangeHandoffBindingV1,
+  type PrivateFileRangeStagingFrameMutationV1,
+  type PrivateFileRangeStagingFrameV1,
+  type PrivateFileRangeStagingRecordV1,
+  type ResolvedPrivateFileRangeV1,
+  assertPrivateFileRangeHandoffBindingV1,
+  assertPrivateFileRangeStagingFrameChain,
+  assertPrivateFileRangeStagingFrameV1,
+  assertPrivateFileRangeStagingRecordV1,
+} from "./private-file-range-staging-contract.js";
+export {
+  PRIVATE_FILE_RANGE_MAX_FRAMES,
+  PRIVATE_FILE_RANGE_STAGING_STATE,
+  PRIVATE_FILE_RANGE_STAGING_STATES,
+  assertPrivateFileRangeHandoffBindingV1,
+  isPrivateFileRangeStagingState,
+} from "./private-file-range-staging-contract.js";
+export type {
+  PrivateFileRangeHandoffBindingV1,
+  PrivateFileRangeStagingFrameV1,
+  PrivateFileRangeStagingStateV1,
+  ResolvedPrivateFileRangeV1,
+} from "./private-file-range-staging-contract.js";
 
 function cloneBinding(value: PrivateFileRangeHandoffBindingV1): PrivateFileRangeHandoffBindingV1 {
   assertPrivateFileRangeHandoffBindingV1(value);
   return structuredClone(value);
 }
 
-interface PrivateFileRangeStagingRecordV1 {
-  schema_version: "1.0";
-  handoff_id: string;
-  repo_relative_path: string;
-  start_line: number;
-  end_line: number;
-  line_count: number;
-  content: string;
-  content_utf8_sha256: string;
-  content_byte_length: number;
-  staged_at: string;
-  expires_at: string;
-  record_digest: string;
-}
-
-interface PrivateFileRangeStagingFrameV1 {
-  schema_version: "1.0";
-  handoff_id: string;
-  sequence: number;
-  previous_frame_digest: string | null;
-  handoff_record_digest: string;
-  state: "available" | "reserved" | "consumed";
-  reservation_key: string | null;
-  consumed_by: string | null;
-  recorded_at: string;
-  frame_digest: string;
-}
-
-export interface ResolvedPrivateFileRangeV1 {
-  repo_relative_path: string;
-  start_line: number;
-  end_line: number;
-  line_count: number;
-  content: string;
-}
-
-// biome-ignore format: production file ceiling
-function frame(record: PrivateFileRangeStagingRecordV1, prior: PrivateFileRangeStagingFrameV1 | null, input: Pick<PrivateFileRangeStagingFrameV1, "state" | "reservation_key" | "consumed_by" | "recorded_at">): PrivateFileRangeStagingFrameV1 {
-  const preimage = {
-    schema_version: "1.0" as const,
-    handoff_id: record.handoff_id,
-    sequence: (prior?.sequence ?? -1) + 1,
-    previous_frame_digest: prior?.frame_digest ?? null,
-    handoff_record_digest: record.record_digest,
-    ...structuredClone(input),
-  };
-  return {
-    ...preimage,
-    frame_digest: digestV1("VF-PRIVATE-FILE-RANGE-STAGING-FRAME\0v1\0", preimage),
-  };
-}
-
-function binding(record: PrivateFileRangeStagingRecordV1): PrivateFileRangeHandoffBindingV1 {
-  const output: PrivateFileRangeHandoffBindingV1 = {
-    schema_version: "1.0",
-    handoff_id: record.handoff_id,
-    handoff_record_digest: record.record_digest,
-    repo_relative_path: record.repo_relative_path,
-    start_line: record.start_line,
-    end_line: record.end_line,
-    line_count: record.line_count,
-    staged_at: record.staged_at,
-    expires_at: record.expires_at,
-  };
-  assertPrivateFileRangeHandoffBindingV1(output);
-  return output;
-}
-
 export function createPrivateFileRangeHandoffId(): string {
-  return `vf-file-range-${randomBytes(32).toString("hex")}`;
+  return `${PRIVATE_FILE_RANGE_STAGING_IDENTIFIER_PREFIX}-${randomBytes(32).toString("hex")}`;
 }
 
 export class PrivateFileRangeStagingStoreV1 {
@@ -151,13 +67,17 @@ export class PrivateFileRangeStagingStoreV1 {
 
   constructor(artifactRoot: string) {
     const root = ensurePrivateDirectory(join(resolve(artifactRoot), "actions", "v1"));
-    this.records = ensurePrivateDirectory(join(root, "private-file-range-records"));
-    this.frames = ensurePrivateDirectory(join(root, "private-file-range-staging"));
-    this.lockPath = join(root, "private-file-range-staging.writer.lock");
+    this.records = ensurePrivateDirectory(
+      join(root, PRIVATE_FILE_RANGE_STAGING_STORAGE.RECORDS_DIRECTORY),
+    );
+    this.frames = ensurePrivateDirectory(
+      join(root, PRIVATE_FILE_RANGE_STAGING_STORAGE.FRAMES_DIRECTORY),
+    );
+    this.lockPath = join(root, PRIVATE_FILE_RANGE_STAGING_STORAGE.WRITER_LOCK_FILE);
   }
 
   // biome-ignore format: production file ceiling
-  private assertId(id: string): void { if (!STAGING.test(id)) throw new Error("invalid private file range handoff id"); }
+  private assertId(id: string): void { if (!PRIVATE_FILE_RANGE_STAGING_PATTERN.HANDOFF_ID.test(id)) throw new Error("invalid private file range handoff id"); }
 
   private withLock<T>(operation: string, run: (lock: ProcessLock) => T): T {
     const lock = acquireProcessLock(this.lockPath, { operation });
@@ -170,114 +90,116 @@ export class PrivateFileRangeStagingStoreV1 {
 
   private codec(id: string) {
     return {
-      domain: "private-file-range-staging" as const,
+      domain: PRIVATE_FILE_RANGE_STAGING_STORAGE.DOMAIN,
       maxFrames: PRIVATE_FILE_RANGE_MAX_FRAMES,
-      maxPayloadBytes: MAX_RECORD,
-      maxAggregateBytes: MAX_RECORD * PRIVATE_FILE_RANGE_MAX_FRAMES,
+      maxPayloadBytes: PRIVATE_FILE_RANGE_STAGING_LIMIT.MAX_RECORD_BYTES,
+      maxAggregateBytes:
+        PRIVATE_FILE_RANGE_STAGING_LIMIT.MAX_RECORD_BYTES * PRIVATE_FILE_RANGE_MAX_FRAMES,
       validatePayload: (payload: Record<string, unknown>) => {
-        const value = payload as unknown as PrivateFileRangeStagingFrameV1;
+        assertPrivateFileRangeStagingFrameV1(payload);
+        const value = payload;
         const { frame_digest: _digest, ...preimage } = value;
         if (
           value.handoff_id !== id ||
-          digestV1("VF-PRIVATE-FILE-RANGE-STAGING-FRAME\0v1\0", preimage) !== value.frame_digest
+          digestV1(PRIVATE_FILE_RANGE_STAGING_DIGEST_DOMAIN.FRAME, preimage) !== value.frame_digest
         )
           throw new Error("invalid private file range staging frame");
       },
-      computePayloadDigest: (payload: Record<string, unknown>) =>
-        (payload as unknown as PrivateFileRangeStagingFrameV1).frame_digest,
+      computePayloadDigest: (payload: Record<string, unknown>) => {
+        assertPrivateFileRangeStagingFrameV1(payload);
+        return payload.frame_digest;
+      },
       validateJournalIdentity: (payload: Record<string, unknown>) => payload.handoff_id === id,
     };
   }
 
-  stage(input: {
-    handoff_id: string;
-    repo_relative_path: string;
-    start_line: number;
-    end_line: number;
-    content: string;
-    staged_at: string;
-    ttl_ms?: number;
-  }): PrivateFileRangeHandoffBindingV1 {
+  private appendFrame(
+    record: PrivateFileRangeStagingRecordV1,
+    frames: readonly PrivateFileRangeStagingFrameV1[],
+    mutation: PrivateFileRangeStagingFrameMutationV1,
+    lock: ProcessLock,
+  ): void {
+    const next = buildPrivateFileRangeStagingFrame(record, frames.at(-1) ?? null, mutation);
+    assertPrivateFileRangeStagingFrameChain([...frames, next]);
+    appendVffrFrame(
+      join(this.frames, `${record.handoff_id}.frames`),
+      PRIVATE_FILE_RANGE_STAGING_STORAGE.DOMAIN,
+      next as unknown as JsonValue,
+      { ...this.codec(record.handoff_id), lock },
+    );
+  }
+
+  stage(input: PrivateFileRangeStageInputV1): PrivateFileRangeHandoffBindingV1 {
     this.assertId(input.handoff_id);
-    if (!validRepoRelativePath(input.repo_relative_path))
-      throw new Error("private file range path is invalid");
-    const content = input.content;
-    const bytes = Buffer.from(content, "utf8");
-    if (bytes.length === 0 || bytes.length > MAX_CONTENT)
-      throw new Error("private file range content is empty or oversized");
-    // biome-ignore format: production file ceiling
-    if (!validLine(input.start_line) || !validLine(input.end_line) || input.end_line < input.start_line)
-      throw new Error("private file range line bounds are invalid");
-    // biome-ignore format: production file ceiling
-    if (!validTimestamp(input.staged_at)) throw new Error("private file range timestamp is invalid");
-    const lineCount = input.end_line - input.start_line + 1;
-    const withoutDigest = {
-      schema_version: "1.0" as const,
-      handoff_id: input.handoff_id,
-      repo_relative_path: input.repo_relative_path,
-      start_line: input.start_line,
-      end_line: input.end_line,
-      line_count: lineCount,
-      content,
-      content_utf8_sha256: digestV1("VF-PRIVATE-FILE-RANGE-CONTENT\0v1\0", {
-        schema_version: "1.0",
-        content,
-      }),
-      content_byte_length: bytes.length,
-      staged_at: input.staged_at,
-      expires_at: new Date(
-        Date.parse(input.staged_at) + (input.ttl_ms ?? 10 * 60_000),
-      ).toISOString(),
-    };
-    const record: PrivateFileRangeStagingRecordV1 = {
-      ...withoutDigest,
-      record_digest: digestV1("VF-PRIVATE-FILE-RANGE-STAGING-RECORD\0v1\0", withoutDigest),
-    };
+    const { record, binding: output } = buildPrivateFileRangeStage(input);
     this.withLock(`private-file-range-stage:${input.handoff_id}`, (lock) => {
       createOrVerifyPrivateFile(
         join(this.records, `${input.handoff_id}.json`),
         canonicalJsonBytes(record),
-        { lock, maxBytes: MAX_RECORD },
+        { lock, maxBytes: PRIVATE_FILE_RANGE_STAGING_LIMIT.MAX_RECORD_BYTES },
       );
-      if (this.readFrames(input.handoff_id).length === 0)
-        appendVffrFrame(
-          join(this.frames, `${input.handoff_id}.frames`),
-          "private-file-range-staging",
-          frame(record, null, {
-            state: "available",
+      const frames = this.readFrames(input.handoff_id);
+      if (frames.length === 0)
+        this.appendFrame(
+          record,
+          frames,
+          {
+            state: PRIVATE_FILE_RANGE_STAGING_STATE.AVAILABLE,
             reservation_key: null,
             consumed_by: null,
             recorded_at: input.staged_at,
-          }) as unknown as JsonValue,
-          { ...this.codec(input.handoff_id), lock },
+          },
+          lock,
         );
     });
-    return binding(record);
+    return output;
   }
 
   readRecord(id: string): PrivateFileRangeStagingRecordV1 | null {
     this.assertId(id);
-    const bytes = privateFileBytes(join(this.records, `${id}.json`), MAX_RECORD);
+    const bytes = privateFileBytes(
+      join(this.records, `${id}.json`),
+      PRIVATE_FILE_RANGE_STAGING_LIMIT.MAX_RECORD_BYTES,
+    );
     if (!bytes) return null;
     // biome-ignore format: production file ceiling
-    const record = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as PrivateFileRangeStagingRecordV1;
+    let record: PrivateFileRangeStagingRecordV1;
+    try {
+      const decoded: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      assertPrivateFileRangeStagingRecordV1(decoded);
+      record = decoded;
+    } catch (error) {
+      throw new Error("private file range staging record is corrupt", { cause: error });
+    }
     const { record_digest: _digest, ...preimage } = record;
     if (
+      record.handoff_id !== id ||
       !canonicalJsonBytes(record).equals(bytes) ||
-      digestV1("VF-PRIVATE-FILE-RANGE-STAGING-RECORD\0v1\0", preimage) !== record.record_digest
+      digestV1(PRIVATE_FILE_RANGE_STAGING_DIGEST_DOMAIN.RECORD, preimage) !== record.record_digest
     )
       throw new Error("private file range staging record is corrupt");
-    assertPrivateFileRangeHandoffBindingV1(binding(record));
+    assertPrivateFileRangeHandoffBindingV1(privateFileRangeHandoffBinding(record));
     return structuredClone(record);
   }
 
   readFrames(id: string): PrivateFileRangeStagingFrameV1[] {
     this.assertId(id);
     const path = join(this.frames, `${id}.frames`);
-    if (privateFileBytes(path, MAX_RECORD * PRIVATE_FILE_RANGE_MAX_FRAMES) === null) return [];
-    return readVffrFile(path, this.codec(id)).map((item) =>
+    if (
+      privateFileBytes(
+        path,
+        PRIVATE_FILE_RANGE_STAGING_LIMIT.MAX_RECORD_BYTES * PRIVATE_FILE_RANGE_MAX_FRAMES,
+      ) === null
+    )
+      return [];
+    const decoded = readVffrFile(path, this.codec(id)).map((item) =>
       structuredClone(item.payload as unknown as PrivateFileRangeStagingFrameV1),
     );
+    assertPrivateFileRangeStagingFrameChain(decoded);
+    const record = this.readRecord(id);
+    if (!record || decoded.some((frame) => frame.handoff_record_digest !== record.record_digest))
+      throw new Error("private file range staging frame authority changed");
+    return decoded;
   }
 
   // biome-ignore format: production file ceiling
@@ -285,25 +207,30 @@ export class PrivateFileRangeStagingStoreV1 {
     const requested = cloneBinding(bindingValue);
     this.withLock(`private-file-range-reserve:${bindingValue.handoff_id}`, (lock) => {
       const record = this.readRecord(requested.handoff_id);
-      const current = this.readFrames(requested.handoff_id).at(-1);
+      const frames = this.readFrames(requested.handoff_id);
+      const current = frames.at(-1);
       // biome-ignore format: production file ceiling
-      if (!record || canonicalJsonBytes(binding(record)).compare(canonicalJsonBytes(requested)) !== 0)
+      if (!record || canonicalJsonBytes(privateFileRangeHandoffBinding(record)).compare(canonicalJsonBytes(requested)) !== 0)
         throw new Error("private file range handoff binding changed");
       if (Date.parse(at) >= Date.parse(record.expires_at))
         throw new Error("private file range handoff expired");
-      if (current?.state === "reserved" && current.reservation_key === reservationKey) return;
-      if (current?.state !== "available")
+      if (
+        current?.state === PRIVATE_FILE_RANGE_STAGING_STATE.RESERVED &&
+        current.reservation_key === reservationKey
+      )
+        return;
+      if (current?.state !== PRIVATE_FILE_RANGE_STAGING_STATE.AVAILABLE)
         throw new Error("private file range handoff is not available");
-      appendVffrFrame(
-        join(this.frames, `${record.handoff_id}.frames`),
-        "private-file-range-staging",
-        frame(record, current, {
-          state: "reserved",
+      this.appendFrame(
+        record,
+        frames,
+        {
+          state: PRIVATE_FILE_RANGE_STAGING_STATE.RESERVED,
           reservation_key: reservationKey,
           consumed_by: null,
           recorded_at: at,
-        }) as unknown as JsonValue,
-        { ...this.codec(record.handoff_id), lock },
+        },
+        lock,
       );
     });
   }
@@ -313,23 +240,27 @@ export class PrivateFileRangeStagingStoreV1 {
     const requested = cloneBinding(bindingValue);
     this.withLock(`private-file-range-release:${bindingValue.handoff_id}`, (lock) => {
       const record = this.readRecord(requested.handoff_id);
-      const current = this.readFrames(requested.handoff_id).at(-1);
+      const frames = this.readFrames(requested.handoff_id);
+      const current = frames.at(-1);
       // biome-ignore format: production file ceiling
-      if (!record || canonicalJsonBytes(binding(record)).compare(canonicalJsonBytes(requested)) !== 0)
+      if (!record || canonicalJsonBytes(privateFileRangeHandoffBinding(record)).compare(canonicalJsonBytes(requested)) !== 0)
         throw new Error("private file range handoff binding changed");
-      if (!current || current.state === "available") return;
-      if (current.state !== "reserved" || current.reservation_key !== reservationKey)
+      if (!current || current.state === PRIVATE_FILE_RANGE_STAGING_STATE.AVAILABLE) return;
+      if (
+        current.state !== PRIVATE_FILE_RANGE_STAGING_STATE.RESERVED ||
+        current.reservation_key !== reservationKey
+      )
         throw new Error("private file range handoff reservation changed");
-      appendVffrFrame(
-        join(this.frames, `${record.handoff_id}.frames`),
-        "private-file-range-staging",
-        frame(record, current, {
-          state: "available",
+      this.appendFrame(
+        record,
+        frames,
+        {
+          state: PRIVATE_FILE_RANGE_STAGING_STATE.AVAILABLE,
           reservation_key: null,
           consumed_by: null,
           recorded_at: at,
-        }) as unknown as JsonValue,
-        { ...this.codec(record.handoff_id), lock },
+        },
+        lock,
       );
     });
   }
@@ -343,27 +274,31 @@ export class PrivateFileRangeStagingStoreV1 {
     const requested = cloneBinding(bindingValue);
     this.withLock(`private-file-range-consume:${bindingValue.handoff_id}`, (lock) => {
       const record = this.readRecord(requested.handoff_id);
-      const current = this.readFrames(requested.handoff_id).at(-1);
+      const frames = this.readFrames(requested.handoff_id);
+      const current = frames.at(-1);
       // biome-ignore format: production file ceiling
-      if (!record || canonicalJsonBytes(binding(record)).compare(canonicalJsonBytes(requested)) !== 0)
+      if (!record || canonicalJsonBytes(privateFileRangeHandoffBinding(record)).compare(canonicalJsonBytes(requested)) !== 0)
         throw new Error("private file range handoff binding changed");
-      if (current?.state === "consumed") {
+      if (current?.state === PRIVATE_FILE_RANGE_STAGING_STATE.CONSUMED) {
         if (current.reservation_key !== reservationKey || current.consumed_by !== consumedBy)
           throw new Error("private file range handoff consumption conflict");
         return;
       }
-      if (current?.state !== "reserved" || current.reservation_key !== reservationKey)
+      if (
+        current?.state !== PRIVATE_FILE_RANGE_STAGING_STATE.RESERVED ||
+        current.reservation_key !== reservationKey
+      )
         throw new Error("private file range handoff reservation changed");
-      appendVffrFrame(
-        join(this.frames, `${record.handoff_id}.frames`),
-        "private-file-range-staging",
-        frame(record, current, {
-          state: "consumed",
+      this.appendFrame(
+        record,
+        frames,
+        {
+          state: PRIVATE_FILE_RANGE_STAGING_STATE.CONSUMED,
           reservation_key: reservationKey,
           consumed_by: consumedBy,
           recorded_at: at,
-        }) as unknown as JsonValue,
-        { ...this.codec(record.handoff_id), lock },
+        },
+        lock,
       );
     });
   }
@@ -371,13 +306,18 @@ export class PrivateFileRangeStagingStoreV1 {
   content(bindingValue: PrivateFileRangeHandoffBindingV1): ResolvedPrivateFileRangeV1 {
     const requested = cloneBinding(bindingValue);
     const record = this.readRecord(requested.handoff_id);
-    if (!record || canonicalJsonBytes(binding(record)).compare(canonicalJsonBytes(requested)) !== 0)
+    if (
+      !record ||
+      canonicalJsonBytes(privateFileRangeHandoffBinding(record)).compare(
+        canonicalJsonBytes(requested),
+      ) !== 0
+    )
       throw new Error("private file range handoff binding changed");
     const bytes = Buffer.from(record.content, "utf8");
     if (
       bytes.length !== record.content_byte_length ||
-      digestV1("VF-PRIVATE-FILE-RANGE-CONTENT\0v1\0", {
-        schema_version: "1.0",
+      digestV1(PRIVATE_FILE_RANGE_STAGING_DIGEST_DOMAIN.CONTENT, {
+        schema_version: PRIVATE_FILE_RANGE_STAGING_SCHEMA_VERSION,
         content: record.content,
       }) !== record.content_utf8_sha256
     )

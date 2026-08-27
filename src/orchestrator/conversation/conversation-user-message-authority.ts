@@ -1,6 +1,8 @@
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import type { ArtifactRegistry } from "../trace/artifacts.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import { conversationLockDigest } from "./catalog-lock.js";
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import {
   conversationParticipantBindingSetDigest,
   materializeConversationMessageQueueAuthorityV1,
@@ -8,6 +10,10 @@ import {
 } from "./conversation-message-queue-authority.js";
 import type { ConversationMessageQueueAuthorityV1 } from "./conversation-message-queue-records.js";
 import { foldOrdinaryConversationOperation } from "./conversation-operation-fold.js";
+import {
+  CONVERSATION_TERMINAL_LIFECYCLES,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import type {
   ConversationLineageService,
   ResolvedConversationLineageV1,
@@ -15,10 +21,10 @@ import type {
 import { projectConversationEvents } from "./policy-registry.js";
 import type { ValidatedConversationSourceV1 } from "./source-inventory.js";
 
-const TERMINAL = new Set(["COMPLETED", "STOPPED", "FAILED", "ABORTED"]);
+const TERMINAL = new Set<string>(CONVERSATION_TERMINAL_LIFECYCLES);
 
 export class ConversationMessageTargetConflictError extends Error {
-  readonly code = "not_lineage_head" as const;
+  readonly code = PUBLIC_ERROR_CODE.NOT_LINEAGE_HEAD;
 }
 
 export interface ResolvedConversationUserMessageAuthorityV1 {
@@ -42,7 +48,7 @@ function nodeKey(value: {
 
 function activeSource(resolved: ResolvedConversationLineageV1): ValidatedConversationSourceV1 {
   const active = resolved.head.active;
-  if (resolved.head.head_status !== "committed" || !active)
+  if (resolved.head.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED || !active)
     throw new Error("conversation lineage has no committed active head");
   const matches = resolved.selected_nodes.filter((item) => nodeKey(item.node) === nodeKey(active));
   if (matches.length !== 1) throw new Error("conversation active source is ambiguous");
@@ -51,13 +57,15 @@ function activeSource(resolved: ResolvedConversationLineageV1): ValidatedConvers
 
 function activeOperationId(source: ValidatedConversationSourceV1): string | null {
   const lifecycle = source.journal_records.filter(
-    ({ stored_event: row }) => row.event.type === "operation_lifecycle",
+    ({ stored_event: row }) => row.event.type === CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE,
   );
   const terminal = source.journal_records.filter(
-    ({ stored_event: row }) => row.event.type === "conversation_terminal",
+    ({ stored_event: row }) =>
+      row.event.type === CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL,
   );
   const configured = source.journal_records.find(
-    ({ stored_event: row }) => row.event.type === "conversation_configured",
+    ({ stored_event: row }) =>
+      row.event.type === CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED,
   );
   const selected =
     terminal.at(-1)?.stored_event.operation_id ??

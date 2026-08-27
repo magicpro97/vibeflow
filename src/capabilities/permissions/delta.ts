@@ -1,3 +1,4 @@
+import { CAPABILITY_MANIFEST_PERMISSION_KIND } from "../../actions/capability-manifest-vocabulary-contract.js";
 import { canonicalJson } from "../../durability/index.js";
 import type { CapabilityPermissionKindScopeV1 } from "../manifest/types.js";
 import { bytewise } from "../wire/primitives.js";
@@ -16,20 +17,20 @@ function sameGroup(left: PermissionBindingRowV1, right: PermissionBindingRowV1):
 
 function kindScope(value: PermissionBindingRowV1): CapabilityPermissionKindScopeV1 {
   switch (value.kind) {
-    case "filesystem":
-      return { kind: "filesystem", scope: value.scope };
-    case "network":
-      return { kind: "network", scope: value.scope };
-    case "process":
-      return { kind: "process", scope: value.scope };
-    case "shell":
-      return { kind: "shell", scope: value.scope };
-    case "config":
-      return { kind: "config", scope: value.scope };
-    case "secret":
-      return { kind: "secret", scope: value.scope };
-    case "hook":
-      return { kind: "hook", scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET, scope: value.scope };
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK:
+      return { kind: CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK, scope: value.scope };
   }
 }
 

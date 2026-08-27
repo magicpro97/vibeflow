@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { ref, shallowRef } from "vue";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+} from "../src/orchestrator/conversation/conversation-message-queue-contract.js";
 import { conversationApi } from "../src/ui/src/conversation-api.js";
 import {
   ConversationHomeApiError,
@@ -13,6 +18,7 @@ import type {
   HomeOptimisticQueuedMessage,
   HomeQueuedMessage,
   HomeQueuedMessageEditBinding,
+  HomeRetryableQueuedMessage,
 } from "../src/ui/src/conversation-home-message-queue-types.js";
 import { ActivationEpoch } from "../src/ui/src/conversation-home-state.js";
 import { watchHomeConversationStream } from "../src/ui/src/conversation-home-stream.js";
@@ -20,6 +26,16 @@ import { watchHomeConversationStream } from "../src/ui/src/conversation-home-str
 const digest = (value: string) => `sha256:${value.repeat(64).slice(0, 64)}`;
 const queueId = (value: string) => `vf-queued-message-${value.repeat(64).slice(0, 64)}`;
 const NOW = "2026-08-26T00:00:00.000Z";
+
+const quote = (seed: string): HomeQueuedMessage["quote_refs"][number] => ({
+  root_session_id: "root-a",
+  conversation_id: "conversation-a",
+  revision_id: "revision-a",
+  target_event_id: `event-${seed}`,
+  target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
+  content_digest: digest(seed),
+  author_public_id: "agent-a",
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -42,10 +58,10 @@ function item(
     queue_item_id: queueId(seed),
     queue_sequence: sequence,
     root_session_id: "root-a",
-    author_public_id: "human",
+    author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
     content,
     content_digest: digest(seed),
-    target_participants: "all",
+    target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     quote_refs: [],
     private_context_present: false,
     predecessor_queue_item_id: sequence === 1 ? null : queueId((sequence - 1).toString(16)),
@@ -81,6 +97,7 @@ function harness() {
   const composerError = ref("");
   const queue = shallowRef<HomeMessageQueueSnapshot | null>(null);
   const optimistic = ref<HomeOptimisticQueuedMessage[]>([]);
+  const retryable = ref<HomeRetryableQueuedMessage[]>([]);
   const edit = shallowRef<HomeQueuedMessageEditBinding | null>(null);
   const editSaving = ref(false);
   const sendAsNew = ref(false);
@@ -95,6 +112,7 @@ function harness() {
     composerError,
     snapshot: queue,
     optimistic,
+    retryable,
     edit,
     editSaving,
     sendAsNew,
@@ -108,7 +126,7 @@ function harness() {
   runtime.adoptSnapshot(snapshot(), "root-a");
   const admission = (content: string, privateContext = false) => ({
     content,
-    target_participants: "all" as const,
+    target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     quote_refs: [],
     private_context_present: privateContext,
     clearIfCurrent() {
@@ -131,6 +149,7 @@ function harness() {
     sendAsNew,
     focusEpoch,
     optimistic,
+    retryable,
     queue,
     runtime,
     admission,
@@ -172,7 +191,7 @@ describe("Home durable message queue", () => {
       expect(requests[1]).toMatchObject({
         schema_version: "1.0",
         content: "B",
-        target_participants: "all",
+        target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
         quote_refs: [],
         private_context_present: true,
       });
@@ -573,6 +592,194 @@ describe("Home durable message queue", () => {
       conversationHomeApi.enqueueMessage = original;
     }
   });
+
+  test("late A failure cannot replace the newer B transport error", async () => {
+    const original = conversationHomeApi.enqueueMessage;
+    const admissionA = deferred<HomeQueuedMessage>();
+    const admissionB = deferred<HomeQueuedMessage>();
+    let calls = 0;
+    conversationHomeApi.enqueueMessage = (() => {
+      calls += 1;
+      return calls === 1 ? admissionA.promise : admissionB.promise;
+    }) as typeof conversationHomeApi.enqueueMessage;
+    const fx = harness();
+    try {
+      fx.draft.value = "A";
+      const sendingA = fx.runtime.enqueue(fx.admission("A"));
+      fx.draft.value = "B";
+      const sendingB = fx.runtime.enqueue(fx.admission("B"));
+
+      admissionB.reject(new Error("B transport failed"));
+      expect(await sendingB).toBeFalse();
+      expect(fx.composerError.value).toBe("B transport failed");
+      expect(fx.draft.value).toBe("B");
+
+      admissionA.reject(new Error("A transport failed late"));
+      expect(await sendingA).toBeFalse();
+      expect(fx.composerError.value).toBe("B transport failed");
+      expect(fx.draft.value).toBe("B");
+      expect(fx.retryable.value.map((entry) => entry.content)).toEqual(["A"]);
+      expect(fx.retryable.value[0]?.failure_message).toBe("A transport failed late");
+    } finally {
+      fx.runtime.dispose();
+      fx.activation.close();
+      conversationHomeApi.enqueueMessage = original;
+    }
+  });
+
+  test("retrying A cannot clear or replace the newer B validation error", async () => {
+    const original = conversationHomeApi.enqueueMessage;
+    const admissionA = deferred<HomeQueuedMessage>();
+    const retryA = deferred<HomeQueuedMessage>();
+    const responses = [admissionA, retryA];
+    let calls = 0;
+    conversationHomeApi.enqueueMessage = (() => {
+      const response = responses[calls];
+      calls += 1;
+      return response?.promise ?? Promise.reject(new Error("unexpected queue request"));
+    }) as typeof conversationHomeApi.enqueueMessage;
+    const fx = harness();
+    try {
+      fx.draft.value = "A";
+      const sendingA = fx.runtime.enqueue(fx.admission("A"));
+      fx.draft.value = "B";
+      fx.composerError.value = "B validation failed";
+      admissionA.reject(new Error("A transport failed late"));
+      expect(await sendingA).toBeFalse();
+      expect(fx.composerError.value).toBe("B validation failed");
+
+      const projectionKey = fx.retryable.value[0]?.projection_key;
+      if (!projectionKey) throw new Error("expected retryable A projection");
+      const retrying = fx.runtime.retry(projectionKey);
+      expect(fx.composerError.value).toBe("B validation failed");
+      expect(fx.retryable.value[0]?.retrying).toBeTrue();
+
+      retryA.reject(new Error("A retry failed"));
+      expect(await retrying).toBeFalse();
+      expect(fx.composerError.value).toBe("B validation failed");
+      expect(fx.draft.value).toBe("B");
+      expect(fx.retryable.value[0]?.failure_message).toBe("A retry failed");
+      expect(fx.retryable.value[0]?.retrying).toBeFalse();
+    } finally {
+      fx.runtime.dispose();
+      fx.activation.close();
+      conversationHomeApi.enqueueMessage = original;
+    }
+  });
+
+  const retryVariants: Array<{
+    name: string;
+    aQuotes: HomeQueuedMessage["quote_refs"];
+    aPrivate: boolean;
+    bDraft: string;
+    bQuotes: HomeQueuedMessage["quote_refs"];
+    bPrivate: boolean;
+  }> = [
+    {
+      name: "newer draft",
+      aQuotes: [],
+      aPrivate: false,
+      bDraft: "B",
+      bQuotes: [],
+      bPrivate: false,
+    },
+    {
+      name: "newer quote",
+      aQuotes: [quote("a")],
+      aPrivate: false,
+      bDraft: "",
+      bQuotes: [quote("b")],
+      bPrivate: false,
+    },
+    {
+      name: "newer private context",
+      aQuotes: [],
+      aPrivate: true,
+      bDraft: "",
+      bQuotes: [],
+      bPrivate: true,
+    },
+  ];
+  for (const variant of retryVariants) {
+    test(`failed A remains retryable without overwriting ${variant.name}`, async () => {
+      const original = conversationHomeApi.enqueueMessage;
+      const rejected = deferred<HomeQueuedMessage>();
+      const retried = deferred<HomeQueuedMessage>();
+      const requests: HomeEnqueueMessageRequest[] = [];
+      conversationHomeApi.enqueueMessage = ((_root, request) => {
+        requests.push(structuredClone(request));
+        return requests.length === 1 ? rejected.promise : retried.promise;
+      }) as typeof conversationHomeApi.enqueueMessage;
+      const fx = harness();
+      let composerQuotes: HomeQueuedMessage["quote_refs"] = structuredClone(variant.aQuotes);
+      let composerPrivate = variant.aPrivate;
+      const admission = {
+        idempotency_key: `admission-${variant.name.replaceAll(" ", "-")}`,
+        content: "A",
+        target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
+        quote_refs: structuredClone(variant.aQuotes),
+        private_context_present: variant.aPrivate,
+        clearIfCurrent() {
+          if (fx.draft.value === "A") fx.draft.value = "";
+          composerQuotes = [];
+          composerPrivate = false;
+        },
+        restoreIfVacant() {
+          if (fx.draft.value || composerQuotes.length || composerPrivate) return false;
+          fx.draft.value = "A";
+          composerQuotes = structuredClone(variant.aQuotes);
+          composerPrivate = variant.aPrivate;
+          return true;
+        },
+      };
+      try {
+        fx.draft.value = "A";
+        const first = fx.runtime.enqueue(admission);
+        expect(fx.draft.value).toBe("");
+        fx.draft.value = variant.bDraft;
+        composerQuotes = structuredClone(variant.bQuotes);
+        composerPrivate = variant.bPrivate;
+        fx.sendAsNew.value = true;
+        rejected.reject(new Error("A admission rejected"));
+        expect(await first).toBeFalse();
+
+        expect(fx.draft.value).toBe(variant.bDraft);
+        expect(composerQuotes).toEqual(variant.bQuotes);
+        expect(composerPrivate).toBe(variant.bPrivate);
+        expect(fx.sendAsNew.value).toBeTrue();
+        expect(fx.retryable.value).toHaveLength(1);
+        expect(fx.retryable.value[0]?.content).toBe("A");
+        expect(fx.retryable.value[0]?.quote_refs).toEqual(variant.aQuotes);
+        expect(fx.retryable.value[0]?.private_context_present).toBe(variant.aPrivate);
+        expect(fx.retryable.value[0]?.failure_message).toBe("A admission rejected");
+        expect(fx.retryable.value[0]?.retrying).toBeFalse();
+        expect(fx.announcement.value).toContain("remains in Message queue");
+
+        const projectionKey = fx.retryable.value[0]?.projection_key;
+        if (!projectionKey) throw new Error("expected a retryable A projection");
+        const retrying = fx.runtime.retry(projectionKey);
+        expect(fx.retryable.value[0]?.retrying).toBeTrue();
+        expect(requests).toHaveLength(2);
+        expect(requests[1]).toEqual(requests[0]);
+        retried.resolve(
+          item(1, "A", {
+            quote_refs: structuredClone(variant.aQuotes),
+            private_context_present: variant.aPrivate,
+          }),
+        );
+        expect(await retrying).toBeTrue();
+        expect(fx.retryable.value).toEqual([]);
+        expect(fx.draft.value).toBe(variant.bDraft);
+        expect(composerQuotes).toEqual(variant.bQuotes);
+        expect(composerPrivate).toBe(variant.bPrivate);
+        expect(fx.sendAsNew.value).toBeTrue();
+      } finally {
+        fx.runtime.dispose();
+        fx.activation.close();
+        conversationHomeApi.enqueueMessage = original;
+      }
+    });
+  }
 
   test("offline abort removes optimism and keeps unacknowledged content inert", async () => {
     const original = conversationHomeApi.enqueueMessage;

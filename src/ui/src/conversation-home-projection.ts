@@ -1,9 +1,12 @@
+import { CONVERSATION_TRACE_EVENT_KIND } from "../../orchestrator/conversation/conversation-public-wire-contract.js";
 import { homeReactionLabel } from "./conversation-home-authoring.js";
+import { homeParticipantDisplayLabel } from "./conversation-home-participant-label.js";
 export type { RenderedHomeTraceEntry } from "./conversation-home-trace-projection.js";
 export { projectHomeTrace } from "./conversation-home-trace-projection.js";
 import type {
   HomeActionOperation,
   HomeCanonicalMessageReference,
+  HomeParticipant,
   HomeQuoteProjection,
   HomeReactionSummary,
   HomeTimelineItem,
@@ -95,9 +98,24 @@ function systemItem(
 
 export function projectHomeTimeline(
   source: readonly HomeTimelineItem[],
+  participants: readonly HomeParticipant[] = [],
 ): RenderedHomeTimelineItem[] {
   const output: RenderedHomeTimelineItem[] = [];
   const streamed = new Map<string, RenderedHomeTimelineItem>();
+  const participantById = new Map(
+    participants.map((participant) => [participant.participant_id, participant] as const),
+  );
+  const participantTitle = (
+    participantId: string,
+    fallback: { readonly role_ref?: unknown; readonly engine?: unknown },
+  ) => {
+    const participant = participantById.get(participantId);
+    return homeParticipantDisplayLabel({
+      participantId,
+      roleRef: participant?.role_ref ?? fallback.role_ref,
+      engine: participant?.engine ?? fallback.engine,
+    });
+  };
 
   for (const item of source) {
     if (item.kind === "revision-boundary") {
@@ -155,8 +173,9 @@ export function projectHomeTimeline(
     const reactions = reactionSummaries(interaction.reactions);
     const operations = item.action_operations.items;
     switch (event.event.type) {
-      case "agent_response_delta": {
+      case CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA: {
         const participantId = text(payload.participant_id, event.participant_id ?? "AI");
+        const title = participantTitle(participantId, event);
         const roundId = text(payload.round_id, "round");
         const key = `${item.revision_ordinal}:${roundId}:${participantId}`;
         const existing = streamed.get(key);
@@ -181,7 +200,7 @@ export function projectHomeTimeline(
         const rendered: RenderedHomeTimelineItem = {
           id: key,
           kind: "assistant",
-          title: participantId,
+          title,
           body: text(payload.content_delta),
           at: event.ts,
           anchorKey: messageRef?.target_event_id ?? null,
@@ -206,7 +225,7 @@ export function projectHomeTimeline(
         output.push(rendered);
         break;
       }
-      case "user_message":
+      case CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE:
         output.push({
           id: event.event_id,
           kind: "user",
@@ -230,11 +249,12 @@ export function projectHomeTimeline(
           operations,
         });
         break;
-      case "precommit":
+      case CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT: {
+        const participantId = text(payload.participant_id, event.participant_id ?? "AI");
         output.push({
           id: event.event_id,
           kind: "assistant",
-          title: text(payload.participant_id, "AI"),
+          title: participantTitle(participantId, event),
           body: text(payload.answer),
           at: event.ts,
           anchorKey: messageRef?.target_event_id ?? null,
@@ -243,7 +263,7 @@ export function projectHomeTimeline(
           conversationId: event.conversation_id,
           revisionId: event.revision_id,
           publicSessionRef: event.public_session_ref,
-          publicAuthorId: text(payload.participant_id, "AI"),
+          publicAuthorId: participantId,
           messageRef,
           revisionOrdinal: item.revision_ordinal,
           complete: false,
@@ -256,7 +276,8 @@ export function projectHomeTimeline(
           operations,
         });
         break;
-      case "error":
+      }
+      case CONVERSATION_TRACE_EVENT_KIND.ERROR:
         output.push({
           ...systemItem(
             event.event_id,
@@ -269,7 +290,7 @@ export function projectHomeTimeline(
           kind: "error",
         });
         break;
-      case "state_change":
+      case CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE:
         output.push(
           systemItem(
             event.event_id,
@@ -283,7 +304,7 @@ export function projectHomeTimeline(
           ),
         );
         break;
-      case "conversation_terminal":
+      case CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL:
         output.push(
           systemItem(
             event.event_id,
@@ -297,7 +318,7 @@ export function projectHomeTimeline(
           ),
         );
         break;
-      case "tool_action":
+      case CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION:
         output.push(
           systemItem(
             event.event_id,
@@ -309,7 +330,7 @@ export function projectHomeTimeline(
           ),
         );
         break;
-      case "consensus_update": {
+      case CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE: {
         const decision = payload.decision as { outcome?: unknown; score?: unknown } | undefined;
         output.push(
           systemItem(
@@ -325,12 +346,14 @@ export function projectHomeTimeline(
         );
         break;
       }
-      case "artifact_created":
-      case "artifact_updated":
+      case CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED:
+      case CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED:
         output.push(
           systemItem(
             event.event_id,
-            event.event.type === "artifact_created" ? "Artifact ready" : "Artifact updated",
+            event.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED
+              ? "Artifact ready"
+              : "Artifact updated",
             text(payload.artifact_type, "Conversation artifact"),
             item.revision_ordinal,
             event.ts,

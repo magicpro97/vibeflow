@@ -1,9 +1,13 @@
 import type { AttemptHandle } from "../../dispatch/session-types.js";
+import type {
+  ConversationTerminalLifecycleV1,
+  ConversationTransitionLifecycleV1,
+} from "./conversation-public-wire-contract.js";
 import type { OperationCancellationAuthority } from "./durable-operation-authority.js";
 import type { OperationRegistry } from "./operation-registry.js";
 
-export type SettledLifecycle = "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED";
-export type TransitionLifecycle = "ACTIVE" | "PAUSED";
+export type SettledLifecycle = ConversationTerminalLifecycleV1;
+export type TransitionLifecycle = ConversationTransitionLifecycleV1;
 
 export interface OperationEntry {
   readonly conversationId: string;

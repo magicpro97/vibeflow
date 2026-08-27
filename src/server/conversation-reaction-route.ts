@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import { parseStrictJson } from "../actions/strict-json.js";
 import { ConversationInteractionCorruptError } from "../orchestrator/conversation/conversation-interaction-store.js";
 import type { PublicMessageLocatorV1 } from "../orchestrator/conversation/conversation-interaction-types.js";
@@ -85,11 +86,17 @@ export async function handleConversationReactionRoute(
   targetEventId: string,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "POST")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   if (authority.csrf && !authority.csrf(request))
-    return conversationReadError("forbidden", { message: "CSRF validation failed." });
+    return conversationReadError(PUBLIC_ERROR_CODE.FORBIDDEN, {
+      message: "CSRF validation failed.",
+    });
   try {
     const root = await authority.rootSessionId(conversationId);
     if (!root) throw new Error("reaction target unavailable");
@@ -122,12 +129,16 @@ export async function handleConversationReactionRoute(
     );
   } catch (error) {
     if (error instanceof ConversationInteractionCorruptError)
-      return conversationReadError("authority_corrupt", {
+      return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
         message: "Conversation interaction authority is corrupt.",
-        recoveryAction: "repair-authority",
+        recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
       });
     if (error instanceof BoundedRequestBodyError || error instanceof InvalidReactionRequestError)
-      return conversationReadError("invalid_request", { message: "The reaction body is invalid." });
-    return conversationReadError("not_found", { message: "The message was not found." });
+      return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
+        message: "The reaction body is invalid.",
+      });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The message was not found.",
+    });
   }
 }

@@ -5,17 +5,17 @@ import type { PublicStoredTraceEvent, TraceCorrelation } from "../trace/types.js
 import type { PersistedResumeBinding } from "./artifact-store.js";
 import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-runtime.js";
 import {
-  assertCoordinatorEmission,
-  policyContextView,
-  previewBindingPolicyContext,
-  snapshotRuntimeValue,
-} from "./emission-authority.js";
+  CONVERSATION_TERMINAL_LIFECYCLE,
+  CONVERSATION_TRANSITION_LIFECYCLE,
+  type ConversationTransitionLifecycleV1,
+} from "./conversation-public-wire-contract.js";
+import { previewBindingPolicyContext } from "./emission-authority.js";
 import type { LiveConversation } from "./lifecycle-gate.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
 import { OperationTransitionReservedError } from "./operation-registry.js";
 // biome-ignore format: production file ceiling
 import {
-  configurationEmissions, conversationMessages, type rehydrateConversation, terminalJournalState,
+  configurationEmissions, type rehydrateConversation, terminalJournalState,
 } from "./policy-registry.js";
 import { preparedStartCorrelation } from "./prepared-start-correlation.js";
 import { configurationEnvelope } from "./restart-authority.js";
@@ -27,16 +27,14 @@ import {
 } from "./runtime-authorities.js";
 import { runtimeCorrelation } from "./runtime-correlation.js";
 import { createConversationRuntimeDelegates } from "./runtime-delegates.js";
-import { bindSharedHandoffToAttempt } from "./runtime-handoff.js";
 import { createRuntimeLiveConversation } from "./runtime-live-conversation.js";
 import type { ConversationRuntimeOptions } from "./runtime-options.js";
+import { createRuntimePolicyContext } from "./runtime-policy-context.js";
 import { publishRuntimeUserMessage } from "./runtime-private-file-message.js";
 import { createConversationRuntimeReaders } from "./runtime-readers.js";
-import { prepareRuntimeConversationTurn } from "./runtime-turn-delivery.js";
-import type { ConversationTurnPreparationRequestV1 } from "./turn-delivery-types.js";
 // biome-ignore format: production file ceiling
 import type {
-  ApprovalDecision, ArtifactCreateRequest, ArtifactUpdateRequest, AttemptRef, ConversationContext, ConversationCreateRequest, ConversationHealth, ConversationManifest, ConversationSnapshot, CoordinatorEmission, MessageRequest, OperationCancelCommand, OperationCancelResult, PolicyAttemptRequest, TerminalLifecycle,
+  ApprovalDecision, ConversationContext, ConversationCreateRequest, ConversationHealth, ConversationManifest, ConversationSnapshot, MessageRequest, OperationCancelCommand, OperationCancelResult, TerminalLifecycle,
 } from "./types.js";
 export type { ConversationRuntimeOptions } from "./runtime-options.js";
 export { ConversationRestoreOperationMismatchError };
@@ -119,39 +117,16 @@ export class ConversationRuntime {
     const operation = this.operations.get(live.manifest.conversation_id, live.operationId);
     if (!operation) throw new Error("operation authority missing");
     const correlation = this.correlation(live.manifest, live.operationId);
-    const refs = new Map<AttemptRef, string>();
-    return Object.freeze({
-      correlation,
-      ...policyContextView(live.manifest, live.bindings),
+    return createRuntimePolicyContext({
+      options: this.options,
+      live,
       signal: operation.signal,
-      // biome-ignore format: production file ceiling
-      messages: () => this.options.traceStore.readConversation(live.manifest.conversation_id).then(conversationMessages),
-      prepareTurn: (request: ConversationTurnPreparationRequestV1) =>
-        prepareRuntimeConversationTurn(this.options, live, request),
-      publishSocialIntent: (input: Parameters<ConversationContext["publishSocialIntent"]>[0]) =>
-        this.options.socialAuthority?.participantIntent({
-          conversation_id: live.manifest.conversation_id,
-          response_event_id: input.response_event_id,
-          actor_participant_id: input.participant_id,
-          request: input.request,
-        }) ?? { accepted: false, diagnostic_code: "interaction_authority_unavailable" },
-      // biome-ignore format: production file ceiling
-      stageActionCandidate: (input: Parameters<ConversationContext["stageActionCandidate"]>[0]) => this.options.agentActionCandidates?.stage({ manifest: live.manifest, participant_id: input.participant_id, response_idempotency_key: input.response_idempotency_key, candidate: input.candidate }) ?? { accepted: false, diagnostic_code: "host_tool_not_granted" },
-      emit: (emission: CoordinatorEmission) => {
-        const captured = snapshotRuntimeValue(emission);
-        assertCoordinatorEmission(captured, live.operationId);
-        return this.effects.writePolicy(correlation, captured);
-      },
-      launchAttempt: (request: PolicyAttemptRequest) =>
-        this.attempts.launch(
-          live,
-          operation,
-          bindSharedHandoffToAttempt(live.sharedHandoff, request),
-          refs,
-        ),
-      createArtifact: (request: ArtifactCreateRequest) =>
+      correlation,
+      writePolicy: (emission) => this.effects.writePolicy(correlation, emission),
+      launchAttempt: (request, refs) => this.attempts.launch(live, operation, request, refs),
+      createArtifact: (request) =>
         this.artifacts.create(live.manifest.conversation_id, correlation, request),
-      updateArtifact: (request: ArtifactUpdateRequest) =>
+      updateArtifact: (request) =>
         this.artifacts.update(live.manifest.conversation_id, correlation, request),
     });
   }
@@ -259,7 +234,7 @@ export class ConversationRuntime {
   }
   async transition(
     id: string,
-    lifecycle: "ACTIVE" | "PAUSED",
+    lifecycle: ConversationTransitionLifecycleV1,
     health: ConversationHealth,
   ): Promise<void> {
     const live = this.live.get(id);
@@ -269,7 +244,7 @@ export class ConversationRuntime {
     if (!operation) throw new Error("operation authority missing");
     try {
       await this.operations.transition(id, live.operationId, lifecycle, epoch, async () => {
-        if (lifecycle === "ACTIVE" && live.needsReconcile) {
+        if (lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE && live.needsReconcile) {
           await this.attempts.reconcile(live, operation);
         }
         await this.controls.transition(id, lifecycle, health, epoch);
@@ -277,7 +252,10 @@ export class ConversationRuntime {
     } catch (error) {
       if (!(error instanceof OperationTransitionReservedError)) {
         const durable = await this.restarts.controlState(id).catch(() => null);
-        if (durable?.lifecycle === "ACTIVE" || durable?.lifecycle === "PAUSED") {
+        if (
+          durable?.lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE ||
+          durable?.lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED
+        ) {
           this.operations.adoptTransition(
             id,
             live.operationId,
@@ -288,13 +266,17 @@ export class ConversationRuntime {
       }
       throw error;
     }
-    if (lifecycle === "ACTIVE") live.needsReconcile = false;
+    if (lifecycle === CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE) live.needsReconcile = false;
   }
   async health(id: string, health: ConversationHealth): Promise<void> {
     const live = this.live.get(id);
     if (!live) throw new Error("conversation runtime is not live");
     const state = await this.restarts.controlState(id);
-    if (!state || (state.lifecycle !== "ACTIVE" && state.lifecycle !== "PAUSED")) {
+    if (
+      !state ||
+      (state.lifecycle !== CONVERSATION_TRANSITION_LIFECYCLE.ACTIVE &&
+        state.lifecycle !== CONVERSATION_TRANSITION_LIFECYCLE.PAUSED)
+    ) {
       throw new Error("conversation health authority missing");
     }
     const lifecycle = state.lifecycle;
@@ -346,7 +328,7 @@ export class ConversationRuntime {
         reserved,
         health,
         reserved === lifecycle ? reason : "completion superseded by pause",
-        reserved === "COMPLETED" ? finalScore : null,
+        reserved === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED ? finalScore : null,
       );
     };
     try {
@@ -360,11 +342,18 @@ export class ConversationRuntime {
         effective = this.emissions.adoptTerminal(id, live.operationId, winner);
       } else if (
         error instanceof TraceLifecycleConflictError &&
-        ((lifecycle === "COMPLETED" && error.durableLifecycle === "PAUSED") ||
-          (lifecycle !== "ABORTED" && error.durableLifecycle === "ABORTED"))
+        ((lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED &&
+          error.durableLifecycle === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED) ||
+          (lifecycle !== CONVERSATION_TERMINAL_LIFECYCLE.ABORTED &&
+            error.durableLifecycle === CONVERSATION_TERMINAL_LIFECYCLE.ABORTED))
       ) {
         this.emissions.releaseFailedTerminal(id, live.operationId, effective);
-        effective = await this.emissions.terminal(id, live.operationId, "ABORTED", append);
+        effective = await this.emissions.terminal(
+          id,
+          live.operationId,
+          CONVERSATION_TERMINAL_LIFECYCLE.ABORTED,
+          append,
+        );
       } else if (hasState) {
         this.emissions.releaseFailedTerminal(id, live.operationId, effective);
         effective = await this.emissions.terminal(id, live.operationId, lifecycle, append);

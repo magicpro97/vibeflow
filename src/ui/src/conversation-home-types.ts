@@ -1,13 +1,31 @@
+import type { ActionOperationState } from "../../actions/protocol-contract.js";
+import type { PublicApiErrorBodyV1 } from "../../actions/public-error-contract.js";
+import type {
+  ActionOperationViewV1,
+  ActionOperationsPageV1,
+  PublicActionApprovalViewV1,
+  PublicActionProposalViewV1,
+} from "../../actions/public-types.js";
+import type {
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_TIMELINE_ITEM_KIND,
+  ConversationCatalogHealth,
+  ConversationHeadStatus,
+  ConversationLineageStatus,
+} from "../../orchestrator/conversation/conversation-catalog-contract.js";
+import type {
+  ConversationInteractionState,
+  ReactionEmojiV1,
+} from "../../orchestrator/conversation/conversation-interaction-contract.js";
+import type { ConversationMessageQueueQuoteTargetKindV1 } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
+import type {
+  ConversationHealthV1,
+  ConversationLifecycleV1,
+} from "../../orchestrator/conversation/conversation-public-wire-contract.js";
+import type { ConversationClientStreamState } from "../../orchestrator/conversation/conversation-sse-contract.js";
 import type { ConversationTraceRecord } from "./conversation-types.js";
 
-export type ConversationLifecycle =
-  | "INIT"
-  | "ACTIVE"
-  | "PAUSED"
-  | "COMPLETED"
-  | "STOPPED"
-  | "FAILED"
-  | "ABORTED";
+export type ConversationLifecycle = ConversationLifecycleV1;
 
 export interface HomeParticipant {
   participant_id: string;
@@ -17,17 +35,17 @@ export interface HomeParticipant {
 }
 
 export interface HomeRevisionSummary {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   conversation_id: string;
   revision_id: string;
   revision_ordinal: number;
   parent_conversation_id: string | null;
   parent_revision_id: string | null;
-  lineage_status: "verified" | "unverified";
+  lineage_status: ConversationLineageStatus;
   topic: string;
   policy: string;
   lifecycle: ConversationLifecycle;
-  health: "healthy" | "degraded";
+  health: ConversationHealthV1;
   participants: HomeParticipant[];
   created_at: string;
   updated_at: string;
@@ -36,9 +54,9 @@ export interface HomeRevisionSummary {
 }
 
 export interface HomeSessionSummary {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   root_session_id: string;
-  head_status: "committed" | "ambiguous" | "unclaimed";
+  head_status: ConversationHeadStatus;
   root: HomeRevisionSummary;
   active_conversation_id: string | null;
   active_revision_id: string | null;
@@ -52,18 +70,18 @@ export interface HomeSessionSummary {
 }
 
 export interface HomeCatalogResponse {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   items: HomeSessionSummary[];
   next_cursor: string | null;
   catalog_generation: string;
   source_watermark: string;
-  catalog_health: "ready" | "rebuilding" | "degraded";
+  catalog_health: ConversationCatalogHealth;
 }
 
 export interface HomeAuthoritativeHeadResponse {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   root_session_id: string;
-  head_status: "committed" | "ambiguous" | "unclaimed";
+  head_status: ConversationHeadStatus;
   head_epoch: number;
   head_digest: string;
   active: HomeRevisionSummary | null;
@@ -75,96 +93,81 @@ export interface HomeLineageNode {
   revision_ordinal: number;
 }
 
-export interface HomeActionProgress {
-  sequence: number;
-  phase: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "reversed";
-  message_code: string;
-  at: string;
-}
+export type HomeActionProgress = ActionOperationViewV1["progress"][number];
 
-export type HomeActionOperationState =
-  | "pending_review"
-  | "approved"
-  | "committing"
-  | "succeeded"
-  | "failed"
-  | "denied"
-  | "canceled"
-  | "expired"
-  | "stale"
-  | "needs_recovery";
+export type HomeActionOperationState = ActionOperationState;
 
-export interface HomeActionOperation {
-  schema_version: "1.0";
-  operation_id: string | null;
-  proposal_id: string;
-  proposal_digest: string;
-  approval_id: string | null;
-  approval_digest: string | null;
-  correlation_id: string;
-  domain: "conversation" | "capability";
-  state: HomeActionOperationState;
-  phase_sequence: number | null;
-  latest_event_cursor: string | null;
-  progress: HomeActionProgress[];
-  targets: Array<{
-    target_id: string;
-    outcome: string;
-    health: string;
-  }>;
-  delivery: string;
-  result_ref: string | null;
-  error: HomeApiErrorBody | null;
-  recovery_actions: string[];
-  created_at: string;
-  updated_at: string;
-}
+export type HomeActionOperation = ActionOperationViewV1;
 
 export interface HomeActionProposal {
   schema_version: "1.0";
   proposal_id: string;
   proposal_digest: string;
   origin_event_id: string | null;
-  action_type: string;
-  domain: "conversation" | "capability";
-  scope: "conversation" | "project" | "user";
-  risk: "low" | "medium" | "high" | "critical";
-  effect_classes: string[];
-  targets: unknown[];
-  package_pins: Array<{ id: string; version: string; trust: string }>;
-  reversibility: string;
+  action_type: PublicActionProposalViewV1["action_type"];
+  domain: PublicActionProposalViewV1["domain"];
+  scope: PublicActionProposalViewV1["scope"];
+  authority_binding_mode?: PublicActionProposalViewV1["authority_binding_mode"];
+  risk: PublicActionProposalViewV1["risk"];
+  effect_classes: PublicActionProposalViewV1["effect_classes"];
+  targets: PublicActionProposalViewV1["targets"];
+  package_pins: Array<{
+    id: string;
+    version: string;
+    trust: PublicActionProposalViewV1["package_pins"][number]["trust"];
+    source_kind?: PublicActionProposalViewV1["package_pins"][number]["source_kind"];
+    content_sha256?: string;
+    nonportable?: boolean;
+    pin_digest?: string;
+  }>;
+  adapter_set_digest?: string;
+  plan_digest?: string;
+  policy_digest?: string;
+  permission_digest?: string;
+  reversibility: PublicActionProposalViewV1["reversibility"];
   preview: {
     title: string;
     summary: string;
+    action_type?: PublicActionProposalViewV1["action_type"];
+    planning_options?: { mode: string; network_read: string };
+    review_fields?: Array<{
+      json_pointer: string;
+      label: string;
+      before: unknown;
+      after: unknown;
+      private_binding_digest: string | null;
+    }>;
+    targets?: PublicActionProposalViewV1["targets"];
+    target_dispositions: Array<{
+      target_id: string;
+      execution: string;
+      reason_code: string | null;
+    }>;
+    package_pins?: PublicActionProposalViewV1["package_pins"];
     permission_delta: Array<{
       permission_id: string;
       change: string;
       public_scope: string;
       enforcement: string;
     }>;
-    target_dispositions: Array<{
-      target_id: string;
-      execution: string;
-      reason_code: string | null;
-    }>;
-    recovery_actions: string[];
+    dependency_delta?: unknown[];
+    config_diffs?: unknown[];
+    effect_classes?: PublicActionProposalViewV1["effect_classes"];
+    enforcement?: unknown[];
+    reversibility?: PublicActionProposalViewV1["reversibility"];
+    health_plan?: unknown[];
+    recovery_actions: ActionOperationViewV1["recovery_actions"];
+    projector_version?: string;
+    rules_digest?: string;
+    redaction_manifest_digest?: string;
   };
   created_at: string;
   expires_at: string;
 }
 
-export interface HomeActionApproval {
-  schema_version: "1.0";
-  approval_id: string;
-  approval_digest: string;
-  proposal_id: string;
-  proposal_digest: string;
-  decision: "approved" | "denied";
-  challenge_class: string;
-  decided_at: string;
-  expires_at: string;
-}
+export type HomeActionApproval = Omit<PublicActionApprovalViewV1, "decided_by"> & {
+  decided_by?: PublicActionApprovalViewV1["decided_by"];
+};
 
 export interface HomePendingChallenge {
   id: string;
@@ -174,12 +177,16 @@ export interface HomePendingChallenge {
 }
 
 export interface HomeActionView {
+  schema_version: "1.0";
   proposal: HomeActionProposal;
   approval: HomeActionApproval | null;
   operation: HomeActionOperation;
 }
 
-export type HomeReactionEmoji = "👍" | "👎" | "❤️" | "🎉" | "👀" | "🤔" | "✅" | "❗";
+export type HomeActionOperationsPage = Pick<ActionOperationsPageV1, "items"> &
+  Partial<Omit<ActionOperationsPageV1, "items">>;
+
+export type HomeReactionEmoji = ReactionEmojiV1;
 
 export interface HomeReactionSummary {
   emoji: HomeReactionEmoji;
@@ -194,7 +201,7 @@ export interface HomeCanonicalMessageReference {
   conversation_id: string;
   revision_id: string;
   target_event_id: string;
-  target_kind: "user-message" | "completed-agent-response";
+  target_kind: ConversationMessageQueueQuoteTargetKindV1;
   content_digest: string;
 }
 
@@ -208,7 +215,7 @@ export interface HomeQuoteProjection extends HomeCanonicalQuoteReference {
 }
 
 export interface HomeTimelineInteraction {
-  state: "ready" | "degraded";
+  state: ConversationInteractionState;
   message_locator: HomeCanonicalMessageReference | null;
   quote_refs: Array<{
     quoting_message_id: string;
@@ -227,7 +234,7 @@ export interface HomeTimelineMessageReference {
   revision_ordinal: number;
   source_event_ids: string[];
   target_event_id: string | null;
-  target_kind: "user-message" | "completed-agent-response" | null;
+  target_kind: ConversationMessageQueueQuoteTargetKindV1 | null;
   content_digest: string | null;
 }
 
@@ -247,7 +254,7 @@ export interface HomePendingActionsResponse {
 
 export type HomeTimelineItem =
   | {
-      kind: "revision-boundary";
+      kind: typeof CONVERSATION_TIMELINE_ITEM_KIND.REVISION_BOUNDARY;
       boundary_id: string;
       from: HomeLineageNode;
       to: HomeLineageNode;
@@ -255,23 +262,23 @@ export type HomeTimelineItem =
       prompt_projection_digest: string;
     }
   | {
-      kind: "conversation-start";
+      kind: typeof CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_START;
       revision_ordinal: number;
       conversation_id: string;
       revision_id: string;
       anchor_id: string;
-      action_operations: { items: HomeActionOperation[] };
+      action_operations: HomeActionOperationsPage;
     }
   | {
-      kind: "conversation-event";
+      kind: typeof CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT;
       revision_ordinal: number;
       event: ConversationTraceRecord & { event_id: string; public_session_ref: string | null };
       interaction: HomeTimelineInteraction;
-      action_operations: { items: HomeActionOperation[] };
+      action_operations: HomeActionOperationsPage;
     };
 
 export interface HomeTimelineResponse {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   root_session_id: string;
   head: HomeLineageNode;
   head_epoch: number;
@@ -292,27 +299,9 @@ export interface HomePagingState {
   capability: HomePagingSection;
 }
 
-export type HomeConversationStreamStatus =
-  | "idle"
-  | "connecting"
-  | "live"
-  | "reconnecting"
-  | "error";
+export type HomeConversationStreamStatus = ConversationClientStreamState;
 
-export type CapabilityStatus =
-  | "absent"
-  | "ready"
-  | "degraded"
-  | "blocked"
-  | "failed"
-  | "unknown"
-  | "stale"
-  | "drifted"
-  | "orphaned"
-  | "unmanaged"
-  | "manual"
-  | "unsupported"
-  | "needs-recovery";
+export type CapabilityStatus = CapabilityStatusV1;
 
 export interface HomeCapabilityItem {
   package_id: string;
@@ -349,5 +338,5 @@ export interface HomeApiErrorBody {
   recovery_action?: string | null;
   details?: unknown;
 }
-import type { CapabilityScope } from "../../capabilities/manifest/types.js";
-import type { Engine } from "../../core/types.js";
+import type { Engine } from "../../core/agent-contract.js";
+import type { CapabilityScope, CapabilityStatusV1 } from "../../core/capability-contract.js";

@@ -1,4 +1,6 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type { ActionProposalRequestV1, ActionRequestAuthorityV1 } from "../../actions/index.js";
+import { CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE } from "./conversation-message-queue-contract.js";
 import { isTerminalLifecycle } from "./policy-registry.js";
 import { isConversationRevisionMutation } from "./revision-action-manifest.js";
 import type { ConversationDeferredRevisionAuthority } from "./revision-deferred-authority.js";
@@ -26,14 +28,14 @@ export async function proposeDeferredConversationAction(input: {
     throw new ConversationControlConflictError("unsupported revision action");
   const candidate = input.request.candidate;
   const targets =
-    candidate.type === "conversation.continue_message"
+    candidate.type === HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE
       ? candidate.target_participants
-      : candidate.type === "conversation.remove_participant" ||
-          candidate.type === "conversation.update_participant"
+      : candidate.type === HOST_ACTION_KIND.CONVERSATION_REMOVE_PARTICIPANT ||
+          candidate.type === HOST_ACTION_KIND.CONVERSATION_UPDATE_PARTICIPANT
         ? [candidate.participant_id]
-        : "all";
+        : CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL;
   if (
-    targets !== "all" &&
+    targets !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL &&
     targets.some(
       (target) => !input.manifest?.bindings.some((binding) => binding.participant_id === target),
     )

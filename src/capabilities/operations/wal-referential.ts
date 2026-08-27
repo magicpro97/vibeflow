@@ -2,13 +2,20 @@ import { canonicalJson } from "../../durability/index.js";
 import type { CapabilityFabricPlanV1 } from "../planning/types.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
-import type {
-  AdapterReceiptV1,
-  CapabilityOperationV1,
-  CapabilityWalEventV1,
+import {
+  type AdapterReceiptV1,
+  CAPABILITY_ADAPTER_RECEIPT_COMPENSATION_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_PUBLICATION_TERMINAL_STATES,
+  CAPABILITY_ADAPTER_RECEIPT_STATE,
+  CAPABILITY_HEALTH_OUTCOME,
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityOperationV1,
+  type CapabilityWalEventV1,
+  isCapabilityAdapterReceiptStateIn,
 } from "../wire/operation.js";
 import { bytewise } from "../wire/primitives.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import { resolveHealthObservationBatches } from "./health-evidence.js";
 import { validateCapabilityLockCheckpoint } from "./lock-checkpoint.js";
 import { assertCapabilityPublicationEvidence } from "./publication-evidence.js";
@@ -21,7 +28,7 @@ import {
 } from "./wal-receipt-referential.js";
 
 function corrupt(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function same(left: unknown, right: unknown): boolean {
@@ -58,7 +65,8 @@ function expectedHealthKeys(
             .filter((step) => step.target_ids.includes(target.target_id))
             .every(
               (step) =>
-                receipts.get(`${adapterPlan.plan_id}\0${step.step_id}`)?.state === "applied",
+                receipts.get(`${adapterPlan.plan_id}\0${step.step_id}`)?.state ===
+                CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED,
             ),
       )
       .map((target) => target.target_id),
@@ -139,8 +147,12 @@ function assertCheckpointClosure(
   baseLock: CapabilityLockV1 | null,
   events: readonly CapabilityWalEventV1[],
 ): void {
-  const checkpoints = events.filter((event) => event.payload.kind === "lock-checkpoint");
-  const prepared = events.find((event) => event.payload.kind === "health-inventory-prepared");
+  const checkpoints = events.filter(
+    (event) => event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.LOCK_CHECKPOINT,
+  );
+  const prepared = events.find(
+    (event) => event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED,
+  );
   if (baseLock === null && checkpoints.length > 0)
     corrupt("initial capability operation contains a prior-lock checkpoint");
   if (checkpoints.length > 1) corrupt("capability operation contains duplicate checkpoints");
@@ -148,16 +160,22 @@ function assertCheckpointClosure(
   validateCapabilityLockCheckpoint({
     storage,
     base: baseLock,
-    payload: selected?.payload.kind === "lock-checkpoint" ? selected.payload : null,
+    payload:
+      selected?.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.LOCK_CHECKPOINT
+        ? selected.payload
+        : null,
     required: prepared !== undefined,
   });
   if (!selected) return;
   const lastEffectOrHealth = events
     .filter(
       (event) =>
-        event.payload.kind === "health" ||
-        (event.payload.kind === "adapter-step" &&
-          !["reverse_in_progress", "reversed"].includes(event.payload.receipt.state)),
+        event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH ||
+        (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP &&
+          !isCapabilityAdapterReceiptStateIn(
+            CAPABILITY_ADAPTER_RECEIPT_COMPENSATION_STATES,
+            event.payload.receipt.state,
+          )),
     )
     .at(-1);
   if (
@@ -170,11 +188,17 @@ function assertCheckpointClosure(
 function selectedHealth(
   events: readonly CapabilityWalEventV1[],
   beforeSequence: number,
-): Map<string, Extract<CapabilityWalEventV1["payload"], { kind: "health" }>> {
-  const selected = new Map<string, Extract<CapabilityWalEventV1["payload"], { kind: "health" }>>();
+): Map<
+  string,
+  Extract<CapabilityWalEventV1["payload"], { kind: typeof CAPABILITY_WAL_PAYLOAD_KIND.HEALTH }>
+> {
+  const selected = new Map<
+    string,
+    Extract<CapabilityWalEventV1["payload"], { kind: typeof CAPABILITY_WAL_PAYLOAD_KIND.HEALTH }>
+  >();
   for (const event of events) {
     if (event.sequence >= beforeSequence) break;
-    if (event.payload.kind === "health")
+    if (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH)
       selected.set(
         healthKey(event.payload.plan_id, event.payload.probe_id, event.payload.target_id),
         event.payload,
@@ -197,11 +221,17 @@ function assertPublicationReady(
     const appliedTargets = new Set<string>();
     for (const step of adapterPlan.steps) {
       const receipt = receipts.get(`${adapterPlan.plan_id}\0${step.step_id}`);
-      if (!receipt || !["applied", "failed", "reversed"].includes(receipt.state))
+      if (
+        !receipt ||
+        !isCapabilityAdapterReceiptStateIn(
+          CAPABILITY_ADAPTER_RECEIPT_PUBLICATION_TERMINAL_STATES,
+          receipt.state,
+        )
+      )
         corrupt("lock publication precedes a terminal receipt chain");
-      if (receipt.state === "applied")
+      if (receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED)
         for (const targetId of step.target_ids) appliedTargets.add(targetId);
-      if (receipt.state === "failed")
+      if (receipt.state === CAPABILITY_ADAPTER_RECEIPT_STATE.FAILED)
         for (const targetId of step.target_ids)
           if (requiredTargetIds.has(targetId))
             corrupt("lock publication follows a required apply failure");
@@ -211,7 +241,7 @@ function assertPublicationReady(
         if (adapterPlan.steps.length > 0 && !appliedTargets.has(targetId)) continue;
         const row = health.get(healthKey(adapterPlan.plan_id, probe.probe_id, targetId));
         if (!row) corrupt("lock publication precedes complete health evidence");
-        if (probe.required && row.outcome !== "ready")
+        if (probe.required && row.outcome !== CAPABILITY_HEALTH_OUTCOME.READY)
           corrupt("lock publication follows failed required health");
       }
     }
@@ -222,7 +252,10 @@ function assertRefusal(
   storage: CapabilityStorageV1,
   header: CapabilityOperationV1,
   plan: CapabilityFabricPlanV1,
-  refusal: Extract<CapabilityWalEventV1["payload"], { kind: "pre-effect-refusal" }>["refusal"],
+  refusal: Extract<
+    CapabilityWalEventV1["payload"],
+    { kind: typeof CAPABILITY_WAL_PAYLOAD_KIND.PRE_EFFECT_REFUSAL }
+  >["refusal"],
   recordedAt: string,
   events: readonly CapabilityWalEventV1[],
   sequence: number,
@@ -246,13 +279,16 @@ function assertRefusal(
   const { schema_version: _, ...refusalWithoutSchema } = refusal;
   if (!same(copied, refusalWithoutSchema) || refusal.checked_at !== recordedAt)
     corrupt("pre-effect refusal differs from its immutable observation");
-  if (refusal.frontier_kind === "operation" || refusal.frontier_kind === "lock-publication") {
+  if (
+    refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION ||
+    refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION
+  ) {
     if (!same(refusal.target_ids, hostTargetIds(plan)))
       corrupt("scope refusal target set escaped the header host closure");
     if (observation.row.plan_order !== null || observation.row.unit_order !== null)
       corrupt("global pre-effect refusal has adapter-local ordering");
     if (
-      refusal.frontier_kind === "lock-publication" &&
+      refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION &&
       remainingHealthFrontier(storage, plan, events, sequence) !== null
     )
       corrupt("lock publication refusal preceded the complete dense health frontier");
@@ -261,13 +297,16 @@ function assertRefusal(
   const adapterPlan = plan.adapter_plans.find((row) => row.plan_id === refusal.plan_id);
   if (!adapterPlan) corrupt("refusal names an unknown adapter plan");
   const healthFrontier =
-    refusal.frontier_kind === "health-batch"
+    refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.HEALTH_BATCH
       ? remainingHealthFrontier(storage, plan, events, sequence)
       : null;
-  if (refusal.frontier_kind === "health-batch" && healthFrontier?.plan_id !== adapterPlan.plan_id)
+  if (
+    refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.HEALTH_BATCH &&
+    healthFrontier?.plan_id !== adapterPlan.plan_id
+  )
     corrupt("health refusal escaped the approved dense health frontier");
   const expected =
-    refusal.frontier_kind === "adapter-step"
+    refusal.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.ADAPTER_STEP
       ? adapterPlan.steps.find((row) => row.step_id === refusal.step_id)?.target_ids
       : healthFrontier?.target_ids;
   if (!expected || !same(refusal.target_ids, expected))
@@ -282,12 +321,17 @@ function assertRefusal(
     corrupt("pre-effect observation ordering escaped the approved frontier");
 }
 
+export interface CapabilityWalReferentialClosureOptionsV1 {
+  deferPreparedPublicationEvidence?: true;
+}
+
 export function assertCapabilityWalReferentialClosure(
   storage: CapabilityStorageV1,
   header: CapabilityOperationV1,
   plan: CapabilityFabricPlanV1,
   events: readonly CapabilityWalEventV1[],
   baseLock: CapabilityLockV1 | null,
+  options: CapabilityWalReferentialClosureOptionsV1 = {},
 ): void {
   for (const adapterPlan of plan.adapter_plans) {
     if (
@@ -307,12 +351,12 @@ export function assertCapabilityWalReferentialClosure(
   for (const event of events) {
     if (event.operation_id !== header.operation_id)
       corrupt("WAL event operation identity mismatch");
-    if (event.payload.kind === "adapter-step") {
+    if (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.ADAPTER_STEP) {
       const receipt = event.payload.receipt;
       const key = capabilityReceiptKey(receipt);
       assertCapabilityReceipt(storage, header, plan, receipt, priorReceipts.get(key));
       priorReceipts.set(key, receipt);
-    } else if (event.payload.kind === "pre-effect-refusal")
+    } else if (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.PRE_EFFECT_REFUSAL)
       assertRefusal(
         storage,
         header,
@@ -322,7 +366,7 @@ export function assertCapabilityWalReferentialClosure(
         events,
         event.sequence,
       );
-    else if (event.payload.kind === "health") {
+    else if (event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH) {
       const payload = event.payload;
       const adapterPlan = plan.adapter_plans.find((row) => row.plan_id === payload.plan_id);
       const probe = adapterPlan?.health_plan.find(
@@ -338,15 +382,17 @@ export function assertCapabilityWalReferentialClosure(
         adapterPlan.steps.some(
           (step) =>
             step.target_ids.includes(payload.target_id) &&
-            receipts.get(`${adapterPlan.plan_id}\0${step.step_id}`)?.state !== "applied",
+            receipts.get(`${adapterPlan.plan_id}\0${step.step_id}`)?.state !==
+              CAPABILITY_ADAPTER_RECEIPT_STATE.APPLIED,
         )
       )
         corrupt("health row precedes applied target receipts");
     } else if (
-      event.payload.kind === "health-inventory-prepared" ||
-      event.payload.kind === "lock-commit"
+      event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED ||
+      event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT
     )
       assertPublicationReady(plan, events, event.sequence);
   }
-  assertCapabilityPublicationEvidence({ storage, plan, events });
+  if (!options.deferPreparedPublicationEvidence)
+    assertCapabilityPublicationEvidence({ storage, plan, events });
 }

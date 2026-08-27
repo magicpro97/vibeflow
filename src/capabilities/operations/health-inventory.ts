@@ -17,7 +17,7 @@ import type { CapabilityStorageV1 } from "../storage/store.js";
 import type { CapabilityHealthCurrentV1, CapabilityHealthInventoryV1 } from "../storage/types.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
 import { bytewise } from "../wire/primitives.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 import {
   type AdapterHealthObservationResultV1,
   type CapabilityHealthBindingV1,
@@ -27,7 +27,7 @@ import {
 } from "./health-evidence.js";
 
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function readObject(storage: CapabilityStorageV1, digest: string): unknown {

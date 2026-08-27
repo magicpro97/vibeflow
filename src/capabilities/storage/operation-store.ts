@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import {
   appendVffrFrame,
@@ -86,7 +87,7 @@ export function validateCapabilityOperation(value: CapabilityOperationV1): void 
   integer(value.authority_epoch, "operation.authority_epoch");
   timestamp(value.created_at, "operation.created_at");
   if (
-    value.action_root_locator.kind === "capability" &&
+    value.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY &&
     (value.action_root_locator.scope !== value.scope ||
       value.action_root_locator.scope_identity_digest !== value.scope_identity_digest)
   )

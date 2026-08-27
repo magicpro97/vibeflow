@@ -1,10 +1,17 @@
 import { isAbsolute, posix, relative, resolve } from "node:path";
 import type { Engine } from "../core.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { CONVERSATION_OPERATION_STATE } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import { filterEnv, providerCredentialValues } from "./env-filter.js";
 import { claimIsolationLease, materializeIsolationInvocation } from "./isolation.js";
 import type { OwnedProcessPlatform } from "./owned-process-platform.js";
 import type { OwnedProcessRecordStore } from "./owned-process-runtime.js";
 import { assertSpawnProjection, sessionInvocation } from "./session-argv.js";
+import {
+  ENGINE_ISOLATION_KIND,
+  ENGINE_ROLE_SOURCE,
+  ENGINE_SESSION_PROTOCOL,
+} from "./session-contract.js";
 import { reserveOwnedSessionRuntime } from "./session-owned-runtime.js";
 import {
   COPILOT_ARG_PROMPT_FILE_THRESHOLD_BYTES,
@@ -38,12 +45,12 @@ function containerVisiblePromptRoot(
   lease: ReturnType<typeof claimIsolationLease> | undefined,
   hostRoot: string,
 ): string | undefined {
-  if (lease?.kind !== "container") return undefined;
+  if (lease?.kind !== ENGINE_ISOLATION_KIND.CONTAINER) return undefined;
   const child = resolve(hostRoot);
   const rel = relative(lease.repoRoot, child);
   if (
     rel === ".." ||
-    rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+    rel.startsWith(`..${process.platform === RUNTIME_PLATFORM.WINDOWS ? "\\" : "/"}`) ||
     isAbsolute(rel)
   ) {
     throw new Error("private Copilot prompt root is outside container repository authority");
@@ -71,8 +78,8 @@ export function prepareSessionLaunch(input: {
   const engine = input.spawn.engine;
   const claimedProjection = input.spawn.isolation;
   assertSpawnProjection(input.spawn, input.nativeSessionId);
-  input.transition("requested");
-  const projectRole = input.spawn.provenance.roleSource === "repo";
+  input.transition(CONVERSATION_OPERATION_STATE.REQUESTED);
+  const projectRole = input.spawn.provenance.roleSource === ENGINE_ROLE_SOURCE.REPO;
   if (projectRole && !claimedProjection) {
     throw new Error("project role requires a live isolation lease");
   }
@@ -87,7 +94,7 @@ export function prepareSessionLaunch(input: {
   }
   const promptFileRoot = input.config.privatePromptFileRoot;
   const promptFileEligible =
-    input.config.protocol !== "bridge" &&
+    input.config.protocol !== ENGINE_SESSION_PROTOCOL.BRIDGE &&
     engine === SESSION_PROMPT_FILE_ENGINE &&
     promptFileRoot !== undefined &&
     Buffer.byteLength(input.spawn.rendered_prompt, "utf8") >=
@@ -106,7 +113,7 @@ export function prepareSessionLaunch(input: {
     : undefined;
   try {
     const baseInvocation =
-      input.config.protocol === "bridge"
+      input.config.protocol === ENGINE_SESSION_PROTOCOL.BRIDGE
         ? bridgeSessionInvocation(input.spawn)
         : sessionInvocation(input.spawn, input.nativeSessionId, promptFile?.pointerPrompt);
     const invocation = promptFile

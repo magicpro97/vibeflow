@@ -1,47 +1,44 @@
-import type { CapabilityPreEffectRefusalReasonV1 } from "../wire/operation.js";
+import {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  type CapabilityRuntimeErrorCodeV1,
+} from "../../core/capability-contract.js";
+import {
+  CAPABILITY_PRE_EFFECT_REFUSAL_REASON,
+  type CapabilityPreEffectRefusalReasonV1,
+} from "../wire/operation.js";
 
-export type CapabilityRuntimeErrorCodeV1 =
-  | "action-required"
-  | "package-not-found"
-  | "ambiguous-package"
-  | "service-unavailable"
-  | "invalid-plan"
-  | "authorization-mismatch"
-  | "authority-head-stale"
-  | "policy-stale"
-  | "grant-stale"
-  | "source-authority-stale"
-  | "permission-stale"
-  | "user-prerequisite-stale"
-  | "private-input-stale"
-  | "enforcement-stale"
-  | "scope-base-stale"
-  | "owned-preimage-stale"
-  | "apply-failed"
-  | "health-failed"
-  | "rollback-failed"
-  | "scope-needs-recovery"
-  | "operation-not-found"
-  | "integrity-failure"
-  | "fault";
+export {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  CAPABILITY_RUNTIME_ERROR_CODES,
+  isCapabilityRuntimeErrorCode,
+} from "../../core/capability-contract.js";
+export type { CapabilityRuntimeErrorCodeV1 } from "../../core/capability-contract.js";
 
-const REFUSAL_ERROR_CODES = {
-  "scope-base-stale": "scope-base-stale",
-  "authority-head-stale": "authority-head-stale",
-  "policy-stale": "policy-stale",
-  "grant-stale": "grant-stale",
-  "permission-stale": "permission-stale",
-  "user-prerequisite-stale": "user-prerequisite-stale",
-  "source-authority-stale": "source-authority-stale",
-  "private-input-stale": "private-input-stale",
-  "enforcement-stale": "enforcement-stale",
-  "owned-preimage-stale": "owned-preimage-stale",
-} as const satisfies Record<CapabilityPreEffectRefusalReasonV1, CapabilityRuntimeErrorCodeV1>;
+export const CAPABILITY_RUNTIME_ERROR_CODE_BY_REFUSAL_REASON = Object.freeze({
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SCOPE_BASE_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_BASE_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.AUTHORITY_HEAD_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.AUTHORITY_HEAD_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.POLICY_STALE]: CAPABILITY_RUNTIME_ERROR_CODE.POLICY_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.GRANT_STALE]: CAPABILITY_RUNTIME_ERROR_CODE.GRANT_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PERMISSION_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.PERMISSION_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.USER_PREREQUISITE_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.USER_PREREQUISITE_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SOURCE_AUTHORITY_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.SOURCE_AUTHORITY_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PRIVATE_INPUT_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.PRIVATE_INPUT_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.ENFORCEMENT_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.ENFORCEMENT_STALE,
+  [CAPABILITY_PRE_EFFECT_REFUSAL_REASON.OWNED_PREIMAGE_STALE]:
+    CAPABILITY_RUNTIME_ERROR_CODE.OWNED_PREIMAGE_STALE,
+} satisfies Readonly<Record<CapabilityPreEffectRefusalReasonV1, CapabilityRuntimeErrorCodeV1>>);
 
 export function runtimeCodeForRefusal(
   reason: CapabilityPreEffectRefusalReasonV1,
 ): CapabilityRuntimeErrorCodeV1 {
-  return REFUSAL_ERROR_CODES[reason];
+  return CAPABILITY_RUNTIME_ERROR_CODE_BY_REFUSAL_REASON[reason];
 }
 
 export class CapabilityRuntimeError extends Error {

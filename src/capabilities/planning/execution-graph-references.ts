@@ -1,5 +1,5 @@
 import type { CapabilityAdapterPrivateDescriptorV1 } from "../adapters/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import type {
   CapabilityExecutionJsonObjectValueV1,
@@ -11,7 +11,7 @@ const OBJECT_REF = /^actions\/v1\/objects\/[a-f0-9]{64}\.json$/u;
 const BLOB_REF = /^actions\/v1\/blobs\/[a-f0-9]{64}\.bin$/u;
 
 function fail(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function embeddedRefs(value: unknown, refs: Set<string>): void {

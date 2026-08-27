@@ -1,10 +1,16 @@
-import type { EngineName } from "../../actions/types.js";
+import {
+  CAPABILITY_MANIFEST_ACCESSES,
+  CAPABILITY_MANIFEST_FILESYSTEM_ROOT,
+  CAPABILITY_MANIFEST_FILESYSTEM_ROOTS,
+  CAPABILITY_MANIFEST_NETWORK_TRANSPORTS,
+  CAPABILITY_MANIFEST_PERMISSION_KIND,
+  CAPABILITY_MANIFEST_PERMISSION_KINDS,
+  CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENTS,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
+import { ENGINES } from "../../core/agent-contract.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJson, digestV1 } from "../../durability/index.js";
-import type {
-  CapabilityPermissionKindScopeV1,
-  CapabilityPermissionV1,
-  RuntimeEnforcementV1,
-} from "../manifest/types.js";
+import type { CapabilityPermissionKindScopeV1, CapabilityPermissionV1 } from "../manifest/types.js";
 import {
   CapabilityValidationError,
   assertSortedUnique,
@@ -16,14 +22,6 @@ import {
   localId,
   text,
 } from "../wire/primitives.js";
-
-const ENGINES: EngineName[] = ["claude", "codex", "copilot", "opencode", "antigravity"];
-const ENFORCEMENTS: RuntimeEnforcementV1[] = [
-  "brokered",
-  "sandboxed",
-  "engine-enforced",
-  "disclosed-not-enforced",
-];
 
 export function canonicalRelativePrefix(value: unknown, path: string, allowEmpty = true): string {
   const result = text(value, path, { min: allowEmpty ? 0 : 1, max: 4_096 });
@@ -84,33 +82,25 @@ export function validatePermissionKindScope(
   path = "$",
 ): CapabilityPermissionKindScopeV1 {
   const outer = exactKeys(value, ["kind", "scope"], [], path);
-  const kind = enumeration(
-    outer.kind,
-    ["filesystem", "network", "process", "shell", "config", "secret", "hook"] as const,
-    `${path}.kind`,
-  );
+  const kind = enumeration(outer.kind, CAPABILITY_MANIFEST_PERMISSION_KINDS, `${path}.kind`);
   const scopePath = `${path}.scope`;
-  if (kind === "filesystem") {
+  if (kind === CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM) {
     const scope = exactKeys(outer.scope, ["root", "access", "path_prefix"], [], scopePath);
-    enumeration(scope.root, ["project", "user-home"] as const, `${scopePath}.root`);
-    enumeration(scope.access, ["read", "write"] as const, `${scopePath}.access`);
+    enumeration(scope.root, CAPABILITY_MANIFEST_FILESYSTEM_ROOTS, `${scopePath}.root`);
+    enumeration(scope.access, CAPABILITY_MANIFEST_ACCESSES, `${scopePath}.access`);
     canonicalRelativePrefix(scope.path_prefix, `${scopePath}.path_prefix`);
-  } else if (kind === "network") {
+  } else if (kind === CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK) {
     const scope = exactKeys(
       outer.scope,
       ["transport", "host", "port", "path_prefix"],
       [],
       scopePath,
     );
-    enumeration(
-      scope.transport,
-      ["https", "git-https", "mcp-https"] as const,
-      `${scopePath}.transport`,
-    );
+    enumeration(scope.transport, CAPABILITY_MANIFEST_NETWORK_TRANSPORTS, `${scopePath}.transport`);
     canonicalHost(scope.host, `${scopePath}.host`);
     if (scope.port !== null) integer(scope.port, `${scopePath}.port`, 1, 65_535);
     canonicalUrlPathPrefix(scope.path_prefix, `${scopePath}.path_prefix`);
-  } else if (kind === "process") {
+  } else if (kind === CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS) {
     const scope = exactKeys(
       outer.scope,
       ["executable_class", "argv_prefix", "allow_additional_args"],
@@ -124,11 +114,11 @@ export function validatePermissionKindScope(
       text(item, `${scopePath}.argv_prefix[${index}]`, { max: 4_096 }),
     );
     boolean(scope.allow_additional_args, `${scopePath}.allow_additional_args`);
-  } else if (kind === "shell") {
+  } else if (kind === CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL) {
     const scope = exactKeys(outer.scope, ["adapter_id", "template_id"], [], scopePath);
     localId(scope.adapter_id, `${scopePath}.adapter_id`);
     localId(scope.template_id, `${scopePath}.template_id`);
-  } else if (kind === "config") {
+  } else if (kind === CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG) {
     const scope = exactKeys(
       outer.scope,
       ["engine", "namespace", "access", "key_prefix"],
@@ -137,9 +127,9 @@ export function validatePermissionKindScope(
     );
     enumeration(scope.engine, ENGINES, `${scopePath}.engine`);
     localId(scope.namespace, `${scopePath}.namespace`);
-    enumeration(scope.access, ["read", "write"] as const, `${scopePath}.access`);
+    enumeration(scope.access, CAPABILITY_MANIFEST_ACCESSES, `${scopePath}.access`);
     structuredKey(scope.key_prefix, `${scopePath}.key_prefix`);
-  } else if (kind === "secret") {
+  } else if (kind === CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET) {
     const scope = exactKeys(outer.scope, ["input_ids"], [], scopePath);
     if (
       !Array.isArray(scope.input_ids) ||
@@ -184,7 +174,11 @@ export function validateManifestPermission(
       `${path}.permission_id`,
     );
   localId(permissionId.slice(prefix.length), `${path}.permission_id`);
-  enumeration(outer.required_enforcement, ENFORCEMENTS, `${path}.required_enforcement`);
+  enumeration(
+    outer.required_enforcement,
+    CAPABILITY_MANIFEST_RUNTIME_ENFORCEMENTS,
+    `${path}.required_enforcement`,
+  );
   validatePermissionKindScope({ kind: outer.kind, scope: outer.scope }, path);
   return value as CapabilityPermissionV1;
 }
@@ -201,10 +195,13 @@ export function publicPermissionScope(value: CapabilityPermissionKindScopeV1): s
 
 export function assertPermissionMatchesOperationScope(
   permission: CapabilityPermissionKindScopeV1,
-  scope: "project" | "user",
+  scope: CapabilityScope,
 ): void {
-  if (permission.kind !== "filesystem") return;
-  const expected = scope === "project" ? "project" : "user-home";
+  if (permission.kind !== CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM) return;
+  const expected =
+    scope === CAPABILITY_SCOPE.PROJECT
+      ? CAPABILITY_MANIFEST_FILESYSTEM_ROOT.PROJECT
+      : CAPABILITY_MANIFEST_FILESYSTEM_ROOT.USER_HOME;
   if (permission.scope.root !== expected)
     throw new CapabilityValidationError(
       "filesystem permission crosses the operation scope",

@@ -1,4 +1,8 @@
 import { canonicalJson, canonicalJsonBytes } from "../../durability/index.js";
+import {
+  CAPABILITY_OPERATION_RECOVERY_PHASE,
+  type CapabilityOperationRecoveryPhaseV1,
+} from "../wire/operation-state-contract.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import {
   boundedProjectionPath,
@@ -12,7 +16,28 @@ import {
   writeJsonSlice,
 } from "./filesystem-io.js";
 import type { ProjectionBuilderRootsV1 } from "./projection-builders.js";
-import type { CapabilityPrivateEffectPayloadV1, CapabilityPrivateJsonV1 } from "./types.js";
+import type {
+  CapabilityOwnedResourceV1,
+  CapabilityPrivateEffectPayloadV1,
+  CapabilityPrivateJsonV1,
+  CapabilityProjectionObservationV1,
+} from "./types.js";
+
+export function assertReconciledFilesystemObservation(
+  resource: CapabilityOwnedResourceV1,
+  observation: CapabilityProjectionObservationV1,
+  direction: CapabilityOperationRecoveryPhaseV1,
+): void {
+  const expected =
+    direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD
+      ? resource.expected_postimage_sha256
+      : resource.expected_preimage_sha256;
+  if (observation.content_sha256 !== expected)
+    throw new CapabilityValidationError(
+      "repaired projection does not match the approved terminal state",
+      resource.ownership_key,
+    );
+}
 
 function decode(value: string | null): Buffer | null {
   return value === null ? null : Buffer.from(value, "base64");
@@ -48,7 +73,7 @@ type SlicePayload = Extract<
 function reconcileJsonSlice(
   payload: SlicePayload,
   roots: ProjectionBuilderRootsV1,
-  direction: "forward" | "rollback",
+  direction: CapabilityOperationRecoveryPhaseV1,
 ): void {
   const root = roots[payload.root];
   const path = boundedProjectionPath(root, payload.canonical_relative_path);
@@ -56,8 +81,13 @@ function reconcileJsonSlice(
   const currentObject = parseProjectionJson(currentBytes, payload.canonical_relative_path);
   const current = readJsonSlice(currentObject, payload.key_path);
   const desiredPresent =
-    direction === "forward" ? payload.postimage_present : payload.preimage_present;
-  const desiredValue = direction === "forward" ? payload.postimage : payload.preimage;
+    direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD
+      ? payload.postimage_present
+      : payload.preimage_present;
+  const desiredValue =
+    direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD
+      ? payload.postimage
+      : payload.preimage;
   if (!sliceEqual(current, desiredPresent, desiredValue)) {
     const isPre = sliceEqual(current, payload.preimage_present, payload.preimage);
     const isPost = sliceEqual(current, payload.postimage_present, payload.postimage);
@@ -80,7 +110,11 @@ function reconcileJsonSlice(
         path: boundedProjectionPath(root, file.canonical_relative_path),
         preimage: decode(file.preimage_base64),
         postimage: decode(file.postimage_base64),
-        desired: decode(direction === "forward" ? file.postimage_base64 : file.preimage_base64),
+        desired: decode(
+          direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD
+            ? file.postimage_base64
+            : file.preimage_base64,
+        ),
         mode: file.file_mode,
       });
     }
@@ -91,7 +125,9 @@ function reconcileJsonSlice(
       feature.block_id,
       feature.preimage_block,
       feature.postimage_block,
-      direction === "forward" ? feature.postimage_block : feature.preimage_block,
+      direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD
+        ? feature.postimage_block
+        : feature.preimage_block,
       feature.placement,
     );
   }
@@ -103,7 +139,7 @@ function reconcileJsonSlice(
     path: boundedProjectionPath(root, payload.marker_relative_path),
     preimage: preMarker,
     postimage: postMarker,
-    desired: direction === "forward" ? postMarker : preMarker,
+    desired: direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? postMarker : preMarker,
     mode: 0o600,
   });
 }
@@ -111,7 +147,7 @@ function reconcileJsonSlice(
 function reconcileOwnedFile(
   payload: Extract<CapabilityPrivateEffectPayloadV1, { payload_kind: "owned-file" }>,
   roots: ProjectionBuilderRootsV1,
-  direction: "forward" | "rollback",
+  direction: CapabilityOperationRecoveryPhaseV1,
 ): void {
   const root = roots[payload.root];
   const pre = decode(payload.preimage_base64);
@@ -120,7 +156,7 @@ function reconcileOwnedFile(
     path: boundedProjectionPath(root, payload.canonical_relative_path),
     preimage: pre,
     postimage: post,
-    desired: direction === "forward" ? post : pre,
+    desired: direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? post : pre,
     mode: payload.file_mode,
   });
   const preMarker = decode(payload.preimage_marker_base64);
@@ -129,7 +165,7 @@ function reconcileOwnedFile(
     path: boundedProjectionPath(root, payload.marker_relative_path),
     preimage: preMarker,
     postimage: postMarker,
-    desired: direction === "forward" ? postMarker : preMarker,
+    desired: direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? postMarker : preMarker,
     mode: 0o600,
   });
 }
@@ -137,11 +173,14 @@ function reconcileOwnedFile(
 function reconcileToml(
   payload: Extract<CapabilityPrivateEffectPayloadV1, { payload_kind: "toml-owned-block" }>,
   roots: ProjectionBuilderRootsV1,
-  direction: "forward" | "rollback",
+  direction: CapabilityOperationRecoveryPhaseV1,
 ): void {
   const root = roots[payload.root];
   const path = boundedProjectionPath(root, payload.canonical_relative_path);
-  const desired = direction === "forward" ? payload.postimage_block : payload.preimage_block;
+  const desired =
+    direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD
+      ? payload.postimage_block
+      : payload.preimage_block;
   reconcileTomlBlock(
     path,
     payload.block_id,
@@ -157,7 +196,7 @@ function reconcileToml(
     path: boundedProjectionPath(root, payload.marker_relative_path),
     preimage: preMarker,
     postimage: postMarker,
-    desired: direction === "forward" ? postMarker : preMarker,
+    desired: direction === CAPABILITY_OPERATION_RECOVERY_PHASE.FORWARD ? postMarker : preMarker,
     mode: 0o600,
   });
 }
@@ -182,7 +221,7 @@ function reconcileTomlBlock(
 export function reconcileFilesystemPayload(
   payload: CapabilityPrivateEffectPayloadV1,
   roots: ProjectionBuilderRootsV1,
-  direction: "forward" | "rollback",
+  direction: CapabilityOperationRecoveryPhaseV1,
 ): void {
   // A claim changes only the owner registry. Projection bytes are immutable
   // across both approved terminal directions.

@@ -81,7 +81,7 @@ describe("#686 registry release docs contract", () => {
   });
 
   test("CLI help contains the exact release commands", () => {
-    const help = read("src/commands/help-commands.ts");
+    const help = read("src/help/skills-command-help.ts");
     for (const command of commands) expect(help).toContain(command);
   });
 });

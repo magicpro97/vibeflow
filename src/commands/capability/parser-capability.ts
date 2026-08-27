@@ -1,3 +1,4 @@
+import { CAPABILITY_CLI_COMMAND } from "../../actions/capability-cli-contract.js";
 import { DIGEST } from "../../actions/record-primitives.js";
 import type { FabricCliMutationCommandV1 } from "../../capabilities/wire/cli.js";
 import {
@@ -76,7 +77,7 @@ export function parseCapabilityCliArgv(
       usage("capability adopt inspect does not accept --dry-run or --yes");
     return {
       kind: "inspection",
-      command: "capability.adopt.inspect",
+      command: CAPABILITY_CLI_COMMAND.ADOPT_INSPECT,
       mode: "direct",
       legacySources: dedupeSorted(raw.repeatableValueFlags.get("source") ?? []),
       ...common,
@@ -95,7 +96,7 @@ export function parseCapabilityCliArgv(
     }
     return {
       kind: "private-input",
-      command: "capability.private-input.bind",
+      command: CAPABILITY_CLI_COMMAND.PRIVATE_INPUT_BIND,
       mode: "direct",
       packageId: command.packageId,
       packagePinDigest: raw.singleValueFlags.get("package-pin-digest"),
@@ -111,7 +112,8 @@ export function parseCapabilityCliArgv(
     usage("non-interactive capability mutations require --idempotency-key");
   if (
     !io.stdinIsTTY &&
-    (command.command === "capability.install" || command.command === "capability.retarget") &&
+    (command.command === CAPABILITY_CLI_COMMAND.INSTALL ||
+      command.command === CAPABILITY_CLI_COMMAND.RETARGET) &&
     (raw.repeatableValueFlags.get("for")?.length ?? 0) === 0
   ) {
     usage(`${command.command} requires at least one explicit --for target in non-interactive mode`);
@@ -161,7 +163,7 @@ function capabilityCommand(positionals: string[]):
     }
   | {
       kind: "mutation-private-input";
-      command: "capability.private-input.bind";
+      command: typeof CAPABILITY_CLI_COMMAND.PRIVATE_INPUT_BIND;
       packageId?: string;
       directFlagNames: readonly string[];
       consumedCommandWords: number;
@@ -172,7 +174,7 @@ function capabilityCommand(positionals: string[]):
     if (positionals.length > 2) usage("vf capability search accepts at most one query");
     return {
       kind: "query",
-      command: "capability.search",
+      command: CAPABILITY_CLI_COMMAND.SEARCH,
       query: second,
       directFlagNames: ["for", "scope"],
       consumedCommandWords: 1,
@@ -182,7 +184,7 @@ function capabilityCommand(positionals: string[]):
     if (positionals.length > 1) usage("vf capability list does not accept extra positionals");
     return {
       kind: "query",
-      command: "capability.list",
+      command: CAPABILITY_CLI_COMMAND.LIST,
       directFlagNames: ["scope"],
       consumedCommandWords: 1,
     };
@@ -191,7 +193,7 @@ function capabilityCommand(positionals: string[]):
     if (positionals.length > 2) usage("vf capability status accepts at most one package selector");
     return {
       kind: "query",
-      command: "capability.status",
+      command: CAPABILITY_CLI_COMMAND.STATUS,
       packageId: second,
       directFlagNames: ["scope", "refresh"],
       consumedCommandWords: 1,
@@ -203,7 +205,7 @@ function capabilityCommand(positionals: string[]):
       usage("vf capability private-input bind accepts one package selector");
     return {
       kind: "mutation-private-input",
-      command: "capability.private-input.bind",
+      command: CAPABILITY_CLI_COMMAND.PRIVATE_INPUT_BIND,
       packageId: third,
       directFlagNames: ["scope", "package-pin-digest", "input", "idempotency-key", "values-stdin"],
       consumedCommandWords: 2,
@@ -214,7 +216,7 @@ function capabilityCommand(positionals: string[]):
       usage("vf capability adopt inspect does not accept extra positionals");
     return {
       kind: "inspection",
-      command: "capability.adopt.inspect",
+      command: CAPABILITY_CLI_COMMAND.ADOPT_INSPECT,
       directFlagNames: ["scope", "source", "idempotency-key"],
       consumedCommandWords: 2,
     };
@@ -239,14 +241,14 @@ function directCapabilityMutation(
   name: string | undefined,
 ): ParsedCapabilityDirectMutationV1["command"] {
   const commands: Record<string, ParsedCapabilityDirectMutationV1["command"]> = {
-    adopt: "capability.adopt",
-    configure: "capability.configure",
-    install: "capability.install",
-    remove: "capability.remove",
-    repair: "capability.repair",
-    retarget: "capability.retarget",
-    rollback: "capability.rollback",
-    update: "capability.update",
+    adopt: CAPABILITY_CLI_COMMAND.ADOPT,
+    configure: CAPABILITY_CLI_COMMAND.CONFIGURE,
+    install: CAPABILITY_CLI_COMMAND.INSTALL,
+    remove: CAPABILITY_CLI_COMMAND.REMOVE,
+    repair: CAPABILITY_CLI_COMMAND.REPAIR,
+    retarget: CAPABILITY_CLI_COMMAND.RETARGET,
+    rollback: CAPABILITY_CLI_COMMAND.ROLLBACK,
+    update: CAPABILITY_CLI_COMMAND.UPDATE,
   };
   const command = commands[name ?? ""];
   if (!command) usage(`unsupported capability subcommand ${JSON.stringify(name)}`);
@@ -257,7 +259,7 @@ function capabilityDirectFlagNames(
   command: ParsedCapabilityDirectMutationV1["command"],
 ): readonly string[] {
   const names = {
-    "capability.install": [
+    [CAPABILITY_CLI_COMMAND.INSTALL]: [
       "package-pin-digest",
       "for",
       "scope",
@@ -265,7 +267,7 @@ function capabilityDirectFlagNames(
       "private",
       "idempotency-key",
     ],
-    "capability.update": [
+    [CAPABILITY_CLI_COMMAND.UPDATE]: [
       "package-pin-digest",
       "scope",
       "for",
@@ -274,12 +276,17 @@ function capabilityDirectFlagNames(
       "private",
       "idempotency-key",
     ],
-    "capability.configure": ["scope", "set", "private", "idempotency-key"],
-    "capability.retarget": ["for", "scope", "idempotency-key"],
-    "capability.remove": ["scope", "cascade", "idempotency-key"],
-    "capability.rollback": ["generation-id", "scope", "idempotency-key"],
-    "capability.repair": ["scope", "idempotency-key"],
-    "capability.adopt": ["scope", "candidate-id", "candidate-digest", "idempotency-key"],
+    [CAPABILITY_CLI_COMMAND.CONFIGURE]: ["scope", "set", "private", "idempotency-key"],
+    [CAPABILITY_CLI_COMMAND.RETARGET]: ["for", "scope", "idempotency-key"],
+    [CAPABILITY_CLI_COMMAND.REMOVE]: ["scope", "cascade", "idempotency-key"],
+    [CAPABILITY_CLI_COMMAND.ROLLBACK]: ["generation-id", "scope", "idempotency-key"],
+    [CAPABILITY_CLI_COMMAND.REPAIR]: ["scope", "idempotency-key"],
+    [CAPABILITY_CLI_COMMAND.ADOPT]: [
+      "scope",
+      "candidate-id",
+      "candidate-digest",
+      "idempotency-key",
+    ],
   } satisfies Record<ParsedCapabilityDirectMutationV1["command"], readonly string[]>;
   return names[command];
 }

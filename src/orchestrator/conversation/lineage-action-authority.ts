@@ -1,4 +1,5 @@
 import { validateDispatchRecord } from "../../actions/persistence-validation.js";
+import { ACTION_DECISION, ACTION_DOMAIN } from "../../actions/public-action-contract.js";
 import {
   assertApproval,
   assertProposal,
@@ -21,6 +22,7 @@ import {
   isLineageDigest,
   isPlainLineageRecord,
 } from "./lineage-types.js";
+import { REVISION_OPERATION_EVENT_STORAGE } from "./revision-operation-event-contract.js";
 
 export interface LineageActionClosureV1 {
   proposal: ActionProposalV1;
@@ -28,17 +30,25 @@ export interface LineageActionClosureV1 {
   dispatch: ActionDispatchRecordV1;
 }
 
-export type LineagePlanKindV1 =
-  | "lineage-head"
-  | "lineage-association"
-  | "revision-operation"
-  | "context-compaction"
-  | "conversation-control"
-  | "public-literal-publication";
+export const LINEAGE_PLAN_KIND = Object.freeze({
+  LINEAGE_HEAD: "lineage-head",
+  LINEAGE_ASSOCIATION: "lineage-association",
+  REVISION_OPERATION: REVISION_OPERATION_EVENT_STORAGE.DOMAIN,
+  CONTEXT_COMPACTION: "context-compaction",
+  CONVERSATION_CONTROL: "conversation-control",
+  PUBLIC_LITERAL_PUBLICATION: "public-literal-publication",
+} as const);
+
+export type LineagePlanKindV1 = (typeof LINEAGE_PLAN_KIND)[keyof typeof LINEAGE_PLAN_KIND];
+export const LINEAGE_PLAN_KINDS = Object.freeze(Object.values(LINEAGE_PLAN_KIND));
+
+export function isLineagePlanKindV1(value: unknown): value is LineagePlanKindV1 {
+  return typeof value === "string" && (LINEAGE_PLAN_KINDS as readonly string[]).includes(value);
+}
 
 export interface LineageActionPlanBindingV1 {
   schema_version: "1.0";
-  domain: "conversation";
+  domain: typeof ACTION_DOMAIN.CONVERSATION;
   action_root_locator: PrivateActionRootLocatorV1;
   planning_options: ActionPlanningOptionsV1;
   execution_object_closure_digest: null;
@@ -115,9 +125,9 @@ export function validateLineageActionClosure(
   const dispatch = validateDispatchRecord(value.dispatch);
   const expected = materializeDispatchRecord(proposal, approval, domainHeaderDigest);
   if (
-    proposal.domain !== "conversation" ||
+    proposal.domain !== ACTION_DOMAIN.CONVERSATION ||
     proposal.plan_digest !== actionPlanDigest ||
-    approval.decision !== "approved" ||
+    approval.decision !== ACTION_DECISION.APPROVED ||
     !sameCanonical(dispatch, expected)
   )
     throw new Error("invalid lineage action closure");
@@ -154,7 +164,7 @@ export function assertLineageActionPlanBindingV1(
       "steps",
     ]) ||
     value.schema_version !== "1.0" ||
-    value.domain !== "conversation" ||
+    value.domain !== ACTION_DOMAIN.CONVERSATION ||
     value.execution_object_closure_digest !== null ||
     value.permission_digest !== proposal.permission_digest ||
     !sameCanonical(value.action_root_locator, proposal.action_root_locator) ||

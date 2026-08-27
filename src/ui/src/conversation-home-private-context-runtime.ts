@@ -1,4 +1,10 @@
 import type { Ref } from "vue";
+import {
+  CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+  CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT,
+  CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND,
+  CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND,
+} from "../../orchestrator/conversation/conversation-private-context-broker-wire.js";
 import { conversationHomeApi } from "./conversation-home-api.js";
 import { assertHomePrivateContextPresence } from "./conversation-home-private-context-authority.js";
 import type {
@@ -9,7 +15,12 @@ import type {
 } from "./conversation-home-private-context-types.js";
 import { createHomeActionKey, readableHomeError } from "./conversation-home-runtime.js";
 
-type PrivateContextScope = { kind: "draft" } | { kind: "message"; root_session_id: string };
+type PrivateContextScope =
+  | { kind: typeof CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.DRAFT }
+  | {
+      kind: typeof CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.MESSAGE;
+      root_session_id: string;
+    };
 
 interface PrivateContextSelection {
   scope: PrivateContextScope;
@@ -33,7 +44,9 @@ interface HomePrivateContextRuntimeInput {
 }
 
 const scopeKey = (scope: PrivateContextScope): string =>
-  scope.kind === "draft" ? "draft" : `message:${scope.root_session_id}`;
+  scope.kind === CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.DRAFT
+    ? CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.DRAFT
+    : `${CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.MESSAGE}:${scope.root_session_id}`;
 
 const sameSelection = (
   left: PrivateContextSelection | undefined,
@@ -53,8 +66,11 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
 
   const activeScope = (): PrivateContextScope =>
     input.activeRootId.value
-      ? { kind: "message", root_session_id: input.activeRootId.value }
-      : { kind: "draft" };
+      ? {
+          kind: CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.MESSAGE,
+          root_session_id: input.activeRootId.value,
+        }
+      : { kind: CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.DRAFT };
   const syncProjection = () => {
     if (!disposed) input.present.value = selections.has(scopeKey(activeScope()));
   };
@@ -72,18 +88,18 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
     const operation = async () => {
       const selection = task.selection;
       const response = await exactReplay(() =>
-        selection.scope.kind === "message"
+        selection.scope.kind === CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.MESSAGE
           ? conversationHomeApi.discardMessagePrivateContext(selection.scope.root_session_id, {
-              schema_version: "1.0",
+              schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
               idempotency_key: task.idempotency_key,
               enqueue_idempotency_key: selection.command_key,
-              expected_private_context_present: true,
+              expected_private_context_present: CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT,
             } satisfies HomeDiscardMessagePrivateContextRequest)
           : conversationHomeApi.discardDraftPrivateContext({
-              schema_version: "1.0",
+              schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
               idempotency_key: task.idempotency_key,
               create_idempotency_key: selection.command_key,
-              expected_private_context_present: true,
+              expected_private_context_present: CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT,
             } satisfies HomeDiscardDraftPrivateContextRequest),
       );
       assertHomePrivateContextPresence(response, false);
@@ -141,26 +157,27 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
     const scope = activeScope();
     const key = scopeKey(scope);
     const stageToken = createHomeActionKey();
-    const commandKey = scope.kind === "message" ? messageKey() : createKey();
+    const commandKey =
+      scope.kind === CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.MESSAGE ? messageKey() : createKey();
     latestStages.set(key, stageToken);
     void retryPendingForScope(scope);
     const response = await exactReplay(() =>
-      scope.kind === "message"
+      scope.kind === CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.MESSAGE
         ? conversationHomeApi.stageMessagePrivateContext(
             scope.root_session_id,
             {
-              schema_version: "1.0",
+              schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
               enqueue_idempotency_key: commandKey,
-              source_kind: "private-file-range",
+              source_kind: CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND.PRIVATE_FILE_RANGE,
               ...selectionRequest,
             },
             signal,
           )
         : conversationHomeApi.stageDraftPrivateContext(
             {
-              schema_version: "1.0",
+              schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
               create_idempotency_key: commandKey,
-              source_kind: "private-file-range",
+              source_kind: CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND.PRIVATE_FILE_RANGE,
               ...selectionRequest,
             },
             signal,
@@ -212,7 +229,7 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
     if (!selected) return null;
     return Object.freeze({
       idempotency_key: selected.command_key,
-      private_context_present: true as const,
+      private_context_present: CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT,
       clearIfCurrent() {
         const key = scopeKey(selected.scope);
         if (sameSelection(selections.get(key), selected)) selections.delete(key);
@@ -229,11 +246,14 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
   }
 
   function captureForMessage(rootSessionId: string): HomePrivateContextCapture | null {
-    return capture({ kind: "message", root_session_id: rootSessionId });
+    return capture({
+      kind: CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.MESSAGE,
+      root_session_id: rootSessionId,
+    });
   }
 
   function captureForCreate(): HomePrivateContextCapture | null {
-    return capture({ kind: "draft" });
+    return capture({ kind: CONVERSATION_PRIVATE_CONTEXT_STAGE_KIND.DRAFT });
   }
 
   function switchRoot(): void {

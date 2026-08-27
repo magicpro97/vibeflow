@@ -1,4 +1,8 @@
-import type { ActionDispatchRecordV1 } from "../../actions/index.js";
+import {
+  ACTION_OPERATION_STATE as ACTION_STATE,
+  type ActionDispatchRecordV1,
+  PUBLIC_OPERATION_REVISION_PHASE as REVISION,
+} from "../../actions/index.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import { publishedRevisionAuthorityMap } from "./lineage-published-transition.js";
@@ -15,6 +19,10 @@ import {
   ConversationRevisionCorruptError,
 } from "./revision-errors.js";
 import { foldRevisionOperation } from "./revision-fold.js";
+import {
+  REVISION_OPERATION_EVENT_PAYLOAD_KIND as EVENT_KIND,
+  REVISION_OPERATION_INITIAL_PHASE as INITIAL_PHASE,
+} from "./revision-operation-event-contract.js";
 import type { PreparedConversationRevisionV1 } from "./revision-operation-types.js";
 import { runOwnedRevisionStart } from "./revision-owned-start-runtime.js";
 import {
@@ -28,11 +36,14 @@ import {
   RevisionStartOwnerAuthority,
   type RevisionStartOwnerTokenV1,
 } from "./revision-start-owner.js";
-import { materializeRevisionStateTransition } from "./revision-state-transition.js";
+import { materializeRevisionStateTransition as stateEdge } from "./revision-state-transition.js";
 import type { ConversationRuntime } from "./runtime.js";
 import { readConversationSourceInventory } from "./source-inventory.js";
 import type { ConversationCreateResult, ConversationManifest } from "./types.js";
 export type { PreparedConversationRevisionV1 } from "./revision-operation-types.js";
+
+type PreparedRevision = PreparedConversationRevisionV1;
+type RevisionEvent = RevisionOperationEventV1;
 
 export interface ConversationRevisionExecutorOptions {
   runtime: ConversationRuntime;
@@ -56,31 +67,32 @@ export class ConversationRevisionOperationExecutor {
     this.startOwners = new RevisionStartOwnerAuthority(options.artifactRoot);
   }
 
-  private append(
-    operation: RevisionOperationV1,
-    event: RevisionOperationEventV1,
-  ): RevisionOperationEventV1 {
+  private append(operation: RevisionOperationV1, event: RevisionEvent): RevisionEvent {
     this.options.home.revisions.appendEvent(operation, event);
     return event;
   }
 
-  private ensurePreparing(operation: RevisionOperationV1): RevisionOperationEventV1[] {
+  private fold(prepared: PreparedRevision, events: readonly RevisionEvent[]) {
+    return foldRevisionOperation(prepared.operation, events, {
+      preparationPlan: prepared.revisionPlan,
+    });
+  }
+
+  private ensurePreparing(prepared: PreparedRevision): RevisionEvent[] {
+    const operation = prepared.operation;
     const events = this.options.home.revisions.readEvents(operation.operation_id);
     if (events.length === 0)
       events.push(
         this.append(
           operation,
-          materializeRevisionStateTransition(operation, events, "created", "preparing"),
+          stateEdge(operation, events, INITIAL_PHASE.CREATED, REVISION.PREPARING),
         ),
       );
-    if (foldRevisionOperation(operation, events).state !== "preparing") return events;
+    if (this.fold(prepared, events).state !== REVISION.PREPARING) return events;
     return events;
   }
 
-  private dispatch(
-    prepared: PreparedConversationRevisionV1,
-    events: RevisionOperationEventV1[],
-  ): ActionDispatchRecordV1 {
+  private dispatch(prepared: PreparedRevision, events: RevisionEvent[]): ActionDispatchRecordV1 {
     const first = events[0];
     if (!first) throw new ConversationRevisionCorruptError("revision sequence zero is absent");
     this.options.home.actions.bindHeader(
@@ -94,10 +106,10 @@ export class ConversationRevisionOperationExecutor {
     );
   }
 
-  abandon(prepared: PreparedConversationRevisionV1, reasonCode: string): void {
+  abandon(prepared: PreparedRevision, reasonCode: string): void {
     let events = this.options.home.revisions.readEvents(prepared.operation.operation_id);
-    const state = foldRevisionOperation(prepared.operation, events).state;
-    if (state === "preparing" || state === "prepared") {
+    const state = this.fold(prepared, events).state;
+    if (state === REVISION.PREPARING || state === REVISION.PREPARED) {
       events = [
         ...events,
         this.append(
@@ -106,15 +118,15 @@ export class ConversationRevisionOperationExecutor {
             prepared.operation,
             events,
             {
-              kind: "state-transition",
+              kind: EVENT_KIND.STATE_TRANSITION,
               from: state,
-              to: "abandoned",
+              to: REVISION.ABANDONED,
               authorized_by_action_operation_id: prepared.operation.operation_id,
               effect_action_operation_id: prepared.operation.operation_id,
               action_terminals: [
                 {
                   action_operation_id: prepared.operation.operation_id,
-                  outcome: "failed",
+                  outcome: ACTION_STATE.FAILED,
                   reason_code: reasonCode,
                 },
               ],
@@ -130,14 +142,14 @@ export class ConversationRevisionOperationExecutor {
       prepared.proposal.proposal_id,
       prepared.operation.operation_id,
       {
-        outcome: "failed",
+        outcome: ACTION_STATE.FAILED,
         digest: events.at(-1)?.event_digest ?? prepared.operation.header_digest,
         recorded_at: prepared.operation.created_at,
       },
     );
   }
 
-  private async prepareChild(prepared: PreparedConversationRevisionV1): Promise<void> {
+  private async prepareChild(prepared: PreparedRevision): Promise<void> {
     this.options.artifactStore.prepareRevision(prepared.manifest, prepared.bindingAuthorities, {
       operation_id: prepared.operation.operation_id,
       manifest_record_digest: prepared.manifestRecordDigest,
@@ -172,24 +184,24 @@ export class ConversationRevisionOperationExecutor {
   }
 
   async execute(
-    prepared: PreparedConversationRevisionV1,
+    prepared: PreparedRevision,
     priorHead: Parameters<typeof materializeRevisionHead>[0],
   ): Promise<{ childId: string; committedHere: boolean }> {
-    let events = this.ensurePreparing(prepared.operation);
+    let events = this.ensurePreparing(prepared);
     const dispatch = this.dispatch(prepared, events);
     await this.prepareChild(prepared);
-    if (foldRevisionOperation(prepared.operation, events).state === "preparing") {
+    if (this.fold(prepared, events).state === REVISION.PREPARING) {
       events = [
         ...events,
         this.append(
           prepared.operation,
-          materializeRevisionStateTransition(prepared.operation, events, "preparing", "prepared"),
+          stateEdge(prepared.operation, events, REVISION.PREPARING, REVISION.PREPARED),
         ),
       ];
     }
     runRevisionCrashFault(this.options.revisionFault, "after-prepared");
     const committedHead = materializeRevisionHead(priorHead, prepared.operation);
-    if (foldRevisionOperation(prepared.operation, events).state === "prepared") {
+    if (this.fold(prepared, events).state === REVISION.PREPARED) {
       events = [
         ...events,
         this.append(
@@ -198,7 +210,7 @@ export class ConversationRevisionOperationExecutor {
             prepared.operation,
             events,
             {
-              kind: "head-commit",
+              kind: EVENT_KIND.HEAD_COMMIT,
               authorized_by_action_operation_id: prepared.operation.operation_id,
               effect_action_operation_id: prepared.operation.operation_id,
               prior_head_digest: priorHead.content_digest,
@@ -333,23 +345,29 @@ export class ConversationRevisionOperationExecutor {
     }
   }
 
-  private start(prepared: PreparedConversationRevisionV1, owner: RevisionStartOwnerTokenV1): void {
+  private start(prepared: PreparedRevision, owner: RevisionStartOwnerTokenV1): void {
     const releaseIfTerminal = () => {
       const state = foldRevisionOperation(
         prepared.operation,
         this.options.home.revisions.readEvents(prepared.operation.operation_id),
+        { preparationPlan: prepared.revisionPlan },
       ).state;
-      if (["started", "start_failed", "needs_recovery"].includes(state)) owner.release();
+      if (
+        state === REVISION.STARTED ||
+        state === REVISION.START_FAILED ||
+        state === REVISION.NEEDS_RECOVERY
+      )
+        owner.release();
     };
     let events = this.options.home.revisions.readEvents(prepared.operation.operation_id);
     try {
-      if (foldRevisionOperation(prepared.operation, events).state === "published") {
+      if (this.fold(prepared, events).state === REVISION.PUBLISHED) {
         owner.assertHeld();
         events = [
           ...events,
           this.append(
             prepared.operation,
-            materializeRevisionStateTransition(prepared.operation, events, "published", "starting"),
+            stateEdge(prepared.operation, events, REVISION.PUBLISHED, REVISION.STARTING),
           ),
         ];
       }

@@ -364,6 +364,149 @@ describe("cli help routing", () => {
     }
   });
 
+  test("capability and authority keep JSON stdout machine-parseable", () => {
+    const cases = [
+      {
+        args: ["capability", "list", "--scope", "project", "--offline", "--json"],
+        code: 0,
+        kind: "query",
+      },
+      {
+        args: ["capability", "definitely-unsupported", "--json"],
+        code: 2,
+        kind: "usage-error",
+      },
+      {
+        args: ["authority", "definitely-unsupported", "--json"],
+        code: 2,
+        kind: "usage-error",
+      },
+    ] as const;
+
+    for (const expected of cases) {
+      const result = runCli([...expected.args]);
+      expect(result.code).toBe(expected.code);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain("undefined");
+      const document = JSON.parse(result.stdout) as { kind?: unknown };
+      expect(document.kind).toBe(expected.kind);
+      expect(result.stdout).toBe(`${JSON.stringify(document)}\n`);
+    }
+  });
+
+  test("capability and authority human output never renders undefined sentinels", () => {
+    const cases = [
+      {
+        args: ["capability", "list", "--scope", "project", "--offline"],
+        code: 0,
+        output: "stdout",
+      },
+      { args: ["capability", "definitely-unsupported"], code: 2, output: "stderr" },
+      { args: ["authority", "definitely-unsupported"], code: 2, output: "stderr" },
+    ] as const;
+    for (const expected of cases) {
+      const result = runCli([...expected.args]);
+      expect(result.code).toBe(expected.code);
+      expect(`${result.stdout}\n${result.stderr}`).not.toContain("undefined");
+      if (expected.output === "stdout") {
+        expect(result.stdout).toContain("No capabilities matched.");
+        expect(result.stderr).toBe("");
+      } else {
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toContain("unsupported");
+      }
+    }
+  });
+
+  test("capability request-file failures preserve JSON and human output contracts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-capability-cli-output-"));
+    try {
+      const missing = join(dir, "private-missing-capability.json");
+      const json = runCli(["capability", "install", "--request-file", missing, "--json"]);
+      expect(json.code).toBe(2);
+      expect(json.stderr).toBe("");
+      expect(json.stdout.trim().split("\n")).toHaveLength(1);
+      expect(JSON.parse(json.stdout)).toMatchObject({
+        kind: "usage-error",
+        command: "capability.install",
+        error: { code: "invalid_request" },
+      });
+      expect(json.stdout).not.toMatch(/undefined|ENOENT|at\s+\S+\.ts:\d+/u);
+      expect(json.stdout).not.toContain(dir);
+
+      const human = runCli(["capability", "install", "--request-file", missing]);
+      expect(human.code).toBe(2);
+      expect(human.stdout).toBe("");
+      expect(human.stderr.trim().split("\n")).toHaveLength(1);
+      expect(human.stderr).toContain("capability mutation request could not be read");
+      expect(human.stderr).not.toMatch(/undefined|ENOENT|at\s+\S+\.ts:\d+/u);
+      expect(human.stderr).not.toContain(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("authority file failures preserve the JSON and human CLI output contracts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-authority-cli-output-"));
+    try {
+      const missing = join(dir, "private-missing-authority.json");
+      const json = runCli(
+        [
+          "authority",
+          "grant",
+          "create",
+          "--grant-file",
+          missing,
+          "--idempotency-key",
+          "missing-grant",
+          "--yes",
+          "--json",
+        ],
+        dir,
+      );
+      expect(json.code).toBe(2);
+      expect(json.stderr).toBe("");
+      expect(json.stdout.trim().split("\n")).toHaveLength(1);
+      const document = JSON.parse(json.stdout) as {
+        kind: string;
+        error: { message: string };
+      };
+      expect(document.kind).toBe("usage-error");
+      expect(document.error.message).not.toContain(dir);
+      expect(json.stdout).not.toMatch(/ENOENT|at\s+\S+\.ts:\d+/u);
+
+      const human = runCli(
+        [
+          "authority",
+          "trust",
+          "add",
+          "--scope",
+          "project",
+          "--trust-file",
+          missing,
+          "--idempotency-key",
+          "missing-trust",
+          "--yes",
+        ],
+        dir,
+      );
+      expect(human.code).toBe(2);
+      expect(human.stdout).toBe("");
+      expect(human.stderr.trim().split("\n")).toHaveLength(1);
+      expect(human.stderr).toContain("authority trust file could not be read");
+      expect(human.stderr).not.toContain(dir);
+      expect(human.stderr).not.toMatch(/ENOENT|at\s+\S+\.ts:\d+/u);
+
+      const repair = runCli(["authority", "repair", "--request-file", missing, "--json"], dir);
+      expect(repair.code).toBe(2);
+      expect(repair.stderr).toBe("");
+      expect(JSON.parse(repair.stdout)).toMatchObject({ kind: "usage-error" });
+      expect(repair.stdout).not.toContain(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("`vf --help` prints help with no spurious Unknown command error", () => {
     const { code, stdout, stderr } = runCli(["--help"]);
     expect(code).toBe(0);
@@ -387,6 +530,7 @@ describe("cli help routing", () => {
       ["units", "vf units"],
       ["init", "vf init"],
       ["orchestrate", "vf orchestrate"],
+      ["review", "vf review"],
       ["chat", "vf chat"],
       ["brainstorm", "vf brainstorm"],
       ["tools", "vf tools"],
@@ -659,9 +803,12 @@ describe("server", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src/cli.ts"), "utf8");
     expect(src).toContain("const conversation = buildConversationHttpAuthority({}, host, cwd());");
     expect(src).toContain(
-      "startServerResilient(\n    Number.isFinite(port) ? port : 0,\n    host,\n    conversation,\n  )",
+      "startServerResilient(\n    Number.isFinite(port) ? port : DEFAULT_UI_PORT,\n    host,\n    conversation,\n  )",
     );
-    expect(src).toContain("startServer(Number.isFinite(port) ? port : 0, { host, conversation })");
+    expect(src).toContain(
+      'const port = typeof flags.port === "string" ? Number(flags.port) : DEFAULT_UI_PORT',
+    );
+    expect(src).toContain("return await ui({ dev: true })");
     expect(src).toMatch(/void prev\s*\.stop\(true\)\s*\.then\(\(\) => \{/);
   });
 

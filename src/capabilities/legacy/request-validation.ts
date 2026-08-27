@@ -1,15 +1,11 @@
+import { LEGACY_SOURCES } from "../../actions/capability-manifest-vocabulary-contract.js";
 import { validateIdempotencyKey } from "../../actions/index.js";
 import type { LegacySourceV1 } from "../../actions/legacy-adopt-types.js";
+import { CAPABILITY_SCOPES } from "../../core/capability-contract.js";
 import { CapabilityValidationError, digest, enumeration, exactKeys } from "../wire/primitives.js";
 import type { LegacyAdoptInspectionRequestV1, LegacyAdoptScanRequestV1 } from "./types.js";
 
-const SOURCES: LegacySourceV1[] = [
-  "skill-lock",
-  "tool-managed-evidence",
-  "mcp-managed-sidecar",
-  "hook-sentinel",
-  "role-marker",
-];
+const SOURCES: readonly LegacySourceV1[] = LEGACY_SOURCES;
 
 export function validateLegacyAdoptSources(value: unknown, path: string): LegacySourceV1[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > SOURCES.length)
@@ -48,7 +44,7 @@ export function validateLegacyAdoptInspectionRequest(
   return {
     schema_version: "1.0",
     idempotency_key: validateIdempotencyKey(row.idempotency_key),
-    scope: enumeration(row.scope, ["project", "user"] as const, "$.scope"),
+    scope: enumeration(row.scope, CAPABILITY_SCOPES, "$.scope"),
     legacy_sources: validateLegacyAdoptSources(row.legacy_sources, "$.legacy_sources"),
   };
 }
@@ -66,7 +62,7 @@ export function validateLegacyAdoptScanRequest(value: unknown): LegacyAdoptScanR
       "$.schema_version",
       "unsupported_schema_version",
     );
-  const scope = enumeration(row.scope, ["project", "user"] as const, "$.scope");
+  const scope = enumeration(row.scope, CAPABILITY_SCOPES, "$.scope");
   const scopeIdentityDigest = digest(row.scope_identity_digest, "$.scope_identity_digest");
   return {
     schema_version: "1.0",

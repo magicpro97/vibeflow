@@ -1,4 +1,6 @@
 import { join, resolve } from "node:path";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
 import {
   acquireProcessLock,
   canonicalJsonBytes,
@@ -21,7 +23,10 @@ export type RevisionNativeIdentifierKindV1 =
 
 export interface PrivateProjectorNativeIdentifierBindingV1 {
   schema_version: "1.0";
-  owner_root_locator: { kind: "conversation"; root_session_id: string };
+  owner_root_locator: Extract<
+    PrivateActionRootLocatorV1,
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.CONVERSATION }
+  >;
   identifier_kind: RevisionNativeIdentifierKindV1;
   identifier_utf8: string;
   binding_digest: string;
@@ -44,7 +49,7 @@ function assertBinding(value: unknown): asserts value is PrivateProjectorNativeI
         .join(",") ||
     binding.schema_version !== "1.0" ||
     !binding.owner_root_locator ||
-    binding.owner_root_locator.kind !== "conversation" ||
+    binding.owner_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
     typeof binding.owner_root_locator.root_session_id !== "string" ||
     binding.owner_root_locator.root_session_id.length === 0 ||
     Buffer.byteLength(binding.owner_root_locator.root_session_id, "utf8") > 200 ||
@@ -86,7 +91,7 @@ export class RevisionNativeBindingStore {
     const preimage = {
       schema_version: "1.0" as const,
       owner_root_locator: {
-        kind: "conversation" as const,
+        kind: ACTION_ROOT_LOCATOR_KIND.CONVERSATION,
         root_session_id: input.root_session_id,
       },
       identifier_kind: input.identifier_kind,

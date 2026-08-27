@@ -1,5 +1,17 @@
+import {
+  CAPABILITY_MANIFEST_DEPENDENCY_SCOPES,
+  CAPABILITY_MANIFEST_HEALTH_PROBE_KINDS,
+  CAPABILITY_MANIFEST_HEALTH_RETRIES,
+  CAPABILITY_MANIFEST_ICON_MEDIA_TYPE,
+  CAPABILITY_MANIFEST_INPUT_TYPE,
+  CAPABILITY_MANIFEST_PLATFORM_ARCHES,
+  CAPABILITY_MANIFEST_PLATFORM_LIBCS,
+  CAPABILITY_MANIFEST_PLATFORM_OS,
+  CAPABILITY_MANIFEST_PLATFORM_OSES,
+  CAPABILITY_MANIFEST_SCHEMA_VERSION,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
-import type { EngineName } from "../../actions/types.js";
+import { ENGINES } from "../../core/agent-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import { validateManifestPermission } from "../permissions/scope.js";
 import { parseSemver, validateVersionRange } from "../source/semver.js";
@@ -15,7 +27,7 @@ import {
   rawSha256,
   text,
 } from "../wire/primitives.js";
-import { validateComponent } from "./component-validation.js";
+import { validateComponent, validateComponentShape } from "./component-validation.js";
 import type {
   CapabilityComponentV1,
   CapabilityConflictV1,
@@ -27,7 +39,6 @@ import type {
 } from "./types.js";
 import { inTreePath, validateInputDeclaration, verifyFile } from "./validation-helpers.js";
 
-const ENGINES: EngineName[] = ["claude", "codex", "copilot", "opencode", "antigravity"];
 const VALIDATED_MANIFESTS = new WeakSet<object>();
 
 function assertExactManifestShapes(manifest: CapabilityManifestV1): void {
@@ -56,27 +67,7 @@ function assertExactManifestShapes(manifest: CapabilityManifestV1): void {
     "$.metadata",
   );
   exactKeys(manifest.compatibility, ["vf", "engines"], ["platforms"], "$.compatibility");
-  manifest.components.forEach((component, index) => {
-    const common = ["type", "component_id", "targets", "required"];
-    const fields: Record<string, string[]> = {
-      skill: ["bundle_path", "bundle_sha256"],
-      mcp: ["transport", "executable", "args", "url", "secret_slots"],
-      tool: ["installer", "expected_binary", "version_constraint"],
-      hook: ["event", "vf_handler_id"],
-      role: ["role_spec_path", "role_spec_sha256"],
-      "engine-setting": ["setting_id", "value"],
-    };
-    const extra = fields[component.type];
-    if (!extra)
-      throw new CapabilityValidationError("unknown component type", `$.components[${index}].type`);
-    const optional = component.type === "mcp" ? ["executable", "args", "url", "secret_slots"] : [];
-    exactKeys(
-      component,
-      [...common, ...extra.filter((key) => !optional.includes(key))],
-      optional,
-      `$.components[${index}]`,
-    );
-  });
+  manifest.components.forEach(validateComponentShape);
   manifest.dependencies.forEach((value, index) =>
     exactKeys(
       value,
@@ -142,9 +133,9 @@ function validateMetadata(
   const bytes = verifyFile(files, relative, metadata.icon.sha256, "$.metadata.icon", 256 * 1024);
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const valid =
-    metadata.icon.media_type === "image/png"
+    metadata.icon.media_type === CAPABILITY_MANIFEST_ICON_MEDIA_TYPE.PNG
       ? bytes.byteLength >= 24 && Buffer.from(bytes.subarray(0, 8)).equals(png)
-      : metadata.icon.media_type === "image/webp" &&
+      : metadata.icon.media_type === CAPABILITY_MANIFEST_ICON_MEDIA_TYPE.WEBP &&
         bytes.byteLength >= 16 &&
         Buffer.from(bytes.subarray(0, 4)).toString("ascii") === "RIFF" &&
         Buffer.from(bytes.subarray(8, 12)).toString("ascii") === "WEBP";
@@ -165,16 +156,16 @@ function validatePlatforms(platforms: PlatformConstraintV1[] | undefined): void 
   for (const [index, platform] of platforms.entries()) {
     exactKeys(platform, ["os", "arch", "libc"], [], `$.compatibility.platforms[${index}]`);
     if (
-      !["darwin", "linux", "win32"].includes(platform.os) ||
-      !["arm64", "x64"].includes(platform.arch)
+      !CAPABILITY_MANIFEST_PLATFORM_OSES.includes(platform.os) ||
+      !CAPABILITY_MANIFEST_PLATFORM_ARCHES.includes(platform.arch)
     )
       throw new CapabilityValidationError(
         "unsupported platform tuple",
         `$.compatibility.platforms[${index}]`,
       );
     if (
-      platform.os === "linux"
-        ? ![null, "glibc", "musl"].includes(platform.libc)
+      platform.os === CAPABILITY_MANIFEST_PLATFORM_OS.LINUX
+        ? platform.libc !== null && !CAPABILITY_MANIFEST_PLATFORM_LIBCS.includes(platform.libc)
         : platform.libc !== null
     )
       throw new CapabilityValidationError(
@@ -218,7 +209,7 @@ function validateDependencies(values: CapabilityDependencyV1[], manifestId: stri
         `$.dependencies[${index}]`,
       );
     validateVersionRange(dependency.version_range);
-    if (!["same", "user-prerequisite"].includes(dependency.required_scope))
+    if (!CAPABILITY_MANIFEST_DEPENDENCY_SCOPES.includes(dependency.required_scope))
       throw new CapabilityValidationError(
         "invalid dependency scope",
         `$.dependencies[${index}].required_scope`,
@@ -274,18 +265,12 @@ function validateHealth(manifest: CapabilityManifestV1, components: ReadonlySet<
         "health references an unknown component",
         `$.health[${index}].component_ids`,
       );
-    if (
-      ![
-        "binary-version",
-        "file-hash",
-        "mcp-handshake",
-        "hook-selftest",
-        "role-parse",
-        "engine-config",
-      ].includes(health.kind)
-    )
+    if (!CAPABILITY_MANIFEST_HEALTH_PROBE_KINDS.includes(health.kind))
       throw new CapabilityValidationError("unknown health probe kind", `$.health[${index}].kind`);
-    if (typeof health.required !== "boolean" || ![0, 1, 2].includes(health.retries))
+    if (
+      typeof health.required !== "boolean" ||
+      !CAPABILITY_MANIFEST_HEALTH_RETRIES.includes(health.retries)
+    )
       throw new CapabilityValidationError(
         "invalid health requirement/retry fields",
         `$.health[${index}]`,
@@ -300,7 +285,7 @@ export function validateCapabilityManifest(
   files: ReadonlyMap<string, Uint8Array>,
 ): CapabilityManifestV1 {
   assertExactManifestShapes(manifest);
-  if (manifest.schema_version !== "1.0")
+  if (manifest.schema_version !== CAPABILITY_MANIFEST_SCHEMA_VERSION)
     throw new CapabilityValidationError(
       "unsupported manifest schema",
       "$.schema_version",
@@ -334,7 +319,7 @@ export function validateCapabilityManifest(
     const declaration = inputs.get(ref.id);
     if (!declaration)
       throw new CapabilityValidationError("template references an undeclared input", ref.path);
-    if (declaration.type === "secret-handle")
+    if (declaration.type === CAPABILITY_MANIFEST_INPUT_TYPE.SECRET_HANDLE)
       throw new CapabilityValidationError(
         "secret handles may only be delivered through MCP secret_slots",
         ref.path,

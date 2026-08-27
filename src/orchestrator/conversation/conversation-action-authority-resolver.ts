@@ -1,6 +1,8 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
   type ActionAuthorityResolverV1,
   ActionAuthorityStaleError,
+  type ActionOperationDomainTerminalState,
   deriveOperationId,
   materializeDispatchPreparationProof,
   materializeDomainPreparedProof,
@@ -8,10 +10,19 @@ import {
   materializeProposalPublicationProof,
   materializeReviewAuthorityProof,
 } from "../../actions/index.js";
+import {
+  ACTION_DOMAIN,
+  ACTOR_KIND,
+  type ActionDomain,
+} from "../../actions/public-action-contract.js";
 import { isAgentProposalBrowserController } from "../../actions/store-rules.js";
 import { digestV1 } from "../../durability/index.js";
 import { conversationActionAuthorityHead } from "./conversation-action-planner.js";
 import type { ConversationActionReceiptStore } from "./conversation-action-receipt-store.js";
+import {
+  AGENT_ACTION_CANDIDATE_REVIEW_PHASE,
+  type AgentActionCandidateReviewPhaseV1,
+} from "./conversation-agent-action-candidate-contract.js";
 import type { ConversationRevisionStore } from "./revision-store.js";
 
 interface PreparedAuthorityV1 {
@@ -20,7 +31,7 @@ interface PreparedAuthorityV1 {
 }
 
 interface TerminalAuthorityV1 extends PreparedAuthorityV1 {
-  outcome: "succeeded" | "failed" | "needs_recovery";
+  outcome: ActionOperationDomainTerminalState;
 }
 
 export class ConversationActionAuthorityResolverV1 implements ActionAuthorityResolverV1 {
@@ -51,10 +62,10 @@ export class ConversationActionAuthorityResolverV1 implements ActionAuthorityRes
     const action = this.receipts.readPlan(proposalId)?.native_plan.action;
     return action &&
       [
-        "conversation.abandon_revision_operation",
-        "conversation.retry_revision_operation",
-        "conversation.reconcile_revision_operation",
-      ].includes(action.type) &&
+        HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION,
+        HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION,
+        HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION,
+      ].some((candidate) => candidate === action.type) &&
       "revision_operation_id" in action
       ? action.revision_operation_id
       : null;
@@ -129,7 +140,7 @@ export class ConversationActionAuthorityResolverV1 implements ActionAuthorityRes
   review: ActionAuthorityResolverV1["review"] = ({ proposal, authority, now }) => {
     const root = proposal.base.root_session_id;
     if (!root) throw new Error("conversation action root is absent");
-    if (proposal.requested_by.kind === "agent") {
+    if (proposal.requested_by.kind === ACTOR_KIND.AGENT) {
       if (!isAgentProposalBrowserController(proposal, authority))
         throw new ActionAuthorityStaleError(now, "controller-changed");
     } else {
@@ -240,13 +251,13 @@ export function multiplexActionAuthorityResolvers(
     | ((input: {
         proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
         now: string;
-        phase: "review" | "dispatch";
+        phase: AgentActionCandidateReviewPhaseV1;
         approval_id: string | null;
       }) => string)
     | undefined,
 ): ActionAuthorityResolverV1 {
-  const selected = (domain: "conversation" | "capability") => {
-    if (domain === "conversation") return conversation;
+  const selected = (domain: ActionDomain) => {
+    if (domain === ACTION_DOMAIN.CONVERSATION) return conversation;
     const resolver = capability();
     if (!resolver) throw new Error("capability action authority resolver is unavailable");
     return resolver;
@@ -254,10 +265,10 @@ export function multiplexActionAuthorityResolvers(
   const validateAgentSource = (input: {
     proposal: Parameters<ActionAuthorityResolverV1["review"]>[0]["proposal"];
     now: string;
-    phase: "review" | "dispatch";
+    phase: AgentActionCandidateReviewPhaseV1;
     approval_id: string | null;
   }): string | null => {
-    if (input.proposal.requested_by.kind !== "agent") return null;
+    if (input.proposal.requested_by.kind !== ACTOR_KIND.AGENT) return null;
     const validate = agentReview();
     if (!validate) throw new Error("agent proposal review source validator is absent");
     return validate(input);
@@ -266,13 +277,17 @@ export function multiplexActionAuthorityResolvers(
     validateProposalPublication: (input) =>
       selected(input.proposal.domain).validateProposalPublication(input),
     review: (input) => {
-      validateAgentSource({ ...input, phase: "review", approval_id: null });
+      validateAgentSource({
+        ...input,
+        phase: AGENT_ACTION_CANDIDATE_REVIEW_PHASE.REVIEW,
+        approval_id: null,
+      });
       return selected(input.proposal.domain).review(input);
     },
     prevalidateDispatch: (input) => {
       validateAgentSource({
         ...input,
-        phase: "dispatch",
+        phase: AGENT_ACTION_CANDIDATE_REVIEW_PHASE.DISPATCH,
         approval_id: input.approval.approval_id,
       });
       selected(input.proposal.domain).prevalidateDispatch?.(input);
@@ -280,7 +295,7 @@ export function multiplexActionAuthorityResolvers(
     prepareDispatch: (input) => {
       validateAgentSource({
         ...input,
-        phase: "dispatch",
+        phase: AGENT_ACTION_CANDIDATE_REVIEW_PHASE.DISPATCH,
         approval_id: input.approval.approval_id,
       });
       return selected(input.proposal.domain).prepareDispatch(input);
@@ -288,7 +303,7 @@ export function multiplexActionAuthorityResolvers(
     reserveDispatch: (input) => {
       const producerAuthorityDigest = validateAgentSource({
         ...input,
-        phase: "dispatch",
+        phase: AGENT_ACTION_CANDIDATE_REVIEW_PHASE.DISPATCH,
         approval_id: input.approval.approval_id,
       });
       const reserve = selected(input.proposal.domain).reserveDispatch;

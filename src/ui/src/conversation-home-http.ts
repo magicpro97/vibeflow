@@ -1,24 +1,13 @@
+import { UI_LAN_TOKEN_HEADER } from "../../core/ui-cli-contract.js";
+import { readUiPageToken } from "./browser-ui-token.js";
+import {
+  HOME_API_ERROR_CONTRACT,
+  type HomeApiErrorContract,
+  parseHomeApiError,
+} from "./conversation-home-error-boundary.js";
 import type { HomeApiErrorBody } from "./conversation-home-types.js";
 
-interface BrowserDocumentGlobal {
-  document: { querySelector(selector: string): { content?: string } | null };
-}
-
-function hasBrowserDocument(value: unknown): value is BrowserDocumentGlobal {
-  if (typeof value !== "object" || value === null || !("document" in value)) return false;
-  const document = value.document;
-  return (
-    typeof document === "object" &&
-    document !== null &&
-    "querySelector" in document &&
-    typeof document.querySelector === "function"
-  );
-}
-
-const browserGlobal: unknown = globalThis;
-const CSRF = hasBrowserDocument(browserGlobal)
-  ? (browserGlobal.document.querySelector('meta[name="vf-token"]')?.content ?? "")
-  : "";
+const CSRF = readUiPageToken();
 
 export class ConversationHomeApiError extends Error {
   constructor(
@@ -30,16 +19,22 @@ export class ConversationHomeApiError extends Error {
   }
 }
 
+type ResponseParser<T> = (value: unknown) => T;
+
 function headers(method: "GET" | "PATCH" | "POST"): Record<string, string> {
   const write = method !== "GET";
   return {
     "content-type": "application/json",
     ...(write ? {} : { "cache-control": "no-store" }),
-    ...(write && CSRF ? { "x-vibeflow-token": CSRF } : {}),
+    ...(write && CSRF ? { [UI_LAN_TOKEN_HEADER]: CSRF } : {}),
   };
 }
 
-async function decode<T>(response: Response): Promise<T> {
+async function decode<T>(
+  response: Response,
+  errorContract: HomeApiErrorContract,
+  parser?: ResponseParser<T>,
+): Promise<T> {
   let body: unknown;
   try {
     body = await response.json();
@@ -50,23 +45,37 @@ async function decode<T>(response: Response): Promise<T> {
       retryable: response.status >= 500,
     });
   }
-  if (response.ok) return body as T;
-  const row = body as { error?: HomeApiErrorBody; code?: string; message?: string };
-  throw new ConversationHomeApiError(response.status, {
-    code: row.error?.code ?? row.code ?? "request_failed",
-    message: row.error?.message ?? row.message ?? `Request failed (${response.status}).`,
-    correlation_id: row.error?.correlation_id,
-    retryable: row.error?.retryable ?? response.status >= 500,
-    recovery_action: row.error?.recovery_action ?? null,
-    details: row.error?.details,
-  });
+  if (response.ok) {
+    if (!parser) return body as T;
+    try {
+      return parser(body);
+    } catch {
+      throw new ConversationHomeApiError(response.status, {
+        code: "invalid_response",
+        message: "VibeFlow returned an unreadable response.",
+        retryable: response.status >= 500,
+      });
+    }
+  }
+  try {
+    throw new ConversationHomeApiError(response.status, parseHomeApiError(body, errorContract));
+  } catch (error) {
+    if (error instanceof ConversationHomeApiError) throw error;
+    throw new ConversationHomeApiError(response.status, {
+      code: "invalid_response",
+      message: "VibeFlow returned an unreadable response.",
+      retryable: response.status >= 500,
+    });
+  }
 }
 
 export async function conversationHomeRequest<T>(
   method: "GET" | "PATCH" | "POST",
   path: string,
-  body?: unknown,
-  signal?: AbortSignal,
+  body: unknown | undefined,
+  signal: AbortSignal | undefined,
+  parser: ResponseParser<T> | undefined,
+  errorContract: HomeApiErrorContract,
 ): Promise<T> {
   const response = await fetch(path, {
     method,
@@ -74,5 +83,5 @@ export async function conversationHomeRequest<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
-  return decode<T>(response);
+  return decode<T>(response, errorContract, parser);
 }

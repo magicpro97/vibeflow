@@ -538,6 +538,7 @@ describe("publication recovery hardening", () => {
   });
 
   test("keeps legacy publication rows readable but requires paired successor evidence", () => {
+    const expectedOperationId = "publication-payload-validation";
     const legacy = {
       kind: "health-inventory-prepared" as const,
       generation_id: `vf-generation-${"1".repeat(64)}`,
@@ -545,29 +546,38 @@ describe("publication recovery hardening", () => {
       health_inventory_digest: runtimeDigest("legacy-inventory"),
       expected_health_pointer_digest: null,
     };
-    expect(() => validateCapabilityWalPayload(legacy)).not.toThrow();
+    expect(() => validateCapabilityWalPayload(legacy, expectedOperationId)).not.toThrow();
     expect(() =>
-      validateCapabilityWalPayload({
-        ...legacy,
-        next_health_pointer_epoch: 0,
-      }),
+      validateCapabilityWalPayload(
+        {
+          ...legacy,
+          next_health_pointer_epoch: 0,
+        },
+        expectedOperationId,
+      ),
     ).toThrow(/prior epoch, next epoch, and next digest/i);
     expect(() =>
-      validateCapabilityWalPayload({
-        ...legacy,
-        expected_health_pointer_epoch: 0,
-        next_health_pointer_epoch: 1,
-        next_health_pointer_digest: runtimeDigest("nullability-mismatch"),
-      }),
+      validateCapabilityWalPayload(
+        {
+          ...legacy,
+          expected_health_pointer_epoch: 0,
+          next_health_pointer_epoch: 1,
+          next_health_pointer_digest: runtimeDigest("nullability-mismatch"),
+        },
+        expectedOperationId,
+      ),
     ).toThrow(/prior epoch\/digest nullability differs/i);
     expect(() =>
-      validateCapabilityWalPayload({
-        ...legacy,
-        expected_health_pointer_digest: runtimeDigest("prior-pointer"),
-        expected_health_pointer_epoch: 3,
-        next_health_pointer_epoch: 5,
-        next_health_pointer_digest: runtimeDigest("non-monotonic-pointer"),
-      }),
+      validateCapabilityWalPayload(
+        {
+          ...legacy,
+          expected_health_pointer_digest: runtimeDigest("prior-pointer"),
+          expected_health_pointer_epoch: 3,
+          next_health_pointer_epoch: 5,
+          next_health_pointer_digest: runtimeDigest("non-monotonic-pointer"),
+        },
+        expectedOperationId,
+      ),
     ).toThrow(/successor epoch is not monotonic/i);
   });
 

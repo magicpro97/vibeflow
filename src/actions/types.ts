@@ -1,24 +1,68 @@
+import type { Engine } from "../core/agent-contract.js";
+import type { CapabilityScope } from "../core/capability-contract.js";
+import type { HostActionKind } from "./host-action-contract.js";
 import type { HostActionV1 } from "./internal-action-types.js";
+import type { ActionApprovalChallengeState } from "./persistence-contract.js";
 import type {
   ActionTargetBindingV1,
   HostRenderedPreviewV1,
   PackagePinV1,
 } from "./preview-types.js";
+import {
+  type ACTION_AUTHORITY_EVENT_KIND,
+  type ACTION_OPERATION_STATE,
+  type ACTION_PRODUCER_REQUEST_BINDING_KIND,
+  ACTION_ROOT_LOCATOR_KIND,
+  type ActionOperationReviewDecisionState,
+  type ActionOperationState,
+} from "./protocol-contract.js";
+import type {
+  ACTION_EXPECTED_SOURCE_MODE,
+  ActionApprovalChallengeClass,
+  ActionAuthorityBindingMode,
+  ActionDecision,
+  ActionDomain,
+  ActionEffectClass,
+  ActionPlanningMode,
+  ActionPlanningNetworkRead,
+  ActionRisk,
+  ActorKind,
+  ChallengeClass,
+  CredentialClass,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+  Reversibility,
+} from "./public-action-contract.js";
+import type {
+  ACTION_PLANNING_MODE,
+  ACTION_PLANNING_NETWORK_READ_VALUE,
+} from "./public-action-contract.js";
+import type { RecoveryAction } from "./public-error-contract.js";
+export type { ActionOperationState } from "./protocol-contract.js";
+export type { HostActionKind } from "./host-action-contract.js";
+export type { RecoveryAction } from "./public-error-contract.js";
+export type { CapabilityScope } from "../core/capability-contract.js";
 import type { BrowserHostActionRequestV1, HostActionRequestV1 } from "./request-types.js";
 
 export type * from "./internal-action-types.js";
 export type * from "./preview-types.js";
 export type { BrowserHostActionRequestV1, HostActionRequestV1 } from "./request-types.js";
+export type {
+  ActionAuthorityBindingMode,
+  ActionDecision,
+  ActionDomain,
+  ActionEffectClass,
+  ActionPlanningMode,
+  ActionPlanningNetworkRead,
+  ActionRisk,
+  ActorKind,
+  ChallengeClass,
+  CredentialClass,
+  Reversibility,
+} from "./public-action-contract.js";
 
 export type JsonScalar = string | number | boolean | null;
 export type JsonValue = JsonScalar | JsonValue[] | { [key: string]: JsonValue };
 
-export type ActorKind = "human-browser" | "human-cli" | "agent" | "system-recovery";
-export type CredentialClass =
-  | "loopback-session"
-  | "interactive-tty"
-  | "automation-grant"
-  | "recovery";
 export interface PublicActor {
   kind: ActorKind;
   public_actor_id: string;
@@ -26,7 +70,7 @@ export interface PublicActor {
 }
 
 export interface ActionRequestAuthorityV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   principal_digest: string;
   authority_scope_digest: string;
   control_session_digest: string;
@@ -34,49 +78,18 @@ export interface ActionRequestAuthorityV1 {
   actor: PublicActor;
 }
 
-export type CapabilityScope = "project" | "user";
-export type EngineName = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
-export type HostActionKind =
-  | "conversation.add_participant"
-  | "conversation.remove_participant"
-  | "conversation.update_participant"
-  | "conversation.update_settings"
-  | "conversation.continue_message"
-  | "conversation.select_lineage_head"
-  | "conversation.associate_lineages"
-  | "conversation.publish_suspected_literal"
-  | "conversation.stop_operation"
-  | "conversation.abandon_revision_operation"
-  | "conversation.retry_revision_operation"
-  | "conversation.reconcile_revision_operation"
-  | "context.compact"
-  | "capability.install"
-  | "capability.update"
-  | "capability.configure"
-  | "capability.retarget"
-  | "capability.remove"
-  | "capability.rollback_scope"
-  | "capability.restore_package"
-  | "capability.repair"
-  | "capability.adopt"
-  | "grant.create"
-  | "grant.renew"
-  | "grant.revoke"
-  | "policy.update_authority"
-  | "secret.revoke"
-  | "registry.trust_key"
-  | "authority.repair";
-
+/** @deprecated Prefer the shared `Engine` contract for new code. */
+export type EngineName = Engine;
 export type ExpectedActionSourceV1 =
   | {
-      mode: "writable-revision";
+      mode: typeof ACTION_EXPECTED_SOURCE_MODE.WRITABLE_REVISION;
       conversation_id: string;
       revision_id: string;
       last_seq: number;
       conversation_lock_digest: string;
     }
   | {
-      mode: "lineage-recovery";
+      mode: typeof ACTION_EXPECTED_SOURCE_MODE.LINEAGE_RECOVERY;
       root_session_id: string;
       conversation_id: string;
       revision_id: string;
@@ -87,7 +100,7 @@ export type ExpectedActionSourceV1 =
     };
 
 export interface ActionProposalRequestV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   idempotency_key: string;
   anchor_event_id: string | null;
   expected: ExpectedActionSourceV1;
@@ -95,50 +108,55 @@ export interface ActionProposalRequestV1 {
 }
 
 export type PrivateActionRootLocatorV1 =
-  | { kind: "conversation"; root_session_id: string }
-  | { kind: "capability"; scope: CapabilityScope; scope_identity_digest: string }
-  | { kind: "recovery-bootstrap"; bootstrap_identity_digest: string };
-export type ActionProposalProducerRequestBindingV1 =
-  | { kind: "canonical-action-request"; digest: string }
-  | { kind: "recovery-bootstrap-repair-plan"; digest: string };
-export type ActionPlanningOptionsV1 =
-  | { mode: "durable"; network_read: "ordinary-host-policy" }
-  | { mode: "transient"; network_read: "forbid" | "allow-if-granted" };
-export type ActionRisk = "low" | "medium" | "high" | "critical";
-export type ActionEffectClass =
-  | "pure-local-read"
-  | "local-read-with-cache"
-  | "network-read"
-  | "process-probe"
-  | "project-write"
-  | "user-write"
-  | "external-compensatable"
-  | "external-irreversible";
-export type Reversibility = "reversible" | "compensatable" | "manual" | "irreversible";
-export type RecoveryAction =
-  | "retry"
-  | "edit"
-  | "refresh-proposal"
-  | "restart-pagination"
-  | "complete-challenge"
-  | "select-lineage-head"
-  | "rebuild-catalog"
-  | "resume-by-id"
-  | "inspect-trace"
-  | "resolve-again"
-  | "rollback"
-  | "repair"
-  | "repair-authority"
-  | "verified-abandon"
-  | "reconcile-revision"
-  | "adopt"
-  | "renew-grant"
-  | "authorize-source"
-  | "disable"
-  | "retarget"
-  | "complete-manual-step"
-  | "export-redacted-diagnostics";
+  | { kind: typeof ACTION_ROOT_LOCATOR_KIND.CONVERSATION; root_session_id: string }
+  | {
+      kind: typeof ACTION_ROOT_LOCATOR_KIND.CAPABILITY;
+      scope: CapabilityScope;
+      scope_identity_digest: string;
+    }
+  | {
+      kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP;
+      bootstrap_identity_digest: string;
+    };
+export type NonRecoveryActionRootLocatorV1 = Exclude<
+  PrivateActionRootLocatorV1,
+  { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+>;
 
+export function isNonRecoveryActionRootLocatorV1(
+  locator: unknown,
+): locator is NonRecoveryActionRootLocatorV1 {
+  if (!locator || typeof locator !== "object" || Array.isArray(locator)) return false;
+  const kind = (locator as { kind?: unknown }).kind;
+  return (
+    kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION || kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY
+  );
+}
+
+export type ActionProposalProducerRequestBindingV1 =
+  | {
+      kind: typeof ACTION_PRODUCER_REQUEST_BINDING_KIND.CANONICAL_ACTION_REQUEST;
+      digest: string;
+    }
+  | {
+      kind: typeof ACTION_PRODUCER_REQUEST_BINDING_KIND.RECOVERY_BOOTSTRAP_REPAIR_PLAN;
+      digest: string;
+    };
+export type ActionPlanningOptionsV1 =
+  | {
+      mode: Extract<ActionPlanningMode, typeof ACTION_PLANNING_MODE.DURABLE>;
+      network_read: Extract<
+        ActionPlanningNetworkRead,
+        typeof ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY
+      >;
+    }
+  | {
+      mode: Extract<ActionPlanningMode, typeof ACTION_PLANNING_MODE.TRANSIENT>;
+      network_read: Exclude<
+        ActionPlanningNetworkRead,
+        typeof ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY
+      >;
+    };
 export interface ActionProposalBaseV1 {
   root_session_id: string | null;
   conversation_id: string | null;
@@ -153,13 +171,13 @@ export interface ActionProposalBaseV1 {
   capability_lock_digest: string | null;
   capability_parent_generation_digests: string[];
   user_prerequisites: UserScopePrerequisiteBindingV1[];
-  authority_binding_mode: "current" | "recovery-checkpoint";
+  authority_binding_mode: ActionAuthorityBindingMode;
   authority_epoch: number;
   authority_head_digest: string;
   repair_authorization_binding_digest: string | null;
 }
 export interface UserScopePrerequisiteBindingV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   user_scope_identity_digest: string;
   package_id: string;
   version: string;
@@ -174,10 +192,10 @@ export interface UserScopePrerequisiteBindingV1 {
   expires_at: string;
 }
 export interface ActionProposalDraftV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   idempotency_key: string;
   origin_event_id: string | null;
-  domain: "conversation" | "capability";
+  domain: ActionDomain;
   action_root_locator: PrivateActionRootLocatorV1;
   producer_request_binding: ActionProposalProducerRequestBindingV1;
   planning_options: ActionPlanningOptionsV1;
@@ -206,14 +224,8 @@ export interface ActionProposalV1 extends ActionProposalDraftV1 {
   proposal_digest: string;
 }
 
-export type ChallengeClass =
-  | "normal-confirm"
-  | "fresh-user-scope"
-  | "public-literal"
-  | "automation-grant"
-  | "recovery-tty";
 export interface ActionApprovalV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   approval_id: string;
   proposal_id: string;
   proposal_digest: string;
@@ -232,33 +244,22 @@ export interface ActionApprovalV1 {
   credential_class: CredentialClass;
   challenge_class: ChallengeClass;
   challenge_digest: string | null;
-  decision: "approved" | "denied";
+  decision: ActionDecision;
   decided_at: string;
   expires_at: string;
   approval_digest: string;
 }
 
-export type ActionOperationState =
-  | "pending_review"
-  | "approved"
-  | "committing"
-  | "succeeded"
-  | "failed"
-  | "denied"
-  | "canceled"
-  | "expired"
-  | "stale"
-  | "needs_recovery";
 export type ActionAuthorityPayloadV1 =
-  | { kind: "proposal-created"; proposal: ActionProposalV1 }
+  | { kind: typeof ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED; proposal: ActionProposalV1 }
   | {
-      kind: "approval-decision";
-      from: "pending_review";
-      to: "approved" | "denied";
+      kind: typeof ACTION_AUTHORITY_EVENT_KIND.APPROVAL_DECISION;
+      from: typeof ACTION_OPERATION_STATE.PENDING_REVIEW;
+      to: ActionOperationReviewDecisionState;
       approval: ActionApprovalV1;
     }
   | {
-      kind: "state-transition";
+      kind: typeof ACTION_AUTHORITY_EVENT_KIND.STATE_TRANSITION;
       from: ActionOperationState;
       to: ActionOperationState;
       operation_id: string | null;
@@ -267,7 +268,7 @@ export type ActionAuthorityPayloadV1 =
       reason_code: string | null;
     };
 export interface ActionAuthorityEventV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   proposal_id: string;
   sequence: number;
   previous_event_digest: string | null;
@@ -286,13 +287,13 @@ export interface ActionAuthoritySnapshotV1 {
 }
 
 export interface ActionDispatchRecordV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   operation_id: string;
   proposal_id: string;
   proposal_digest: string;
   approval_id: string;
   approval_digest: string;
-  domain: "conversation" | "capability";
+  domain: ActionDomain;
   action_type: HostActionKind;
   action_root_locator: PrivateActionRootLocatorV1;
   execution_object_closure_digest: string | null;
@@ -302,18 +303,18 @@ export interface ActionDispatchRecordV1 {
   dispatch_record_digest: string;
 }
 export interface ApprovalChallengeFrameV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   challenge_id: string;
   sequence: number;
   previous_frame_digest: string | null;
   proposal_id: string;
   proposal_digest: string;
-  challenge_class: "fresh-user-scope" | "public-literal";
+  challenge_class: ActionApprovalChallengeClass;
   principal_digest: string;
   control_session_digest: string;
   csrf_epoch_digest: string;
   response_hmac_sha256: string;
-  state: "created" | "failed-attempt" | "consumed" | "expired" | "locked";
+  state: ActionApprovalChallengeState;
   failed_attempts: number;
   approval_decided_by: PublicActor | null;
   approval_expires_at: string | null;

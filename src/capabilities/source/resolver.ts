@@ -1,3 +1,5 @@
+import type { CapabilityManifestDependencyScope } from "../../actions/capability-manifest-vocabulary-contract.js";
+import { CAPABILITY_PACKAGE_PIN_TRUST } from "../../actions/capability-security-contract.js";
 import { CapabilityValidationError, bytewise, packageId } from "../wire/primitives.js";
 import { validateImmutablePackagePin } from "./pins.js";
 import {
@@ -24,7 +26,7 @@ export interface ResolutionResultV1 {
   pins: PackagePinV1[];
   dependency_bindings: Array<{
     from_package_id: string;
-    required_scope: "same" | "user-prerequisite";
+    required_scope: CapabilityManifestDependencyScope;
     package_id: string;
     version: string;
     content_sha256: string;
@@ -176,7 +178,11 @@ export function resolveDependencies(options: {
   }
   assertNoDuplicateVersionContent(options.candidates);
   const allowedTrust = new Set<PackagePinV1["trust"]>(
-    options.allowed_trust ?? ["verified", "source-pinned", "legacy-verified"],
+    options.allowed_trust ?? [
+      CAPABILITY_PACKAGE_PIN_TRUST.VERIFIED,
+      CAPABILITY_PACKAGE_PIN_TRUST.SOURCE_PINNED,
+      CAPABILITY_PACKAGE_PIN_TRUST.LEGACY_VERIFIED,
+    ],
   );
   const locked = new Map((options.locked_pins ?? []).map((pin) => [pin.id, pin]));
   const constraints = new Map<string, string[]>();

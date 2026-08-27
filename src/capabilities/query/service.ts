@@ -1,8 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
+import { PUBLIC_RECOVERY_ACTION } from "../../actions/public-error-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import {
+  CAPABILITY_STATUS,
+  type CapabilityScope,
+  type CapabilityStatusV1,
+} from "../../core/capability-contract.js";
 import { canonicalJson, digestV1, privateFileBytes } from "../../durability/index.js";
 import type { CapabilityEffectBrokerV1 } from "../adapters/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { CapabilityRuntimeAuthorityReaderV1 } from "../operations/types.js";
 import {
   capabilityHealthCurrentPath,
@@ -11,12 +17,11 @@ import {
 } from "../storage/paths.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
 import type { CapabilityHealthCurrentV1, CapabilityHealthInventoryV1 } from "../storage/types.js";
-import type { CapabilityLockedTargetV1 } from "../wire/lock.js";
+import { CAPABILITY_LOCK_TARGET_STATE, type CapabilityLockedTargetV1 } from "../wire/lock.js";
 import type {
   CapabilityBrowserDetailResponseV1,
   CapabilityQueryItemV1,
   CapabilityQueryResponseV1,
-  CapabilityStatusV1,
 } from "../wire/query.js";
 import {
   StaleCapabilityCursorErrorV1,
@@ -53,11 +58,14 @@ export class CapabilityQueryServiceV1 {
     if (request.scope !== this.options.storage.paths.scope)
       throw new CapabilityRuntimeError(
         "capability query scope is not owned by this service instance",
-        "authorization-mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
       );
     const status = this.options.storage.readStatus();
     if (status.state === "corrupt")
-      throw new CapabilityRuntimeError("capability lock is corrupt", "scope-needs-recovery");
+      throw new CapabilityRuntimeError(
+        "capability lock is corrupt",
+        CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_NEEDS_RECOVERY,
+      );
     const authority = this.options.authority.read(request.scope);
     const discovery =
       request.view === "search" || request.view === "detail"
@@ -159,12 +167,12 @@ export class CapabilityQueryServiceV1 {
     });
   }
 
-  status(input: { scope: "project" | "user"; package_id?: string }): CapabilityQueryResponseV1 {
+  status(input: { scope: CapabilityScope; package_id?: string }): CapabilityQueryResponseV1 {
     return this.query({ view: "status", ...input });
   }
 
   discover(input: {
-    scope: "project" | "user";
+    scope: CapabilityScope;
     query?: string;
     engines?: import("../../actions/types.js").EngineName[];
     cursor?: string | null;
@@ -201,11 +209,12 @@ export class CapabilityQueryServiceV1 {
       });
       const required = targets.filter((target) => target.required);
       const evaluated = required.length > 0 ? required : targets;
-      const bad = evaluated.find((target) => target.status !== "ready");
+      const bad = evaluated.find((target) => target.status !== CAPABILITY_STATUS.READY);
       const optionalBad = targets.some(
-        (target) => !evaluated.includes(target) && target.status !== "ready",
+        (target) => !evaluated.includes(target) && target.status !== CAPABILITY_STATUS.READY,
       );
-      const status: CapabilityStatusV1 = bad?.status ?? (optionalBad ? "degraded" : "ready");
+      const status: CapabilityStatusV1 =
+        bad?.status ?? (optionalBad ? CAPABILITY_STATUS.DEGRADED : CAPABILITY_STATUS.READY);
       return {
         package_id: entry.package_id,
         discovery_entry_digest: null,
@@ -222,7 +231,8 @@ export class CapabilityQueryServiceV1 {
         cache_status: "available" as const,
         generation_id: lock?.generation_id ?? null,
         targets,
-        recovery_actions: status === "drifted" ? ["repair" as const] : [],
+        recovery_actions:
+          status === CAPABILITY_STATUS.DRIFTED ? [PUBLIC_RECOVERY_ACTION.REPAIR] : [],
       };
     });
   }
@@ -233,7 +243,7 @@ export class CapabilityQueryServiceV1 {
         capabilityObjectPath(this.options.storage.paths, projection.projection_digest),
         512 * 1024,
       );
-      if (!bytes) return "blocked";
+      if (!bytes) return CAPABILITY_STATUS.BLOCKED;
       const binding = parseStrictJson(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as {
         ownership_key?: unknown;
         expected_postimage_sha256?: unknown;
@@ -242,15 +252,18 @@ export class CapabilityQueryServiceV1 {
         binding.ownership_key !== projection.ownership_key ||
         typeof binding.expected_postimage_sha256 !== "string"
       )
-        return "blocked";
+        return CAPABILITY_STATUS.BLOCKED;
       const observed = this.options.broker.inspect({
         ownership_key: projection.ownership_key,
         kind: "managed-registration",
         public_target: projection.ownership_key,
       });
-      if (observed.content_sha256 !== binding.expected_postimage_sha256) return "drifted";
+      if (observed.content_sha256 !== binding.expected_postimage_sha256)
+        return CAPABILITY_STATUS.DRIFTED;
     }
-    return target.state === "degraded" ? "degraded" : "ready";
+    return target.state === CAPABILITY_LOCK_TARGET_STATE.DEGRADED
+      ? CAPABILITY_STATUS.DEGRADED
+      : CAPABILITY_STATUS.READY;
   }
 
   private discoveryItems(
@@ -283,14 +296,20 @@ export class CapabilityQueryServiceV1 {
         package_pin_digest: entry.pin.pin_digest,
         content_sha256: entry.pin.content_sha256,
         scope: null,
-        status: entry.scan_status === "failed" ? "blocked" : entry.stale ? "stale" : "absent",
+        status:
+          entry.scan_status === "failed"
+            ? CAPABILITY_STATUS.BLOCKED
+            : entry.stale
+              ? CAPABILITY_STATUS.STALE
+              : CAPABILITY_STATUS.ABSENT,
         source_kind: entry.pin.source.kind,
         source_trust: entry.pin.trust,
         scan_status: entry.scan_status,
         cache_status: entry.cache_status,
         generation_id: null,
         targets: [],
-        recovery_actions: entry.scan_status === "failed" ? ["resolve-again"] : [],
+        recovery_actions:
+          entry.scan_status === "failed" ? [PUBLIC_RECOVERY_ACTION.RESOLVE_AGAIN] : [],
       }));
   }
 
@@ -304,7 +323,7 @@ export class CapabilityQueryServiceV1 {
       package_pin_digest: null,
       content_sha256: null,
       scope: null,
-      status: "absent",
+      status: CAPABILITY_STATUS.ABSENT,
       source_kind: null,
       source_trust: null,
       scan_status: "not-applicable",

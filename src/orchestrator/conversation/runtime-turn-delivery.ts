@@ -1,3 +1,4 @@
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { LiveConversation } from "./lifecycle-gate.js";
 import { projectConversationEvents } from "./policy-registry.js";
 import type { ConversationRuntimeOptions } from "./runtime-options.js";
@@ -9,6 +10,11 @@ export async function prepareRuntimeConversationTurn(
   live: LiveConversation,
   request: ConversationTurnPreparationRequestV1,
 ) {
+  const bindingIndex = live.manifest.bindings.findIndex(
+    (binding) => binding.participant_id === request.participant_id,
+  );
+  const recipientBinding = live.bindings[bindingIndex];
+  if (!recipientBinding) throw new Error("turn recipient binding is unavailable");
   const records = await options.traceStore.readConversation(live.manifest.conversation_id);
   const privateContexts = options.homeAuthorities
     ? [
@@ -31,7 +37,7 @@ export async function prepareRuntimeConversationTurn(
             : [];
         })(),
         ...records.flatMap(({ stored_event: stored }) => {
-          if (stored.event.type !== "user_message") return [];
+          if (stored.event.type !== CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE) return [];
           const context = options.homeAuthorities?.privateTurnContexts.readMessage(
             live.manifest.conversation_id,
             stored.idempotency_key,
@@ -55,6 +61,7 @@ export async function prepareRuntimeConversationTurn(
   return prepareConversationTurn({
     conversation_id: live.manifest.conversation_id,
     revision_id: live.manifest.revision_id,
+    recipient_engine: recipientBinding.resolved.engine,
     request,
     events: projectConversationEvents(
       records,

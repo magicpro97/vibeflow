@@ -1,4 +1,12 @@
 // All HTTP helpers. Token read once from <meta name="vf-token"> (injected by server).
+import type { HookConfirmationDecision } from "../../core/hook-contract.js";
+import {
+  UI_HOOK_ROUTE,
+  UI_LAN_EVENT_SOURCE_TOKEN_QUERY,
+  UI_LAN_TOKEN_HEADER,
+} from "../../core/ui-cli-contract.js";
+import { type LogEvent, decodeLogEvent } from "../../logbus/types.js";
+import { readUiPageToken } from "./browser-ui-token.js";
 import type {
   DashboardSelection,
   DomainImpact,
@@ -11,12 +19,9 @@ import type {
   WorkflowDashboardItem,
   WorkflowState,
 } from "./types.js";
-type BrowserDocument = {
-  querySelector(selector: string): { content?: string } | null;
-};
-
-const browserDocument = (globalThis as unknown as { document?: BrowserDocument }).document;
-const CSRF = browserDocument?.querySelector('meta[name="vf-token"]')?.content ?? "";
+const decodeLogEvents = (values: unknown[]): LogEvent[] =>
+  values.map(decodeLogEvent).filter((event): event is LogEvent => event !== null);
+const CSRF = readUiPageToken();
 
 /** Warn once in console if CSRF token is missing — all write requests will 403 */
 if (!CSRF) {
@@ -32,7 +37,7 @@ async function req<T>(
   const headers: Record<string, string> = { "content-type": "application/json" };
   // Always send the CSRF token — required by GET /api/file (#558) and harmless
   // on other GETs (they don't check it). Write routes have always needed it.
-  headers["x-vibeflow-token"] = CSRF;
+  headers[UI_LAN_TOKEN_HEADER] = CSRF;
   const res = await fetch(path, {
     method,
     headers,
@@ -149,8 +154,8 @@ export const api = {
   attachments: () =>
     req<{ attachments: unknown[] }>("GET", "/api/attachments").then((r) => r.attachments),
   logsRecent: (since = 0, limit = 200) =>
-    req<{ events: unknown[] }>("GET", `/api/logs/recent?since=${since}&limit=${limit}`).then(
-      (r) => r.events,
+    req<{ events: unknown[] }>("GET", `/api/logs/recent?since=${since}&limit=${limit}`).then((r) =>
+      decodeLogEvents(r.events),
     ),
   detect: (repoPath: string) => req<unknown>("POST", "/api/detect", { path: repoPath }),
   init: (payload: unknown) => req<unknown>("POST", "/api/init", payload),
@@ -166,7 +171,7 @@ export const api = {
     const res = await fetch(`/api/upload?name=${encodeURIComponent(file.name)}`, {
       method: "POST",
       headers: {
-        "x-vibeflow-token": CSRF,
+        [UI_LAN_TOKEN_HEADER]: CSRF,
         "content-type": file.type || "application/octet-stream",
       },
       body: file,
@@ -203,17 +208,17 @@ export const api = {
         `/api/projects/state?path=${encodeURIComponent(path)}`,
       ).then((r) => r.state),
     logs: (path: string, since = 0, limit = 200) =>
-      req<{ events: import("./types.js").LogEvent[] }>(
+      req<{ events: unknown[] }>(
         "GET",
         `/api/projects/logs?path=${encodeURIComponent(path)}&since=${since}&limit=${limit}`,
-      ).then((r) => r.events),
+      ).then((r) => decodeLogEvents(r.events)),
     delete: (path: string) =>
       req<{ ok: boolean }>("DELETE", `/api/projects?path=${encodeURIComponent(path)}`),
   },
   hook: {
-    pending: () => req<{ pending: unknown[] }>("GET", "/api/hook/pending"),
-    approve: (id: string, decision: "allow" | "block") =>
-      req<{ ok: boolean }>("POST", "/api/hook/approve", { id, decision }),
+    pending: () => req<{ pending: unknown[] }>("GET", UI_HOOK_ROUTE.PENDING),
+    approve: (id: string, decision: HookConfirmationDecision) =>
+      req<{ ok: boolean }>("POST", UI_HOOK_ROUTE.APPROVE, { id, decision }),
   },
   // #558: read a repo file for `file:line` evidence (token-guarded, sandboxed server-side).
   readFile: (path: string, line?: number) =>
@@ -250,14 +255,16 @@ export const api = {
         includeWorkflowEvents: String(includeWorkflowEvents),
       });
       if (sel.unit) p.set("unit", sel.unit);
-      return req<{ events: import("./types.js").LogEvent[] }>("GET", `/api/dashboard/logs?${p}`);
+      return req<{ events: unknown[] }>("GET", `/api/dashboard/logs?${p}`).then((response) => ({
+        events: decodeLogEvents(response.events),
+      }));
     },
     streamUrl: (sel: DashboardSelection & { since?: number; runId?: string }) => {
       const p = new URLSearchParams({ repoPath: sel.repoPath, workflowId: sel.workflowId });
       if (sel.unit) p.set("unit", sel.unit);
       if (sel.since && sel.since > 0) p.set("since", String(sel.since));
       if (sel.runId) p.set("runId", sel.runId);
-      p.set("token", CSRF);
+      p.set(UI_LAN_EVENT_SOURCE_TOKEN_QUERY, CSRF);
       return `/api/dashboard/logs/stream?${p.toString()}`;
     },
   },

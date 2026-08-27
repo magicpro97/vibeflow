@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { digestV1 } from "../../src/durability/index.js";
 import type { ConversationArtifactStore } from "../../src/orchestrator/conversation/artifact-store.js";
 import type { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
+import { conversationRevisionActionPlanDigest } from "../../src/orchestrator/conversation/conversation-revision-action-plan.js";
 import { foldRevisionOperation } from "../../src/orchestrator/conversation/revision-fold.js";
 import type { PreparedConversationRevisionV1 } from "../../src/orchestrator/conversation/revision-operation-executor.js";
 import {
   type RevisionOperationEventV1,
   materializeRevisionEvent,
   materializeRevisionOperation,
+  materializeRevisionPreparationPlan,
   materializeRevisionReservation,
 } from "../../src/orchestrator/conversation/revision-planner.js";
 import {
@@ -27,6 +29,31 @@ const retryOperationId = `vf-operation-${"4".repeat(64)}`;
 const digest = (label: string) => digestV1("REVISION-START-FINALIZER-TEST\0v1\0", { label });
 const owner = { assertHeld() {}, release() {} };
 
+function revisionPlan() {
+  return materializeRevisionPreparationPlan({
+    root_session_id: "conversation-root",
+    parent: {
+      conversation_id: "conversation-root",
+      revision_id: "revision-root",
+      revision_ordinal: 0,
+    },
+    expected_head_digest: digest("head"),
+    expected_head_epoch: 0,
+    expected_reservation_digest: null,
+    expected_reservation_epoch: 0,
+    expected_parent_last_seq: 1,
+    expected_parent_lock_digest: digest("lock"),
+    permission_digest: digest("permission"),
+    revision_claim_epoch: 1,
+    binding_delta_digest: digest("delta"),
+    resulting_binding_set_digest: digest("bindings"),
+    handoff_selection_plan_digest: digest("selection"),
+    participant_starts: [],
+    created_at: createdAt,
+    expires_at: "2026-08-25T01:00:00.000Z",
+  });
+}
+
 function operation() {
   return materializeRevisionOperation({
     operation_id: operationId,
@@ -34,7 +61,7 @@ function operation() {
     proposal_digest: digest("proposal"),
     approval_id: `vf-approval-${"3".repeat(64)}`,
     approval_digest: digest("approval"),
-    plan_digest: digest("plan"),
+    plan_digest: conversationRevisionActionPlanDigest("conversation-root", revisionPlan()),
     authority_epoch: 0,
     authority_head_digest: digest("authority"),
     root_session_id: "conversation-root",
@@ -172,7 +199,7 @@ describe("revision start finalization", () => {
     const prepared = {
       operation: target,
       proposal: { proposal_id: proposalId },
-      revisionPlan: {},
+      revisionPlan: revisionPlan(),
     } as unknown as PreparedConversationRevisionV1;
     const input = {
       prepared,
@@ -357,7 +384,7 @@ describe("revision start finalization", () => {
         prepared: {
           operation: target,
           proposal: { proposal_id: proposalId },
-          revisionPlan: {},
+          revisionPlan: revisionPlan(),
         } as unknown as PreparedConversationRevisionV1,
         resultStatus: "completed",
         home,
@@ -427,10 +454,7 @@ describe("revision start finalization", () => {
     await expect(
       recoverInterruptedPublishedRevisionStart({
         operation: target,
-        revisionPlan: {
-          root_session_id: target.root_session_id,
-          parent: target.parent,
-        } as PreparedConversationRevisionV1["revisionPlan"],
+        revisionPlan: revisionPlan(),
         reservation,
         proposalId,
         runtime: {

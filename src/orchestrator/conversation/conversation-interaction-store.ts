@@ -15,6 +15,20 @@ import {
   commitHumanReactionV1,
   recoverPendingHumanReactionsV1,
 } from "./conversation-human-reaction-store.js";
+import {
+  CONVERSATION_HUMAN_REACTION_REQUEST_MODE,
+  CONVERSATION_INTERACTION_ACTOR_KIND,
+  CONVERSATION_INTERACTION_ENTRY_KIND,
+  CONVERSATION_INTERACTION_LIMITS,
+  CONVERSATION_INTERACTION_SCHEMA_VERSION,
+  CONVERSATION_REACTION_OPERATION,
+} from "./conversation-interaction-contract.js";
+import {
+  decodeInteractionAuthority,
+  initialInteractionHead,
+  interactionEntryPriorHead,
+  interactionEntryTime,
+} from "./conversation-interaction-store-codec.js";
 import type {
   AgentReactionRequestV1,
   ConversationInteractionEntryV1,
@@ -37,39 +51,6 @@ import {
   sameCanonicalInteraction,
 } from "./conversation-interaction-validation.js";
 import { assertParticipantReactionTransitions } from "./conversation-participant-reaction-validation.js";
-
-const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
-const MAX_FRAMES = 16_384;
-const INITIAL_TIME = "1970-01-01T00:00:00.000Z";
-
-function initialHead(rootSessionId: string): ConversationInteractionHeadV1 {
-  const preimage = {
-    schema_version: "1.0" as const,
-    root_session_id: rootSessionId,
-    sequence: 0,
-    last_frame_digest: null,
-    updated_at: INITIAL_TIME,
-  };
-  return { ...preimage, content_digest: interactionHeadDigest(preimage) };
-}
-
-function entryTime(entry: ConversationInteractionEntryV1): string {
-  return entry.kind === "reaction-operation" ? entry.operation.created_at : entry.intent.created_at;
-}
-
-function entryPriorHead(entry: ConversationInteractionEntryV1): string {
-  return entry.kind === "reaction-operation"
-    ? entry.operation.prior_interaction_head_digest
-    : entry.intent.prior_interaction_head_digest;
-}
-
-function decode<T>(bytes: Buffer, assert: (value: unknown) => void): T {
-  const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  assert(value);
-  if (!canonicalJsonBytes(value, { maxBytes: MAX_OBJECT_BYTES }).equals(bytes))
-    throw new Error("conversation interaction authority is non-canonical");
-  return structuredClone(value) as T;
-}
 
 export class ConversationInteractionCorruptError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -102,7 +83,7 @@ export class ConversationInteractionStore {
   private headPath(rootSessionId: string): string {
     const key = digestHex(
       digestV1("VF-CONVERSATION-INTERACTION-STORAGE-KEY\0v1\0", {
-        schema_version: "1.0",
+        schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
         root_session_id: rootSessionId,
       }),
     );
@@ -114,10 +95,13 @@ export class ConversationInteractionStore {
   }
 
   readHead(rootSessionId: string): ConversationInteractionHeadV1 {
-    const bytes = privateFileBytes(this.headPath(rootSessionId), MAX_OBJECT_BYTES);
-    if (bytes === null) return initialHead(rootSessionId);
+    const bytes = privateFileBytes(
+      this.headPath(rootSessionId),
+      CONVERSATION_INTERACTION_LIMITS.maxObjectBytes,
+    );
+    if (bytes === null) return initialInteractionHead(rootSessionId);
     try {
-      const head = decode<ConversationInteractionHeadV1>(
+      const head = decodeInteractionAuthority<ConversationInteractionHeadV1>(
         bytes,
         assertConversationInteractionHeadV1,
       );
@@ -136,10 +120,17 @@ export class ConversationInteractionStore {
       const head = this.readHead(rootSessionId);
       const reversed: ConversationInteractionFrameV1[] = [];
       let digest = head.last_frame_digest;
-      for (let count = 0; digest !== null && count < MAX_FRAMES; count += 1) {
-        const bytes = privateFileBytes(this.objectPath(digest), MAX_OBJECT_BYTES);
+      for (
+        let count = 0;
+        digest !== null && count < CONVERSATION_INTERACTION_LIMITS.maxFrames;
+        count += 1
+      ) {
+        const bytes = privateFileBytes(
+          this.objectPath(digest),
+          CONVERSATION_INTERACTION_LIMITS.maxObjectBytes,
+        );
         if (bytes === null) throw new Error("interaction frame is absent");
-        const frame = decode<ConversationInteractionFrameV1>(
+        const frame = decodeInteractionAuthority<ConversationInteractionFrameV1>(
           bytes,
           assertConversationInteractionFrameV1,
         );
@@ -150,7 +141,7 @@ export class ConversationInteractionStore {
       }
       if (digest !== null) throw new Error("interaction history exceeds bound");
       const frames = reversed.reverse();
-      let prior = initialHead(rootSessionId);
+      let prior = initialInteractionHead(rootSessionId);
       const operations: ConversationReactionOperationV1[] = [];
       const intents: ConversationParticipantSocialIntentV1[] = [];
       const headDigests: Record<string, string> = { "0": prior.content_digest };
@@ -159,10 +150,10 @@ export class ConversationInteractionStore {
         if (
           frame.sequence !== index + 1 ||
           frame.previous_frame_digest !== prior.last_frame_digest ||
-          entryPriorHead(frame.entry) !== prior.content_digest
+          interactionEntryPriorHead(frame.entry) !== prior.content_digest
         )
           throw new Error("interaction frame chain changed");
-        if (frame.entry.kind === "reaction-operation") {
+        if (frame.entry.kind === CONVERSATION_INTERACTION_ENTRY_KIND.REACTION_OPERATION) {
           operations.push(structuredClone(frame.entry.operation));
           reactionSequences[frame.entry.operation.operation_id] = frame.sequence;
         } else {
@@ -172,11 +163,11 @@ export class ConversationInteractionStore {
             reactionSequences[operation.operation_id] = frame.sequence;
         }
         const headPreimage = {
-          schema_version: "1.0" as const,
+          schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
           root_session_id: rootSessionId,
           sequence: frame.sequence,
           last_frame_digest: frame.frame_digest,
-          updated_at: entryTime(frame.entry),
+          updated_at: interactionEntryTime(frame.entry),
         };
         prior = { ...headPreimage, content_digest: interactionHeadDigest(headPreimage) };
         headDigests[String(frame.sequence)] = prior.content_digest;
@@ -184,7 +175,7 @@ export class ConversationInteractionStore {
       if (!sameCanonicalInteraction(prior, head))
         throw new Error("interaction folded head changed");
       return {
-        schema_version: "1.0",
+        schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
         root_session_id: rootSessionId,
         head_digest: head.content_digest,
         head_sequence: head.sequence,
@@ -208,7 +199,7 @@ export class ConversationInteractionStore {
     lock: ProcessLock,
   ): ConversationInteractionHeadV1 {
     const framePreimage = {
-      schema_version: "1.0" as const,
+      schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
       root_session_id: rootSessionId,
       sequence: prior.sequence + 1,
       previous_frame_digest: prior.last_frame_digest,
@@ -218,21 +209,21 @@ export class ConversationInteractionStore {
     assertConversationInteractionFrameV1(frame);
     createOrVerifyPrivateFile(this.objectPath(frame.frame_digest), canonicalJsonBytes(frame), {
       lock,
-      maxBytes: MAX_OBJECT_BYTES,
+      maxBytes: CONVERSATION_INTERACTION_LIMITS.maxObjectBytes,
     });
     const headPreimage = {
-      schema_version: "1.0" as const,
+      schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
       root_session_id: rootSessionId,
       sequence: frame.sequence,
       last_frame_digest: frame.frame_digest,
-      updated_at: entryTime(entry),
+      updated_at: interactionEntryTime(entry),
     };
     const head = { ...headPreimage, content_digest: interactionHeadDigest(headPreimage) };
     assertConversationInteractionHeadV1(head);
     const expected = prior.sequence === 0 ? null : canonicalJsonBytes(prior);
     atomicCompareAndSwap(this.headPath(rootSessionId), expected, canonicalJsonBytes(head), {
       lock,
-      maxBytes: MAX_OBJECT_BYTES,
+      maxBytes: CONVERSATION_INTERACTION_LIMITS.maxObjectBytes,
     });
     return head;
   }
@@ -250,7 +241,7 @@ export class ConversationInteractionStore {
     root_session_id: string;
     actor_public_id: string;
     idempotency_key: string;
-    operation: "add" | "remove";
+    operation: ConversationReactionOperationV1["operation"];
     target: PublicMessageLocatorV1;
     emoji: ReactionEmojiV1;
     created_at: string;
@@ -260,7 +251,11 @@ export class ConversationInteractionStore {
   }
 
   commitHumanToggle(input: HumanReactionInputV1): ConversationReactionOperationV1 {
-    return commitHumanReactionV1(this.humanHost(), input, "toggle-self");
+    return commitHumanReactionV1(
+      this.humanHost(),
+      input,
+      CONVERSATION_HUMAN_REACTION_REQUEST_MODE.TOGGLE_SELF,
+    );
   }
 
   private humanHost() {
@@ -332,11 +327,11 @@ export class ConversationInteractionStore {
           }),
         )}`;
         const preimage = {
-          schema_version: "1.0" as const,
+          schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
           operation_id: operationId,
           root_session_id: input.root_session_id,
           actor_public_id: input.actor_participant_id,
-          actor_kind: "participant" as const,
+          actor_kind: CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT,
           operation: request.operation,
           target: structuredClone(request.target),
           emoji: request.emoji,
@@ -346,9 +341,11 @@ export class ConversationInteractionStore {
         return { ...preimage, operation_digest: reactionOperationDigest(preimage) };
       });
       if (input.diagnostic_code === null) {
-        const adds = reactionOperations.filter((item) => item.operation === "add");
+        const adds = reactionOperations.filter(
+          (item) => item.operation === CONVERSATION_REACTION_OPERATION.ADD,
+        );
         if (
-          adds.length > 3 ||
+          adds.length > CONVERSATION_INTERACTION_LIMITS.maxParticipantReactionAdds ||
           new Set(adds.map((item) => item.target.target_event_id)).size !== adds.length
         )
           throw new Error("participant reaction add bound exceeded");
@@ -356,7 +353,7 @@ export class ConversationInteractionStore {
       } else if (input.quote_refs.length || reactionOperations.length)
         throw new Error("rejected social intent contains effects");
       const intentPreimage = {
-        schema_version: "1.0" as const,
+        schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
         intent_id: intentId,
         root_session_id: input.root_session_id,
         actor_participant_id: input.actor_participant_id,
@@ -371,7 +368,12 @@ export class ConversationInteractionStore {
         ...intentPreimage,
         intent_digest: participantSocialIntentDigest(intentPreimage),
       };
-      this.append(input.root_session_id, head, { kind: "participant-social-intent", intent }, lock);
+      this.append(
+        input.root_session_id,
+        head,
+        { kind: CONVERSATION_INTERACTION_ENTRY_KIND.PARTICIPANT_SOCIAL_INTENT, intent },
+        lock,
+      );
       return intent;
     });
   }

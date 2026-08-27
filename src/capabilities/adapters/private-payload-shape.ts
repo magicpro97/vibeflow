@@ -1,3 +1,4 @@
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import type { CapabilityPrivateEffectPayloadV1 } from "./types.js";
 
@@ -60,13 +61,13 @@ function assertOwnerBinding(candidate: Record<string, unknown>): void {
     "private_payload.preimage_owner_binding",
   );
   const locator = owner.action_root_locator as Record<string, unknown> | null;
-  if (locator?.kind === "conversation")
+  if (locator?.kind === ACTION_ROOT_LOCATOR_KIND.CONVERSATION)
     exactRecord(
       locator,
       ["kind", "root_session_id"],
       "private_payload.preimage_owner_binding.action_root_locator",
     );
-  else if (locator?.kind === "capability")
+  else if (locator?.kind === ACTION_ROOT_LOCATOR_KIND.CAPABILITY)
     exactRecord(
       locator,
       ["kind", "scope", "scope_identity_digest"],

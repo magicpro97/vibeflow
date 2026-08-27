@@ -1,8 +1,28 @@
+import {
+  CAPABILITY_MANIFEST_COMPONENT_TYPE,
+  CAPABILITY_MANIFEST_COMPONENT_TYPES,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import type {
   ActionTargetBindingV1,
   CapabilityTargetDispositionV1,
 } from "../../actions/preview-types.js";
-import type { EngineName } from "../../actions/types.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import {
+  ACTION_EFFECT_CLASS,
+  ACTION_PLANNING_MODE,
+  ACTION_REVERSIBILITY_VALUE,
+  ACTION_TARGET_DISPOSITION_EXECUTION_VALUE,
+  ACTION_TARGET_MANUAL_REASON,
+  ACTION_TARGET_UNSUPPORTED_REASON,
+} from "../../actions/public-action-contract.js";
+import {
+  PUBLIC_ACTION_TARGET_APPLY_FAILURE,
+  PUBLIC_ACTION_TARGET_HEALTH_FAILURE,
+  PUBLIC_ACTION_TARGET_SUBJECT_KIND,
+} from "../../actions/public-operation-contract.js";
+import type { ActionPlanningMode, EngineName } from "../../actions/types.js";
+import { isAgentEngine } from "../../core/agent-contract.js";
+import { CAPABILITY_SCOPE, CAPABILITY_STATUS } from "../../core/capability-contract.js";
 import { digestHex, digestV1 } from "../../durability/index.js";
 import { resolveCapabilityAdapter } from "../adapters/registry.js";
 import type {
@@ -39,19 +59,23 @@ function parseOwnershipKey(value: string): {
 } | null {
   const parts = value.split(":");
   if (![6, 7].includes(parts.length) || parts[0] !== "vf") return null;
-  const engine = parts[2] as EngineName;
+  const engine = parts[2];
   const componentType = parts[parts.length === 7 ? 4 : 3] as CapabilityComponentV1["type"];
   if (
-    !["claude", "codex", "copilot", "opencode", "antigravity"].includes(engine) ||
-    !["skill", "mcp", "tool", "hook", "role", "engine-setting"].includes(componentType)
+    !isAgentEngine(engine) ||
+    !CAPABILITY_MANIFEST_COMPONENT_TYPES.some((candidate) => candidate === componentType)
   )
     return null;
   return { engine, componentType };
 }
 
 function resourceKind(componentType: CapabilityComponentV1["type"]): CapabilityOwnedResourceKindV1 {
-  if (componentType === "skill" || componentType === "role") return "file";
-  if (componentType === "tool") return "external-effect";
+  if (
+    componentType === CAPABILITY_MANIFEST_COMPONENT_TYPE.SKILL ||
+    componentType === CAPABILITY_MANIFEST_COMPONENT_TYPE.ROLE
+  )
+    return "file";
+  if (componentType === CAPABILITY_MANIFEST_COMPONENT_TYPE.TOOL) return "external-effect";
   return "config-key";
 }
 
@@ -65,13 +89,13 @@ function baseTargetBinding(
   const targetPolicy = target.required
     ? {
         required: true as const,
-        on_apply_failure: "abort-scope" as const,
-        on_health_failure: "abort-scope" as const,
+        on_apply_failure: PUBLIC_ACTION_TARGET_APPLY_FAILURE.ABORT_SCOPE,
+        on_health_failure: PUBLIC_ACTION_TARGET_HEALTH_FAILURE.ABORT_SCOPE,
       }
     : {
         required: false as const,
-        on_apply_failure: "omit-after-rollback" as const,
-        on_health_failure: "omit-after-rollback" as const,
+        on_apply_failure: PUBLIC_ACTION_TARGET_APPLY_FAILURE.OMIT_AFTER_ROLLBACK,
+        on_health_failure: PUBLIC_ACTION_TARGET_HEALTH_FAILURE.OMIT_AFTER_ROLLBACK,
       };
   return {
     target_id: target.target_id,
@@ -81,7 +105,11 @@ function baseTargetBinding(
       participant_id: target.participant_id,
       ...targetPolicy,
     },
-    subject: { kind: "capability", package_id: pkg.pin.id, component_id: target.component_id },
+    subject: {
+      kind: PUBLIC_ACTION_TARGET_SUBJECT_KIND.CAPABILITY,
+      package_id: pkg.pin.id,
+      component_id: target.component_id,
+    },
   };
 }
 
@@ -91,7 +119,7 @@ export function buildOrphanRemovalPlans(input: {
   plannedSnapshots: readonly CapabilityProjectionSnapshotV1[];
   broker: CapabilityEffectBrokerV1;
   now: string;
-  persistence?: "transient" | "durable";
+  persistence?: ActionPlanningMode;
 }): CapabilityOrphanRemovalPlansV1 {
   const output: CapabilityOrphanRemovalPlansV1 = {
     targets: [],
@@ -129,28 +157,36 @@ export function buildOrphanRemovalPlans(input: {
           output.targets.push(target);
         if (!output.dispositions.some((row) => row.target_id === target.target_id)) {
           output.dispositions.push(
-            entry.support === "host"
-              ? { target_id: target.target_id, execution: "host", reason_code: null }
-              : entry.support === "manual-runtime-setup"
+            entry.support === ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST
+              ? {
+                  target_id: target.target_id,
+                  execution: ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST,
+                  reason_code: null,
+                }
+              : entry.support === ACTION_TARGET_MANUAL_REASON.MANUAL_RUNTIME_SETUP
                 ? {
                     target_id: target.target_id,
-                    execution: "manual",
-                    reason_code: "manual-runtime-setup",
+                    execution: ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.MANUAL,
+                    reason_code: ACTION_TARGET_MANUAL_REASON.MANUAL_RUNTIME_SETUP,
                   }
-                : entry.support === "unsupported"
+                : entry.support === ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.UNSUPPORTED
                   ? {
                       target_id: target.target_id,
-                      execution: "unsupported",
-                      reason_code: "adapter-unavailable",
+                      execution: ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.UNSUPPORTED,
+                      reason_code: ACTION_TARGET_UNSUPPORTED_REASON.ADAPTER_UNAVAILABLE,
                     }
                   : {
                       target_id: target.target_id,
-                      execution: "required-user-action",
+                      execution: ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.REQUIRED_USER_ACTION,
                       reason_code: entry.support,
                     },
           );
         }
-        if (entry.support !== "host" || entry.adapter === null) continue;
+        if (
+          entry.support !== ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST ||
+          entry.adapter === null
+        )
+          continue;
         const prepared = buildExactRemovalResource({
           resource: {
             ownership_key: projection.ownership_key,
@@ -167,7 +203,7 @@ export function buildOrphanRemovalPlans(input: {
         });
         const resource = prepared.resource;
         const actionRootLocator = input.request.action_root_locator ?? {
-          kind: "capability" as const,
+          kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
           scope: input.request.scope,
           scope_identity_digest: input.request.scope_identity_digest,
         };
@@ -178,7 +214,7 @@ export function buildOrphanRemovalPlans(input: {
           targetId: target.target_id,
           prepared,
           broker: input.broker,
-          persistence: input.persistence ?? "transient",
+          persistence: input.persistence ?? ACTION_PLANNING_MODE.TRANSIENT,
           actionRootLocator,
           descriptorKind: "intent",
           operation: "remove",
@@ -190,7 +226,7 @@ export function buildOrphanRemovalPlans(input: {
           targetId: target.target_id,
           prepared,
           broker: input.broker,
-          persistence: input.persistence ?? "transient",
+          persistence: input.persistence ?? ACTION_PLANNING_MODE.TRANSIENT,
           actionRootLocator,
           ownerBinding: intent.descriptor.private_payload_binding,
           descriptorKind: "rollback",
@@ -201,7 +237,7 @@ export function buildOrphanRemovalPlans(input: {
           target_states: [
             {
               target_id: target.target_id,
-              state: "orphaned" as const,
+              state: CAPABILITY_STATUS.ORPHANED,
               live_projection_digests: resource.expected_preimage_sha256
                 ? [resource.expected_preimage_sha256]
                 : [],
@@ -229,9 +265,9 @@ export function buildOrphanRemovalPlans(input: {
           target_ids: [target.target_id],
           required: target.target.required,
           effect_classes: [
-            input.request.scope === "project"
-              ? ("project-write" as const)
-              : ("user-write" as const),
+            input.request.scope === CAPABILITY_SCOPE.PROJECT
+              ? ACTION_EFFECT_CLASS.PROJECT_WRITE
+              : ACTION_EFFECT_CLASS.USER_WRITE,
           ],
           permission_ids: [],
           enforcement_digest: digestV1("VF-STEP-ENFORCEMENT\0v1\0", {
@@ -245,7 +281,7 @@ export function buildOrphanRemovalPlans(input: {
           },
           owned_resources: [resource],
           rollback: {
-            class: "reversible" as const,
+            class: ACTION_REVERSIBILITY_VALUE.REVERSIBLE,
             schema_id: rollback.descriptor.descriptor_schema_id,
             descriptor_digest: rollback.descriptor.descriptor_digest,
             private_descriptor_ref: `actions/v1/objects/${digestHex(rollback.descriptor.descriptor_digest)}.json`,
@@ -280,7 +316,7 @@ export function buildOrphanRemovalPlans(input: {
           },
           steps: [step],
           health_plan: [],
-          reversibility: "reversible" as const,
+          reversibility: ACTION_REVERSIBILITY_VALUE.REVERSIBLE,
           plan_digest: "",
         };
         const digest = adapterPlanDigest(planDraft);

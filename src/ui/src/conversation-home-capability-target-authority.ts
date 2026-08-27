@@ -1,6 +1,6 @@
 import { toRaw } from "vue";
 import type { CapabilityScope } from "../../capabilities/manifest/types.js";
-import { ENGINES } from "../../core/types.js";
+import { ENGINES } from "../../core/agent-contract.js";
 import type { BrowserActionCandidate } from "./conversation-home-api.js";
 import type { HomeParticipant, HomeRevisionSummary } from "./conversation-home-types.js";
 
@@ -12,6 +12,13 @@ export interface HomeCapabilityTargetAuthority {
   lock_digest: string;
 }
 
+export const HOME_CAPABILITY_TARGET_SELECTION_MODE = Object.freeze({
+  AUTOMATIC: "automatic",
+  EXPLICIT: "explicit",
+} as const);
+export type HomeCapabilityTargetSelectionMode =
+  (typeof HOME_CAPABILITY_TARGET_SELECTION_MODE)[keyof typeof HOME_CAPABILITY_TARGET_SELECTION_MODE];
+
 export interface HomeCapabilityTargetRequest {
   package_id: string;
   scope: CapabilityScope;
@@ -20,7 +27,7 @@ export interface HomeCapabilityTargetRequest {
   participants: HomeParticipant[];
   selected_participant_ids: string[];
   reselection_required: boolean;
-  selection_mode: "automatic" | "explicit";
+  selection_mode: HomeCapabilityTargetSelectionMode;
 }
 
 export function cloneHomeCapabilityTargetRequest(
@@ -105,7 +112,7 @@ export function homeCapabilityInstallCandidate(
   participants: readonly HomeParticipant[],
 ): BrowserActionCandidate {
   return {
-    type: "capability.install",
+    type: HOST_ACTION_KIND.CAPABILITY_INSTALL,
     package: { id: request.package_id },
     scope: request.scope,
     requested_targets: participants.map((participant) => ({
@@ -115,3 +122,4 @@ export function homeCapabilityInstallCandidate(
     inputs: [],
   };
 }
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";

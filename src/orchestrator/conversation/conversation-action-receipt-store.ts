@@ -1,5 +1,7 @@
 import { dirname, join, resolve } from "node:path";
+import type { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type {
+  ActionOperationDomainTerminalState,
   ActionProposalV1,
   CanonicalActionRequestV1,
   HostActionKind,
@@ -31,18 +33,18 @@ const DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 export type ConversationReceiptActionKindV1 = Extract<
   HostActionKind,
-  | "conversation.select_lineage_head"
-  | "conversation.associate_lineages"
-  | "conversation.publish_suspected_literal"
-  | "conversation.stop_operation"
-  | "context.compact"
+  | typeof HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD
+  | typeof HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES
+  | typeof HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
+  | typeof HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION
+  | typeof HOST_ACTION_KIND.CONTEXT_COMPACT
 >;
 
 export type ConversationControlActionKindV1 = Extract<
   HostActionKind,
-  | "conversation.abandon_revision_operation"
-  | "conversation.retry_revision_operation"
-  | "conversation.reconcile_revision_operation"
+  | typeof HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION
+  | typeof HOST_ACTION_KIND.CONVERSATION_RETRY_REVISION_OPERATION
+  | typeof HOST_ACTION_KIND.CONVERSATION_RECONCILE_REVISION_OPERATION
 >;
 
 export type ConversationNativeActionKindV1 =
@@ -110,7 +112,7 @@ export interface ConversationActionReceiptV1 {
   plan_digest: string;
   expected_authority_binding_digest: string;
   observed_authority_binding_digest: string;
-  outcome: "succeeded" | "failed" | "needs_recovery";
+  outcome: ActionOperationDomainTerminalState;
   reason_code: string | null;
   recorded_at: string;
   receipt_digest: string;

@@ -1,4 +1,6 @@
+import { CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY } from "./conversation-durable-authority-contract.js";
 import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-trace-authority.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { LiveConversation } from "./lifecycle-gate.js";
 import { durableTraceEventAuthority } from "./private-file-range-commit-authority.js";
 import type { ConversationRuntimeOptions } from "./runtime-options.js";
@@ -65,14 +67,14 @@ export async function publishRuntimeUserMessage({
     );
   } catch (error) {
     const authority = publicMessageCommitted
-      ? "committed"
+      ? CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.COMMITTED
       : await durableTraceEventAuthority(
           options.traceStore,
           conversationId,
           messageKey,
-          "user_message",
+          CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE,
         );
-    if (authority === "committed") {
+    if (authority === CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.COMMITTED) {
       try {
         home.privateFileRanges.consume(
           privateFileRange,
@@ -83,7 +85,7 @@ export async function publishRuntimeUserMessage({
       } catch {
         /* committed delivery remains reserved or consumed, never reusable */
       }
-    } else if (authority === "proven-absent") {
+    } else if (authority === CONVERSATION_DURABLE_TRACE_EVENT_AUTHORITY.PROVEN_ABSENT) {
       try {
         home.privateFileRanges.release(privateFileRange, messageKey, recordedAt);
       } catch {

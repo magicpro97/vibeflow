@@ -1,14 +1,41 @@
-import type { ConversationLifecycle, InternalTraceStoreRecord, StoredTraceEvent } from "./types.js";
+import {
+  CONVERSATION_ARTIFACT_TYPE,
+  CONVERSATION_HEALTH,
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_TERMINAL_LIFECYCLE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "../conversation/conversation-public-wire-contract.js";
+import type {
+  ConversationHealth,
+  ConversationLifecycle,
+  InternalTraceStoreRecord,
+  StoredTraceEvent,
+} from "./types.js";
 
-const LEGAL: Readonly<Record<ConversationLifecycle, readonly ConversationLifecycle[]>> = {
-  INIT: ["ACTIVE", "STOPPED"],
-  ACTIVE: ["PAUSED", "COMPLETED", "STOPPED", "FAILED", "ABORTED"],
-  PAUSED: ["ACTIVE", "STOPPED", "FAILED", "ABORTED"],
-  COMPLETED: [],
-  STOPPED: [],
-  FAILED: [],
-  ABORTED: [],
-};
+const LEGAL: Readonly<Record<ConversationLifecycle, readonly ConversationLifecycle[]>> =
+  Object.freeze({
+    [CONVERSATION_LIFECYCLE.INIT]: Object.freeze([
+      CONVERSATION_LIFECYCLE.ACTIVE,
+      CONVERSATION_LIFECYCLE.STOPPED,
+    ]),
+    [CONVERSATION_LIFECYCLE.ACTIVE]: Object.freeze([
+      CONVERSATION_LIFECYCLE.PAUSED,
+      CONVERSATION_LIFECYCLE.COMPLETED,
+      CONVERSATION_LIFECYCLE.STOPPED,
+      CONVERSATION_LIFECYCLE.FAILED,
+      CONVERSATION_LIFECYCLE.ABORTED,
+    ]),
+    [CONVERSATION_LIFECYCLE.PAUSED]: Object.freeze([
+      CONVERSATION_LIFECYCLE.ACTIVE,
+      CONVERSATION_LIFECYCLE.STOPPED,
+      CONVERSATION_LIFECYCLE.FAILED,
+      CONVERSATION_LIFECYCLE.ABORTED,
+    ]),
+    [CONVERSATION_LIFECYCLE.COMPLETED]: Object.freeze([]),
+    [CONVERSATION_LIFECYCLE.STOPPED]: Object.freeze([]),
+    [CONVERSATION_LIFECYCLE.FAILED]: Object.freeze([]),
+    [CONVERSATION_LIFECYCLE.ABORTED]: Object.freeze([]),
+  });
 const canonicalLifecycleKey = (key: string): boolean =>
   key === "conversation:active" ||
   key.startsWith("conversation:transition:") ||
@@ -17,10 +44,10 @@ const canonicalLifecycleKey = (key: string): boolean =>
   key === "conversation:terminal";
 
 const reviewedPostTerminalAction = (stored: StoredTraceEvent): boolean =>
-  (stored.event.type === "artifact_created" &&
-    stored.event.payload.artifact_type === "compaction" &&
+  (stored.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED &&
+    stored.event.payload.artifact_type === CONVERSATION_ARTIFACT_TYPE.COMPACTION &&
     stored.idempotency_key.startsWith("action-context-compaction:vf-proposal-")) ||
-  (stored.event.type === "user_message" &&
+  (stored.event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE &&
     stored.idempotency_key.startsWith("action-public-literal:vf-proposal-"));
 
 export class TraceLifecycleConflictError extends Error {
@@ -35,7 +62,7 @@ export class TraceLifecycleConflictError extends Error {
 
 interface LifecycleCursor {
   lifecycle: ConversationLifecycle;
-  health: "healthy" | "degraded";
+  health: ConversationHealth;
   awaitingTerminal: ConversationLifecycle | null;
   terminal: boolean;
   cancelledOperations: Set<string>;
@@ -43,35 +70,43 @@ interface LifecycleCursor {
 
 function apply(cursor: LifecycleCursor, stored: StoredTraceEvent, enforce: boolean): void {
   const { event } = stored;
-  if (event.type === "caller_cancelled") {
+  if (event.type === CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED) {
     cursor.cancelledOperations.add(event.payload.operation_id);
     return;
   }
   if (enforce && cursor.cancelledOperations.has(stored.operation_id)) {
     const allowed =
-      (event.type === "state_change" &&
+      (event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE &&
         event.payload.terminal &&
-        event.payload.lifecycle === "ABORTED") ||
-      (event.type === "conversation_terminal" && event.payload.lifecycle === "ABORTED");
-    if (!allowed) throw new TraceLifecycleConflictError("ABORTED", cursor.lifecycle);
+        event.payload.lifecycle === CONVERSATION_LIFECYCLE.ABORTED) ||
+      (event.type === CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL &&
+        event.payload.lifecycle === CONVERSATION_LIFECYCLE.ABORTED);
+    if (!allowed)
+      throw new TraceLifecycleConflictError(CONVERSATION_LIFECYCLE.ABORTED, cursor.lifecycle);
   }
   if (
     enforce &&
-    cursor.lifecycle === "PAUSED" &&
-    event.type !== "state_change" &&
-    event.type !== "conversation_terminal" &&
+    cursor.lifecycle === CONVERSATION_LIFECYCLE.PAUSED &&
+    event.type !== CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE &&
+    event.type !== CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL &&
     !(
-      event.type === "native_history_reconciled" &&
+      event.type === CONVERSATION_TRACE_EVENT_KIND.NATIVE_HISTORY_RECONCILED &&
       stored.idempotency_key.startsWith("native-history:")
     )
   ) {
-    throw new TraceLifecycleConflictError("PAUSED", "PAUSED");
+    throw new TraceLifecycleConflictError(
+      CONVERSATION_LIFECYCLE.PAUSED,
+      CONVERSATION_LIFECYCLE.PAUSED,
+    );
   }
-  if (event.type === "state_change") {
+  if (event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE) {
     const next = event.payload.lifecycle;
     const nextHealth = event.payload.health;
     const terminal =
-      next === "COMPLETED" || next === "STOPPED" || next === "FAILED" || next === "ABORTED";
+      next === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED ||
+      next === CONVERSATION_TERMINAL_LIFECYCLE.STOPPED ||
+      next === CONVERSATION_TERMINAL_LIFECYCLE.FAILED ||
+      next === CONVERSATION_TERMINAL_LIFECYCLE.ABORTED;
     if (enforce && event.payload.terminal !== terminal) {
       throw new TraceLifecycleConflictError(cursor.lifecycle, next);
     }
@@ -87,7 +122,8 @@ function apply(cursor: LifecycleCursor, stored: StoredTraceEvent, enforce: boole
     if (
       enforce &&
       next === cursor.lifecycle &&
-      ((next !== "ACTIVE" && next !== "PAUSED") || nextHealth === cursor.health)
+      ((next !== CONVERSATION_LIFECYCLE.ACTIVE && next !== CONVERSATION_LIFECYCLE.PAUSED) ||
+        nextHealth === cursor.health)
     ) {
       throw new TraceLifecycleConflictError(cursor.lifecycle, next);
     }
@@ -99,7 +135,7 @@ function apply(cursor: LifecycleCursor, stored: StoredTraceEvent, enforce: boole
     cursor.awaitingTerminal = event.payload.terminal ? next : null;
     return;
   }
-  if (event.type !== "conversation_terminal") return;
+  if (event.type !== CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL) return;
   const next = event.payload.lifecycle;
   if (enforce && (cursor.terminal || cursor.awaitingTerminal !== next)) {
     throw new TraceLifecycleConflictError(cursor.lifecycle, next);
@@ -115,8 +151,8 @@ export function assertCanonicalLifecycleAppend(
   pending: readonly InternalTraceStoreRecord[],
 ): void {
   const cursor: LifecycleCursor = {
-    lifecycle: "INIT",
-    health: "healthy",
+    lifecycle: CONVERSATION_LIFECYCLE.INIT,
+    health: CONVERSATION_HEALTH.HEALTHY,
     awaitingTerminal: null,
     terminal: false,
     cancelledOperations: new Set(),

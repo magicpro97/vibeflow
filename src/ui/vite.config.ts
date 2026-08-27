@@ -2,6 +2,9 @@ import { presetWind } from "@unocss/preset-wind";
 import vue from "@vitejs/plugin-vue";
 import UnoCSS from "unocss/vite";
 import { defineConfig } from "vite";
+import { DEFAULT_UI_PORT } from "../core/ui-cli-contract.js";
+
+const DEFAULT_UI_ORIGIN = `http://localhost:${DEFAULT_UI_PORT}`;
 
 export default defineConfig(({ command }) => ({
   plugins: [
@@ -48,9 +51,9 @@ export default defineConfig(({ command }) => ({
   base: command === "build" ? "/ui/" : "/",
   server: {
     proxy: {
-      "/api": "http://localhost:7799",
-      "/state": "http://localhost:7799",
-      "/assets": "http://localhost:7799",
+      "/api": DEFAULT_UI_ORIGIN,
+      "/state": DEFAULT_UI_ORIGIN,
+      "/assets": DEFAULT_UI_ORIGIN,
     },
   },
 }));

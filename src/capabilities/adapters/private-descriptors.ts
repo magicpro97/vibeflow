@@ -1,5 +1,7 @@
 import { actionIdempotencyScopeDigest } from "../../actions/idempotency.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
+import { CAPABILITY_SCOPE } from "../../core/capability-contract.js";
 import { canonicalJsonBytes, digestHex, digestV1 } from "../../durability/index.js";
 import { CapabilityValidationError, DIGEST_PATTERN } from "../wire/primitives.js";
 import {
@@ -175,7 +177,10 @@ export function restorePrivateEffectOwnerBinding(
 
 export function privateEffectBinding(
   descriptor: CapabilityAdapterPrivateDescriptorV1,
-  actionRootLocator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>,
+  actionRootLocator: Exclude<
+    PrivateActionRootLocatorV1,
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+  >,
 ): CapabilityPrivateEffectBindingV1 {
   const validated = validateAdapterPrivateDescriptor(descriptor);
   const action_root_locator = structuredClone(actionRootLocator);
@@ -210,12 +215,15 @@ export function validatePrivateEffectBinding(
   );
   const rawLocator = (value as { action_root_locator?: PrivateActionRootLocatorV1 })
     .action_root_locator;
-  if (!rawLocator || rawLocator.kind === "recovery-bootstrap")
+  if (!rawLocator || rawLocator.kind === ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP)
     throw new CapabilityValidationError(
       "private descriptor action root is invalid",
       "private_payload_binding",
     );
-  const locator = rawLocator as Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>;
+  const locator = rawLocator as Exclude<
+    PrivateActionRootLocatorV1,
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+  >;
   try {
     actionIdempotencyScopeDigest(locator);
   } catch {
@@ -318,7 +326,10 @@ export function validatePrivateEffectPayload(
         value.codex_feature.canonical_relative_path,
         "private_payload.codex_feature.canonical_relative_path",
       );
-      if (value.root !== "user" || value.codex_feature.block_id !== "codex-hooks-feature")
+      if (
+        value.root !== CAPABILITY_SCOPE.USER ||
+        value.codex_feature.block_id !== "codex-hooks-feature"
+      )
         throw new CapabilityValidationError(
           "Codex hook feature payload is not bound to the user adapter",
           "private_payload.codex_feature",

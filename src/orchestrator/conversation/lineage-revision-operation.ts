@@ -1,4 +1,6 @@
+import { type Engine, isAgentEngine } from "../../core/agent-contract.js";
 import { digestV1 } from "../../durability/index.js";
+import { CONVERSATION_PUBLIC_PROFILE } from "./conversation-public-wire-contract.js";
 import { MAX_CANONICAL_HANDOFF_BYTES } from "./handoff-limits.js";
 import type { RevisionReservationRecordV1 } from "./lineage-reservation.js";
 import {
@@ -10,6 +12,18 @@ import {
   isMillisecondIsoDate,
   isPlainLineageRecord,
 } from "./lineage-types.js";
+import {
+  REVISION_OPERATION_EVENT_PAYLOAD_KIND,
+  type RevisionHeadCommitEventV1,
+  assertRevisionOperationEventV1,
+} from "./revision-operation-event-contract.js";
+import {
+  type ParticipantCancelModeV1,
+  type ParticipantStartReconciliationModeV1,
+  isParticipantCancelModeV1,
+  isParticipantStartReconciliationModeV1,
+} from "./revision-participant-receipt.js";
+export type { RevisionHeadCommitEventV1 } from "./revision-operation-event-contract.js";
 
 const OPERATION_ID = /^vf-operation-[0-9a-f]{64}$/;
 const PROPOSAL_ID = /^vf-proposal-[0-9a-f]{64}$/;
@@ -33,11 +47,11 @@ export interface RevisionPreparationPlanV1 {
   handoff_selection_plan_digest: string;
   participant_starts: Array<{
     participant_id: string;
-    engine: "claude" | "codex" | "copilot" | "opencode" | "antigravity";
+    engine: Engine;
     model: string | null;
     adapter_fingerprint: string;
-    reconciliation_mode: "provider-idempotency" | "inspect-start" | "vf-process-lease";
-    cancellation_mode: "idempotent-cancel" | "inspect-cancel" | "vf-process-lease";
+    reconciliation_mode: ParticipantStartReconciliationModeV1;
+    cancellation_mode: ParticipantCancelModeV1;
     wrapper_descriptor_digest: string;
     max_shared_prompt_bytes: number;
   }>;
@@ -68,31 +82,13 @@ export interface RevisionOperationV1 {
   expected_parent_lock_digest: string;
   permission_digest: string;
   binding_set_digest: string;
-  handoff_profile: "vf-public-handoff/1";
+  handoff_profile: typeof CONVERSATION_PUBLIC_PROFILE.HANDOFF;
   handoff_id: string;
   handoff_digest: string;
   handoff_selection_digest: string;
   prompt_projection_digest: string;
   created_at: string;
   header_digest: string;
-}
-
-export interface RevisionHeadCommitEventV1 {
-  schema_version: "1.0";
-  operation_id: string;
-  sequence: number;
-  previous_event_digest: string | null;
-  payload: {
-    kind: "head-commit";
-    authorized_by_action_operation_id: string;
-    effect_action_operation_id: string;
-    prior_head_digest: string;
-    prior_head_checkpoint_digest: string;
-    committed_head_digest: string;
-    directory_fsync_completed: true;
-  };
-  recorded_at: string;
-  event_digest: string;
 }
 
 export function assertRevisionPreparationPlanV1(
@@ -170,17 +166,11 @@ export function assertRevisionPreparationPlanV1(
         "wrapper_descriptor_digest",
       ]) ||
       !isBoundedLineageReference(participant.participant_id) ||
-      !["claude", "codex", "copilot", "opencode", "antigravity"].includes(
-        participant.engine as string,
-      ) ||
+      !isAgentEngine(participant.engine) ||
       (participant.model !== null && !isBoundedLineageReference(participant.model)) ||
       !isBoundedLineageReference(participant.adapter_fingerprint) ||
-      !["provider-idempotency", "inspect-start", "vf-process-lease"].includes(
-        participant.reconciliation_mode as string,
-      ) ||
-      !["idempotent-cancel", "inspect-cancel", "vf-process-lease"].includes(
-        participant.cancellation_mode as string,
-      ) ||
+      !isParticipantStartReconciliationModeV1(participant.reconciliation_mode) ||
+      !isParticipantCancelModeV1(participant.cancellation_mode) ||
       !isLineageDigest(participant.wrapper_descriptor_digest) ||
       !Number.isSafeInteger(participant.max_shared_prompt_bytes) ||
       (participant.max_shared_prompt_bytes as number) < 1 ||
@@ -249,7 +239,7 @@ export function assertRevisionOperationV1(value: unknown): asserts value is Revi
     (value.revision_claim_epoch as number) < 1 ||
     !Number.isSafeInteger(value.expected_parent_last_seq) ||
     (value.expected_parent_last_seq as number) < 0 ||
-    value.handoff_profile !== "vf-public-handoff/1" ||
+    value.handoff_profile !== CONVERSATION_PUBLIC_PROFILE.HANDOFF ||
     typeof value.handoff_id !== "string" ||
     !HANDOFF_ID.test(value.handoff_id) ||
     !isMillisecondIsoDate(value.created_at)
@@ -289,50 +279,9 @@ export function assertRevisionOperationV1(value: unknown): asserts value is Revi
 export function assertRevisionHeadCommitEventV1(
   value: unknown,
 ): asserts value is RevisionHeadCommitEventV1 {
-  if (
-    !isPlainLineageRecord(value) ||
-    !hasExactLineageKeys(value, [
-      "event_digest",
-      "operation_id",
-      "payload",
-      "previous_event_digest",
-      "recorded_at",
-      "schema_version",
-      "sequence",
-    ]) ||
-    value.schema_version !== "1.0" ||
-    typeof value.operation_id !== "string" ||
-    !OPERATION_ID.test(value.operation_id) ||
-    !Number.isSafeInteger(value.sequence) ||
-    (value.sequence as number) < 0 ||
-    (value.previous_event_digest !== null && !isLineageDigest(value.previous_event_digest)) ||
-    ((value.sequence as number) === 0) !== (value.previous_event_digest === null) ||
-    !isMillisecondIsoDate(value.recorded_at) ||
-    !isLineageDigest(value.event_digest) ||
-    !isPlainLineageRecord(value.payload) ||
-    !hasExactLineageKeys(value.payload, [
-      "authorized_by_action_operation_id",
-      "committed_head_digest",
-      "directory_fsync_completed",
-      "effect_action_operation_id",
-      "kind",
-      "prior_head_checkpoint_digest",
-      "prior_head_digest",
-    ]) ||
-    value.payload.kind !== "head-commit" ||
-    typeof value.payload.authorized_by_action_operation_id !== "string" ||
-    !OPERATION_ID.test(value.payload.authorized_by_action_operation_id) ||
-    typeof value.payload.effect_action_operation_id !== "string" ||
-    !OPERATION_ID.test(value.payload.effect_action_operation_id) ||
-    !isLineageDigest(value.payload.prior_head_digest) ||
-    !isLineageDigest(value.payload.prior_head_checkpoint_digest) ||
-    !isLineageDigest(value.payload.committed_head_digest) ||
-    value.payload.directory_fsync_completed !== true
-  )
+  assertRevisionOperationEventV1(value);
+  if (value.payload.kind !== REVISION_OPERATION_EVENT_PAYLOAD_KIND.HEAD_COMMIT)
     throw new Error("invalid revision head commit event");
-  const { event_digest: _digest, ...preimage } = value;
-  if (digestV1("VF-REVISION-OPERATION-EVENT\0v1\0", preimage) !== value.event_digest)
-    throw new Error("invalid revision head commit digest");
 }
 
 export function assertOperationReservationClosure(

@@ -47,13 +47,18 @@ import {
   isQueueReference,
 } from "./conversation-message-queue-validation.js";
 
-export function assertQueueJournalAppendCapacity(journalSequence: number): void {
+export function assertQueueJournalAppendCapacity(
+  journalSequence: number,
+  rootSessionId: string,
+): void {
   if (!Number.isSafeInteger(journalSequence) || journalSequence < 0)
     throw new Error("invalid queue journal append sequence");
+  if (!isQueueReference(rootSessionId)) throw new Error("invalid queue root authority");
   if (journalSequence >= CONVERSATION_MESSAGE_QUEUE_LIMITS.maxJournalEvents)
     throw new ConversationMessageQueueConflictError(
       CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUE_FULL,
       "conversation message queue journal reached its lifetime capacity",
+      { root_session_id: rootSessionId },
     );
 }
 
@@ -126,7 +131,7 @@ export class ConversationMessageQueueJournalV1 {
       state: typeof CONVERSATION_MESSAGE_QUEUE_PENDING_MUTATION_STATE.PENDING;
     };
     assertQueueIdempotencyWinnerV1(pending.binding, pending.event);
-    assertQueueJournalAppendCapacity(pending.event.journal_sequence);
+    assertQueueJournalAppendCapacity(pending.event.journal_sequence, this.rootSessionId);
     createOrVerifyPrivateFile(
       this.eventPath(pending.event.event_digest),
       canonicalJsonBytes(pending.event),
@@ -246,7 +251,10 @@ export class ConversationMessageQueueJournalV1 {
     recordedAt: string,
   ): PrivateConversationMessageQueueEventV1 {
     const current = this.readCurrent().value;
-    assertQueueJournalAppendCapacity((current?.last_journal_sequence ?? -1) + 1);
+    assertQueueJournalAppendCapacity(
+      (current?.last_journal_sequence ?? -1) + 1,
+      this.rootSessionId,
+    );
     const preimage = {
       schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
       root_session_id: this.rootSessionId,
@@ -261,7 +269,7 @@ export class ConversationMessageQueueJournalV1 {
   }
 
   private publishCurrent(event: PrivateConversationMessageQueueEventV1, lock: ProcessLock): void {
-    assertQueueJournalAppendCapacity(event.journal_sequence);
+    assertQueueJournalAppendCapacity(event.journal_sequence, this.rootSessionId);
     const prior = this.readCurrent();
     if (
       event.journal_sequence !== (prior.value?.last_journal_sequence ?? -1) + 1 ||
@@ -283,7 +291,7 @@ export class ConversationMessageQueueJournalV1 {
 
   append(event: PrivateConversationMessageQueueEventV1, lock: ProcessLock): void {
     assertConversationMessageQueueEventV1(event);
-    assertQueueJournalAppendCapacity(event.journal_sequence);
+    assertQueueJournalAppendCapacity(event.journal_sequence, this.rootSessionId);
     const existing = this.readEvents();
     foldConversationMessageQueueV1(this.rootSessionId, [...existing, event]);
     createOrVerifyPrivateFile(this.eventPath(event.event_digest), canonicalJsonBytes(event), {
@@ -332,7 +340,7 @@ export class ConversationMessageQueueJournalV1 {
     const binding = { ...draft, binding_digest: queueIdempotencyBindingDigest(draft) };
     assertQueueIdempotencyBindingV1(binding);
     assertQueueIdempotencyWinnerV1(binding, event);
-    assertQueueJournalAppendCapacity(event.journal_sequence);
+    assertQueueJournalAppendCapacity(event.journal_sequence, this.rootSessionId);
     const existing = this.readEvents();
     foldConversationMessageQueueV1(this.rootSessionId, [...existing, event]);
     const pending = this.pendingMutations.begin(binding, event, lock);
@@ -362,7 +370,7 @@ export class ConversationMessageQueueJournalV1 {
     if (!event)
       throw new ConversationMessageQueueCorruptError("queue idempotency winner is missing");
     assertQueueIdempotencyWinnerV1(binding, event);
-    assertQueueJournalAppendCapacity(event.journal_sequence);
+    assertQueueJournalAppendCapacity(event.journal_sequence, this.rootSessionId);
     const current = this.readCurrent().value;
     if (
       event.journal_sequence !== (current?.last_journal_sequence ?? -1) + 1 ||

@@ -2,8 +2,26 @@
 // Types
 // ---------------------------------------------------------------------------
 
-export type Channel = "vf" | "engine-stdout" | "engine-stderr" | "user" | "hook";
-export type LogLevel = "info" | "warn" | "error" | "debug";
+import {
+  LOG_CHANNEL,
+  type LogChannel,
+  type LogLevel,
+  isLogChannel,
+  isLogLevel,
+} from "../core/log-contract.js";
+
+export {
+  LOG_CHANNEL,
+  LOG_CHANNELS,
+  LOG_LEVEL,
+  LOG_LEVELS,
+  isLogChannel,
+  isLogLevel,
+  type LogLevel,
+} from "../core/log-contract.js";
+
+/** @deprecated Prefer the explicit LogChannel name. */
+export type Channel = LogChannel;
 
 export interface LogContext {
   workflowId?: string;
@@ -38,6 +56,53 @@ export type LogEventInput = Omit<LogEvent, "ts" | "seq"> & {
 export interface WatchHandle {
   close(): void;
   currentOffset(): number;
+}
+
+const FORBIDDEN_KEYS = Object.freeze(["__proto__", "constructor", "prototype"] as const);
+
+const isSafeRecord = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  return FORBIDDEN_KEYS.every((key) => !Object.prototype.hasOwnProperty.call(value, key));
+};
+
+const isSafeJsonTree = (value: unknown, seen = new WeakSet<object>()): boolean => {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) return value.every((item) => isSafeJsonTree(item, seen));
+  if (!isSafeRecord(value)) return false;
+  return Object.values(value).every((item) => isSafeJsonTree(item, seen));
+};
+
+const optionalString = (record: Record<string, unknown>, key: string): boolean =>
+  record[key] === undefined || typeof record[key] === "string";
+
+/** Decode a current or legacy JSONL event, rejecting invented protocol values. */
+export function decodeLogEvent(value: unknown): LogEvent | null {
+  if (!isSafeRecord(value) || !isSafeJsonTree(value)) return null;
+  if (!Number.isSafeInteger(value.seq) || (value.seq as number) < 0) return null;
+  if (typeof value.ts !== "number" || !Number.isFinite(value.ts) || value.ts < 0) return null;
+  if (!isLogLevel(value.level)) return null;
+  if (value.channel !== undefined && !isLogChannel(value.channel)) return null;
+  if (typeof value.text !== "string") return null;
+  if (value.runId !== undefined && typeof value.runId !== "string") return null;
+  if (!["workflowId", "repoPath", "unit"].every((key) => optionalString(value, key))) return null;
+  if (value.meta !== undefined && !isSafeRecord(value.meta)) return null;
+  return {
+    seq: value.seq as number,
+    ts: value.ts,
+    runId: value.runId ?? "",
+    workflowId: value.workflowId as string | undefined,
+    repoPath: value.repoPath as string | undefined,
+    unit: value.unit as string | undefined,
+    channel: value.channel ?? LOG_CHANNEL.VIBE_FLOW,
+    level: value.level,
+    text: value.text,
+    meta: value.meta,
+  };
 }
 
 // Strip CSI escapes (ESC [ ... letter), bare CR, and cursor-position sequences.

@@ -1,3 +1,8 @@
+import {
+  CAPABILITY_MANIFEST_SCHEMA_VERSION,
+  LEGACY_SOURCE_RECORD_KIND,
+  isLegacySource,
+} from "../../actions/capability-manifest-vocabulary-contract.js";
 import { canonicalJson, canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import { assertFilesystemLegacyOwnedMarkerV1 } from "../legacy/filesystem-reader.js";
 import type { LegacyOwnedMarkerV1 } from "../legacy/types.js";
@@ -45,14 +50,8 @@ export function validateLegacyInspectionEvidence(
     "legacy_evidence",
   );
   if (
-    value.schema_version !== "1.0" ||
-    ![
-      "skill-lock",
-      "tool-managed-evidence",
-      "mcp-managed-sidecar",
-      "hook-sentinel",
-      "role-marker",
-    ].includes(value.legacy_source)
+    value.schema_version !== CAPABILITY_MANIFEST_SCHEMA_VERSION ||
+    !isLegacySource(value.legacy_source)
   )
     throw new CapabilityValidationError("invalid legacy inspection evidence", "legacy_evidence");
   const rawIdentifier = text(value.raw_identifier_nfc, "legacy_evidence.raw_identifier_nfc", {
@@ -138,13 +137,7 @@ export function issueLegacyInspectionEvidence(
   const marker = assertFilesystemLegacyOwnedMarkerV1(markerValue);
   const evidence = validateLegacyInspectionEvidence(value);
   const proof = marker.ownership_proof;
-  const expectedRecordKind = {
-    "skill-lock": "lock",
-    "tool-managed-evidence": "descriptor",
-    "mcp-managed-sidecar": "managed-sidecar",
-    "hook-sentinel": "sentinel",
-    "role-marker": "renderer-marker",
-  }[marker.source];
+  const expectedRecordKind = LEGACY_SOURCE_RECORD_KIND[marker.source];
   const resources = marker.owned_resources.map(
     ({ ownership_key, public_target, expected_preimage_sha256 }) => ({
       ownership_key,

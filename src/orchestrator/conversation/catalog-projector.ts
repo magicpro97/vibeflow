@@ -16,6 +16,13 @@ import {
   assertConversationListResponseV1,
   normalizeConversationCatalogQuery,
 } from "./catalog-types.js";
+import {
+  CONVERSATION_CATALOG_HEALTH,
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_CURSOR_ERROR_CODE,
+  CONVERSATION_CURSOR_SORT,
+  CONVERSATION_CURSOR_VALIDATION_STATUS,
+} from "./conversation-catalog-contract.js";
 import { deriveLineageAssociations } from "./lineage-association.js";
 import { validateLineageHeadAuthorityChain } from "./lineage-head-authority.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
@@ -50,7 +57,7 @@ export interface ProjectConversationCatalogOptions {
 }
 
 export interface ConversationCatalogProjectionV1 {
-  schema_version: "1.0";
+  schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   response: ConversationListResponseV1;
   diagnostics: ConversationSourceDiagnosticV1[];
   read_only: boolean;
@@ -94,7 +101,10 @@ function afterBoundary(
       row.root_session_id === boundary.root_session_id,
   );
   if (index < 0)
-    throw new CatalogCursorError("cursor_binding_mismatch", "catalog cursor boundary is absent");
+    throw new CatalogCursorError(
+      CONVERSATION_CURSOR_ERROR_CODE.BINDING_MISMATCH,
+      "catalog cursor boundary is absent",
+    );
   return index + 1;
 }
 
@@ -211,7 +221,7 @@ export function projectConversationCatalog(
     associations.source_entries,
   );
   const sourceInventoryDigest = digestV1("VF-CONVERSATION-CATALOG-SOURCE-INVENTORY\0v1\0", {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     entries,
   });
   const sourceWatermark = digestV1("VF-CONVERSATION-CATALOG-SOURCE-WATERMARK\0v1\0", {
@@ -239,7 +249,7 @@ export function projectConversationCatalog(
     scope_id: options.scopeId,
     query_digest: queryDigest,
     filter_digest: filterDigest,
-    sort: "updated-desc-root-desc" as const,
+    sort: CONVERSATION_CURSOR_SORT.UPDATED_DESC_ROOT_DESC,
     catalog_generation: catalogGeneration,
     source_watermark: sourceWatermark,
     catalog_head_digest: catalogHeadDigest,
@@ -248,7 +258,7 @@ export function projectConversationCatalog(
   let boundary: CatalogCursorBoundaryV1 | null = null;
   if (options.cursor) {
     const validated = options.cursorCodec.validateCatalog(options.cursor, binding);
-    if (validated.status === "stale")
+    if (validated.status === CONVERSATION_CURSOR_VALIDATION_STATUS.STALE)
       throw new StaleCatalogCursorError(validated.restart_cursor, validated.catalog_generation);
     boundary = validated.value;
   }
@@ -265,16 +275,18 @@ export function projectConversationCatalog(
       : null;
   const authoritative = options.lineages.authoritative && diagnostics.length === 0;
   const response: ConversationListResponseV1 = {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     items,
     next_cursor: nextCursor,
     catalog_generation: catalogGeneration,
     source_watermark: sourceWatermark,
-    catalog_health: authoritative ? "ready" : "degraded",
+    catalog_health: authoritative
+      ? CONVERSATION_CATALOG_HEALTH.READY
+      : CONVERSATION_CATALOG_HEALTH.DEGRADED,
   };
   assertConversationListResponseV1(response);
   return {
-    schema_version: "1.0",
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     response,
     diagnostics,
     read_only: !authoritative,

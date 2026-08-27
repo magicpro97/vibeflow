@@ -6,6 +6,7 @@ import type {
   ConversationInteractionFoldV1,
   PublicQuoteReferenceV1,
 } from "../../src/orchestrator/conversation/conversation-interaction-types.js";
+import { conversationRevisionActionPlanDigest } from "../../src/orchestrator/conversation/conversation-revision-action-plan.js";
 import { buildContextHandoff } from "../../src/orchestrator/conversation/handoff-selection.js";
 import type { ContextHandoffStore } from "../../src/orchestrator/conversation/handoff-store.js";
 import type {
@@ -280,7 +281,7 @@ function revisionPublicationFixture(
     proposal_digest: sha("publication-proposal"),
     approval_id: `vf-approval-${"d".repeat(64)}`,
     approval_digest: sha("publication-approval"),
-    plan_digest: plan.plan_digest,
+    plan_digest: conversationRevisionActionPlanDigest(ROOT_ID, plan),
     authority_epoch: 0,
     authority_head_digest: sha("publication-action-head"),
     root_session_id: ROOT_ID,
@@ -560,7 +561,7 @@ describe("revision context continuity repairs", () => {
       }),
     ).toThrow("quote occurrence source changed");
 
-    const compaction: PublicCompactionArtifactV1 = {
+    const compactionPreimage: Omit<PublicCompactionArtifactV1, "content_digest"> = {
       schema_version: "1.0",
       profile: "vf-public-compaction/1",
       source: {
@@ -579,7 +580,10 @@ describe("revision context continuity repairs", () => {
       retained_artifact_ids: [],
       omitted_public_ranges: [],
       created_at: NOW,
-      content_digest: sha("compaction"),
+    };
+    const compaction: PublicCompactionArtifactV1 = {
+      ...compactionPreimage,
+      content_digest: digestV1("VF-PUBLIC-COMPACTION-ARTIFACT\0v1\0", compactionPreimage),
     };
     const built = buildContextHandoff({
       source: {
@@ -1039,7 +1043,11 @@ describe("revision context continuity repairs", () => {
       },
     });
     expect(appended).toEqual(retryEvents.slice(events.length));
-    expect(foldRevisionOperation(fixture.operation, retryEvents).state).toBe("started");
+    expect(
+      foldRevisionOperation(fixture.operation, retryEvents, {
+        preparationPlan: fixture.plan,
+      }).state,
+    ).toBe("started");
     expect(resumes[0]).toMatchObject({
       delivery_interaction_sequence: fixture.interaction.interaction_sequence,
       delivery_interaction_digest: fixture.interaction.interaction_head_digest,
@@ -1063,6 +1071,7 @@ describe("revision context continuity repairs", () => {
     const firstTurn = prepareConversationTurn({
       conversation_id: CHILD_ID,
       revision_id: "revision-child",
+      recipient_engine: "codex",
       request: { participant_id: PARTICIPANT_ID, instruction: { kind: "direct", topic: null } },
       events: [
         traceEvent(1, {
@@ -1215,6 +1224,7 @@ describe("revision context continuity repairs", () => {
     const exact = prepareConversationTurn({
       conversation_id: CHILD_ID,
       revision_id: "revision-child",
+      recipient_engine: "codex",
       request: { participant_id: PARTICIPANT_ID, instruction: { kind: "direct", topic: null } },
       events,
       resume: published.resume,
@@ -1257,6 +1267,7 @@ describe("revision context continuity repairs", () => {
     const mismatched = prepareConversationTurn({
       conversation_id: CHILD_ID,
       revision_id: "revision-child",
+      recipient_engine: "codex",
       request: { participant_id: PARTICIPANT_ID, instruction: { kind: "direct", topic: null } },
       events,
       resume: {

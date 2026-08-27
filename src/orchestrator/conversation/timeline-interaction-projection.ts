@@ -1,3 +1,4 @@
+import { CONVERSATION_INTERACTION_STATE } from "./conversation-interaction-contract.js";
 import type {
   ConversationInteractionProjectionV1,
   ConversationTimelineInteractionV1,
@@ -7,16 +8,16 @@ export function timelineInteractionProjection(
   eventId: string,
   projection: ConversationInteractionProjectionV1 | undefined,
 ): ConversationTimelineInteractionV1 {
-  if (!projection || projection.state === "degraded")
+  if (!projection || projection.state === CONVERSATION_INTERACTION_STATE.DEGRADED)
     return {
-      state: "degraded",
+      state: CONVERSATION_INTERACTION_STATE.DEGRADED,
       message_locator: null,
       quote_refs: [],
       reactions: [],
       diagnostic_code: null,
     };
   return {
-    state: "ready",
+    state: CONVERSATION_INTERACTION_STATE.READY,
     message_locator: structuredClone(projection.message_locators_by_event_id[eventId] ?? null),
     quote_refs: (projection.quote_projections_by_response_event_id[eventId] ?? []).map(
       (target, index) => ({

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { WorkflowState } from "../core.js";
 import { writeState } from "../core.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { type GateReport, computeConfidence, policyGates } from "../gates.js";
 import { snapshotImpl } from "../spec-freshness.js";
 
@@ -331,7 +332,7 @@ export function persistImplementationFingerprints(
       fingerprint: Record<string, string | null>;
     }> = [];
     for (const [index, unit] of state.work_units.entries()) {
-      if (unit.status !== "done" || !unit.scope?.length) continue;
+      if (unit.status !== WORK_UNIT_STATUS.DONE || !unit.scope?.length) continue;
       pending.push({ index, fingerprint: snapshot(base, unit.scope) });
     }
     if (!pending.length) return false;

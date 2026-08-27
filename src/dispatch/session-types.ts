@@ -1,22 +1,39 @@
 import type { RoleSandbox } from "../agents/role.js";
 import type { Engine } from "../core.js";
+import type {
+  CONVERSATION_OPERATION_STATE,
+  ConversationOperationStateV1,
+  ConversationReconciliationStatusV1,
+} from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import { type EnvPolicy, isConversationEnvPolicy } from "./env-filter.js";
 import type { OwnedProcessPlatform } from "./owned-process-platform.js";
 import type { OwnedProcessController, OwnedProcessReleaseProof } from "./owned-process-runtime.js";
 import type { OwnedSupervisorExitOutcome } from "./owned-process-status.js";
+import {
+  type ENGINE_SESSION_SCHEMA_VERSION,
+  type EngineAttemptStartOutcome,
+  type EngineEvidenceStatus,
+  type EngineIsolationKind,
+  type EngineNativeSessionStatus,
+  type EngineOutputStream,
+  type EngineRoleSource,
+  type EngineSessionMode,
+  type EngineSessionProtocol,
+  isEngineRoleSource,
+} from "./session-contract.js";
 import type { EngineTerminalObservation } from "./session-terminal.js";
 import type { EngineSummary } from "./types.js";
 
-export type SessionMode = "exact" | "replay" | "fresh";
+export type SessionMode = EngineSessionMode;
 
 export interface IsolationLeaseProjection {
-  kind: "worktree" | "container";
+  kind: EngineIsolationKind;
   cwd: string;
   evidence_ref: string;
 }
 
 export interface SessionProvenance {
-  roleSource: "builtin" | "repo";
+  roleSource: EngineRoleSource;
   roleHash: string;
   skillHashes: string[];
 }
@@ -75,7 +92,7 @@ export function createSpawnOptionsProjection(input: SpawnOptionsInput): SpawnOpt
   if (!isConversationEnvPolicy(input.env_policy, input.engine)) {
     throw new Error("spawn.env_policy must be canonical conversation authority");
   }
-  if (input.provenance.roleSource !== "builtin" && input.provenance.roleSource !== "repo") {
+  if (!isEngineRoleSource(input.provenance.roleSource)) {
     throw new Error("spawn provenance roleSource must be builtin or repo");
   }
   if (input.model !== null && !isSafeModelIdentifier(input.model)) {
@@ -112,12 +129,7 @@ export function isCanonicalSpawnOptionsProjection(projection: SpawnOptionsProjec
   return canonicalSpawnProjections.has(projection);
 }
 
-export type OperationLifecycleState =
-  | "requested"
-  | "dispatched"
-  | "acknowledged"
-  | "completed"
-  | "ambiguous";
+export type OperationLifecycleState = ConversationOperationStateV1;
 
 export interface AttemptProcessRelease {
   proof: OwnedProcessReleaseProof | null;
@@ -125,7 +137,7 @@ export interface AttemptProcessRelease {
 }
 
 export interface EngineChunk {
-  stream: "stdout" | "stderr";
+  stream: EngineOutputStream;
   /** Public-safe, newline-framed content. Incomplete control records stay buffered. */
   content: string;
 }
@@ -140,13 +152,15 @@ export interface EngineSessionResult {
   attemptId: string;
   engine: Engine;
   ok: boolean;
-  state: "completed" | "ambiguous";
+  state:
+    | typeof CONVERSATION_OPERATION_STATE.COMPLETED
+    | typeof CONVERSATION_OPERATION_STATE.AMBIGUOUS;
   lifecycle: OperationLifecycleState[];
   output: string;
   summary?: EngineSummary;
   reason?: string;
-  evidenceStatus: "persisted";
-  nativeSessionStatus: "captured" | "unavailable";
+  evidenceStatus: EngineEvidenceStatus;
+  nativeSessionStatus: EngineNativeSessionStatus;
 }
 
 export interface AttemptHandle<T = EngineSessionResult> {
@@ -160,10 +174,10 @@ export interface AttemptHandle<T = EngineSessionResult> {
 }
 
 export interface AttemptStartAuthorityRecordV1 {
-  schema_version: "1.0";
+  schema_version: typeof ENGINE_SESSION_SCHEMA_VERSION;
   attempt_id: string;
   engine: Engine;
-  outcome: "accepted" | "proved-absent" | "unknown";
+  outcome: EngineAttemptStartOutcome;
   native_session_id: string | null;
   evidence_ref: string;
   evidence_sha256: string;
@@ -194,7 +208,7 @@ export interface HistoryReconcileRequest {
 }
 
 export interface HistoryReconcileResult {
-  status: "reconciled" | "partial" | "unavailable";
+  status: ConversationReconciliationStatusV1;
   imported_turn_count: number;
   imported_tool_count: number;
   completeness_reason: string;
@@ -240,7 +254,7 @@ export interface EngineSessionAdapterOptions {
   idleTimeoutMs?: number;
   graceMs?: number;
   /** Bridge commands acknowledge at successful process exit rather than native session protocol. */
-  protocol?: "native" | "bridge";
+  protocol?: EngineSessionProtocol;
   /** The configured spawner creates a detached process group owned by this adapter. */
   ownsProcessGroup?: boolean;
   evidenceRoot?: string;

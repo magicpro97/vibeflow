@@ -2,11 +2,13 @@
 // Resolver helpers live in orchestrate-resolve.ts (#186 PR7).
 // Reviewer prompt isolation lives in orchestrate-reviewer.ts (ADR-001).
 //
-// Contents:
 // - orchestrate: plans concurrency, builds the spawner, runs orchestrateUnits,
 //   merges results back into the workflow ledger, and reports the goal verdict.
 
 import { resolve } from "node:path";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import { dispatchInWaves } from "../orchestrator/waves.js";
 // Protection cluster lives in src/commands/protection.ts and is
 // re-exported through the sibling barrel (_shared.js). Both this
@@ -168,7 +170,7 @@ export async function orchestrate(
   const allUnits: WorkUnit[] =
     state.work_units.length > 0
       ? state.work_units
-      : [normalizeUnit({ name: "task", status: "pending", confidence: 0 })];
+      : [normalizeUnit({ name: "task", status: WORK_UNIT_STATUS.PENDING, confidence: 0 })];
 
   const done = allUnits.filter(isComplete);
   const units: WorkUnit[] = allUnits.filter((u) => !isComplete(u));
@@ -203,7 +205,7 @@ export async function orchestrate(
     state.goal,
     (state.attachments ?? []).map((a) => a.name),
     "orchestrate",
-    mode !== "dry",
+    mode !== DISPATCH_MODE.DRY,
     flags.yes === true,
     inject,
   );
@@ -224,7 +226,7 @@ export async function orchestrate(
   const fp = resolveProtection(flags, settings.failureProtection);
   const git = inject.git ?? repoGit(base);
   let prot: ProtectionRuntime | undefined;
-  if (mode === "cli") {
+  if (mode === DISPATCH_MODE.CLI) {
     const plan = planProtection(base, state.task_id, fp, git);
     if (plan.refused) {
       out("vf");
@@ -266,7 +268,7 @@ export async function orchestrate(
   }
 
   // ponytail: antigravity stays serial until a concurrent non-TTY canary is added (agy 1.1.4).
-  if (engine === "antigravity") concurrency = 1;
+  if (engine === AGENT_ENGINE.ANTIGRAVITY) concurrency = 1;
 
   const spinner = new Spinner();
   spinner.start(
@@ -275,7 +277,9 @@ export async function orchestrate(
 
   // W1: per-unit worktree isolation, STRICTLY opt-in via `--isolate` (cli only).
   const isolate =
-    flags.isolate === true && mode === "cli" ? { base: "HEAD", wt: inject.wt } : undefined;
+    flags.isolate === true && mode === DISPATCH_MODE.CLI
+      ? { base: "HEAD", wt: inject.wt }
+      : undefined;
   if (isolate) {
     out("vf", c.dim("  worktree isolation ON — each unit dispatches in its own git worktree"));
   }
@@ -335,7 +339,7 @@ export async function orchestrate(
   recomputeTotals(state);
   // Dry is read-only: keep the persisted ledger byte-identical (only the CONTEXT.md prompt
   // previews under workunits/* are written). Real runs (cli/bridge) persist the outcome.
-  if (mode !== "dry") writeState(base, state);
+  if (mode !== DISPATCH_MODE.DRY) writeState(base, state);
 
   for (const r of reviews) {
     out("vf", `${r.pass ? c.green("✓") : c.yellow("•")} review ${r.unit}: ${r.reason}`);
@@ -343,7 +347,7 @@ export async function orchestrate(
 
   // W3: optional per-unit PR (opt-in `--pr`, cli + isolate only; never merges).
   maybePublishPrs({
-    prRequested: flags.pr === true && mode === "cli",
+    prRequested: flags.pr === true && mode === DISPATCH_MODE.CLI,
     isolated: Boolean(isolate),
     units: ran.map((u) => ({
       name: u.name,
@@ -363,7 +367,7 @@ export async function orchestrate(
   out("vf", color(`goal: ${verdict.verdict}`));
   for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
   // Append a machine event to the work journal — real runs only (dry is read-only).
-  if (mode !== "dry") {
+  if (mode !== DISPATCH_MODE.DRY) {
     appendJournal(base, "dispatch", `${engine} → goal ${verdict.verdict}`, [
       `${ran.length} unit(s) dispatched (${mode}, concurrency ${concurrency})`,
       ...ran.map((u) => `- ${u.name}: ${u.status} @ ${u.confidence}`),
@@ -384,7 +388,7 @@ export async function orchestrate(
       out("vf", c.dim("  DRAFT only — NOT installed. Review, then `git add` if useful."));
     }
   }
-  if (mode === "dry") {
+  if (mode === DISPATCH_MODE.DRY) {
     out(
       "vf",
       c.dim(

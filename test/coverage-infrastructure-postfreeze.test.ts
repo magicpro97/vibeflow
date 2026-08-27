@@ -818,6 +818,71 @@ async function responseText(response: Response): Promise<string> {
 }
 
 describe("post-freeze conversation mutation and stream route coverage", () => {
+  test("conversation mutation routes reject missing auth, wrong methods, and failed CSRF", async () => {
+    const url = new URL("http://local/api/conversations/conversation/action-proposals");
+    const actionAuthority = {
+      sessions: { authorize: () => false },
+      csrf: () => true,
+      actions: {},
+      rootSessionId: () => "root",
+    };
+    const unauthenticatedAction = await handleConversationActionRoute(
+      actionAuthority as never,
+      new Request(url.toString()),
+      url,
+      "conversation",
+      ["action-proposals"],
+    );
+    expect((await responseError(unauthenticatedAction as Response)).error.code).toBe(
+      "unauthenticated",
+    );
+    const csrfAction = await handleConversationActionRoute(
+      {
+        ...actionAuthority,
+        sessions: { authorize: () => true },
+        csrf: () => false,
+      } as never,
+      new Request(url.toString(), { method: "POST" }),
+      url,
+      "conversation",
+      ["action-proposals"],
+    );
+    expect((await responseError(csrfAction as Response)).error.code).toBe("forbidden");
+
+    const wrongListMethod = await handleConversationListRoute(
+      { sessions: { authorize: () => true }, catalog: {} } as never,
+      new Request("http://local/api/conversations", { method: "POST" }),
+      new URL("http://local/api/conversations"),
+    );
+    expect((await responseError(wrongListMethod)).error.code).toBe("not_found");
+
+    const reactionRequest = (method: string) =>
+      new Request("http://local/reactions", {
+        method,
+        ...(method === "POST"
+          ? { headers: { "content-type": "application/json" }, body: "{}" }
+          : {}),
+      });
+    const reactionAuthority = {
+      sessions: { authorize: () => true },
+      csrf: () => false,
+    } as never;
+    const wrongReactionMethod = await handleConversationReactionRoute(
+      reactionAuthority,
+      reactionRequest("GET"),
+      "conversation",
+      "event",
+    );
+    expect((await responseError(wrongReactionMethod)).error.code).toBe("not_found");
+    const csrfReaction = await handleConversationReactionRoute(
+      reactionAuthority,
+      reactionRequest("POST"),
+      "conversation",
+      "event",
+    );
+    expect((await responseError(csrfReaction)).error.code).toBe("forbidden");
+  });
+
   test("action route maps every typed failure without leaking authority details", async () => {
     const conflict = new ActionConflictError(
       "idempotency_conflict",

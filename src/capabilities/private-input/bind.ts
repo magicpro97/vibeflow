@@ -1,6 +1,7 @@
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import { DIGEST } from "../../actions/record-primitives.js";
 import { digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import { assertPackageIdentity, objectFromEntries, parseInputId } from "./helpers.js";
 import type {
@@ -22,12 +23,12 @@ export function validateBindRequest(input: {
   if (request.schema_version !== "1.0")
     throw new CapabilityRuntimeError(
       "unsupported private-input bind request version",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   if (request.scope !== scope)
     throw new CapabilityRuntimeError(
       "private input scope is not owned by this authority",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   if (
     request.scope_identity_digest !== scopeIdentityDigest ||
@@ -35,30 +36,39 @@ export function validateBindRequest(input: {
   ) {
     throw new CapabilityRuntimeError(
       "private input scope identity digest mismatch",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   }
   assertPackageIdentity(request.package_id, request.package_pin_digest, request.manifest_digest);
   if (!/^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/u.test(request.idempotency_key))
-    throw new CapabilityRuntimeError("invalid private-input idempotency key", "invalid-plan");
+    throw new CapabilityRuntimeError(
+      "invalid private-input idempotency key",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+    );
   const expiresAt = Date.parse(request.expires_at);
   const currentTime = Date.parse(now());
   if (!Number.isFinite(expiresAt) || request.expires_at !== new Date(expiresAt).toISOString()) {
     throw new CapabilityRuntimeError(
       "invalid private-input bind request timestamp",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   }
   if (!(expiresAt > currentTime))
     throw new CapabilityRuntimeError(
       "private-input bind expiry must be in the future",
-      "invalid-plan",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
     );
   if (!request.values || Array.isArray(request.values))
-    throw new CapabilityRuntimeError("private-input bind values must be an object", "invalid-plan");
+    throw new CapabilityRuntimeError(
+      "private-input bind values must be an object",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+    );
   const entries = Object.entries(request.values);
   if (entries.length === 0 || entries.length > 128)
-    throw new CapabilityRuntimeError("private-input bind requires 1-128 values", "invalid-plan");
+    throw new CapabilityRuntimeError(
+      "private-input bind requires 1-128 values",
+      CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
+    );
   return {
     ...request,
     values: objectFromEntries(
@@ -67,13 +77,13 @@ export function validateBindRequest(input: {
         if (typeof secretValue !== "string" || Buffer.byteLength(secretValue, "utf8") < 1) {
           throw new CapabilityRuntimeError(
             `private-input value ${parsedInputId} must be a non-empty string`,
-            "invalid-plan",
+            CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
           );
         }
         if (Buffer.byteLength(secretValue, "utf8") > 65536) {
           throw new CapabilityRuntimeError(
             `private-input value ${parsedInputId} exceeds the byte limit`,
-            "invalid-plan",
+            CAPABILITY_RUNTIME_ERROR_CODE.INVALID_PLAN,
           );
         }
         return [parsedInputId, secretValue] as const;
@@ -90,7 +100,10 @@ export function createBindingRecord(input: {
   const createdAt = input.now();
   const epoch = Date.parse(createdAt);
   if (!Number.isFinite(epoch))
-    throw new CapabilityRuntimeError("private-input clock produced an invalid timestamp", "fault");
+    throw new CapabilityRuntimeError(
+      "private-input clock produced an invalid timestamp",
+      CAPABILITY_RUNTIME_ERROR_CODE.FAULT,
+    );
   const bindings = Object.entries(input.request.values)
     .sort(([left], [right]) => bytewise(left, right))
     .map(([inputId, secretValue]) =>
@@ -106,7 +119,7 @@ export function createBindingRecord(input: {
     package_pin_digest: input.request.package_pin_digest,
     manifest_digest: input.request.manifest_digest,
     action_root_locator: {
-      kind: "capability" as const,
+      kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
       scope: input.request.scope,
       scope_identity_digest: input.request.scope_identity_digest,
     },

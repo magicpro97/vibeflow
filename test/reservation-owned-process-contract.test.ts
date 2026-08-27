@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   OWNED_CLI_IDENTITY_STATE,
   OWNED_CLI_IDENTITY_STATES,
+  OWNED_PROCESS_ENV,
+  OWNED_PROCESS_EXIT_CODE,
   OWNED_PROCESS_IGNORABLE_STREAM_ERROR_CODE,
   OWNED_PROCESS_IGNORABLE_STREAM_ERROR_CODES,
+  OWNED_PROCESS_LIMIT,
   OWNED_PROCESS_PRESENCE_KIND,
   OWNED_PROCESS_PRESENCE_KINDS,
   OWNED_PROCESS_PROOF_STRENGTH,
@@ -14,12 +18,14 @@ import {
   OWNED_PROCESS_QUIESCENCE_MODES,
   OWNED_PROCESS_QUIESCENCE_SCOPE,
   OWNED_PROCESS_QUIESCENCE_SCOPES,
+  OWNED_PROCESS_SCHEMA_VERSION,
   OWNED_PROCESS_STATE,
   OWNED_PROCESS_STATES,
   OWNED_PROCESS_STRATEGIES,
   OWNED_PROCESS_STRATEGY,
   OWNED_PROCESS_TERMINAL_KIND,
   OWNED_PROCESS_TERMINAL_KINDS,
+  OWNED_PROCESS_TIMING_MS,
   OWNED_SUPERVISOR_OUTCOME_KIND,
   OWNED_SUPERVISOR_OUTCOME_KINDS,
   OWNED_SUPERVISOR_PHASE,
@@ -31,6 +37,9 @@ import {
   OWNED_SUPERVISOR_STATUS_KEY,
   OWNED_SUPERVISOR_TERMINAL_PHASE,
   OWNED_SUPERVISOR_TERMINAL_PHASES,
+  OWNED_WINDOWS_JOB,
+  OWNED_WINDOWS_LIMIT,
+  OWNED_WINDOWS_QUERY_STATUS,
   isOwnedCliIdentityState,
   isOwnedProcessIgnorableStreamErrorCode,
   isOwnedProcessPresenceKind,
@@ -52,147 +61,23 @@ import {
 } from "../src/dispatch/owned-process-launch-receipt.js";
 import { OWNED_SUPERVISOR_SCRIPT } from "../src/dispatch/owned-process-launch.js";
 import {
-  CAPABILITY_DISPATCH_RELEASE_OUTCOME,
-  CAPABILITY_DISPATCH_RELEASE_OUTCOMES,
-  CAPABILITY_DISPATCH_RESERVATION_ERROR_NAME,
-  CAPABILITY_DISPATCH_RESERVATION_SCHEMA_VERSION,
-  CAPABILITY_DISPATCH_RESERVATION_STALE_REASON,
-  CAPABILITY_DISPATCH_RESERVATION_STATUS,
-  CAPABILITY_DISPATCH_RESERVATION_STATUSES,
-  isCapabilityDispatchReleaseOutcome,
-  isCapabilityDispatchReservationStatus,
-} from "../src/orchestrator/conversation/conversation-capability-dispatch-reservation-contract.js";
+  OwnedProcessRecordStore,
+  buildOwnedProcessRecord,
+} from "../src/dispatch/owned-process-record.js";
+import { canonicalJsonBytes } from "../src/durability/index.js";
 import {
-  LINEAGE_MUTATION_ACTION_TYPE,
-  LINEAGE_MUTATION_ACTION_TYPES,
-  LINEAGE_MUTATION_KIND,
-  LINEAGE_MUTATION_KINDS,
-  LINEAGE_MUTATION_RELEASE_OUTCOME,
-  LINEAGE_MUTATION_RELEASE_OUTCOMES,
-  LINEAGE_MUTATION_RESERVATION_ERROR_NAME,
-  LINEAGE_MUTATION_RESERVATION_SCHEMA_VERSION,
-  LINEAGE_MUTATION_RESERVATION_STALE_REASON,
-  LINEAGE_MUTATION_RESERVATION_STATUS,
-  LINEAGE_MUTATION_RESERVATION_STATUSES,
-  isLineageMutationActionType,
-  isLineageMutationKind,
-  isLineageMutationReleaseOutcome,
-  isLineageMutationReservationStatus,
-} from "../src/orchestrator/conversation/conversation-lineage-mutation-reservation-contract.js";
-
+  PROCESS_START_IDENTITY_CONTRACT,
+  PROCESS_START_IDENTITY_PREFIX,
+  formatProcessStartIdentity,
+} from "../src/durability/process-identity-contract.js";
 const valuesAreUnique = (values: readonly string[]): boolean =>
   new Set(values).size === values.length;
-
-describe("durable reservation protocol contracts", () => {
-  test("capability dispatch vocabulary is frozen, parity-safe, and fail-closed", () => {
-    expect(
-      [
-        CAPABILITY_DISPATCH_RESERVATION_STATUS,
-        CAPABILITY_DISPATCH_RESERVATION_STATUSES,
-        CAPABILITY_DISPATCH_RELEASE_OUTCOME,
-        CAPABILITY_DISPATCH_RELEASE_OUTCOMES,
-        CAPABILITY_DISPATCH_RESERVATION_STALE_REASON,
-        CAPABILITY_DISPATCH_RESERVATION_ERROR_NAME,
-      ].every(Object.isFrozen),
-    ).toBe(true);
-    expect(CAPABILITY_DISPATCH_RESERVATION_STATUSES).toEqual(
-      Object.values(CAPABILITY_DISPATCH_RESERVATION_STATUS),
-    );
-    expect(CAPABILITY_DISPATCH_RELEASE_OUTCOMES).toEqual(
-      Object.values(CAPABILITY_DISPATCH_RELEASE_OUTCOME),
-    );
-    expect(
-      CAPABILITY_DISPATCH_RESERVATION_STATUSES.every(isCapabilityDispatchReservationStatus),
-    ).toBe(true);
-    expect(CAPABILITY_DISPATCH_RELEASE_OUTCOMES.every(isCapabilityDispatchReleaseOutcome)).toBe(
-      true,
-    );
-    expect(isCapabilityDispatchReservationStatus("unknown")).toBe(false);
-    expect(isCapabilityDispatchReleaseOutcome(null)).toBe(false);
-  });
-
-  test("lineage mutation vocabulary is frozen, parity-safe, and fail-closed", () => {
-    expect(
-      [
-        LINEAGE_MUTATION_RESERVATION_STATUS,
-        LINEAGE_MUTATION_RESERVATION_STATUSES,
-        LINEAGE_MUTATION_KIND,
-        LINEAGE_MUTATION_KINDS,
-        LINEAGE_MUTATION_ACTION_TYPE,
-        LINEAGE_MUTATION_ACTION_TYPES,
-        LINEAGE_MUTATION_RELEASE_OUTCOME,
-        LINEAGE_MUTATION_RELEASE_OUTCOMES,
-        LINEAGE_MUTATION_RESERVATION_STALE_REASON,
-        LINEAGE_MUTATION_RESERVATION_ERROR_NAME,
-      ].every(Object.isFrozen),
-    ).toBe(true);
-    expect(LINEAGE_MUTATION_RESERVATION_STATUSES).toEqual(
-      Object.values(LINEAGE_MUTATION_RESERVATION_STATUS),
-    );
-    expect(LINEAGE_MUTATION_KINDS).toEqual(Object.values(LINEAGE_MUTATION_KIND));
-    expect(LINEAGE_MUTATION_ACTION_TYPES).toEqual(Object.values(LINEAGE_MUTATION_ACTION_TYPE));
-    expect(LINEAGE_MUTATION_RELEASE_OUTCOMES).toEqual(
-      Object.values(LINEAGE_MUTATION_RELEASE_OUTCOME),
-    );
-    expect(LINEAGE_MUTATION_RESERVATION_STATUSES.every(isLineageMutationReservationStatus)).toBe(
-      true,
-    );
-    expect(LINEAGE_MUTATION_KINDS.every(isLineageMutationKind)).toBe(true);
-    expect(LINEAGE_MUTATION_ACTION_TYPES.every(isLineageMutationActionType)).toBe(true);
-    expect(LINEAGE_MUTATION_RELEASE_OUTCOMES.every(isLineageMutationReleaseOutcome)).toBe(true);
-    expect([
-      isLineageMutationReservationStatus("unknown"),
-      isLineageMutationKind("remove"),
-      isLineageMutationActionType(null),
-      isLineageMutationReleaseOutcome(1),
-    ]).toEqual([false, false, false, false]);
-  });
-
-  test("reservation consumers do not duplicate their protocol literals", () => {
-    const protocols = [
-      {
-        consumers: [
-          "src/orchestrator/conversation/conversation-capability-dispatch-reservation-records.ts",
-          "src/orchestrator/conversation/conversation-capability-dispatch-reservation.ts",
-        ],
-        literals: [
-          CAPABILITY_DISPATCH_RESERVATION_SCHEMA_VERSION,
-          ...Object.values(CAPABILITY_DISPATCH_RESERVATION_STATUS),
-          ...Object.values(CAPABILITY_DISPATCH_RELEASE_OUTCOME),
-          ...Object.values(CAPABILITY_DISPATCH_RESERVATION_STALE_REASON),
-          ...Object.values(CAPABILITY_DISPATCH_RESERVATION_ERROR_NAME),
-        ],
-      },
-      {
-        consumers: [
-          "src/orchestrator/conversation/conversation-lineage-mutation-reservation-records.ts",
-          "src/orchestrator/conversation/conversation-lineage-mutation-reservation.ts",
-        ],
-        literals: [
-          LINEAGE_MUTATION_RESERVATION_SCHEMA_VERSION,
-          ...Object.values(LINEAGE_MUTATION_RESERVATION_STATUS),
-          ...Object.values(LINEAGE_MUTATION_KIND),
-          ...Object.values(LINEAGE_MUTATION_ACTION_TYPE),
-          ...Object.values(LINEAGE_MUTATION_RELEASE_OUTCOME),
-          ...Object.values(LINEAGE_MUTATION_RESERVATION_STALE_REASON),
-          ...Object.values(LINEAGE_MUTATION_RESERVATION_ERROR_NAME),
-        ],
-      },
-    ] as const;
-    const duplicates: string[] = [];
-    for (const protocol of protocols) {
-      expect(valuesAreUnique(protocol.literals)).toBe(true);
-      for (const consumer of protocol.consumers) {
-        const source = readFileSync(resolve(consumer), "utf8");
-        for (const literal of protocol.literals) {
-          if (source.includes(JSON.stringify(literal)))
-            duplicates.push(`${consumer} -> ${literal}`);
-        }
-      }
-    }
-    expect(duplicates).toEqual([]);
-  });
-});
+const LINUX_BOOT_ID = "123e4567-e89b-12d3-a456-426614174000";
+const CLI_IDENTITY = formatProcessStartIdentity(
+  PROCESS_START_IDENTITY_PREFIX.LINUX,
+  LINUX_BOOT_ID,
+  42,
+);
 
 describe("owned process protocol contract", () => {
   test("closed vocabularies are frozen, parity-safe, and narrowed fail-closed", () => {
@@ -239,41 +124,121 @@ describe("owned process protocol contract", () => {
     expect(Object.isFrozen(OWNED_SUPERVISOR_STATUS_KEY)).toBe(true);
   });
 
-  test("receipt reader validates all untrusted optional CLI fields", () => {
+  test("receipt reader validates untrusted fields with deterministic invalid-to-valid cases", () => {
     const cliKey = OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PID;
-    const invalidReceipts = [
-      null,
-      [],
-      { [cliKey]: 0 },
-      { [cliKey]: 42, [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY]: 1 },
-      { [cliKey]: 42, [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY_STATE]: "forged" },
-      { [cliKey]: 42, [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PGID]: -1 },
-    ];
-    const validReceipt = {
+    const validCliReceipt = {
       [cliKey]: 42,
-      [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY]: "linux:boot:42",
+      [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY]: CLI_IDENTITY,
       [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY_STATE]: OWNED_CLI_IDENTITY_STATE.AVAILABLE,
       [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PGID]: 41,
     };
-    const serialized = [...invalidReceipts, validReceipt].map((value) => JSON.stringify(value));
-    const runtime = {
-      now: () => Date.now(),
-      readFileSync: (() =>
-        serialized.shift() ?? JSON.stringify(validReceipt)) as unknown as typeof readFileSync,
-    };
-    expect(waitForOwnedSupervisorReceipt("receipt.json", cliKey, runtime)).toEqual(validReceipt);
-
-    const supervisorReceipt = {
+    const validSupervisorReceipt = {
       [OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID]: 40,
       [OWNED_SUPERVISOR_RECEIPT_KEY.CONTAINMENT]:
         OWNED_PROCESS_QUIESCENCE_SCOPE.POSIX_PROCESS_GROUP,
     };
-    expect(
-      waitForOwnedSupervisorReceipt("receipt.json", OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID, {
-        now: () => Date.now(),
-        readFileSync: (() => JSON.stringify(supervisorReceipt)) as unknown as typeof readFileSync,
-      }),
-    ).toEqual(supervisorReceipt);
+    const cases = [
+      { key: cliKey, invalid: null, valid: validCliReceipt },
+      { key: cliKey, invalid: [], valid: validCliReceipt },
+      { key: cliKey, invalid: "not-an-object", valid: validCliReceipt },
+      { key: cliKey, invalid: { [cliKey]: 0 }, valid: validCliReceipt },
+      {
+        key: cliKey,
+        invalid: { [cliKey]: 42, [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY]: 1 },
+        valid: validCliReceipt,
+      },
+      {
+        key: cliKey,
+        invalid: {
+          [cliKey]: 42,
+          [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_IDENTITY_STATE]: "forged",
+        },
+        valid: validCliReceipt,
+      },
+      {
+        key: cliKey,
+        invalid: { [cliKey]: 42, [OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PGID]: -1 },
+        valid: validCliReceipt,
+      },
+      {
+        key: cliKey,
+        invalid: { ...validCliReceipt, unexpected_field: true },
+        valid: validCliReceipt,
+      },
+      {
+        key: OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID,
+        invalid: {
+          [OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID]: 40,
+          [OWNED_SUPERVISOR_RECEIPT_KEY.CONTAINMENT]: "forged",
+        },
+        valid: validSupervisorReceipt,
+      },
+      {
+        key: OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID,
+        invalid: { ...validSupervisorReceipt, unexpected_field: true },
+        valid: validSupervisorReceipt,
+      },
+    ] as const;
+
+    for (const receiptCase of cases) {
+      let now = 0;
+      let readIndex = 0;
+      const readings: readonly unknown[] = [receiptCase.invalid, receiptCase.valid];
+      const runtime = {
+        now: () => {
+          const observed = now;
+          now += OWNED_PROCESS_TIMING_MS.SUPERVISOR_STATUS_POLL;
+          return observed;
+        },
+        readFileSync: (() => {
+          const reading = readings[Math.min(readIndex, readings.length - 1)];
+          readIndex++;
+          return JSON.stringify(reading);
+        }) as unknown as typeof readFileSync,
+      };
+      const observed =
+        receiptCase.key === OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID
+          ? waitForOwnedSupervisorReceipt(
+              "receipt.json",
+              OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID,
+              runtime,
+            )
+          : waitForOwnedSupervisorReceipt(
+              "receipt.json",
+              OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PID,
+              runtime,
+            );
+      expect(JSON.stringify(observed)).toBe(JSON.stringify(receiptCase.valid));
+      expect(readIndex).toBe(2);
+    }
+  });
+
+  test("supervisor script serializes every live frozen contract object exactly", () => {
+    const inlinedContracts = [
+      ["PHASE", OWNED_SUPERVISOR_PHASE],
+      ["RECEIPT_PHASE", OWNED_SUPERVISOR_RECEIPT_PHASE],
+      ["RECEIPT_KEY", OWNED_SUPERVISOR_RECEIPT_KEY],
+      ["STATUS_KEY", OWNED_SUPERVISOR_STATUS_KEY],
+      ["IDENTITY_STATE", OWNED_CLI_IDENTITY_STATE],
+      ["IDENTITY", PROCESS_START_IDENTITY_CONTRACT],
+      ["ENV", OWNED_PROCESS_ENV],
+      ["EXIT_CODE", OWNED_PROCESS_EXIT_CODE],
+      ["IGNORABLE_STREAM_ERROR_CODE", OWNED_PROCESS_IGNORABLE_STREAM_ERROR_CODE],
+      ["TIMING_MS", OWNED_PROCESS_TIMING_MS],
+      ["WINDOWS_QUERY_STATUS", OWNED_WINDOWS_QUERY_STATUS],
+      ["WINDOWS_JOB", OWNED_WINDOWS_JOB],
+      ["WINDOWS_LIMIT", OWNED_WINDOWS_LIMIT],
+      ["QUIESCENCE_SCOPE", OWNED_PROCESS_QUIESCENCE_SCOPE],
+    ] as const;
+    const scriptLines = new Set(OWNED_SUPERVISOR_SCRIPT.split("\n"));
+    const inlinedBindings = [...scriptLines]
+      .flatMap((line) => /^const ([A-Z][A-Z_]*) = \{/.exec(line)?.[1] ?? [])
+      .sort();
+    expect(inlinedBindings).toEqual(inlinedContracts.map(([binding]) => binding).sort());
+    for (const [binding, contract] of inlinedContracts) {
+      expect(Object.isFrozen(contract)).toBe(true);
+      expect(scriptLines.has(`const ${binding} = ${JSON.stringify(contract)};`)).toBe(true);
+    }
   });
 
   test("launch and status consumers use the canonical receipt/status/error vocabulary", () => {
@@ -286,13 +251,6 @@ describe("owned process protocol contract", () => {
       }),
     ).toBe(true);
     expect(ignorableOwnedStdinError({ code: "ENOENT" })).toBe(false);
-    expect(OWNED_SUPERVISOR_SCRIPT).toContain(
-      `const RECEIPT_KEY = ${JSON.stringify(OWNED_SUPERVISOR_RECEIPT_KEY)};`,
-    );
-    expect(OWNED_SUPERVISOR_SCRIPT).toContain(
-      `const STATUS_KEY = ${JSON.stringify(OWNED_SUPERVISOR_STATUS_KEY)};`,
-    );
-
     const consumers = [
       "src/dispatch/owned-process-launch-receipt.ts",
       "src/dispatch/owned-process-launch.ts",
@@ -314,5 +272,45 @@ describe("owned process protocol contract", () => {
     expect(readFileSync(resolve("src/dispatch/owned-process-status.ts"), "utf8")).not.toContain(
       "UNPROVEN_SUPERVISOR_EXIT_CODE",
     );
+  });
+
+  test("record persistence rejects a canonical value beyond the contract byte limit", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-owned-record-boundary-"));
+    const attemptId = "oversized-owned-record";
+    try {
+      const store = new OwnedProcessRecordStore(root);
+      const timestamp = "2026-08-26T00:00:00.000Z";
+      const oversized = buildOwnedProcessRecord({
+        schema_version: OWNED_PROCESS_SCHEMA_VERSION,
+        attempt_id: attemptId,
+        engine: "codex",
+        host: "x".repeat(OWNED_PROCESS_LIMIT.MAX_RECORD_BYTES),
+        platform: process.platform,
+        strategy: OWNED_PROCESS_STRATEGY.POSIX_SESSION,
+        quiescence_scope: OWNED_PROCESS_QUIESCENCE_SCOPE.POSIX_PROCESS_GROUP,
+        proof_strength: OWNED_PROCESS_PROOF_STRENGTH.COOPERATIVE_LINEAGE,
+        owner_pid: process.pid,
+        owner_identity: "freebsd:oversized-record-owner",
+        supervisor_pid: null,
+        supervisor_identity: null,
+        cli_pid: null,
+        cli_identity: null,
+        terminal_kind: null,
+        state: OWNED_PROCESS_STATE.RESERVED,
+        release_reason: null,
+        exit_code: null,
+        process_quiescent: false,
+        prior_record_digest: null,
+        recorded_at: timestamp,
+        updated_at: timestamp,
+      });
+      expect(canonicalJsonBytes(oversized).length).toBeGreaterThan(
+        OWNED_PROCESS_LIMIT.MAX_RECORD_BYTES,
+      );
+      expect(() => store.write(attemptId, null, oversized)).toThrow(/CAS value exceeds byte limit/);
+      expect(store.read(attemptId)).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

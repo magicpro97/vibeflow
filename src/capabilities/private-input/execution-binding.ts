@@ -1,6 +1,7 @@
+import type { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { PrivateActionRootLocatorV1 } from "../../actions/types.js";
 import { digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import {
   assertPackageIdentity,
@@ -35,7 +36,7 @@ export function validateExecutionPrivateInputRecord(
   )
     throw new CapabilityRuntimeError(
       "execution private input binding is not canonical",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   assertPackageIdentity(value.package_id, value.package_pin_digest, value.manifest_digest);
   return structuredClone(value);
@@ -48,7 +49,10 @@ export interface MaterializeExecutionPrivateInputV1 {
   package_pin_digest: string;
   manifest_digest: string;
   input_ids: string[];
-  action_root_locator: Exclude<PrivateActionRootLocatorV1, { kind: "recovery-bootstrap" }>;
+  action_root_locator: Exclude<
+    PrivateActionRootLocatorV1,
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
+  >;
   preparation_digest: string | null;
 }
 
@@ -65,16 +69,19 @@ function requireSource(
   if (!head)
     throw new CapabilityRuntimeError(
       `current private input head for ${identity.input_id} is unavailable`,
-      "service-unavailable",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
     );
   const record = readers.readBinding(head.private_binding_id);
   if (!record || record.binding_digest !== head.binding_digest)
-    throw new CapabilityRuntimeError("private input head binding is corrupt", "integrity-failure");
+    throw new CapabilityRuntimeError(
+      "private input head binding is corrupt",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+    );
   const row = record.bindings.find((candidate) => candidate.input_id === identity.input_id);
   if (!row)
     throw new CapabilityRuntimeError(
       `private input binding omits ${identity.input_id}`,
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   return { record, row, head };
 }

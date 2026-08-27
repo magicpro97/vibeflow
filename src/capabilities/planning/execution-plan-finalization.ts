@@ -1,6 +1,6 @@
 import { digestV1Bytes } from "../../durability/canonical.js";
 import { digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import type { PermissionBindingV1 } from "../permissions/types.js";
 import { bytewise } from "../wire/primitives.js";
 import { adapterPlanDigest, adapterPlanIdentity, projectionSnapshotDigest } from "./digests.js";
@@ -110,7 +110,7 @@ export function finalizeCapabilityExecutionPlans(input: {
     if (!rawSnapshot || !pkg)
       throw new CapabilityRuntimeError(
         "adapter plan lacks its exact package inspection closure",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     const bounded = inspectionEvidence({
       request: input.request,

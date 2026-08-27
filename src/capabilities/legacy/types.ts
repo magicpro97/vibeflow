@@ -1,6 +1,7 @@
 import type { LegacySourceV1 } from "../../actions/legacy-adopt-types.js";
 import type { StrictLegacyAdoptCandidateV1 } from "../../actions/legacy-adopt-types.js";
 import type { EngineName } from "../../actions/types.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type { CapabilityOwnedResourceKindV1 } from "../adapters/types.js";
 
 export interface LegacyOwnershipProofV1 {
@@ -28,13 +29,13 @@ export interface LegacyOwnedMarkerV1 {
 export interface LegacyAdoptInspectionRequestV1 {
   schema_version: "1.0";
   idempotency_key: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   legacy_sources: LegacySourceV1[];
 }
 
 export interface LegacyAdoptScanRequestV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   sources: LegacySourceV1[];
 }

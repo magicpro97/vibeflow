@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { units } from "../src/commands/units.js";
+import { SKILL_STATUS, SKILL_STATUSES, isSkillStatus } from "../src/core/skill-contract.js";
 import {
   type SkillAuditEvent,
   appendSkillAudit,
@@ -51,6 +52,30 @@ const mkLog = () => {
 };
 
 describe("appendSkillAudit / readSkillAudit", () => {
+  test("shares and freezes the complete skill lifecycle authority", () => {
+    expect(SKILL_STATUSES).toEqual(Object.values(SKILL_STATUS));
+    expect(Object.isFrozen(SKILL_STATUS)).toBe(true);
+    expect(Object.isFrozen(SKILL_STATUSES)).toBe(true);
+    expect(SKILL_STATUSES.every(isSkillStatus)).toBe(true);
+    expect(isSkillStatus("pending-review")).toBe(false);
+  });
+
+  test("accepts draft as the old status of a verified skill audit", () => {
+    expect(
+      appendSkillAudit(
+        {
+          ...ev(),
+          skillName: "typed-protocol-contracts",
+          oldStatus: SKILL_STATUS.DRAFT,
+          newStatus: SKILL_STATUS.VERIFIED,
+          evidence: ["quality-contract:pass"],
+        },
+        appendDeps(mkdirSync, appendFileSync, () => "2026-08-27T00:00:00Z"),
+      ),
+    ).toBe(true);
+    expect(readSkillAudit(readDeps())[0]?.oldStatus).toBe(SKILL_STATUS.DRAFT);
+  });
+
   test("append with omitted timestamp succeeds and read has injected ts", () => {
     expect(
       appendSkillAudit(
@@ -249,6 +274,22 @@ describe("verify integration with audit log", () => {
     expect(e?.newStatus).toBe("verified");
     expect(e?.evidence.some((x) => x.startsWith("security-scan:"))).toBe(true);
     expect(e?.evidence).toContain("quality-contract:pass");
+  });
+
+  test("draft -> verified records the prior lifecycle status", () => {
+    scaffold("good", [
+      "---",
+      "name: good",
+      "status: draft",
+      "description: d",
+      "---",
+      ...VALID_BODY,
+    ]);
+    expect(verifySkillCommand(base, ["good"], {}, {}, { repo: base })).toBe(0);
+    const events = readSkillAudit(readDeps());
+    expect(events).toHaveLength(1);
+    expect(events[0]?.oldStatus).toBe(SKILL_STATUS.DRAFT);
+    expect(events[0]?.newStatus).toBe(SKILL_STATUS.VERIFIED);
   });
 
   test("verified -> unverified audit oldStatus verified", () => {

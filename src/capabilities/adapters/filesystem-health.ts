@@ -1,4 +1,6 @@
+import { CAPABILITY_MANIFEST_HEALTH_PROBE_KIND } from "../../actions/capability-manifest-vocabulary-contract.js";
 import { digestV1 } from "../../durability/index.js";
+import { CAPABILITY_HEALTH_OUTCOME } from "../wire/operation-state-contract.js";
 import type {
   CapabilityHealthProbeRequestV1,
   CapabilityOwnedResourceV1,
@@ -20,12 +22,13 @@ export function filesystemCapabilityHealth(
     (resource) => resource.observed_content_sha256 === resource.expected_postimage_sha256,
   );
   const unavailableLiveProbe =
-    request.kind === "mcp-handshake" || request.kind === "binary-version";
+    request.kind === CAPABILITY_MANIFEST_HEALTH_PROBE_KIND.MCP_HANDSHAKE ||
+    request.kind === CAPABILITY_MANIFEST_HEALTH_PROBE_KIND.BINARY_VERSION;
   const outcome = !exact
-    ? ("failed" as const)
+    ? CAPABILITY_HEALTH_OUTCOME.FAILED
     : unavailableLiveProbe
-      ? ("unknown" as const)
-      : ("ready" as const);
+      ? CAPABILITY_HEALTH_OUTCOME.UNKNOWN
+      : CAPABILITY_HEALTH_OUTCOME.READY;
   const evidenceDraft = {
     schema_version: "1.0" as const,
     evidence_schema_id: "vf.adapter-health-filesystem/1" as const,

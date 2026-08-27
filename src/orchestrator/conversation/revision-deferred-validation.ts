@@ -2,7 +2,14 @@ import {
   type ActionAuthoritySnapshotV1,
   type ActionRequestAuthorityV1,
   deriveOperationId,
+  isActionOperationDispatchReservationReadState,
 } from "../../actions/index.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import {
+  ACTION_DECISION,
+  ACTION_DOMAIN,
+  ACTOR_KIND,
+} from "../../actions/public-action-contract.js";
 import { isAgentProposalBrowserController } from "../../actions/store-rules.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import {
@@ -90,9 +97,9 @@ export function validateDeferredRevisionCommit(input: {
     approval.plan_digest !== actionState.proposal.plan_digest ||
     approval.authority_epoch !== actionState.proposal.base.authority_epoch ||
     approval.authority_head_digest !== actionState.proposal.base.authority_head_digest ||
-    approval.decision !== "approved" ||
-    actionState.proposal.domain !== "conversation" ||
-    actionState.proposal.action_root_locator.kind !== "conversation" ||
+    approval.decision !== ACTION_DECISION.APPROVED ||
+    actionState.proposal.domain !== ACTION_DOMAIN.CONVERSATION ||
+    actionState.proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.CONVERSATION ||
     actionState.proposal.base.root_session_id !==
       actionState.proposal.action_root_locator.root_session_id ||
     actionState.proposal.base.conversation_id !== input.commit.conversationId ||
@@ -113,7 +120,7 @@ export function validateDeferredRevisionCommit(input: {
   );
   if (digestV1("VF-ACTION-PLAN\0v1\0", actionPlan) !== actionState.proposal.plan_digest)
     throw new Error("deferred revision action plan changed");
-  if (actionState.proposal.requested_by.kind !== "agent") {
+  if (actionState.proposal.requested_by.kind !== ACTOR_KIND.AGENT) {
     const authorityHead = conversationActionAuthorityHead({
       root_session_id: rootSessionId,
       authority: input.commit.authority,
@@ -124,9 +131,7 @@ export function validateDeferredRevisionCommit(input: {
     )
       throw new Error("deferred revision request authority changed");
   }
-  if (
-    !["approved", "committing", "succeeded", "failed", "needs_recovery"].includes(actionState.state)
-  )
+  if (!isActionOperationDispatchReservationReadState(actionState.state))
     throw new Error("deferred revision proposal is not committable");
   const operationId = deriveOperationId(actionState.proposal, approval.approval_id);
   if (actionState.operation_id !== null && actionState.operation_id !== operationId)

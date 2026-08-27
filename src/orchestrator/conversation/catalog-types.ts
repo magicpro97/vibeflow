@@ -2,10 +2,27 @@ import { ENGINES, type Engine } from "../../core/types.js";
 import type { ConversationHealth, ConversationLifecycle } from "../trace/types.js";
 import { isValidParticipantModel } from "../trace/validation.js";
 import {
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_HEAD_STATUS,
+  type ConversationCatalogHealth,
+  type ConversationCatalogSourceKind,
+  type ConversationHeadStatus,
+  type ConversationLineageStatus,
+  isConversationCatalogHealth,
+  isConversationCatalogSourceKind,
+  isConversationHeadStatus,
+  isConversationLineageStatus,
+} from "./conversation-catalog-contract.js";
+export { CONVERSATION_CATALOG_SCHEMA_VERSION } from "./conversation-catalog-contract.js";
+import {
   assertListResponseInvariants,
   assertRevisionSummaryInvariants,
   assertSessionSummaryInvariants,
 } from "./catalog-invariants.js";
+import {
+  CONVERSATION_HEALTH_VALUES,
+  CONVERSATION_LIFECYCLES,
+} from "./conversation-public-wire-contract.js";
 export {
   projectPublicParticipantSummaries,
   safePublicRoleReference,
@@ -19,7 +36,6 @@ import {
   isSafeCatalogIdentifier,
 } from "./lineage-types.js";
 
-export const CONVERSATION_CATALOG_SCHEMA_VERSION = "1.0" as const;
 export const CONVERSATION_CATALOG_LIMITS = Object.freeze({
   maxPageSize: 100,
   maxQueryBytes: 256,
@@ -43,7 +59,7 @@ export interface ConversationRevisionSummaryV1 {
   revision_ordinal: number;
   parent_conversation_id: string | null;
   parent_revision_id: string | null;
-  lineage_status: "verified" | "unverified";
+  lineage_status: ConversationLineageStatus;
   topic: string;
   policy: string;
   lifecycle: ConversationLifecycle;
@@ -58,7 +74,7 @@ export interface ConversationRevisionSummaryV1 {
 export interface ConversationSessionSummaryV1 {
   schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   root_session_id: string;
-  head_status: "committed" | "ambiguous" | "unclaimed";
+  head_status: ConversationHeadStatus;
   root: ConversationRevisionSummaryV1;
   active_conversation_id: string | null;
   active_revision_id: string | null;
@@ -77,7 +93,7 @@ export interface ConversationListResponseV1 {
   next_cursor: string | null;
   catalog_generation: string;
   source_watermark: string;
-  catalog_health: "ready" | "rebuilding" | "degraded";
+  catalog_health: ConversationCatalogHealth;
 }
 
 export type PublicParticipantSummary = PublicParticipantSummaryV1;
@@ -86,11 +102,7 @@ export type ConversationSessionSummary = ConversationSessionSummaryV1;
 export type ConversationListResponse = ConversationListResponseV1;
 
 export interface ConversationCatalogSourceInventoryEntryV1 {
-  source_kind:
-    | "conversation-manifest"
-    | "conversation-journal-head"
-    | "lineage-head"
-    | "lineage-association";
+  source_kind: ConversationCatalogSourceKind;
   root_session_id: string;
   record_id: string;
   record_digest: string;
@@ -108,16 +120,8 @@ export interface NormalizedConversationCatalogQueryV1 {
   policy: string[];
 }
 
-const LIFECYCLES: readonly ConversationLifecycle[] = [
-  "INIT",
-  "ACTIVE",
-  "PAUSED",
-  "COMPLETED",
-  "STOPPED",
-  "FAILED",
-  "ABORTED",
-];
-const HEALTH = new Set<ConversationHealth>(["healthy", "degraded"]);
+const LIFECYCLES: readonly ConversationLifecycle[] = CONVERSATION_LIFECYCLES;
+const HEALTH = new Set<ConversationHealth>(CONVERSATION_HEALTH_VALUES);
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const GENERATION = /^vf-catalog-generation-[0-9a-f]{64}$/;
 
@@ -208,12 +212,7 @@ export function assertConversationCatalogSourceInventoryEntryV1(
   if (
     !isPlain(value) ||
     !exact(value, ["record_digest", "record_id", "root_session_id", "source_kind"]) ||
-    ![
-      "conversation-manifest",
-      "conversation-journal-head",
-      "lineage-head",
-      "lineage-association",
-    ].includes(value.source_kind as string) ||
+    !isConversationCatalogSourceKind(value.source_kind) ||
     !isSafeCatalogIdentifier(value.root_session_id) ||
     !isSafeCatalogIdentifier(value.record_id) ||
     typeof value.record_digest !== "string" ||
@@ -252,7 +251,7 @@ export function assertConversationRevisionSummaryV1(
     (value.revision_ordinal as number) < 0 ||
     !nullableReference(value.parent_conversation_id) ||
     !nullableReference(value.parent_revision_id) ||
-    !["verified", "unverified"].includes(value.lineage_status as string) ||
+    !isConversationLineageStatus(value.lineage_status) ||
     !boundedText(value.topic) ||
     !isBoundedLineageReference(value.policy) ||
     !LIFECYCLES.includes(value.lifecycle as ConversationLifecycle) ||
@@ -299,7 +298,7 @@ export function assertConversationSessionSummaryV1(
     ]) ||
     value.schema_version !== CONVERSATION_CATALOG_SCHEMA_VERSION ||
     !isSafeCatalogIdentifier(value.root_session_id) ||
-    !["committed", "ambiguous", "unclaimed"].includes(value.head_status as string) ||
+    !isConversationHeadStatus(value.head_status) ||
     !nullableReference(value.active_conversation_id) ||
     !nullableReference(value.active_revision_id) ||
     (value.active_revision_ordinal !== null &&
@@ -329,8 +328,8 @@ export function assertConversationSessionSummaryV1(
     value.active_revision_id === value.active.revision_id &&
     value.active_revision_ordinal === value.active.revision_ordinal;
   if (
-    (value.head_status === "committed" && !allPresent) ||
-    (value.head_status !== "committed" && !allNull)
+    (value.head_status === CONVERSATION_HEAD_STATUS.COMMITTED && !allPresent) ||
+    (value.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED && !allNull)
   )
     throw new Error("invalid conversation session head projection");
   assertSessionSummaryInvariants(value as unknown as ConversationSessionSummaryV1);
@@ -358,7 +357,7 @@ export function assertConversationListResponseV1(
     !GENERATION.test(value.catalog_generation) ||
     typeof value.source_watermark !== "string" ||
     !DIGEST.test(value.source_watermark) ||
-    !["ready", "rebuilding", "degraded"].includes(value.catalog_health as string)
+    !isConversationCatalogHealth(value.catalog_health)
   )
     throw new Error("invalid conversation list response");
   for (const item of value.items) assertConversationSessionSummaryV1(item);

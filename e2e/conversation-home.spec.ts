@@ -1,7 +1,71 @@
-import { createHash } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { HOST_ACTION_KIND } from "../src/actions/host-action-contract.js";
+import {
+  ACTION_OPERATION_SSE_EVENT,
+  ACTION_OPERATION_STATE,
+} from "../src/actions/protocol-contract.js";
+import {
+  ACTION_DOMAIN,
+  ACTION_RISK,
+  ACTION_SCOPE,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "../src/actions/public-action-contract.js";
+import { PUBLIC_API_ERROR_SCHEMA_VERSION } from "../src/actions/public-error-contract.js";
+import {
+  PUBLIC_OPERATION_FIXED_PHASE,
+  PUBLIC_OPERATION_MESSAGE_CODE_PREFIX,
+  PUBLIC_OPERATION_PROGRESS_STATUS,
+} from "../src/actions/public-operation-contract.js";
+import { AGENT_ENGINE } from "../src/core/agent-contract.js";
+import { projectConversationAgentTurnOutput } from "../src/orchestrator/conversation/agent-turn-output-projection.js";
+import {
+  CONVERSATION_CATALOG_HEALTH,
+  CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_HEAD_STATUS,
+  CONVERSATION_LINEAGE_STATUS,
+  CONVERSATION_TIMELINE_ITEM_KIND,
+} from "../src/orchestrator/conversation/conversation-catalog-contract.js";
+import {
+  CONVERSATION_HUMAN_REACTION_REQUEST_MODE,
+  CONVERSATION_INTERACTION_SCHEMA_VERSION,
+  CONVERSATION_INTERACTION_STATE,
+  CONVERSATION_REACTION_EMOJI,
+} from "../src/orchestrator/conversation/conversation-interaction-contract.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
+  CONVERSATION_MESSAGE_QUEUE_LIMITS,
+  CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND,
+  CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION,
+  CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+  CONVERSATION_MESSAGE_QUEUE_STATE,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+} from "../src/orchestrator/conversation/conversation-message-queue-contract.js";
+import {
+  CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+  CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND,
+} from "../src/orchestrator/conversation/conversation-private-context-broker-wire.js";
+import {
+  CONVERSATION_HEALTH,
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "../src/orchestrator/conversation/conversation-public-wire-contract.js";
+import {
+  CONVERSATION_SSE_EVENT,
+  serializeSseEmptyEvent,
+} from "../src/orchestrator/conversation/conversation-sse-contract.js";
+import {
+  HOME_EXPIRED_TS,
+  HOME_FUTURE_TS,
+  HOME_TS,
+  homeAuthorityId,
+  homeDigest,
+  homeFreshUserChallenge,
+  homeHex,
+  homePendingAction,
+} from "./conversation-home-action-fixture.js";
 import { waitForPage } from "./helpers";
 
 const browserFailures = new WeakMap<Page, string[]>();
@@ -52,42 +116,27 @@ async function expectHomeComposerViewportFit(page: Page): Promise<void> {
   );
 }
 
-const HOME_TS = "2026-08-25T00:00:00.000Z";
-const HOME_FUTURE_TS = "2099-12-31T23:59:59.000Z";
-const HOME_PAST_TS = "2000-01-01T00:00:00.000Z";
-
-function homeHex(seed: string) {
-  return createHash("sha256").update(seed).digest("hex");
-}
-
-function homeDigest(seed: string) {
-  return `sha256:${homeHex(seed)}`;
-}
-
-function homeAuthorityId(
-  kind: "proposal" | "approval" | "operation" | "operation-event",
-  seed: string,
+function homeParticipant(
+  participant_id = "reviewer",
+  role_ref = "reviewer",
+  engine = AGENT_ENGINE.CODEX,
 ) {
-  return `vf-${kind}-${homeHex(`${kind}:${seed}`)}`;
-}
-
-function homeParticipant(participant_id = "reviewer", role_ref = "reviewer") {
-  return { participant_id, role_ref, engine: "codex" as const, model: null };
+  return { participant_id, role_ref, engine, model: null };
 }
 
 function homeSession(rootSessionId: string, topic: string, participants = [homeParticipant()]) {
   const revision = {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     conversation_id: `${rootSessionId}-conversation`,
     revision_id: `${rootSessionId}-revision`,
     revision_ordinal: 0,
     parent_conversation_id: null,
     parent_revision_id: null,
-    lineage_status: "verified" as const,
+    lineage_status: CONVERSATION_LINEAGE_STATUS.VERIFIED,
     topic,
     policy: "direct",
-    lifecycle: "COMPLETED" as const,
-    health: "healthy" as const,
+    lifecycle: CONVERSATION_LIFECYCLE.COMPLETED,
+    health: CONVERSATION_HEALTH.HEALTHY,
     participants,
     created_at: HOME_TS,
     updated_at: HOME_TS,
@@ -95,9 +144,9 @@ function homeSession(rootSessionId: string, topic: string, participants = [homeP
     lock_digest: homeDigest(`${rootSessionId}-lock`),
   };
   return {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     root_session_id: rootSessionId,
-    head_status: "committed" as const,
+    head_status: CONVERSATION_HEAD_STATUS.COMMITTED,
     root: revision,
     active_conversation_id: revision.conversation_id,
     active_revision_id: revision.revision_id,
@@ -117,10 +166,17 @@ function homeLocator(rootSessionId: string, eventId: string) {
     conversation_id: `${rootSessionId}-conversation`,
     revision_id: `${rootSessionId}-revision`,
     target_event_id: eventId,
-    target_kind: "completed-agent-response" as const,
+    target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
     content_digest: homeDigest(eventId),
   };
 }
+
+const homeActionOperations = (items: Array<Record<string, unknown>> = []) => ({
+  schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
+  items,
+  next_cursor: null,
+  proposal_set_watermark: homeDigest("e2e-action-operations"),
+});
 
 function homeAssistantEvent(
   rootSessionId: string,
@@ -130,9 +186,9 @@ function homeAssistantEvent(
   participantId = "reviewer",
 ) {
   return {
-    kind: "conversation-event" as const,
+    kind: CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT,
     revision_ordinal: 0,
-    action_operations: { items: [] },
+    action_operations: homeActionOperations(),
     event: {
       workflow_id: "workflow",
       conversation_id: `${rootSessionId}-conversation`,
@@ -147,7 +203,7 @@ function homeAssistantEvent(
       public_session_ref: null,
       participant_id: participantId,
       event: {
-        type: "agent_response_delta" as const,
+        type: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
         payload: {
           round_id: "round-1",
           participant_id: participantId,
@@ -159,7 +215,7 @@ function homeAssistantEvent(
       },
     },
     interaction: {
-      state: "ready" as const,
+      state: CONVERSATION_INTERACTION_STATE.READY,
       message_locator: homeLocator(rootSessionId, eventId),
       quote_refs: [],
       reactions,
@@ -174,7 +230,7 @@ function homeTimeline(
   nextCursor: string | null = null,
 ) {
   return {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     root_session_id: rootSessionId,
     head: {
       conversation_id: `${rootSessionId}-conversation`,
@@ -186,12 +242,12 @@ function homeTimeline(
     next_cursor: nextCursor,
     items: [
       {
-        kind: "conversation-start" as const,
+        kind: CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_START,
         revision_ordinal: 0,
         conversation_id: `${rootSessionId}-conversation`,
         revision_id: `${rootSessionId}-revision`,
         anchor_id: `anchor-${rootSessionId}`,
-        action_operations: { items: [] },
+        action_operations: homeActionOperations(),
       },
       ...items,
     ],
@@ -200,9 +256,9 @@ function homeTimeline(
 
 function homeHead(session: ReturnType<typeof homeSession>) {
   return {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     root_session_id: session.root_session_id,
-    head_status: "committed" as const,
+    head_status: CONVERSATION_HEAD_STATUS.COMMITTED,
     head_epoch: 1,
     head_digest: homeDigest(`${session.root_session_id}-head`),
     active: session.active,
@@ -212,21 +268,21 @@ function homeHead(session: ReturnType<typeof homeSession>) {
 function homeQueuedMessage(rootSessionId: string, sequence: number, content: string) {
   const queueItemId = `vf-queued-message-${homeHex(`${rootSessionId}:${sequence}`)}`;
   return {
-    schema_version: "1.0" as const,
+    schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
     queue_item_id: queueItemId,
     queue_sequence: sequence,
     root_session_id: rootSessionId,
-    author_public_id: "human" as const,
+    author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
     content,
     content_digest: homeDigest(`queue-content:${rootSessionId}:${sequence}:${content}`),
-    target_participants: "all" as const,
+    target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     quote_refs: [],
     private_context_present: false,
     predecessor_queue_item_id:
       sequence === 1 ? null : `vf-queued-message-${homeHex(`${rootSessionId}:${sequence - 1}`)}`,
     admitted_authority_digest: homeDigest(`${rootSessionId}-queue-authority`),
     effective_authority_digest: homeDigest(`${rootSessionId}-queue-authority`),
-    state: "queued" as const,
+    state: CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED,
     stale_reason: null,
     admitted_at: HOME_TS,
     updated_at: HOME_TS,
@@ -238,79 +294,18 @@ const homeMessageQueue = (
   rootSessionId: string,
   items: ReturnType<typeof homeQueuedMessage>[] = [],
 ) => ({
-  schema_version: "1.0" as const,
+  schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   root_session_id: rootSessionId,
   current_authority_digest: homeDigest(`${rootSessionId}-queue-authority`),
-  max_nonterminal_items: 32 as const,
+  max_nonterminal_items: CONVERSATION_MESSAGE_QUEUE_LIMITS.maxNonterminalItems,
   items,
 });
 
-function homePendingAction(
-  proposalSeed: string,
-  title: string,
-  overrides: Partial<Record<string, unknown>> = {},
-) {
-  const proposalId = /^vf-proposal-[0-9a-f]{64}$/.test(proposalSeed)
-    ? proposalSeed
-    : homeAuthorityId("proposal", proposalSeed);
-  const proposalDigest = homeDigest(`proposal:${proposalId}`);
-  const proposal = {
-    schema_version: "1.0" as const,
-    proposal_id: proposalId,
-    proposal_digest: proposalDigest,
-    origin_event_id: null,
-    action_type: "conversation.update_settings",
-    domain: "conversation" as const,
-    scope: "conversation" as const,
-    risk: "low" as const,
-    effect_classes: [],
-    targets: [],
-    package_pins: [],
-    reversibility: "reversible",
-    preview: {
-      title,
-      summary: title,
-      permission_delta: [],
-      target_dispositions: [],
-      recovery_actions: [],
-    },
-    created_at: HOME_TS,
-    expires_at: HOME_FUTURE_TS,
-    ...(overrides.proposal as object),
-  };
-  return {
-    proposal,
-    approval: overrides.approval ?? null,
-    operation: {
-      schema_version: "1.0" as const,
-      operation_id: null,
-      proposal_id: proposalId,
-      proposal_digest: proposalDigest,
-      approval_id: null,
-      approval_digest: null,
-      correlation_id: `vf-correlation-${homeHex(`correlation:${proposalId}`)}`,
-      domain: "conversation" as const,
-      state: "pending_review",
-      phase_sequence: null,
-      latest_event_cursor: null,
-      progress: [],
-      targets: [],
-      delivery: "inline",
-      result_ref: null,
-      error: null,
-      recovery_actions: [],
-      created_at: HOME_TS,
-      updated_at: HOME_TS,
-      ...(overrides.operation as object),
-    },
-  };
-}
-
 const homePending = (items: Array<Record<string, unknown>>, nextCursor: string | null = null) => ({
-  schema_version: "1.0" as const,
+  schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
   items,
   next_cursor: nextCursor,
-  authority_watermark: "watermark",
+  authority_watermark: homeDigest("e2e-pending-actions"),
 });
 
 async function routeHomeHeads(page: Page, sessions: Array<ReturnType<typeof homeSession>>) {
@@ -347,17 +342,17 @@ async function routeHomeOperationEvents(
         proposalId === streamed.proposalId
           ? [
               `id: ${homeAuthorityId("operation-event", streamed.operationId)}`,
-              "event: operation",
+              `event: ${ACTION_OPERATION_SSE_EVENT.OPERATION}`,
               `data: ${JSON.stringify({
-                schema_version: "1.0",
+                schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
                 operation_id: streamed.operationId,
                 phase_sequence: 0,
-                state: "committing",
+                state: ACTION_OPERATION_STATE.COMMITTING,
                 progress: {
                   sequence: 0,
-                  phase: "dispatch",
-                  status: "running",
-                  message_code: "dispatch",
+                  phase: PUBLIC_OPERATION_FIXED_PHASE.DISPATCH,
+                  status: PUBLIC_OPERATION_PROGRESS_STATUS.RUNNING,
+                  message_code: `${PUBLIC_OPERATION_MESSAGE_CODE_PREFIX}${PUBLIC_OPERATION_FIXED_PHASE.DISPATCH}`,
                   at: HOME_TS,
                 },
                 target: null,
@@ -369,7 +364,9 @@ async function routeHomeOperationEvents(
               "",
               "",
             ].join("\n")
-          : "event: heartbeat\ndata: \nretry: 60000\n\n";
+          : serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+              retryMilliseconds: 60_000,
+            });
       await route.fulfill({
         status: 200,
         headers: {
@@ -533,39 +530,59 @@ test.describe("AI-first conversation Home", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
-  test("drops stale older timeline and action pages after a rapid A-to-B session switch", async ({
+  test("drops stale pages and renders normalized direct output after a rapid session switch", async ({
     page,
   }) => {
     const delayedTimelineA = deferred<void>();
     const delayedPendingA = deferred<void>();
+    const timelineCursorA = "timelineBody.timelineSignature";
+    const pendingCursorA = "pendingBody.pendingSignature";
     const sessionA = homeSession("root-a", "Session A");
-    const sessionB = homeSession("root-b", "Session B");
-    const timelinePage = (rootSessionId: string, body: string, nextCursor: string | null) =>
+    const claudeSessionId = "00000000-0000-4000-8000-000000000042";
+    const claudeTransport = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      session_id: claudeSessionId,
+      result: "READY",
+    });
+    const directAnswer = projectConversationAgentTurnOutput(AGENT_ENGINE.CLAUDE, claudeTransport);
+    expect(directAnswer).toBe("READY");
+    const sessionB = homeSession("root-b", "Session B", [
+      homeParticipant("participant-1", "direct", AGENT_ENGINE.CLAUDE),
+    ]);
+    const timelinePage = (
+      rootSessionId: string,
+      body: string,
+      nextCursor: string | null,
+      participantId = "reviewer",
+    ) =>
       homeTimeline(
         rootSessionId,
-        [homeAssistantEvent(rootSessionId, `event-${homeDigest(body).slice(-8)}`, body)],
-        nextCursor,
-      );
-    const pendingPage = (proposalId: string, summary: string, nextCursor: string | null) =>
-      homePending(
         [
-          homePendingAction(proposalId, summary, {
-            operation: { state: "succeeded" },
-          }),
+          homeAssistantEvent(
+            rootSessionId,
+            `event-${homeDigest(body).slice(-8)}`,
+            body,
+            [],
+            participantId,
+          ),
         ],
         nextCursor,
       );
+    const pendingPage = (proposalId: string, summary: string, nextCursor: string | null) =>
+      homePending([homePendingAction(proposalId, summary)], nextCursor);
 
     await page.route("**/api/conversations?**", async (route) => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [sessionA, sessionB],
           next_cursor: null,
           catalog_generation: "catalog",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -574,7 +591,7 @@ test.describe("AI-first conversation Home", () => {
       const url = new URL(route.request().url());
       const rootSessionId = url.pathname.split("/")[3] ?? "";
       const cursor = url.searchParams.get("cursor");
-      if (rootSessionId === "root-a" && cursor === "timeline-a") {
+      if (rootSessionId === "root-a" && cursor === timelineCursorA) {
         await delayedTimelineA.promise;
         await route.fulfill({
           status: 200,
@@ -586,15 +603,15 @@ test.describe("AI-first conversation Home", () => {
         status: 200,
         json:
           rootSessionId === "root-a"
-            ? timelinePage("root-a", "Session A initial", "timeline-a")
-            : timelinePage("root-b", "Session B initial", null),
+            ? timelinePage("root-a", "Session A initial", timelineCursorA)
+            : timelinePage("root-b", directAnswer, null, "participant-1"),
       });
     });
     await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
       const url = new URL(route.request().url());
       const conversationId = url.pathname.split("/")[3] ?? "";
       const cursor = url.searchParams.get("cursor");
-      if (conversationId === "root-a-conversation" && cursor === "pending-a") {
+      if (conversationId === "root-a-conversation" && cursor === pendingCursorA) {
         await delayedPendingA.promise;
         await route.fulfill({
           status: 200,
@@ -606,7 +623,7 @@ test.describe("AI-first conversation Home", () => {
         status: 200,
         json:
           conversationId === "root-a-conversation"
-            ? pendingPage("proposal-a", "Action A initial", "pending-a")
+            ? pendingPage("proposal-a", "Action A initial", pendingCursorA)
             : pendingPage("proposal-b", "Action B current", null),
       });
     });
@@ -626,7 +643,12 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "Load older actions" }).click();
     await page.getByRole("button", { name: /Session B/ }).click();
     await expect(page.getByRole("heading", { name: "Session B" })).toBeVisible();
-    await expect(page.getByText("Session B initial")).toBeVisible();
+    const directMessage = page.locator(".home-message--assistant").filter({ hasText: "READY" });
+    await expect(directMessage.getByText("Direct / Claude", { exact: true })).toBeVisible();
+    await expect(directMessage.getByText("READY", { exact: true })).toBeVisible();
+    await expect(directMessage).not.toContainText(claudeSessionId);
+    await expect(directMessage).not.toContainText('"type":"result"');
+    await expect(page.locator("body")).not.toContainText(claudeSessionId);
     await expect(actionCard("Action B current")).toBeVisible();
 
     delayedTimelineA.resolve();
@@ -634,7 +656,7 @@ test.describe("AI-first conversation Home", () => {
     await page.waitForTimeout(100);
     await expect(page.getByText("Session A stale page")).toHaveCount(0);
     await expect(page.getByText("Action A stale page")).toHaveCount(0);
-    await expect(page.getByText("Session B initial")).toBeVisible();
+    await expect(directMessage.getByText("READY", { exact: true })).toBeVisible();
     await expect(actionCard("Action B current")).toBeVisible();
   });
 
@@ -642,22 +664,27 @@ test.describe("AI-first conversation Home", () => {
     page,
   }) => {
     const session = homeSession("root-queue", "Queue session");
-    const gates = new Map(["A", "B", "C"].map((content) => [content, deferred<void>()]));
+    const gates = new Map(
+      ["Rejected A", "A", "B", "C"].map((content) => [content, deferred<void>()]),
+    );
     const items: ReturnType<typeof homeQueuedMessage>[] = [];
     const postBodies: Array<Record<string, unknown>> = [];
     const patchBodies: Array<Record<string, unknown>> = [];
+    const queueSequences = new Map<string, number>();
+    let nextQueueSequence = 0;
+    let rejectFirstAdmission = true;
     let conflictEdit = false;
 
     await page.route("**/api/conversations?**", async (route) => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [session],
           next_cursor: null,
           catalog_generation: "catalog",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -684,7 +711,9 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         headers: { "content-type": "text/event-stream" },
-        body: "event: heartbeat\ndata: \nretry: 60000\n\n",
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+          retryMilliseconds: 60_000,
+        }),
       });
     });
     await page.route("**/api/conversation-sessions/root-queue/messages/queue", async (route) => {
@@ -695,8 +724,34 @@ test.describe("AI-first conversation Home", () => {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       postBodies.push(body);
       const content = String(body.content);
+      if (content === "Rejected A" && rejectFirstAdmission) {
+        await gates.get(content)?.promise;
+        rejectFirstAdmission = false;
+        await route.fulfill({
+          status: 503,
+          json: {
+            schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+            error: {
+              code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.SERVICE_UNAVAILABLE,
+              message: "Queue admission is temporarily unavailable.",
+              correlation_id: "vf-message-queue-e2e-unavailable",
+              retryable: true,
+              recovery_action: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.RETRY,
+              details: null,
+            },
+          },
+        });
+        return;
+      }
+      const idempotencyKey = String(body.idempotency_key);
+      let sequence = queueSequences.get(idempotencyKey);
+      if (sequence === undefined) {
+        nextQueueSequence += 1;
+        sequence = nextQueueSequence;
+        queueSequences.set(idempotencyKey, sequence);
+      }
       const queued = {
-        ...homeQueuedMessage("root-queue", postBodies.length, content),
+        ...homeQueuedMessage("root-queue", sequence, content),
         target_participants: body.target_participants,
         quote_refs: body.quote_refs,
         private_context_present: body.private_context_present,
@@ -715,11 +770,13 @@ test.describe("AI-first conversation Home", () => {
         await route.fulfill({
           status: 409,
           json: {
+            schema_version: PUBLIC_API_ERROR_SCHEMA_VERSION,
             error: {
-              code: "queued_message_not_editable",
+              code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.QUEUED_MESSAGE_NOT_EDITABLE,
               message: "That queued message changed before the edit could commit.",
+              correlation_id: "vf-message-queue-e2e-conflict",
               retryable: false,
-              recovery_action: "send-as-new",
+              recovery_action: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.SEND_AS_NEW,
               details: {
                 root_session_id: "root-queue",
                 queue_item_id: latest.queue_item_id,
@@ -752,20 +809,41 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: /Queue session/ }).click();
     await queueActivated;
     const composer = page.locator("#home-composer");
+
+    await composer.fill("Rejected A");
+    await composer.press("Enter");
+    await expect(composer).toHaveValue("");
+    await composer.fill("Draft B");
+    gates.get("Rejected A")?.resolve();
+    const retryA = page.getByRole("button", { name: "Retry queued message: Rejected A" });
+    await expect(retryA).toBeVisible();
+    await expect(composer).toHaveValue("Draft B");
+    await expect(page.getByText(/remains in Message queue for an explicit retry/i)).toBeVisible();
+    await retryA.click();
+    await expect(retryA).toHaveCount(0);
+    await expect(composer).toHaveValue("Draft B");
+    expect(postBodies[1]).toEqual(postBodies[0]);
+
+    await composer.fill("");
     for (const content of ["A", "B", "C"]) {
       await composer.fill(content);
       await composer.press("Enter");
       await expect(composer).toHaveValue("");
       await expect(composer).toBeFocused();
     }
-    await expect(page.locator(".home-message-queue li")).toHaveCount(3);
-    await expect(page.locator(".home-message-queue__content strong")).toHaveText(["A", "B", "C"]);
-    expect(new Set(postBodies.map((body) => body.idempotency_key)).size).toBe(3);
+    await expect(page.locator(".home-message-queue li")).toHaveCount(4);
+    await expect(page.locator(".home-message-queue__content strong")).toHaveText([
+      "Rejected A",
+      "A",
+      "B",
+      "C",
+    ]);
+    expect(new Set(postBodies.map((body) => body.idempotency_key)).size).toBe(4);
 
     gates.get("C")?.resolve();
     gates.get("A")?.resolve();
     gates.get("B")?.resolve();
-    await expect(page.locator(".home-message-queue__sequence")).toHaveText(["1", "2", "3"]);
+    await expect(page.locator(".home-message-queue__sequence")).toHaveText(["1", "2", "3", "4"]);
 
     await composer.dispatchEvent("compositionstart");
     await composer.press("ArrowUp");
@@ -785,13 +863,14 @@ test.describe("AI-first conversation Home", () => {
     await composer.fill("C edited");
     await composer.press("Enter");
     await expect(page.locator(".home-message-queue__content strong")).toHaveText([
+      "Rejected A",
       "A",
       "B",
       "C edited",
     ]);
     expect(patchBodies[0]).toMatchObject({
-      schema_version: "1.0",
-      expected_item_digest: homeQueuedMessage("root-queue", 3, "C").item_digest,
+      schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+      expected_item_digest: homeQueuedMessage("root-queue", 4, "C").item_digest,
       content: "C edited",
     });
     expect(JSON.stringify(patchBodies[0])).not.toMatch(/private|quote|target|sequence/i);
@@ -807,14 +886,17 @@ test.describe("AI-first conversation Home", () => {
       page.getByRole("button", { name: "Send preserved draft as a new queued message" }),
     ).toBeVisible();
     await page.waitForTimeout(100);
-    expect(postBodies).toHaveLength(3);
+    expect(postBodies).toHaveLength(5);
     const failures = browserFailures.get(page) ?? [];
+    const expectedUnavailable =
+      "console: Failed to load resource: the server responded with a status of 503 (Service Unavailable)";
     const expectedConflict =
       "console: Failed to load resource: the server responded with a status of 409 (Conflict)";
+    expect(failures.filter((failure) => failure === expectedUnavailable)).toHaveLength(1);
     expect(failures.filter((failure) => failure === expectedConflict)).toHaveLength(1);
     browserFailures.set(
       page,
-      failures.filter((failure) => failure !== expectedConflict),
+      failures.filter((failure) => failure !== expectedUnavailable && failure !== expectedConflict),
     );
   });
 
@@ -836,12 +918,12 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [invalidSession, missingSession],
           next_cursor: null,
           catalog_generation: "generation",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -853,9 +935,9 @@ test.describe("AI-first conversation Home", () => {
           rootSessionId === "root-invalid-head"
             ? { ...homeHead(invalidSession), head_digest: "not-a-sha256-digest" }
             : {
-                schema_version: "1.0",
+                schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
                 root_session_id: "root-missing-head",
-                head_status: "unclaimed",
+                head_status: CONVERSATION_HEAD_STATUS.UNCLAIMED,
                 head_epoch: 0,
                 head_digest: homeDigest("root-missing-head-head"),
                 active: null,
@@ -886,7 +968,7 @@ test.describe("AI-first conversation Home", () => {
       homeAssistantEvent("root-home", "event-home-final", "Ship the change.", [
         {
           target: locator,
-          emoji: "👍",
+          emoji: CONVERSATION_REACTION_EMOJI.APPROVE,
           count: 1,
           reacted_by_recipient: false,
           actor_public_ids: ["reviewer"],
@@ -898,12 +980,12 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [session],
           next_cursor: null,
           catalog_generation: "generation",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -925,7 +1007,7 @@ test.describe("AI-first conversation Home", () => {
       messageBody = JSON.parse(route.request().postData() ?? "{}");
       const request = messageBody as {
         content: string;
-        target_participants: "all";
+        target_participants: typeof CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL;
         quote_refs: Array<Record<string, unknown>>;
         private_context_present: boolean;
       };
@@ -952,7 +1034,9 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         headers: { "content-type": "text/event-stream" },
-        body: "event: heartbeat\ndata: \nretry: 60000\n\n",
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+          retryMilliseconds: 60_000,
+        }),
       });
     });
     await page.route(
@@ -962,15 +1046,15 @@ test.describe("AI-first conversation Home", () => {
         await route.fulfill({
           status: 200,
           json: {
-            schema_version: "1.0",
+            schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
             message_ref: locator,
             reactions: [
               {
                 target: locator,
-                emoji: "👍",
+                emoji: CONVERSATION_REACTION_EMOJI.APPROVE,
                 count: 2,
                 reacted_by_recipient: true,
-                actor_public_ids: ["human", "reviewer"],
+                actor_public_ids: [CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN, "reviewer"],
               },
             ],
             folded_at: "2026-08-25T00:00:01.000Z",
@@ -993,11 +1077,11 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "Send message" }).click();
 
     expect(messageBody).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
       idempotency_key: expect.any(String),
       expected_authority_digest: homeDigest("root-home-queue-authority"),
       content: "Use the reviewed source.",
-      target_participants: "all",
+      target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
       quote_refs: [
         {
           ...locator,
@@ -1010,10 +1094,10 @@ test.describe("AI-first conversation Home", () => {
 
     await page.getByRole("button", { name: /Approve, 1 reaction, from reviewer/ }).click();
     expect(reactionBody).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
       idempotency_key: expect.any(String),
-      mode: "toggle-self",
-      emoji: "👍",
+      mode: CONVERSATION_HUMAN_REACTION_REQUEST_MODE.TOGGLE_SELF,
+      emoji: CONVERSATION_REACTION_EMOJI.APPROVE,
       message_ref: locator,
     });
     await expect(
@@ -1044,12 +1128,12 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: createdPublished ? [session, createdSession] : [session],
           next_cursor: null,
           catalog_generation: "generation-private",
           source_watermark: "watermark-private",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -1069,29 +1153,13 @@ test.describe("AI-first conversation Home", () => {
     await page.route(
       "**/api/conversations/root-private-conversation/action-proposals?**",
       async (route) => {
-        await route.fulfill({
-          status: 200,
-          json: {
-            schema_version: "1.0",
-            items: [],
-            next_cursor: null,
-            authority_watermark: "watermark-private",
-          },
-        });
+        await route.fulfill({ status: 200, json: homePending([]) });
       },
     );
     await page.route(
       "**/api/conversations/root-private-created-conversation/action-proposals?**",
       async (route) => {
-        await route.fulfill({
-          status: 200,
-          json: {
-            schema_version: "1.0",
-            items: [],
-            next_cursor: null,
-            authority_watermark: "watermark-private-created",
-          },
-        });
+        await route.fulfill({ status: 200, json: homePending([]) });
       },
     );
     await page.route(
@@ -1110,7 +1178,9 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         headers: { "content-type": "text/event-stream" },
-        body: "event: heartbeat\ndata: \nretry: 60000\n\n",
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+          retryMilliseconds: 60_000,
+        }),
       });
     });
     await page.route(
@@ -1119,7 +1189,10 @@ test.describe("AI-first conversation Home", () => {
         stageRequests.push(JSON.parse(route.request().postData() ?? "{}"));
         await route.fulfill({
           status: 201,
-          json: { schema_version: "1.0", private_context_present: true },
+          json: {
+            schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+            private_context_present: true,
+          },
         });
       },
     );
@@ -1129,7 +1202,10 @@ test.describe("AI-first conversation Home", () => {
         discardRequests.push(JSON.parse(route.request().postData() ?? "{}"));
         await route.fulfill({
           status: 200,
-          json: { schema_version: "1.0", private_context_present: false },
+          json: {
+            schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+            private_context_present: false,
+          },
         });
       },
     );
@@ -1141,7 +1217,10 @@ test.describe("AI-first conversation Home", () => {
       draftStageRequests.push(JSON.parse(route.request().postData() ?? "{}"));
       await route.fulfill({
         status: 201,
-        json: { schema_version: "1.0", private_context_present: true },
+        json: {
+          schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+          private_context_present: true,
+        },
       });
     });
     await page.route("**/api/conversations", async (route) => {
@@ -1168,7 +1247,7 @@ test.describe("AI-first conversation Home", () => {
       messageBody = JSON.parse(route.request().postData() ?? "{}");
       const request = messageBody as {
         content: string;
-        target_participants: "all";
+        target_participants: typeof CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL;
         quote_refs: [];
         private_context_present: boolean;
       };
@@ -1209,9 +1288,9 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByText("Private file range ready", { exact: true })).toBeVisible();
     await expect(privateRangeTrigger).toBeFocused();
     expect(stageRequests[0]).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
       enqueue_idempotency_key: expect.any(String),
-      source_kind: "private-file-range",
+      source_kind: CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND.PRIVATE_FILE_RANGE,
       repo_relative_path: "src/private.ts",
       start_line: 12,
       end_line: 16,
@@ -1246,9 +1325,9 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByText("Private file range ready", { exact: true })).toBeVisible();
     await expect(changePrivateRange).toBeFocused();
     expect(stageRequests[1]).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
       enqueue_idempotency_key: expect.any(String),
-      source_kind: "private-file-range",
+      source_kind: CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND.PRIVATE_FILE_RANGE,
       repo_relative_path: "src/other.ts",
       start_line: 90,
       end_line: 91,
@@ -1258,7 +1337,7 @@ test.describe("AI-first conversation Home", () => {
     );
     await expect.poll(() => discardRequests.length).toBe(1);
     expect(discardRequests[0]).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
       idempotency_key: expect.any(String),
       enqueue_idempotency_key: stageRequests[0]?.enqueue_idempotency_key,
       expected_private_context_present: true,
@@ -1267,7 +1346,7 @@ test.describe("AI-first conversation Home", () => {
     await removePrivateRange.click();
     await expect(page.getByText("Private file range ready", { exact: true })).toHaveCount(0);
     expect(discardRequests[1]).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
       idempotency_key: expect.any(String),
       enqueue_idempotency_key: stageRequests[1]?.enqueue_idempotency_key,
       expected_private_context_present: true,
@@ -1282,11 +1361,11 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "Send message" }).click();
 
     expect(messageBody).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
       idempotency_key: stageRequests[2]?.enqueue_idempotency_key,
       expected_authority_digest: homeDigest("root-private-queue-authority"),
       content: "Use the private excerpt.",
-      target_participants: "all",
+      target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
       quote_refs: [],
       private_context_present: true,
     });
@@ -1299,9 +1378,9 @@ test.describe("AI-first conversation Home", () => {
     await page.getByLabel("End line").fill("9");
     await page.getByRole("button", { name: "Select range" }).click();
     expect(draftStageRequests[0]).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
       create_idempotency_key: expect.any(String),
-      source_kind: "private-file-range",
+      source_kind: CONVERSATION_PRIVATE_CONTEXT_SOURCE_KIND.PRIVATE_FILE_RANGE,
       repo_relative_path: "src/draft-private.ts",
       start_line: 7,
       end_line: 9,
@@ -1312,7 +1391,7 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "Send message" }).click();
     await expect(page.getByRole("heading", { name: "Create with private context" })).toBeVisible();
     expect(createBody).toEqual({
-      schema_version: "1.0",
+      schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
       idempotency_key: draftStageRequests[0]?.create_idempotency_key,
       topic: "Create with private context",
       private_context_present: true,
@@ -1338,12 +1417,12 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [session],
           next_cursor: null,
           catalog_generation: "generation",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -1429,12 +1508,12 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [session],
           next_cursor: null,
           catalog_generation: "generation",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -1455,11 +1534,11 @@ test.describe("AI-first conversation Home", () => {
           status: 200,
           json: homePendingAction("target-install", "Install accessible capability", {
             proposal: {
-              action_type: "capability.install",
-              domain: "capability",
-              scope: "project",
+              action_type: HOST_ACTION_KIND.CAPABILITY_INSTALL,
+              domain: ACTION_DOMAIN.CAPABILITY,
+              scope: ACTION_SCOPE.PROJECT,
             },
-            operation: { domain: "capability" },
+            operation: { domain: ACTION_DOMAIN.CAPABILITY },
           }),
         });
       },
@@ -1515,69 +1594,56 @@ test.describe("AI-first conversation Home", () => {
     const userProposalId = homeAuthorityId("proposal", "user-challenge");
     const streamingProposalId = homeAuthorityId("proposal", "streaming-action");
     const streamingOperationId = homeAuthorityId("operation", "streaming-action");
+    const projectOperationId = homeAuthorityId("operation", "project-critical");
     let projectApproveRequests = 0;
+    let projectCommitRequests = 0;
+    let pendingActionReads = 0;
     let projectApproveBody: Record<string, unknown> | null = null;
+    let projectCommitBody: Record<string, unknown> | null = null;
     let projectAction = homePendingAction("project-critical", "Critical project approval", {
-      proposal: { scope: "project", risk: "critical", expires_at: HOME_FUTURE_TS },
+      proposal: {
+        scope: ACTION_SCOPE.PROJECT,
+        risk: ACTION_RISK.CRITICAL,
+        expires_at: HOME_FUTURE_TS,
+      },
     });
     const userAction = homePendingAction("user-challenge", "User authority approval", {
-      proposal: { scope: "user", risk: "high", expires_at: HOME_FUTURE_TS },
+      proposal: {
+        scope: ACTION_SCOPE.USER,
+        risk: ACTION_RISK.HIGH,
+        expires_at: HOME_FUTURE_TS,
+      },
     });
     const terminalActions = [
       homePendingAction("cancelled", "Cancelled action", {
-        proposal: { expires_at: HOME_PAST_TS },
-        operation: { state: "canceled" },
+        operation: { state: ACTION_OPERATION_STATE.CANCELED },
       }),
       homePendingAction("approval-expired", "Expired approval", {
-        approval: {
-          schema_version: "1.0",
-          approval_id: homeAuthorityId("approval", "approval-expired"),
-          approval_digest: homeDigest("approval:approval-expired"),
-          proposal_id: homeAuthorityId("proposal", "approval-expired"),
-          proposal_digest: homeDigest(
-            `proposal:${homeAuthorityId("proposal", "approval-expired")}`,
-          ),
-          decision: "approved",
-          challenge_class: "normal-confirm",
-          decided_at: HOME_PAST_TS,
-          expires_at: HOME_PAST_TS,
-        },
-        operation: { state: "approved" },
+        approval: { expires_at: HOME_EXPIRED_TS },
+        operation: { state: ACTION_OPERATION_STATE.APPROVED },
       }),
       homePendingAction("stale-result", "Stale terminal", {
-        operation: {
-          state: "failed",
-          error: {
-            code: "stale_operation_state",
-            message: "This action result went stale.",
-            retryable: false,
-            recovery_action: null,
-            correlation_id: "corr-stale",
-          },
-        },
+        operation: { state: ACTION_OPERATION_STATE.STALE },
       }),
     ];
     const streamingAction = homePendingAction(streamingProposalId, "Streaming action", {
       operation: {
         operation_id: streamingOperationId,
-        state: "committing",
+        state: ACTION_OPERATION_STATE.COMMITTING,
       },
     });
-    const expiringAction = () =>
-      homePendingAction("deadline-action", "Exact deadline action", {
-        proposal: { expires_at: new Date(Date.now() + 1_200).toISOString() },
-      });
+    let expiringAction: ReturnType<typeof homePendingAction> | null = null;
 
     await page.route("**/api/conversations?**", async (route) => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [session],
           next_cursor: null,
           catalog_generation: "generation",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });
@@ -1586,17 +1652,33 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({ status: 200, json: homeTimeline("root-actions", []) });
     });
     await page.route(
-      "**/api/conversations/root-actions-conversation/action-proposals?**",
+      (url) => url.pathname === "/api/conversations/root-actions-conversation/action-proposals",
       async (route) => {
+        pendingActionReads += 1;
+        expiringAction ??= homePendingAction("deadline-action", "Exact deadline action", {
+          proposal: { expires_at: new Date(Date.now() + 1_500).toISOString() },
+        });
         await route.fulfill({
           status: 200,
           json: homePending([
             projectAction,
             userAction,
             streamingAction,
-            expiringAction(),
+            expiringAction,
             ...terminalActions,
           ]),
+        });
+      },
+    );
+    await page.route(
+      (url) => url.pathname === "/api/conversations/root-actions-conversation/events",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+            retryMilliseconds: 60_000,
+          }),
         });
       },
     );
@@ -1604,16 +1686,13 @@ test.describe("AI-first conversation Home", () => {
       proposalId: streamingProposalId,
       operationId: streamingOperationId,
     });
+    const userChallenge = homeFreshUserChallenge("user-authority");
     await page.route(
       `**/api/conversations/root-actions-conversation/action-proposals/${userProposalId}/approval-challenge`,
       async (route) => {
         await route.fulfill({
           status: 200,
-          json: {
-            challenge_id: "challenge-user-authority",
-            display_phrase: "APPROVE USER AUTHORITY",
-            expires_at: HOME_FUTURE_TS,
-          },
+          json: userChallenge,
         });
       },
     );
@@ -1623,28 +1702,43 @@ test.describe("AI-first conversation Home", () => {
         projectApproveRequests += 1;
         projectApproveBody = (await route.request().postDataJSON()) as Record<string, unknown>;
         projectAction = homePendingAction("project-critical", "Critical project approval", {
-          proposal: { scope: "project", risk: "critical", expires_at: HOME_FUTURE_TS },
-          approval: {
-            schema_version: "1.0",
-            approval_id: homeAuthorityId("approval", "project-critical"),
-            approval_digest: homeDigest("approval:project-critical"),
-            proposal_id: projectProposalId,
-            proposal_digest: homeDigest(`proposal:${projectProposalId}`),
-            decision: "approved",
-            challenge_class: "normal-confirm",
-            decided_at: HOME_TS,
+          proposal: {
+            scope: ACTION_SCOPE.PROJECT,
+            risk: ACTION_RISK.CRITICAL,
+            expires_at: HOME_FUTURE_TS,
+          },
+          operation: { state: ACTION_OPERATION_STATE.APPROVED },
+        });
+        await route.fulfill({
+          status: 200,
+          json: {
+            schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
+            approval: projectAction.approval,
+            operation: projectAction.operation,
+          },
+        });
+      },
+    );
+    await page.route(
+      `**/api/conversations/root-actions-conversation/action-proposals/${projectProposalId}/commit`,
+      async (route) => {
+        projectCommitRequests += 1;
+        projectCommitBody = (await route.request().postDataJSON()) as Record<string, unknown>;
+        projectAction = homePendingAction("project-critical", "Critical project approval", {
+          proposal: {
+            scope: ACTION_SCOPE.PROJECT,
+            risk: ACTION_RISK.CRITICAL,
             expires_at: HOME_FUTURE_TS,
           },
           operation: {
-            state: "approved",
-            approval_id: homeAuthorityId("approval", "project-critical"),
-            approval_digest: homeDigest("approval:project-critical"),
+            operation_id: projectOperationId,
+            state: ACTION_OPERATION_STATE.COMMITTING,
           },
         });
         await route.fulfill({
           status: 200,
           json: {
-            approval: projectAction.approval,
+            schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
             operation: projectAction.operation,
           },
         });
@@ -1669,15 +1763,16 @@ test.describe("AI-first conversation Home", () => {
       hasText: "Exact deadline action",
     });
     await expect(deadlineCard.getByRole("button", { name: "Approve" })).toBeVisible();
-    await page.waitForTimeout(1_400);
-    expect(await deadlineCard.textContent()).toContain("proposal expired");
+    await expect(deadlineCard).toContainText("proposal expired", { timeout: 5_000 });
     await expect(deadlineCard.getByRole("button", { name: "Approve" })).toHaveCount(0);
 
     const userCard = page.locator(".home-action-card").filter({
       hasText: "User authority approval",
     });
     await userCard.getByRole("button", { name: "Review confirmation" }).click();
-    await expect(userCard.getByLabel(/Type APPROVE USER AUTHORITY/)).toBeFocused();
+    await expect(
+      userCard.getByLabel(`Type ${userChallenge.display_phrase} to confirm this authority change.`),
+    ).toBeFocused();
 
     const criticalCard = page.locator(".home-action-card").filter({
       hasText: "Critical project approval",
@@ -1703,6 +1798,26 @@ test.describe("AI-first conversation Home", () => {
         .filter({ hasText: "Critical project approval" })
         .getByRole("button", { name: "Run approved action" }),
     ).toBeVisible();
+    const pendingReadsBeforeCommit = pendingActionReads;
+    const commitButton = page
+      .locator(".home-action-card")
+      .filter({ hasText: "Critical project approval" })
+      .getByRole("button", { name: "Run approved action" });
+    await commitButton.scrollIntoViewIfNeeded();
+    await expect(commitButton).toBeInViewport();
+    await Promise.all([
+      page.waitForRequest((request) => {
+        const path = new URL(request.url()).pathname;
+        return path.endsWith(`/action-proposals/${projectProposalId}/events`);
+      }),
+      commitButton.click(),
+    ]);
+    expect(projectCommitRequests).toBe(1);
+    expect(pendingActionReads).toBe(pendingReadsBeforeCommit);
+    expect(projectCommitBody).toMatchObject({
+      proposal_digest: projectAction.proposal.proposal_digest,
+      approval_id: projectAction.approval?.approval_id,
+    });
     await expect(
       page.locator(".home-action-card").filter({ hasText: "Cancelled action" }),
     ).toContainText("This action was canceled before a durable receipt completed.");
@@ -1726,29 +1841,39 @@ test.describe("AI-first conversation Home", () => {
   test("renders typed creation errors without discarding the draft or opening a modal", async ({
     page,
   }) => {
-    await page.addInitScript(() => {
-      const originalFetch = window.fetch.bind(window);
-      window.fetch = async (input, init) => {
-        const request = new Request(input, init);
-        if (request.method === "POST" && new URL(request.url).pathname === "/api/conversations") {
-          return new Response(
-            JSON.stringify({
-              error: {
-                code: "invalid_request",
-                message: "The requested goal is not admissible.",
-                retryable: false,
-                recovery_action: null,
+    await page.addInitScript(
+      ({ schemaVersion, invalidRequestCode, editRecoveryAction }) => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = async (input, init) => {
+          const request = new Request(input, init);
+          if (request.method === "POST" && new URL(request.url).pathname === "/api/conversations") {
+            return new Response(
+              JSON.stringify({
+                schema_version: schemaVersion,
+                error: {
+                  code: invalidRequestCode,
+                  message: "The requested goal is not admissible.",
+                  correlation_id: "e2e-invalid-request",
+                  retryable: false,
+                  recovery_action: editRecoveryAction,
+                  details: null,
+                },
+              }),
+              {
+                status: 400,
+                headers: { "content-type": "application/json" },
               },
-            }),
-            {
-              status: 400,
-              headers: { "content-type": "application/json" },
-            },
-          );
-        }
-        return originalFetch(input, init);
-      };
-    });
+            );
+          }
+          return originalFetch(input, init);
+        };
+      },
+      {
+        schemaVersion: PUBLIC_API_ERROR_SCHEMA_VERSION,
+        invalidRequestCode: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.INVALID_REQUEST,
+        editRecoveryAction: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.EDIT,
+      },
+    );
     await page.goto("/");
     await waitForPage(page);
     await page.getByRole("button", { name: "New conversation", exact: true }).first().click();
@@ -1807,12 +1932,12 @@ test.describe("AI-first conversation Home", () => {
       await route.fulfill({
         status: 200,
         json: {
-          schema_version: "1.0",
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
           items: [quoteSession],
           next_cursor: null,
           catalog_generation: "generation",
           source_watermark: "watermark",
-          catalog_health: "ready",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
         },
       });
     });

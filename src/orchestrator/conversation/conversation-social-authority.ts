@@ -1,4 +1,13 @@
 import {
+  CONVERSATION_INTERACTION_ACTOR_KIND,
+  CONVERSATION_INTERACTION_LIMITS,
+  CONVERSATION_INTERACTION_SCHEMA_VERSION,
+  CONVERSATION_INTERACTION_STATE,
+  CONVERSATION_REACTION_OPERATION,
+  CONVERSATION_SOCIAL_DIAGNOSTIC_CODE,
+  type ConversationReactionOperationKind,
+} from "./conversation-interaction-contract.js";
+import {
   ConversationInteractionCorruptError,
   type ConversationInteractionStore,
 } from "./conversation-interaction-store.js";
@@ -21,11 +30,13 @@ import type {
   PublicMessageActorV1,
 } from "./conversation-message-authority.js";
 import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND,
+} from "./conversation-message-queue-contract.js";
+import {
   conversationReactionChanges,
   publicReactionProjection,
 } from "./conversation-reaction-projection.js";
-
-const MAX_AGENT_REACTION_REQUESTS = 16;
 
 export class ConversationMessageReferenceUnavailableError extends Error {
   constructor() {
@@ -49,7 +60,11 @@ function locatorKey(value: PublicMessageLocatorV1): string {
 }
 
 function parseQuoteRefs(value: unknown): PublicQuoteReferenceV1[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 8)
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > CONVERSATION_INTERACTION_LIMITS.maxQuotes
+  )
     throw new Error("invalid quote reference count");
   const output = value.map((item) => {
     assertPublicQuoteReferenceV1(item);
@@ -61,13 +76,17 @@ function parseQuoteRefs(value: unknown): PublicQuoteReferenceV1[] {
 }
 
 function parseReactions(value: unknown): AgentReactionRequestV1[] {
-  if (!Array.isArray(value) || value.length > MAX_AGENT_REACTION_REQUESTS)
+  if (
+    !Array.isArray(value) ||
+    value.length > CONVERSATION_INTERACTION_LIMITS.maxAgentReactionRequests
+  )
     throw new Error("invalid reaction request count");
   return value.map((item) => {
     if (
       !record(item) ||
       !exact(item, ["operation", "target", "emoji"]) ||
-      (item.operation !== "add" && item.operation !== "remove") ||
+      (item.operation !== CONVERSATION_REACTION_OPERATION.ADD &&
+        item.operation !== CONVERSATION_REACTION_OPERATION.REMOVE) ||
       !isReactionEmojiV1(item.emoji)
     )
       throw new Error("invalid reaction request");
@@ -95,8 +114,8 @@ export class ConversationSocialAuthorityV1 {
       const refs = parseQuoteRefs(candidates);
       for (const quote of refs)
         this.messages.quote(conversationId, quote, {
-          kind: "human",
-          public_id: "human",
+          kind: CONVERSATION_INTERACTION_ACTOR_KIND.HUMAN,
+          public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
           participant_id: null,
           source_event_id: null,
         });
@@ -114,7 +133,7 @@ export class ConversationSocialAuthorityV1 {
     request: AgentSocialIntentRequestV1;
   }): { accepted: boolean; diagnostic_code: string | null } {
     const actor: PublicMessageActorV1 = {
-      kind: "participant",
+      kind: CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT,
       public_id: input.actor_participant_id,
       participant_id: input.actor_participant_id,
       source_event_id: input.response_event_id,
@@ -131,21 +150,27 @@ export class ConversationSocialAuthorityV1 {
         source_event_id: null,
       });
       if (
-        response.locator.target_kind !== "completed-agent-response" ||
+        response.locator.target_kind !==
+          CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE ||
         response.author_public_id !== input.actor_participant_id
       )
         throw new Error("participant response authority changed");
     } catch {
-      return { accepted: false, diagnostic_code: "social_intent_response_unavailable" };
+      return {
+        accepted: false,
+        diagnostic_code: CONVERSATION_SOCIAL_DIAGNOSTIC_CODE.RESPONSE_UNAVAILABLE,
+      };
     }
     try {
       const quoteRefs =
         input.request.quote_refs === undefined ? [] : parseQuoteRefs(input.request.quote_refs);
       const reactions =
         input.request.reactions === undefined ? [] : parseReactions(input.request.reactions);
-      const adds = reactions.filter((item) => item.operation === "add");
+      const adds = reactions.filter(
+        (item) => item.operation === CONVERSATION_REACTION_OPERATION.ADD,
+      );
       if (
-        adds.length > 3 ||
+        adds.length > CONVERSATION_INTERACTION_LIMITS.maxParticipantReactionAdds ||
         new Set(adds.map((item) => item.target.target_event_id)).size !== adds.length
       )
         throw new Error("participant reaction add bound exceeded");
@@ -167,7 +192,10 @@ export class ConversationSocialAuthorityV1 {
       return { accepted: true, diagnostic_code: null };
     } catch (error) {
       if (error instanceof ConversationInteractionCorruptError)
-        return { accepted: false, diagnostic_code: "interaction_authority_corrupt" };
+        return {
+          accepted: false,
+          diagnostic_code: CONVERSATION_SOCIAL_DIAGNOSTIC_CODE.AUTHORITY_CORRUPT,
+        };
       try {
         this.store.commitParticipantIntent({
           root_session_id: response.locator.root_session_id,
@@ -175,13 +203,19 @@ export class ConversationSocialAuthorityV1 {
           response: response.locator,
           quote_refs: [],
           reactions: [],
-          diagnostic_code: "invalid_social_intent",
+          diagnostic_code: CONVERSATION_SOCIAL_DIAGNOSTIC_CODE.INVALID_INTENT,
           created_at: response.created_at,
         });
       } catch {
-        return { accepted: false, diagnostic_code: "interaction_authority_corrupt" };
+        return {
+          accepted: false,
+          diagnostic_code: CONVERSATION_SOCIAL_DIAGNOSTIC_CODE.AUTHORITY_CORRUPT,
+        };
       }
-      return { accepted: false, diagnostic_code: "invalid_social_intent" };
+      return {
+        accepted: false,
+        diagnostic_code: CONVERSATION_SOCIAL_DIAGNOSTIC_CODE.INVALID_INTENT,
+      };
     }
   }
 
@@ -189,12 +223,12 @@ export class ConversationSocialAuthorityV1 {
     conversation_id: string;
     actor_public_id: string;
     idempotency_key: string;
-    operation: "add" | "remove";
+    operation: ConversationReactionOperationKind;
     target: PublicMessageLocatorV1;
     emoji: ReactionEmojiV1;
   }): ConversationReactionOperationV1 {
     const resolved = this.messages.resolve(input.conversation_id, input.target, {
-      kind: "human",
+      kind: CONVERSATION_INTERACTION_ACTOR_KIND.HUMAN,
       public_id: input.actor_public_id,
       participant_id: null,
       source_event_id: null,
@@ -214,7 +248,7 @@ export class ConversationSocialAuthorityV1 {
     input: Omit<Parameters<ConversationSocialAuthorityV1["humanReaction"]>[0], "operation">,
   ): ConversationReactionOperationV1 {
     const resolved = this.messages.resolve(input.conversation_id, input.target, {
-      kind: "human",
+      kind: CONVERSATION_INTERACTION_ACTOR_KIND.HUMAN,
       public_id: input.actor_public_id,
       participant_id: null,
       source_event_id: null,
@@ -247,8 +281,8 @@ export class ConversationSocialAuthorityV1 {
         if (!message.quote_refs.length) continue;
         quotesByResponse[message.locator.target_event_id] = message.quote_refs.map((quote) =>
           this.messages.quote(conversationId, quote, {
-            kind: "human",
-            public_id: "human",
+            kind: CONVERSATION_INTERACTION_ACTOR_KIND.HUMAN,
+            public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
             participant_id: null,
             source_event_id: message.locator.target_event_id,
           }),
@@ -256,14 +290,15 @@ export class ConversationSocialAuthorityV1 {
       }
       for (const intent of fold.participant_intents) {
         const response = this.messages.resolve(conversationId, intent.response, {
-          kind: "participant",
+          kind: CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT,
           public_id: intent.actor_participant_id,
           participant_id: intent.actor_participant_id,
           source_event_id: null,
         });
         if (
           response.author_public_id !== intent.actor_participant_id ||
-          response.locator.target_kind !== "completed-agent-response"
+          response.locator.target_kind !==
+            CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE
         )
           throw new Error("social intent response authority changed");
         if (intent.diagnostic_code !== null) {
@@ -272,7 +307,7 @@ export class ConversationSocialAuthorityV1 {
         }
         quotesByResponse[intent.response.target_event_id] = intent.quote_refs.map((quote) =>
           this.messages.quote(conversationId, quote, {
-            kind: "participant",
+            kind: CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT,
             public_id: intent.actor_participant_id,
             participant_id: intent.actor_participant_id,
             source_event_id: intent.response.target_event_id,
@@ -283,9 +318,12 @@ export class ConversationSocialAuthorityV1 {
         const target = this.messages.resolve(conversationId, operation.target, {
           kind: operation.actor_kind,
           public_id: operation.actor_public_id,
-          participant_id: operation.actor_kind === "participant" ? operation.actor_public_id : null,
+          participant_id:
+            operation.actor_kind === CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT
+              ? operation.actor_public_id
+              : null,
           source_event_id:
-            operation.actor_kind === "participant"
+            operation.actor_kind === CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT
               ? (fold.participant_intents.find((intent) =>
                   intent.reaction_operations.some(
                     (candidate) => candidate.operation_id === operation.operation_id,
@@ -294,14 +332,14 @@ export class ConversationSocialAuthorityV1 {
               : null,
         });
         if (
-          operation.actor_kind === "participant" &&
+          operation.actor_kind === CONVERSATION_INTERACTION_ACTOR_KIND.PARTICIPANT &&
           target.author_public_id === operation.actor_public_id
         )
           throw new Error("participant self reaction entered interaction fold");
       }
       return {
-        schema_version: "1.0",
-        state: "ready",
+        schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
+        state: CONVERSATION_INTERACTION_STATE.READY,
         root_session_id: root,
         interaction_head_digest: fold.head_digest,
         interaction_head_sequence: fold.head_sequence,
@@ -319,8 +357,8 @@ export class ConversationSocialAuthorityV1 {
       };
     } catch {
       return {
-        schema_version: "1.0",
-        state: "degraded",
+        schema_version: CONVERSATION_INTERACTION_SCHEMA_VERSION,
+        state: CONVERSATION_INTERACTION_STATE.DEGRADED,
         root_session_id: root,
         interaction_head_digest: null,
         interaction_head_sequence: 0,

@@ -1,3 +1,4 @@
+import { ACTION_EFFECT_CLASSES } from "../../actions/public-action-contract.js";
 import { digestV1Bytes } from "../../durability/canonical.js";
 import { canonicalJson, canonicalJsonBytes } from "../../durability/index.js";
 import type { CapabilityActionPlanBindingV1 } from "../action-domain/types.js";
@@ -5,10 +6,11 @@ import type {
   CapabilityAdapterPrivateDescriptorV1,
   CapabilityOwnedResourceV1,
 } from "../adapters/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import { capabilityFabricPlanDigest, executionClosureDigest } from "./digests.js";
 import { validateCapabilityPlanningGraph } from "./execution-graph-validation.js";
+import type { CapabilityExecutionLedgerMode } from "./execution-ledger-contract.js";
 import {
   CAPABILITY_EXECUTION_SCHEMA_ORDER,
   CAPABILITY_RAW_BLOB_KIND_ORDER,
@@ -40,7 +42,9 @@ type FabricPlanDraft = Omit<
   "execution_closure" | "execution_closure_digest" | "plan_digest"
 >;
 
-function dedupeJson(rows: CapabilityPlanningJsonObjectV1[]): CapabilityPlanningJsonObjectV1[] {
+export function dedupeCapabilityPlanningJsonObjects(
+  rows: CapabilityPlanningJsonObjectV1[],
+): CapabilityPlanningJsonObjectV1[] {
   const byDigest = new Map<string, CapabilityPlanningJsonObjectV1>();
   for (const row of rows) {
     const prior = byDigest.get(row.binding.object_digest);
@@ -49,7 +53,10 @@ function dedupeJson(rows: CapabilityPlanningJsonObjectV1[]): CapabilityPlanningJ
       (prior.binding.object_schema_id !== row.binding.object_schema_id ||
         canonicalJson(prior.value) !== canonicalJson(row.value))
     )
-      throw new CapabilityRuntimeError("conflicting execution object digest", "integrity-failure");
+      throw new CapabilityRuntimeError(
+        "conflicting execution object digest",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+      );
     byDigest.set(row.binding.object_digest, row);
   }
   return [...byDigest.values()].sort((a, b) => {
@@ -69,7 +76,10 @@ function dedupeBlobs(rows: CapabilityPlanningRawBlobV1[]): CapabilityPlanningRaw
       (canonicalJson(prior.binding) !== canonicalJson(row.binding) ||
         prior.bytes_base64 !== row.bytes_base64)
     )
-      throw new CapabilityRuntimeError("conflicting execution blob digest", "integrity-failure");
+      throw new CapabilityRuntimeError(
+        "conflicting execution blob digest",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+      );
     byDigest.set(row.binding.content_digest, row);
   }
   return [...byDigest.values()].sort((a, b) => {
@@ -89,7 +99,7 @@ function privateInputs(
     if (!binding || binding.binding_digest !== pkg.private_input_binding_digest)
       throw new CapabilityRuntimeError(
         "package lacks exact private input execution binding",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     if (binding.record === null) continue;
     const ref = `actions/v1/private-input-bindings/${binding.record.private_binding_id}.json`;
@@ -101,7 +111,10 @@ function privateInputs(
     };
     const prior = rows.get(binding.binding_digest);
     if (prior && canonicalJson(prior.record) !== canonicalJson(row.record))
-      throw new CapabilityRuntimeError("conflicting private input binding", "integrity-failure");
+      throw new CapabilityRuntimeError(
+        "conflicting private input binding",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+      );
     rows.set(binding.binding_digest, row);
   }
   return [...rows.values()].sort((a, b) => bytewise(a.binding_digest, b.binding_digest));
@@ -113,17 +126,11 @@ function actionPlan(
   closureDigest: string,
 ): CapabilityActionPlanBindingV1 {
   if (!request.source_request_context)
-    throw new CapabilityRuntimeError("source request context is absent", "integrity-failure");
-  const effectOrder: import("../../actions/types.js").ActionEffectClass[] = [
-    "pure-local-read",
-    "local-read-with-cache",
-    "network-read",
-    "process-probe",
-    "project-write",
-    "user-write",
-    "external-compensatable",
-    "external-irreversible",
-  ];
+    throw new CapabilityRuntimeError(
+      "source request context is absent",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+    );
+  const effectOrder = ACTION_EFFECT_CLASSES;
   return {
     schema_version: "1.0",
     domain: "capability",
@@ -157,7 +164,7 @@ export function assembleCapabilityDurablePlanningGraph(input: {
   stepEnforcement: CapabilityStepEnforcementBindingV1[];
   probeEnforcement: CapabilityProbeEnforcementBindingV1[];
   packages: ResolvedCapabilityPackageV1[];
-  mode: "transient-preview" | "durable-proposal";
+  mode: CapabilityExecutionLedgerMode;
 }): CapabilityDurablePlanningGraphV1 {
   const jsonObjects: CapabilityPlanningJsonObjectV1[] = [
     planningJsonObject(
@@ -182,7 +189,7 @@ export function assembleCapabilityDurablePlanningGraph(input: {
     if (!source)
       throw new CapabilityRuntimeError(
         "package source execution proof is absent",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     jsonObjects.push(
       planningJsonObject("vf.package-authenticity-binding/1", pkg.authenticity_binding),
@@ -191,18 +198,24 @@ export function assembleCapabilityDurablePlanningGraph(input: {
       planningJsonObject("vf.resolved-source-authority-binding/1", source.resolved),
     );
   }
-  const objects = dedupeJson(jsonObjects);
+  const objects = dedupeCapabilityPlanningJsonObjects(jsonObjects);
   const blobs = dedupeBlobs([
     ...input.privatePreimages.map(({ resource, bytes }) => {
       if (!resource.private_preimage_digest)
-        throw new CapabilityRuntimeError("private preimage digest is absent", "integrity-failure");
+        throw new CapabilityRuntimeError(
+          "private preimage digest is absent",
+          CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+        );
       const row = planningRawBlob(
         "owned-resource-preimage",
         resource.private_preimage_digest,
         bytes,
       );
       if (row.binding.blob_ref !== resource.private_preimage_ref)
-        throw new CapabilityRuntimeError("private preimage binding mismatch", "integrity-failure");
+        throw new CapabilityRuntimeError(
+          "private preimage binding mismatch",
+          CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+        );
       return row;
     }),
     ...input.privateEvidence.map(({ content_digest, bytes }) => {
@@ -210,7 +223,7 @@ export function assembleCapabilityDurablePlanningGraph(input: {
       if (digestV1Bytes("VF-ADAPTER-PRIVATE-EVIDENCE\0v1\0", bytes) !== content_digest)
         throw new CapabilityRuntimeError(
           "private inspection evidence binding mismatch",
-          "integrity-failure",
+          CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
         );
       return row;
     }),
@@ -221,7 +234,7 @@ export function assembleCapabilityDurablePlanningGraph(input: {
     if (!pkg?.private_input_execution)
       throw new CapabilityRuntimeError(
         "adapter plan private input binding is absent",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     const record = pkg.private_input_execution.record;
     return {

@@ -1,25 +1,23 @@
 import { digestV1 } from "../../durability/index.js";
 import type { PublicStoredTraceEvent } from "../trace/types.js";
+import {
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_TRACE_EVENT_KIND,
+  type ConversationOperationStateV1,
+} from "./conversation-public-wire-contract.js";
 
 export interface OrdinaryConversationOperationAuthorityV1 {
   operation_header_digest: string;
   operation_state_digest: string;
 }
 
-type OrdinaryLifecycleStateV1 =
-  | "requested"
-  | "dispatched"
-  | "acknowledged"
-  | "completed"
-  | "ambiguous";
-
-function ordinaryLifecycleState(value: string): OrdinaryLifecycleStateV1 {
+function ordinaryLifecycleState(value: string): ConversationOperationStateV1 {
   switch (value) {
-    case "requested":
-    case "dispatched":
-    case "acknowledged":
-    case "completed":
-    case "ambiguous":
+    case CONVERSATION_OPERATION_STATE.REQUESTED:
+    case CONVERSATION_OPERATION_STATE.DISPATCHED:
+    case CONVERSATION_OPERATION_STATE.ACKNOWLEDGED:
+    case CONVERSATION_OPERATION_STATE.COMPLETED:
+    case CONVERSATION_OPERATION_STATE.AMBIGUOUS:
       return value;
     default:
       throw new Error("ordinary operation lifecycle state changed");
@@ -52,7 +50,7 @@ export function foldOrdinaryConversationOperation(input: {
         event_id: string;
         kind: "operation-lifecycle";
         attempt_id: string;
-        state: OrdinaryLifecycleStateV1;
+        state: ConversationOperationStateV1;
       }
     | {
         sequence: number;
@@ -67,7 +65,7 @@ export function foldOrdinaryConversationOperation(input: {
     if (row.seq <= priorSequence) throw new Error("ordinary operation trace sequence changed");
     priorSequence = row.seq;
     if (row.operation_id !== input.operation_id) continue;
-    if (row.event.type === "operation_lifecycle") {
+    if (row.event.type === CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE) {
       if (
         row.event.payload.operation_id !== input.operation_id ||
         row.attempt_id !== row.event.payload.attempt_id
@@ -80,7 +78,7 @@ export function foldOrdinaryConversationOperation(input: {
         attempt_id: row.event.payload.attempt_id,
         state: ordinaryLifecycleState(row.event.payload.state),
       });
-    } else if (row.event.type === "caller_cancelled") {
+    } else if (row.event.type === CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED) {
       if (row.event.payload.operation_id !== input.operation_id)
         throw new Error("ordinary operation cancellation authority changed");
       events.push({

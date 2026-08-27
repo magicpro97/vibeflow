@@ -446,6 +446,7 @@ describe("capability runtime, operation, and storage post-freeze coverage", () =
   });
 
   test("validates every standalone WAL payload family and rejects contradictory evidence", () => {
+    const expectedOperationId = "standalone-wal-payload-validation";
     const digest = runtimeDigest("wal");
     const health = {
       kind: "health" as const,
@@ -458,12 +459,15 @@ describe("capability runtime, operation, and storage post-freeze coverage", () =
       expires_at: "2026-08-25T00:01:00.000Z",
       evidence_digest: digest,
     };
-    expect(() => validateCapabilityWalPayload(health)).not.toThrow();
+    expect(() => validateCapabilityWalPayload(health, expectedOperationId)).not.toThrow();
     expect(() =>
-      validateCapabilityWalPayload({
-        ...health,
-        expires_at: health.checked_at,
-      }),
+      validateCapabilityWalPayload(
+        {
+          ...health,
+          expires_at: health.checked_at,
+        },
+        expectedOperationId,
+      ),
     ).toThrow(/expiry/i);
 
     const prepared = {
@@ -473,13 +477,16 @@ describe("capability runtime, operation, and storage post-freeze coverage", () =
       health_inventory_digest: digest,
       expected_health_pointer_digest: null,
     };
-    expect(() => validateCapabilityWalPayload(prepared)).not.toThrow();
+    expect(() => validateCapabilityWalPayload(prepared, expectedOperationId)).not.toThrow();
     expect(() =>
-      validateCapabilityWalPayload({
-        ...prepared,
-        kind: "lock-commit",
-        directory_fsync_completed: false,
-      } as never),
+      validateCapabilityWalPayload(
+        {
+          ...prepared,
+          kind: "lock-commit",
+          directory_fsync_completed: false,
+        } as never,
+        expectedOperationId,
+      ),
     ).toThrow(/fsync/i);
 
     const checkpoint = {
@@ -489,7 +496,7 @@ describe("capability runtime, operation, and storage post-freeze coverage", () =
       checkpoint_bytes_sha256: "3".repeat(64),
       checkpoint_digest: digest,
     };
-    expect(() => validateCapabilityWalPayload(checkpoint)).not.toThrow();
+    expect(() => validateCapabilityWalPayload(checkpoint, expectedOperationId)).not.toThrow();
 
     const outbox = {
       kind: "outbox" as const,
@@ -501,23 +508,29 @@ describe("capability runtime, operation, and storage post-freeze coverage", () =
       transition: "created" as const,
       delivery: "pending" as const,
     };
-    expect(() => validateCapabilityWalPayload(outbox)).not.toThrow();
+    expect(() => validateCapabilityWalPayload(outbox, expectedOperationId)).not.toThrow();
     expect(() =>
-      validateCapabilityWalPayload({ ...outbox, transition: "delivered", delivery: "pending" }),
+      validateCapabilityWalPayload(
+        { ...outbox, transition: "delivered", delivery: "pending" },
+        expectedOperationId,
+      ),
     ).toThrow(/transition\/delivery/i);
-    expect(() => validateCapabilityWalPayload({ ...outbox, outbox_event_id: "invalid" })).toThrow(
-      /outbox event ID/i,
-    );
-    expect(() => validateCapabilityWalPayload({ kind: "unknown" } as never)).toThrow(
-      /unknown.*kind/i,
-    );
     expect(() =>
-      validateCapabilityWalPayload({
-        kind: "operation-transition",
-        from: "committing",
-        to: "failed",
-        reason_code: "behavioral-failure",
-      }),
+      validateCapabilityWalPayload({ ...outbox, outbox_event_id: "invalid" }, expectedOperationId),
+    ).toThrow(/outbox event ID/i);
+    expect(() =>
+      validateCapabilityWalPayload({ kind: "unknown" } as never, expectedOperationId),
+    ).toThrow(/unknown.*kind/i);
+    expect(() =>
+      validateCapabilityWalPayload(
+        {
+          kind: "operation-transition",
+          from: "committing",
+          to: "failed",
+          reason_code: "behavioral-failure",
+        },
+        expectedOperationId,
+      ),
     ).not.toThrow();
   });
 
@@ -1287,10 +1300,10 @@ describe("capability runtime, operation, and storage post-freeze coverage", () =
       evidence_digest: runtimeDigest("receipt-validation-evidence"),
       error_code: null,
     });
-    expect(() => validateAdapterReceipt(receipt, "receipt")).not.toThrow();
-    expect(() => validateAdapterReceipt({ ...receipt, attempt: 1 } as never, "receipt")).toThrow(
-      /attempt zero/i,
-    );
+    expect(() => validateAdapterReceipt(receipt, "receipt", operationId)).not.toThrow();
+    expect(() =>
+      validateAdapterReceipt({ ...receipt, attempt: 1 } as never, "receipt", operationId),
+    ).toThrow(/attempt zero/i);
     const referenced = {
       ...receipt,
       private_evidence_ref: "private/evidence/ref",
@@ -1298,17 +1311,19 @@ describe("capability runtime, operation, and storage post-freeze coverage", () =
       receipt_digest: "",
     };
     referenced.receipt_digest = adapterReceiptDigest(referenced);
-    expect(() => validateAdapterReceipt(referenced, "receipt")).not.toThrow();
+    expect(() => validateAdapterReceipt(referenced, "receipt", operationId)).not.toThrow();
     expect(() =>
       validateAdapterReceipt(
         { ...receipt, native_identifier_producer_receipt_digests: null } as never,
         "receipt",
+        operationId,
       ),
     ).toThrow(/producer receipt/i);
     expect(() =>
       validateAdapterReceipt(
         { ...receipt, receipt_digest: runtimeDigest("wrong-receipt") },
         "receipt",
+        operationId,
       ),
     ).toThrow(/receipt digest/i);
   });

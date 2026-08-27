@@ -1,5 +1,15 @@
 import { publicActionError } from "../actions/errors.js";
 import { ActionValidationError } from "../actions/index.js";
+import {
+  ACTION_OPERATION_EVENT_CURSOR_PATTERN,
+  ACTION_OPERATION_SSE_EVENT,
+} from "../actions/protocol-contract.js";
+import { PUBLIC_ACTION_SCHEMA_VERSION } from "../actions/public-action-contract.js";
+import {
+  PUBLIC_API_ERROR_SCHEMA_VERSION,
+  PUBLIC_ERROR_CODE,
+  PUBLIC_RECOVERY_ACTION,
+} from "../actions/public-error-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../durability/index.js";
 import type { ConversationActionDomainRegistryV1 } from "../orchestrator/conversation/conversation-action-registry.js";
 import { conversationReadError } from "./conversation-list-route.js";
@@ -19,22 +29,26 @@ function noStore(body: unknown): Response {
 }
 
 function eventFrame(event: OperationEvent) {
-  return `id: ${event.event_cursor}\nevent: operation\ndata: ${canonicalJsonBytes(event).toString("utf8")}\n\n`;
+  return `id: ${event.event_cursor}\nevent: ${ACTION_OPERATION_SSE_EVENT.OPERATION}\ndata: ${canonicalJsonBytes(event).toString("utf8")}\n\n`;
 }
 
 function streamError(proposalId: string): string {
   const body = publicActionError({
-    code: "service_unavailable",
+    code: PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE,
     message: "The operation event stream is unavailable.",
     correlation_id: `vf-operation-stream-${digestV1("VF-OPERATION-STREAM-ERROR\0v1\0", {
-      schema_version: "1.0",
+      schema_version: PUBLIC_API_ERROR_SCHEMA_VERSION,
       proposal_id: proposalId,
     }).slice(7)}`,
     retryable: true,
-    recovery_action: "retry",
+    recovery_action: PUBLIC_RECOVERY_ACTION.RETRY,
     details: null,
   }).error;
-  return `event: error\ndata: ${canonicalJsonBytes(body).toString("utf8")}\n\n`;
+  return `event: ${ACTION_OPERATION_SSE_EVENT.ERROR}\ndata: ${canonicalJsonBytes(body).toString("utf8")}\n\n`;
+}
+
+function heartbeatFrame(): string {
+  return `event: ${ACTION_OPERATION_SSE_EVENT.HEARTBEAT}\ndata: \n\n`;
 }
 
 function requestedCursor(request: Request, url: URL): string | null {
@@ -45,7 +59,7 @@ function requestedCursor(request: Request, url: URL): string | null {
   const header = request.headers.get("last-event-id");
   const after = afterValues[0] ?? null;
   const valid = (value: string | null) =>
-    value === null || /^vf-operation-event-[0-9a-f]{64}$/.test(value);
+    value === null || ACTION_OPERATION_EVENT_CURSOR_PATTERN.test(value);
   if (!valid(header) || !valid(after)) throw new ActionValidationError("invalid operation cursor");
   // EventSource keeps the original query on reconnect and advances only
   // Last-Event-ID. Once present, the independently validated header is the
@@ -59,9 +73,9 @@ function cursorIndex(events: OperationEvents, cursor: string | null): number {
 }
 
 function stale(events: OperationEvents, proposalId: string) {
-  return conversationReadError("stale_operation_cursor", {
+  return conversationReadError(PUBLIC_ERROR_CODE.STALE_OPERATION_CURSOR, {
     message: "The operation cursor is stale.",
-    recoveryAction: "restart-pagination",
+    recoveryAction: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
     details: {
       restart_cursor: events[0]?.event_cursor ?? "vf-operation-event-empty",
       proposal_id: proposalId,
@@ -157,7 +171,7 @@ function liveStream(input: {
         await refresh();
         const interval = input.authority.actionHeartbeatMs ?? 15_000;
         if (active && interval > 0)
-          heartbeat = setInterval(() => enqueue("event: heartbeat\ndata: \n\n"), interval);
+          heartbeat = setInterval(() => enqueue(heartbeatFrame()), interval);
       })().catch(() => {
         enqueue(streamError(input.proposalId));
         close();
@@ -188,7 +202,9 @@ export async function operationActionEvents(
   const cursor = requestedCursor(request, url);
   const events = await authority.actions.events(conversationId, proposalId);
   if (!events)
-    return conversationReadError("not_found", { message: "The proposal was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The proposal was not found.",
+    });
   const index = cursorIndex(events, cursor);
   if (cursor !== null && index < 0) return stale(events, proposalId);
   if (request.headers.get("accept") === "text/event-stream")
@@ -201,7 +217,7 @@ export async function operationActionEvents(
     });
   const items = events.slice(index + 1, index + 101);
   return noStore({
-    schema_version: "1.0",
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     items,
     next_cursor:
       index + 1 + items.length < events.length ? (items.at(-1)?.event_cursor ?? null) : null,

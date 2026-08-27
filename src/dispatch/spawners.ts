@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { extname, join } from "node:path";
 import { resolveCommand } from "../core.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { filterEnv } from "./env-filter.js";
 import {
   assertOwnedProcessHealthClear,
@@ -66,7 +67,7 @@ export function defaultSyncSpawner(cmd: string, args: string[], input: string): 
   const resolvedCmd = resolveCommand(cmd) ?? cmd;
   const needsShell = shouldUseWindowsShell(cmd, resolvedCmd);
   const spawnArgs = needsShell
-    ? process.platform === "win32"
+    ? process.platform === RUNTIME_PLATFORM.WINDOWS
       ? ["cmd.exe", "/c", cmd, ...args]
       : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
     : [cmd, ...args];
@@ -97,7 +98,7 @@ function hasWindowsShimSibling(path: string): boolean {
 }
 
 function shouldUseWindowsShell(cmd: string, resolvedCmd: string): boolean {
-  if (process.platform !== "win32") return false;
+  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return false;
   if (/\.(?:cmd|bat)$/i.test(resolvedCmd)) return true;
   if (cmd.toLowerCase() === "copilot") return true;
   return hasWindowsShimSibling(resolvedCmd);
@@ -170,7 +171,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     const resolvedCmd = resolveCommand(cmd) ?? cmd;
     const needsShell = shell ?? shouldUseWindowsShell(cmd, resolvedCmd);
     const spawnArgs = needsShell
-      ? process.platform === "win32"
+      ? process.platform === RUNTIME_PLATFORM.WINDOWS
         ? ["cmd.exe", "/c", cmd, ...args]
         : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
       : [cmd, ...args];
@@ -196,7 +197,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     const proc = ownedRuntime
       ? launchOwnedSupervisorProcess(spawnArgs, {
           stdinText: input,
-          detached: process.platform !== "win32",
+          detached: process.platform !== RUNTIME_PLATFORM.WINDOWS,
           env: filteredEnv,
           ...(cwd ? { cwd } : {}),
           ownedRuntime,
@@ -205,7 +206,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
           stdin: "pipe",
           stdout: "pipe",
           stderr: "pipe",
-          detached: process.platform !== "win32",
+          detached: process.platform !== RUNTIME_PLATFORM.WINDOWS,
           env: filteredEnv,
           ...(cwd ? { cwd } : {}),
         }) as unknown as EngineProcess);
@@ -246,7 +247,7 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     let graceTerm: Timer | undefined;
     // Group-leader pid: the SIGN that the child was spawned detached on POSIX. On Windows
     // there is no group-kill equivalent, so we kill the direct child only.
-    const isPosixGroupLeader = process.platform !== "win32" && proc.pid != null;
+    const isPosixGroupLeader = process.platform !== RUNTIME_PLATFORM.WINDOWS && proc.pid != null;
     const killGroup = (signal: NodeJS.Signals) => {
       if (!isPosixGroupLeader || proc.pid == null) {
         try {

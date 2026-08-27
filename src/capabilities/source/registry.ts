@@ -1,4 +1,10 @@
 import { createPublicKey, verify } from "node:crypto";
+import { CAPABILITY_MANIFEST_ICON_MEDIA_TYPES } from "../../actions/capability-manifest-vocabulary-contract.js";
+import {
+  CAPABILITY_REGISTRY_ENVELOPE_STATUS,
+  CAPABILITY_REGISTRY_TRUST_KEY_STATE,
+  CAPABILITY_SIGNATURE_ALGORITHM,
+} from "../../actions/capability-security-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import {
   CapabilityValidationError,
@@ -124,7 +130,7 @@ function decodeBase64Url(value: string, path: string): Buffer {
 }
 
 function trustKeyBytes(key: RegistryTrustKeyV1): Buffer {
-  if (key.algorithm !== "Ed25519")
+  if (key.algorithm !== CAPABILITY_SIGNATURE_ALGORITHM.ED25519)
     throw new CapabilityValidationError("unsupported trust algorithm", "key.algorithm");
   const bytes = decodeBase64(key.public_key_spki_base64, "key.public_key_spki_base64");
   const publicKey = createPublicKey({ key: bytes, format: "der", type: "spki" });
@@ -154,7 +160,10 @@ export function verifyRegistryEnvelope(
     [],
     "envelope.signature",
   );
-  if (envelope.schema_version !== "1.0" || envelope.signature.algorithm !== "Ed25519")
+  if (
+    envelope.schema_version !== "1.0" ||
+    envelope.signature.algorithm !== CAPABILITY_SIGNATURE_ALGORITHM.ED25519
+  )
     throw new CapabilityValidationError(
       "unsupported envelope schema/algorithm",
       "envelope",
@@ -225,12 +234,12 @@ export function verifyRegistryEnvelope(
     now >= timestamp(envelope.statement.expires_at, "statement.expires_at") ||
     now >= timestamp(key.valid_until, "key.valid_until");
   const status =
-    key.state === "revoked"
-      ? "blocked"
-      : key.state === "deprecated" || expired
-        ? "stale"
-        : "verified";
-  if (options.mode === "resolution" && status !== "verified")
+    key.state === CAPABILITY_REGISTRY_TRUST_KEY_STATE.REVOKED
+      ? CAPABILITY_REGISTRY_ENVELOPE_STATUS.BLOCKED
+      : key.state === CAPABILITY_REGISTRY_TRUST_KEY_STATE.DEPRECATED || expired
+        ? CAPABILITY_REGISTRY_ENVELOPE_STATUS.STALE
+        : CAPABILITY_REGISTRY_ENVELOPE_STATUS.VERIFIED;
+  if (options.mode === "resolution" && status !== CAPABILITY_REGISTRY_ENVELOPE_STATUS.VERIFIED)
     throw new CapabilityValidationError(`registry authenticity is ${status}`, "envelope.signature");
   const result = Object.freeze({
     envelope_digest: registryEnvelopeDigest(envelope),
@@ -296,7 +305,11 @@ function validateHint(entry: RegistryCapabilityIndexV1["entries"][number], path:
       `${path}.metadata_hint.icon`,
     );
     rawSha256(entry.metadata_hint.icon.sha256, `${path}.metadata_hint.icon.sha256`);
-    if (!["image/png", "image/webp"].includes(entry.metadata_hint.icon.media_type))
+    if (
+      !CAPABILITY_MANIFEST_ICON_MEDIA_TYPES.some(
+        (mediaType) => mediaType === entry.metadata_hint.icon?.media_type,
+      )
+    )
       throw new CapabilityValidationError(
         "unsupported hint icon media type",
         `${path}.metadata_hint.icon.media_type`,

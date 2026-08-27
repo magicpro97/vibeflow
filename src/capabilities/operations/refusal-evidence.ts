@@ -12,8 +12,13 @@ import type {
   CapabilityPreEffectRefusalReasonV1,
   CapabilityPreEffectRefusalV1,
 } from "../wire/operation.js";
+import {
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_PRE_EFFECT_OBSERVED_STATES_BY_REASON,
+  CAPABILITY_PRE_EFFECT_REFUSAL_REASON,
+} from "../wire/operation.js";
 import { bytewise } from "../wire/primitives.js";
-import { CapabilityRuntimeError } from "./errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./errors.js";
 
 export type CapabilityPreEffectObservedStateV1 = CapabilityPreEffectRefusalV1["observed_state"];
 
@@ -45,36 +50,8 @@ export interface CapabilityPreEffectObservationV1 {
   observation_digest: string;
 }
 
-const STATES: Record<CapabilityPreEffectRefusalReasonV1, CapabilityPreEffectObservedStateV1[]> = {
-  "scope-base-stale": ["absent", "changed"],
-  "authority-head-stale": ["changed"],
-  "policy-stale": ["absent", "changed"],
-  "grant-stale": ["absent", "revoked", "expired", "changed"],
-  "permission-stale": ["absent", "scope-mismatch", "changed"],
-  "user-prerequisite-stale": ["absent", "scope-mismatch", "epoch-drift", "expired", "changed"],
-  "source-authority-stale": [
-    "absent",
-    "scope-mismatch",
-    "epoch-drift",
-    "revoked",
-    "expired",
-    "unavailable",
-    "changed",
-  ],
-  "private-input-stale": [
-    "absent",
-    "scope-mismatch",
-    "epoch-drift",
-    "revoked",
-    "expired",
-    "changed",
-  ],
-  "enforcement-stale": ["absent", "scope-mismatch", "unavailable", "changed"],
-  "owned-preimage-stale": ["absent", "changed"],
-};
-
 function invalid(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function normalize(
@@ -83,21 +60,29 @@ function normalize(
   const targetIds = [...input.row.target_ids].sort(bytewise);
   if (targetIds.length === 0 || new Set(targetIds).size !== targetIds.length)
     invalid("pre-effect observation target set is empty or duplicated");
-  if (!STATES[input.row.reason_code].includes(input.row.observed_state))
+  if (
+    !CAPABILITY_PRE_EFFECT_OBSERVED_STATES_BY_REASON[input.row.reason_code].some(
+      (candidate) => candidate === input.row.observed_state,
+    )
+  )
     invalid("pre-effect observation reason/state pairing is not permitted");
   if (
-    (input.frontier_kind === "operation" || input.frontier_kind === "lock-publication") !==
+    (input.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.OPERATION ||
+      input.frontier_kind === CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION) !==
     (input.plan_id === null && input.step_id === null)
   )
     invalid("pre-effect observation frontier referents are inconsistent");
   if (
-    input.row.reason_code === "owned-preimage-stale" &&
-    (input.frontier_kind !== "adapter-step" || input.step_id === null)
+    input.row.reason_code === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.OWNED_PREIMAGE_STALE &&
+    (input.frontier_kind !== CAPABILITY_PRE_EFFECT_FRONTIER.ADAPTER_STEP || input.step_id === null)
   )
     invalid("owned preimage refusal is outside an adapter-step frontier");
-  const source = input.row.reason_code === "source-authority-stale";
-  const prerequisite = input.row.reason_code === "user-prerequisite-stale";
-  const privateInput = input.row.reason_code === "private-input-stale";
+  const source =
+    input.row.reason_code === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.SOURCE_AUTHORITY_STALE;
+  const prerequisite =
+    input.row.reason_code === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.USER_PREREQUISITE_STALE;
+  const privateInput =
+    input.row.reason_code === CAPABILITY_PRE_EFFECT_REFUSAL_REASON.PRIVATE_INPUT_STALE;
   if (
     (!source &&
       (input.expected_source_support !== null || input.observed_source_support !== null)) ||

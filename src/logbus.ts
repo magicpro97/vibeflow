@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
+import { LOG_CHANNEL, LOG_LEVEL } from "./core/log-contract.js";
 import { DEFAULTS, nowEpoch, safeText, stringifyEvent } from "./logbus/types.js";
 import type { LogContext, LogEvent, LogEventInput } from "./logbus/types.js";
 import type { PublicStoredTraceEvent } from "./orchestrator/trace/types.js";
@@ -17,6 +18,7 @@ import type { PublicStoredTraceEvent } from "./orchestrator/trace/types.js";
 // Re-exports from moved modules
 export { out } from "./logbus/out.js";
 export { watchLogbus } from "./logbus/watch.js";
+export { decodeLogEvent } from "./logbus/types.js";
 export type { Channel, LogLevel, LogEvent, LogEventInput, WatchHandle } from "./logbus/types.js";
 export { tmpdir } from "node:os";
 export class Logbus {
@@ -317,8 +319,8 @@ export class Logbus {
       runId: "trace-public",
       workflowId: "trace-public",
       repoPath: "",
-      channel: "vf",
-      level: "info",
+      channel: LOG_CHANNEL.VIBE_FLOW,
+      level: LOG_LEVEL.INFO,
       text: `trace:${event.event.type}`.slice(0, 128),
       meta: { trace: event },
     });

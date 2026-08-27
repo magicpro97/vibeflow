@@ -1,12 +1,23 @@
+import type { Engine } from "../../core/agent-contract.js";
+import { supportsExactNativeSessionResume } from "../../dispatch/session-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
 import type { PublicStoredTraceEvent } from "../trace/types.js";
 import {
   type PersistedResumeBinding,
   assertPersistedResumeBinding,
 } from "./artifact-resume-validation.js";
+import { CONVERSATION_INTERACTION_STATE } from "./conversation-interaction-contract.js";
 import type { ConversationInteractionProjectionV1 } from "./conversation-interaction-types.js";
-import { HANDOFF_PROMPT_PREFIX, MAX_CANONICAL_HANDOFF_BYTES } from "./handoff-limits.js";
+import { MAX_CANONICAL_HANDOFF_BYTES } from "./handoff-limits.js";
 import { privateFileRangeTurnContextPrompt } from "./private-file-range-turn-context-prompt.js";
+import {
+  CONVERSATION_TURN_DELIVERY_MODE,
+  CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION,
+  CONVERSATION_TURN_NATIVE_SESSION_USE,
+  CONVERSATION_TURN_PRIVATE_CONTEXT_KIND,
+  CONVERSATION_TURN_PROJECTION_PROFILE,
+  CONVERSATION_TURN_PROMPT_PREFIX,
+} from "./turn-delivery-contract.js";
 import { publicTurnMessages, publicTurnResponses } from "./turn-delivery-source.js";
 import type {
   ConversationTurnPreparationRequestV1,
@@ -15,8 +26,10 @@ import type {
   PreparedConversationTurnV1,
   ResumeWithDeliveryAuthorityV1,
 } from "./turn-delivery-types.js";
+import { recipientTurnHistory } from "./turn-recipient-history.js";
+import { recipientSafeSharedHandoff } from "./turn-shared-handoff.js";
 
-export const TURN_PROMPT_PREFIX = "VF-TURN/1\n";
+export const TURN_PROMPT_PREFIX = CONVERSATION_TURN_PROMPT_PREFIX;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const preparedTurns = new WeakSet<object>();
 
@@ -32,10 +45,18 @@ function hasDeliveryAuthority(value: unknown): value is ResumeWithDeliveryAuthor
   );
 }
 
-function trustedNativeResume(value: unknown, participantId: string): PersistedResumeBinding | null {
+function trustedNativeResume(
+  value: unknown,
+  participantId: string,
+  recipientEngine: Engine,
+): PersistedResumeBinding | null {
   try {
     assertPersistedResumeBinding(value);
-    return value.participant_id === participantId ? value : null;
+    return value.participant_id === participantId &&
+      value.engine === recipientEngine &&
+      supportsExactNativeSessionResume(recipientEngine)
+      ? value
+      : null;
   } catch {
     return null;
   }
@@ -50,7 +71,7 @@ function validInteractionCursor(input: {
   const sequence = input.resume.delivery_interaction_sequence;
   const digest = input.resume.delivery_interaction_digest;
   return (
-    input.projection.state === "ready" &&
+    input.projection.state === CONVERSATION_INTERACTION_STATE.READY &&
     Number.isSafeInteger(sequence) &&
     (sequence ?? -1) >= 0 &&
     typeof digest === "string" &&
@@ -63,6 +84,7 @@ function validInteractionCursor(input: {
 export function prepareConversationTurn(input: {
   conversation_id: string;
   revision_id: string;
+  recipient_engine: Engine;
   request: ConversationTurnPreparationRequestV1;
   events: readonly PublicStoredTraceEvent[];
   resume: unknown;
@@ -72,7 +94,11 @@ export function prepareConversationTurn(input: {
   private_contexts?: readonly ConversationTurnPrivateFileRangeContextV1[];
   interaction_projection?: ConversationInteractionProjectionV1;
 }): PreparedConversationTurnV1 {
-  const resume = trustedNativeResume(input.resume, input.request.participant_id);
+  const resume = trustedNativeResume(
+    input.resume,
+    input.request.participant_id,
+    input.recipient_engine,
+  );
   const prior = input.prior_delivery;
   const exactBase =
     resume !== null &&
@@ -96,16 +122,24 @@ export function prepareConversationTurn(input: {
     input.events,
     input.request.participant_id,
     after,
-    resume === null,
+    false,
   );
+  const recipientResponses = publicTurnResponses(
+    input.events,
+    input.request.participant_id,
+    0,
+    true,
+  ).filter((response) => response.author_public_id === input.request.participant_id);
+  const recipientHistory = recipientTurnHistory(recipientResponses, resume !== null);
   const deliveredIds = new Set([
     ...userMessages.map((message) => message.message_id),
     ...publicResponses.map((response) => response.message_id),
+    ...recipientHistory.entries.map((response) => response.message_id),
   ]);
   const interactions = input.interaction_projection;
   const quotedMessages =
-    interactions?.state === "ready"
-      ? [...userMessages, ...publicResponses].flatMap((message) =>
+    interactions?.state === CONVERSATION_INTERACTION_STATE.READY
+      ? [...userMessages, ...publicResponses, ...recipientHistory.entries].flatMap((message) =>
           (interactions.quote_projections_by_response_event_id[message.message_id] ?? []).map(
             (target, index) => ({
               quoting_message_id: message.message_id,
@@ -122,11 +156,15 @@ export function prepareConversationTurn(input: {
       : [];
   const afterInteraction = exact ? (resume.delivery_interaction_sequence ?? 0) : 0;
   const throughInteraction =
-    interactions?.state === "ready" ? interactions.interaction_head_sequence : 0;
+    interactions?.state === CONVERSATION_INTERACTION_STATE.READY
+      ? interactions.interaction_head_sequence
+      : 0;
   const interactionHeadDigest =
-    interactions?.state === "ready" ? interactions.interaction_head_digest : null;
+    interactions?.state === CONVERSATION_INTERACTION_STATE.READY
+      ? interactions.interaction_head_digest
+      : null;
   const peerReactions =
-    interactions?.state === "ready"
+    interactions?.state === CONVERSATION_INTERACTION_STATE.READY
       ? interactions.reaction_changes
           .filter((reaction) =>
             exact
@@ -149,7 +187,7 @@ export function prepareConversationTurn(input: {
   const privateContextPrompt = privateFileRangeTurnContextPrompt(
     (input.private_contexts ?? [])
       .filter((context) =>
-        context.context_kind === "conversation-create"
+        context.context_kind === CONVERSATION_TURN_PRIVATE_CONTEXT_KIND.CONVERSATION_CREATE
           ? after === 0
           : context.message_public_seq !== null && context.message_public_seq > after,
       )
@@ -165,16 +203,23 @@ export function prepareConversationTurn(input: {
     MAX_CANONICAL_HANDOFF_BYTES,
   );
   const envelope = {
-    schema_version: "1.0" as const,
-    projection_profile: "vf-public-turn/1" as const,
+    schema_version: CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION,
+    projection_profile: CONVERSATION_TURN_PROJECTION_PROFILE.PUBLIC_V1,
     conversation_id: input.conversation_id,
     revision_id: input.revision_id,
     recipient_participant_id: input.request.participant_id,
-    delivery_mode: exact ? ("exact-delta" as const) : ("full-history" as const),
+    recipient_engine: input.recipient_engine,
+    delivery_mode: exact
+      ? CONVERSATION_TURN_DELIVERY_MODE.EXACT_DELTA
+      : CONVERSATION_TURN_DELIVERY_MODE.FULL_HISTORY,
+    native_session_use:
+      resume === null
+        ? CONVERSATION_TURN_NATIVE_SESSION_USE.NOT_USED
+        : CONVERSATION_TURN_NATIVE_SESSION_USE.REQUIRED_EXACT,
     after_public_seq: after,
     through_public_seq: through,
     prior_delivery_digest: exact ? (input.prior_delivery?.envelope_digest ?? null) : null,
-    interaction_state: interactions?.state ?? "degraded",
+    interaction_state: interactions?.state ?? CONVERSATION_INTERACTION_STATE.DEGRADED,
     after_interaction_sequence: afterInteraction,
     through_interaction_sequence: throughInteraction,
     prior_interaction_head_digest: exact ? (resume.delivery_interaction_digest ?? null) : null,
@@ -182,11 +227,15 @@ export function prepareConversationTurn(input: {
     instruction: structuredClone(input.request.instruction),
     user_messages: userMessages,
     public_responses: publicResponses,
+    recipient_history: recipientHistory,
     quoted_messages: quotedMessages,
     peer_reactions: peerReactions,
   };
-  const sharedBytes =
-    !exact && input.shared_handoff ? Buffer.byteLength(`${input.shared_handoff}\n\n`, "utf8") : 0;
+  const sharedPrompt =
+    !exact && input.shared_handoff
+      ? recipientSafeSharedHandoff(input.shared_handoff, input.request.participant_id)
+      : null;
+  const sharedBytes = sharedPrompt ? Buffer.byteLength(`${sharedPrompt}\n\n`, "utf8") : 0;
   const privateBytes = privateContextPrompt
     ? Buffer.byteLength(`${privateContextPrompt}\n\n`, "utf8")
     : 0;
@@ -203,7 +252,7 @@ export function prepareConversationTurn(input: {
     private_context_prompt: privateContextPrompt,
     envelope: Object.freeze(envelope),
     receipt: Object.freeze({
-      schema_version: "1.0" as const,
+      schema_version: CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION,
       participant_id: input.request.participant_id,
       prior_attempt_id: exact ? resume.attemptId : null,
       delivery_mode: envelope.delivery_mode,
@@ -244,11 +293,16 @@ export function bindFullHandoffToTurn(
   sharedHandoff: string | null,
   prepared: PreparedConversationTurnV1,
 ): string {
-  if (sharedHandoff === null || prepared.receipt.delivery_mode === "exact-delta")
+  if (
+    sharedHandoff === null ||
+    prepared.receipt.delivery_mode === CONVERSATION_TURN_DELIVERY_MODE.EXACT_DELTA
+  )
     return prepared.prompt_input;
-  if (!sharedHandoff.startsWith(HANDOFF_PROMPT_PREFIX))
-    throw new Error("shared handoff prompt authority is invalid");
-  const combined = `${sharedHandoff}\n\n${prepared.prompt_input}`;
+  const projected = recipientSafeSharedHandoff(
+    sharedHandoff,
+    prepared.envelope.recipient_participant_id,
+  );
+  const combined = `${projected}\n\n${prepared.prompt_input}`;
   if (Buffer.byteLength(combined, "utf8") > MAX_CANONICAL_HANDOFF_BYTES)
     throw new Error("turn delivery exceeds common prompt bound");
   return combined;

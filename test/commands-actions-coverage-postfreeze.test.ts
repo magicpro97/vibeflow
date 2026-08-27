@@ -201,7 +201,7 @@ describe("post-freeze capability mutation port behavior", () => {
     expect(result.command).toBe("capability.install");
     expect(result.status).toBe("failed");
     expect(result.error.code).toBe("source_digest_changed");
-    expect(result.error.message).toContain("permission-stale");
+    expect(result.error.message).toBe("Capability authority changed.");
   });
 
   test("fails closed when the durable port receives an authority command", () => {
@@ -230,6 +230,27 @@ describe("post-freeze capability mutation port behavior", () => {
     expect(result.kind).toBe("plan");
     expect(result.status).toBe("failed");
     expect(result.error?.code).toBe("service_unavailable");
+  });
+
+  test("durable mutation port rethrows unclassified runtime faults", () => {
+    const fx = capabilityFixture();
+    for (const fault of [
+      new TypeError("durable port invariant fault"),
+      new Error("durable port unclassified fault"),
+    ]) {
+      const port = createCapabilityCliMutationPort({
+        base: fx.projectRoot,
+        runtimeFactory: () =>
+          ({
+            service() {
+              throw fault;
+            },
+          }) as never,
+      });
+      expect(() => port.execute(capabilityInstallInput(fx, "postfreeze-port-fault"))).toThrow(
+        fault,
+      );
+    }
   });
 
   test("returns durable planned/no-op previews without creating approval state", () => {
@@ -371,7 +392,7 @@ describe("post-freeze capability mutation port behavior", () => {
     expect(result.kind).toBe("plan");
     expect(result.status).toBe("failed");
     expect(result.error?.code).toBe("invalid_request");
-    expect(result.error?.message).toContain("authorization-mismatch");
+    expect(result.error?.message).toBe("Capability request authority is invalid.");
   });
 });
 
@@ -532,7 +553,7 @@ describe("post-freeze capability durable result behavior", () => {
     expect(prepared).toBe(1);
     expect(result.kind).toBe("mutation");
     expect(result.status).toBe("failed");
-    expect(result.error?.message).toContain("capability operation failed");
+    expect(result.error?.message).toBe("Capability service is unavailable.");
   });
 
   test("materializes an adopt candidate before durable graph preparation", () => {
@@ -920,15 +941,23 @@ describe("post-freeze capability result rendering", () => {
         publicCode,
       );
     }
-    expect(resultError(new Error("ordinary failure")).code).toBe("service_unavailable");
-    expect(resultError({ thrown: true }).message).toBe("Unknown capability command failure.");
-    expect(resultError(new CapabilityCliUsageError("bad\u0000secret")).message).toBe(
-      "Capability request is invalid.",
-    );
+    expect(() => resultError(new Error("ordinary failure"))).toThrow("ordinary failure");
+    expect(() => resultError({ thrown: true })).toThrow();
+    for (const unsafeMessage of [
+      "bad\u0000secret",
+      "backend returned undefined",
+      "ENOENT while reading a request",
+      "/private/capability/request.json",
+      "C:\\private\\capability\\request.json",
+      "Error: internal failure\n    at execute (src/file.ts:1:1)",
+    ])
+      expect(resultError(new CapabilityCliUsageError(unsafeMessage)).message).toBe(
+        "Capability request is invalid.",
+      );
   });
 
   test("renders every result family and returns its documented exit class", () => {
-    const bad = resultError(new Error("down"));
+    const bad = resultError(new CapabilityRuntimeError("down", "service-unavailable"));
     const planPreview = { summary: "Install demo" };
     const cases: Array<{
       result: CapabilityCliResultV1;
@@ -939,7 +968,7 @@ describe("post-freeze capability result rendering", () => {
       {
         result: cliResult({ kind: "usage-error", status: "failed", error: bad }),
         code: 2,
-        output: "down",
+        output: "Capability service is unavailable.",
         level: "error",
       },
       {
@@ -3527,11 +3556,11 @@ describe("post-freeze operation error projection", () => {
     ).toThrow(/correlation mismatch/i);
     const wrongCode = publicActionError({
       code: "scope_needs_recovery",
-      message: "The capability scope needs recovery.",
+      message: "The capability scope requires recovery before it can be changed.",
       correlation_id: correlationId,
       retryable: false,
       recovery_action: "repair",
-      details: {},
+      details: { operation_id: operationId },
     }).error;
     expect(() =>
       foldDomainProjection(snapshot, [dispatch, { ...terminal, error: wrongCode }], correlationId),
@@ -3591,7 +3620,7 @@ describe("post-freeze remaining command and authority boundaries", () => {
     });
     const failed = port.execute(capabilityInstallInput(fx, "postfreeze-clock-finally"));
     expect(failed.status).toBe("failed");
-    expect(failed.error?.code).toBe("service_unavailable");
+    expect(failed.error?.code).toBe("source_digest_changed");
     expect(revalidations).toBe(1);
     service.revalidateGraph = original;
   });

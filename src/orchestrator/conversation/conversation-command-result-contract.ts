@@ -1,0 +1,83 @@
+import { CONVERSATION_OPERATION_STATE } from "./conversation-public-wire-contract.js";
+
+/**
+ * Public command outcomes. These are intentionally separate from engine/process
+ * attempt states; only the shared terminal `completed` value is inherited.
+ */
+export const CONVERSATION_COMMAND_RESULT_STATUS = Object.freeze({
+  COMPLETED: CONVERSATION_OPERATION_STATE.COMPLETED,
+  STOPPED: "stopped",
+  ABORTED: "aborted",
+  FAILED: "failed",
+  AWAITING_APPROVAL: "awaiting_approval",
+  ACCEPTED: "accepted",
+} as const);
+
+/** Upper-case lifecycle emitted by pre-result compatibility snapshots. */
+export const CONVERSATION_LEGACY_RESULT_LIFECYCLE = Object.freeze({
+  AWAITING_APPROVAL: "AWAITING_APPROVAL",
+} as const);
+
+export type ConversationCommandResultStatus =
+  (typeof CONVERSATION_COMMAND_RESULT_STATUS)[keyof typeof CONVERSATION_COMMAND_RESULT_STATUS];
+
+export const CONVERSATION_ORCHESTRATION_RESULT_STATUS = Object.freeze({
+  COMPLETED: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
+  STOPPED: CONVERSATION_COMMAND_RESULT_STATUS.STOPPED,
+  ABORTED: CONVERSATION_COMMAND_RESULT_STATUS.ABORTED,
+  FAILED: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
+  AWAITING_APPROVAL: CONVERSATION_COMMAND_RESULT_STATUS.AWAITING_APPROVAL,
+} as const);
+
+export type ConversationOrchestrationResultStatus =
+  (typeof CONVERSATION_ORCHESTRATION_RESULT_STATUS)[keyof typeof CONVERSATION_ORCHESTRATION_RESULT_STATUS];
+
+export const CONVERSATION_COMMAND_SUCCESS_STATUS = Object.freeze({
+  COMPLETED: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
+  STOPPED: CONVERSATION_COMMAND_RESULT_STATUS.STOPPED,
+  AWAITING_APPROVAL: CONVERSATION_COMMAND_RESULT_STATUS.AWAITING_APPROVAL,
+  ACCEPTED: CONVERSATION_COMMAND_RESULT_STATUS.ACCEPTED,
+} as const);
+
+export const CONVERSATION_REVISION_START_SUCCESS_STATUS = Object.freeze({
+  COMPLETED: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
+  AWAITING_APPROVAL: CONVERSATION_COMMAND_RESULT_STATUS.AWAITING_APPROVAL,
+} as const);
+export const CONVERSATION_REVISION_START_SUCCESS_STATUSES = Object.freeze(
+  Object.values(CONVERSATION_REVISION_START_SUCCESS_STATUS),
+);
+
+export const CONVERSATION_COMMAND_TERMINAL_STATUS = Object.freeze({
+  COMPLETED: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
+  STOPPED: CONVERSATION_COMMAND_RESULT_STATUS.STOPPED,
+  ABORTED: CONVERSATION_COMMAND_RESULT_STATUS.ABORTED,
+  FAILED: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
+} as const);
+
+export const CONVERSATION_COMMAND_FAILURE_STATUS = Object.freeze({
+  ABORTED: CONVERSATION_COMMAND_RESULT_STATUS.ABORTED,
+  FAILED: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
+} as const);
+export type ConversationCommandFailureStatus =
+  (typeof CONVERSATION_COMMAND_FAILURE_STATUS)[keyof typeof CONVERSATION_COMMAND_FAILURE_STATUS];
+
+export type ConversationCommandTerminalStatus =
+  (typeof CONVERSATION_COMMAND_TERMINAL_STATUS)[keyof typeof CONVERSATION_COMMAND_TERMINAL_STATUS];
+
+export const CONVERSATION_COMMAND_RESULT_STATUSES = Object.freeze(
+  Object.values(CONVERSATION_COMMAND_RESULT_STATUS),
+) as readonly ConversationCommandResultStatus[];
+
+export const CONVERSATION_ORCHESTRATION_RESULT_STATUSES = Object.freeze(
+  Object.values(CONVERSATION_ORCHESTRATION_RESULT_STATUS),
+) as readonly ConversationOrchestrationResultStatus[];
+
+export const CONVERSATION_COMMAND_TERMINAL_STATUSES = Object.freeze(
+  Object.values(CONVERSATION_COMMAND_TERMINAL_STATUS),
+) as readonly ConversationCommandTerminalStatus[];
+
+export const isConversationCommandTerminalStatus = (
+  value: unknown,
+): value is ConversationCommandTerminalStatus =>
+  typeof value === "string" &&
+  CONVERSATION_COMMAND_TERMINAL_STATUSES.some((candidate) => candidate === value);

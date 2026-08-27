@@ -6,7 +6,7 @@ import {
 } from "../adapters/payload-preimage-authority.js";
 import { validatePrivateEffectPayload } from "../adapters/private-descriptors.js";
 import type { CapabilityAdapterPrivateDescriptorV1 } from "../adapters/types.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 import { bytewise } from "../wire/primitives.js";
 import { CAPABILITY_RAW_BLOB_KIND_ORDER, actionBlobRef } from "./execution-objects.js";
 import type { CapabilityAdapterBoundedEvidenceV1 } from "./execution-types.js";
@@ -15,7 +15,7 @@ import type { CapabilityDurablePlanningGraphV1 } from "./types.js";
 type ClosedBlobKind = "owned-resource-preimage" | "inspection-private-evidence";
 
 function fail(message: string): never {
-  throw new CapabilityRuntimeError(message, "integrity-failure");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
 }
 
 function assertOrder(graph: CapabilityDurablePlanningGraphV1): void {

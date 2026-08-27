@@ -1,3 +1,4 @@
+import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import {
   CatalogCursorError,
   FutureLineageCursorError,
@@ -39,9 +40,9 @@ function parseLineageQuery(url: URL): { cursor?: string; limit?: number } {
 
 function mapLineageError(error: unknown): Response {
   if (error instanceof StaleLineageCursorError)
-    return conversationReadError("stale_lineage_cursor", {
+    return conversationReadError(PUBLIC_ERROR_CODE.STALE_LINEAGE_CURSOR, {
       message: "The conversation lineage changed during pagination.",
-      recoveryAction: "restart-pagination",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
       details: {
         restart_cursor: error.restart_cursor,
         head_digest: error.head_digest,
@@ -49,31 +50,31 @@ function mapLineageError(error: unknown): Response {
       },
     });
   if (error instanceof FutureLineageCursorError)
-    return conversationReadError("future_event_cursor", {
+    return conversationReadError(PUBLIC_ERROR_CODE.FUTURE_EVENT_CURSOR, {
       message: "The lineage cursor is ahead of the current public sequence.",
-      recoveryAction: "restart-pagination",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.RESTART_PAGINATION,
       details: { current_last_seq: error.current_last_public_sequence },
     });
   if (error instanceof CatalogCursorError)
     return conversationReadError(
-      error.code === "unsupported_schema_version"
-        ? "unsupported_schema_version"
-        : "invalid_request",
+      error.code === PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION
+        ? PUBLIC_ERROR_CODE.UNSUPPORTED_SCHEMA_VERSION
+        : PUBLIC_ERROR_CODE.INVALID_REQUEST,
       { message: "The conversation lineage cursor is invalid." },
     );
   if (error instanceof ConversationLineageNotFoundError)
-    return conversationReadError("not_found", {
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
       message: "The conversation lineage was not found.",
     });
   if (error instanceof LineageAuthorityCorruptError)
-    return conversationReadError("authority_corrupt", {
+    return conversationReadError(PUBLIC_ERROR_CODE.AUTHORITY_CORRUPT, {
       message: "Conversation lineage authority is corrupt.",
-      recoveryAction: "repair-authority",
+      recoveryAction: PUBLIC_RECOVERY_ACTION.REPAIR_AUTHORITY,
     });
-  return conversationReadError("service_unavailable", {
+  return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
     message: "The conversation lineage is unavailable.",
     retryable: true,
-    recoveryAction: "retry",
+    recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
   });
 }
 
@@ -84,14 +85,20 @@ export async function handleConversationLineageRoute(
   conversationId: string,
 ): Promise<Response> {
   if (!authority.sessions.authorize(request))
-    return conversationReadError("unauthenticated", { message: "Authentication is required." });
+    return conversationReadError(PUBLIC_ERROR_CODE.UNAUTHENTICATED, {
+      message: "Authentication is required.",
+    });
   if (request.method !== "GET")
-    return conversationReadError("not_found", { message: "The requested resource was not found." });
+    return conversationReadError(PUBLIC_ERROR_CODE.NOT_FOUND, {
+      message: "The requested resource was not found.",
+    });
   let input: { cursor?: string; limit?: number };
   try {
     input = parseLineageQuery(url);
   } catch {
-    return conversationReadError("invalid_request", { message: "The lineage query is invalid." });
+    return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
+      message: "The lineage query is invalid.",
+    });
   }
   try {
     const body = await authority.lineage.read(conversationId, input);

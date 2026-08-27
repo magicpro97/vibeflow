@@ -1,3 +1,4 @@
+import { PUBLIC_OPERATION_REVISION_PHASE } from "../../actions/protocol-contract.js";
 import { foldRevisionOperation } from "./revision-fold.js";
 import type {
   ConversationRevisionExecutorOptions,
@@ -22,8 +23,9 @@ export async function runOwnedRevisionStart(input: {
     const before = foldRevisionOperation(
       prepared.operation,
       options.home.revisions.readEvents(prepared.operation.operation_id),
+      { preparationPlan: prepared.revisionPlan },
     ).state;
-    if (before !== "starting") return;
+    if (before !== PUBLIC_OPERATION_REVISION_PHASE.STARTING) return;
     owner.assertHeld();
     const accepted = await options.runtime.startRevisionBarrier(
       prepared.manifest.conversation_id,
@@ -38,7 +40,7 @@ export async function runOwnedRevisionStart(input: {
         artifactStore: options.artifactStore,
         owner,
       });
-      if (destination === "start_failed")
+      if (destination === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED)
         await terminalFailedRevisionRuntime(
           options.runtime,
           prepared.manifest.conversation_id,
@@ -53,7 +55,7 @@ export async function runOwnedRevisionStart(input: {
       artifactStore: options.artifactStore,
       owner,
     });
-    if (destination !== "started") return;
+    if (destination !== PUBLIC_OPERATION_REVISION_PHASE.STARTED) return;
     owner.assertHeld();
     configured = true;
     await options.executeConfigured(prepared.manifest, prepared.runtimeOperationId);
@@ -62,8 +64,9 @@ export async function runOwnedRevisionStart(input: {
       const current = foldRevisionOperation(
         prepared.operation,
         options.home.revisions.readEvents(prepared.operation.operation_id),
+        { preparationPlan: prepared.revisionPlan },
       ).state;
-      if (current === "starting") {
+      if (current === PUBLIC_OPERATION_REVISION_PHASE.STARTING) {
         const destination = finalizePublishedRevisionStart({
           prepared,
           resultStatus: "failed",
@@ -71,13 +74,17 @@ export async function runOwnedRevisionStart(input: {
           artifactStore: options.artifactStore,
           owner,
         });
-        if (destination === "start_failed")
+        if (destination === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED)
           await terminalFailedRevisionRuntime(
             options.runtime,
             prepared.manifest.conversation_id,
             "revision participant start authority failed",
           );
-      } else if (["started", "start_failed", "needs_recovery"].includes(current)) {
+      } else if (
+        current === PUBLIC_OPERATION_REVISION_PHASE.STARTED ||
+        current === PUBLIC_OPERATION_REVISION_PHASE.START_FAILED ||
+        current === PUBLIC_OPERATION_REVISION_PHASE.NEEDS_RECOVERY
+      ) {
         try {
           reconcilePublishedRevisionStartTerminal({
             operation: prepared.operation,
@@ -87,11 +94,12 @@ export async function runOwnedRevisionStart(input: {
         } catch {
           // The action mirror is retryable; it cannot suppress exact owned child execution.
         }
-        if (current === "started" && !configured) {
+        if (current === PUBLIC_OPERATION_REVISION_PHASE.STARTED && !configured) {
           owner.assertHeld();
           configured = true;
           await options.executeConfigured(prepared.manifest, prepared.runtimeOperationId);
-        } else if (current === "started") options.runtime.finish(prepared.manifest.conversation_id);
+        } else if (current === PUBLIC_OPERATION_REVISION_PHASE.STARTED)
+          options.runtime.finish(prepared.manifest.conversation_id);
       }
     } catch {
       // The exact durable terminal and owner record remain the retry authority.

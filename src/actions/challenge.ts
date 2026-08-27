@@ -2,7 +2,22 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { digestHex, digestV1 } from "../durability/index.js";
 import type { ProcessLock } from "../durability/index.js";
 import { ActionConflictError } from "./errors.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_LIMIT,
+  ACTION_APPROVAL_CHALLENGE_STATE,
+  ACTION_APPROVAL_CHALLENGE_TERMINAL_STATES,
+  isActionApprovalChallengeStateIn,
+} from "./persistence-contract.js";
 import type { ActionFilePersistence } from "./persistence.js";
+import { ACTION_OPERATION_STATE } from "./protocol-contract.js";
+import {
+  ACTION_APPROVAL_CHALLENGE_DISPLAY_PREFIX,
+  ACTION_APPROVAL_CHALLENGE_DISPLAY_SUFFIX_LENGTH,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
+import type { ActionApprovalChallengeClass } from "./public-action-contract.js";
+import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
+import type { ActionApprovalChallengeResponseV1 } from "./public-types.js";
 import type {
   ActionAuthoritySnapshotV1,
   ActionRequestAuthorityV1,
@@ -12,16 +27,10 @@ import type {
 export interface ApprovalChallengeRequestV1 {
   proposal_id: string;
   proposal_digest: string;
-  challenge_class: "fresh-user-scope" | "public-literal";
+  challenge_class: ActionApprovalChallengeClass;
   authority: ActionRequestAuthorityV1;
 }
-export interface ApprovalChallengeResponseV1 {
-  schema_version: "1.0";
-  challenge_id: string;
-  challenge_class: "fresh-user-scope" | "public-literal";
-  display_phrase: string;
-  expires_at: string;
-}
+export type ApprovalChallengeResponseV1 = ActionApprovalChallengeResponseV1;
 export interface ConsumeApprovalChallengeV1 {
   challenge_id: string;
   proposal_id: string;
@@ -35,9 +44,6 @@ type ResolveBound = (
   proposalDigest: string,
   authority: ActionRequestAuthorityV1,
 ) => ActionAuthoritySnapshotV1;
-
-const CHALLENGE_MS = 120_000;
-const MAX_FAILURES = 5;
 
 function iso(epoch: number): string {
   if (!Number.isSafeInteger(epoch)) throw new Error("invalid action clock");
@@ -65,15 +71,16 @@ export class ApprovalChallengeAuthority {
     return this.files.withLock(`approval-challenge:${input.proposal_id}`, (lock) => {
       const sampledNow = this.now();
       const snapshot = this.resolveBound(input.proposal_id, input.proposal_digest, input.authority);
-      if (snapshot.state !== "pending_review")
+      if (snapshot.state !== ACTION_OPERATION_STATE.PENDING_REVIEW)
         throw new ActionConflictError(
-          "stale_proposal",
+          PUBLIC_ERROR_CODE.STALE_PROPOSAL,
           "Proposal is not pending review.",
           input.proposal_id,
         );
       validateReview(lock, snapshot, sampledNow);
-      const nonce = Buffer.from(this.random(32));
-      if (nonce.length !== 32) throw new Error("approval challenge entropy unavailable");
+      const nonce = Buffer.from(this.random(ACTION_APPROVAL_CHALLENGE_LIMIT.ENTROPY_BYTES));
+      if (nonce.length !== ACTION_APPROVAL_CHALLENGE_LIMIT.ENTROPY_BYTES)
+        throw new Error("approval challenge entropy unavailable");
       const challengeId = nonce.toString("base64url");
       if (this.files.readChallenge(challengeId).length)
         throw new Error("approval challenge collision");
@@ -82,8 +89,8 @@ export class ApprovalChallengeAuthority {
           nonce_base64url: challengeId,
           proposal_digest: snapshot.proposal.proposal_digest,
         }),
-      ).slice(0, 12);
-      const displayPhrase = `${input.challenge_class === "fresh-user-scope" ? "user" : "publish"} ${suffix}`;
+      ).slice(0, ACTION_APPROVAL_CHALLENGE_DISPLAY_SUFFIX_LENGTH);
+      const displayPhrase = `${ACTION_APPROVAL_CHALLENGE_DISPLAY_PREFIX[input.challenge_class]} ${suffix}`;
       const frame = this.frame({
         challenge_id: challengeId,
         sequence: 0,
@@ -95,17 +102,17 @@ export class ApprovalChallengeAuthority {
         control_session_digest: input.authority.control_session_digest,
         csrf_epoch_digest: input.authority.csrf_epoch_digest,
         response_hmac_sha256: this.responseHmac(displayPhrase),
-        state: "created",
+        state: ACTION_APPROVAL_CHALLENGE_STATE.CREATED,
         failed_attempts: 0,
         approval_decided_by: null,
         approval_expires_at: null,
         issued_at: iso(sampledNow),
-        expires_at: iso(sampledNow + CHALLENGE_MS),
+        expires_at: iso(sampledNow + ACTION_APPROVAL_CHALLENGE_LIMIT.LIFETIME_MS),
         consumed_at: null,
       });
       this.files.appendChallenge(lock, frame);
       return {
-        schema_version: "1.0",
+        schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
         challenge_id: challengeId,
         challenge_class: input.challenge_class,
         display_phrase: displayPhrase,
@@ -133,7 +140,7 @@ export class ApprovalChallengeAuthority {
       const latest = frames.at(-1);
       if (!latest)
         throw new ActionConflictError(
-          "stale_proposal",
+          PUBLIC_ERROR_CODE.STALE_PROPOSAL,
           "Approval challenge was not found.",
           input.proposal_id,
         );
@@ -145,30 +152,40 @@ export class ApprovalChallengeAuthority {
         latest.csrf_epoch_digest !== input.authority.csrf_epoch_digest
       )
         throw new ActionConflictError(
-          "stale_proposal",
+          PUBLIC_ERROR_CODE.STALE_PROPOSAL,
           "Approval challenge authority changed.",
           input.proposal_id,
         );
-      if (latest.state === "consumed") return commit(lock, snapshot, latest);
-      if (["expired", "locked"].includes(latest.state))
+      if (latest.state === ACTION_APPROVAL_CHALLENGE_STATE.CONSUMED)
+        return commit(lock, snapshot, latest);
+      if (isActionApprovalChallengeStateIn(ACTION_APPROVAL_CHALLENGE_TERMINAL_STATES, latest.state))
         throw new ActionConflictError(
-          latest.state === "expired" ? "challenge_expired" : "stale_proposal",
+          latest.state === ACTION_APPROVAL_CHALLENGE_STATE.EXPIRED
+            ? PUBLIC_ERROR_CODE.CHALLENGE_EXPIRED
+            : PUBLIC_ERROR_CODE.STALE_PROPOSAL,
           `Approval challenge is already ${latest.state}; replay rejected.`,
           input.proposal_id,
         );
       const now = this.now();
       if (now >= Date.parse(latest.expires_at)) {
-        const expired = this.next(latest, "expired", latest.failed_attempts, null, null, null);
+        const expired = this.next(
+          latest,
+          ACTION_APPROVAL_CHALLENGE_STATE.EXPIRED,
+          latest.failed_attempts,
+          null,
+          null,
+          null,
+        );
         this.files.appendChallenge(lock, expired);
         throw new ActionConflictError(
-          "challenge_expired",
+          PUBLIC_ERROR_CODE.CHALLENGE_EXPIRED,
           "Approval challenge expired.",
           input.proposal_id,
         );
       }
-      if (snapshot.state !== "pending_review")
+      if (snapshot.state !== ACTION_OPERATION_STATE.PENDING_REVIEW)
         throw new ActionConflictError(
-          "stale_proposal",
+          PUBLIC_ERROR_CODE.STALE_PROPOSAL,
           "Proposal is no longer pending review.",
           input.proposal_id,
         );
@@ -183,7 +200,9 @@ export class ApprovalChallengeAuthority {
         const failures = latest.failed_attempts + 1;
         const failed = this.next(
           latest,
-          failures >= MAX_FAILURES ? "locked" : "failed-attempt",
+          failures >= ACTION_APPROVAL_CHALLENGE_LIMIT.MAX_FAILED_ATTEMPTS
+            ? ACTION_APPROVAL_CHALLENGE_STATE.LOCKED
+            : ACTION_APPROVAL_CHALLENGE_STATE.FAILED_ATTEMPT,
           failures,
           null,
           null,
@@ -191,7 +210,7 @@ export class ApprovalChallengeAuthority {
         );
         this.files.appendChallenge(lock, failed);
         throw new ActionConflictError(
-          "stale_proposal",
+          PUBLIC_ERROR_CODE.STALE_PROPOSAL,
           "Approval challenge response did not match.",
           input.proposal_id,
         );
@@ -207,13 +226,13 @@ export class ApprovalChallengeAuthority {
       );
       if (!Number.isFinite(reviewedExpiry) || reviewedExpiry <= now)
         throw new ActionConflictError(
-          "stale_proposal",
+          PUBLIC_ERROR_CODE.STALE_PROPOSAL,
           "Approval authority already expired.",
           input.proposal_id,
         );
       const consumed = this.next(
         latest,
-        "consumed",
+        ACTION_APPROVAL_CHALLENGE_STATE.CONSUMED,
         latest.failed_attempts,
         input.authority.actor,
         approvalExpiresAt,
@@ -253,7 +272,7 @@ export class ApprovalChallengeAuthority {
   private frame(
     value: Omit<ApprovalChallengeFrameV1, "schema_version" | "frame_digest">,
   ): ApprovalChallengeFrameV1 {
-    const preimage = { schema_version: "1.0" as const, ...value };
+    const preimage = { schema_version: PUBLIC_ACTION_SCHEMA_VERSION, ...value };
     return {
       ...preimage,
       frame_digest: digestV1("VF-APPROVAL-CHALLENGE-FRAME\0v1\0", preimage),

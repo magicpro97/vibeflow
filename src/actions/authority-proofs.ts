@@ -1,19 +1,31 @@
+import { CAPABILITY_SCOPE } from "../core/capability-contract.js";
 import { canonicalJsonBytes, digestV1 } from "../durability/index.js";
+import { HOST_ACTION_KIND } from "./host-action-contract.js";
 import type { ProposalPublicationProofV1 } from "./proposal-publication-proof.js";
+import {
+  type ActionOperationDomainTerminalState,
+  type ActionOperationTerminalResolutionState,
+  isActionOperationDomainTerminalState,
+} from "./protocol-contract.js";
+import {
+  ACTION_AUTHORITY_BINDING_MODE,
+  ACTION_CHALLENGE_CLASS,
+  CREDENTIAL_CLASS,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
 import { assertDigest, assertTimestamp } from "./record-primitives.js";
 import { assertApproval, assertProposal } from "./records.js";
 import { exactObject } from "./strict-json.js";
 import type {
   ActionApprovalV1,
   ActionDispatchRecordV1,
-  ActionOperationState,
   ActionProposalV1,
   ActionRequestAuthorityV1,
   ChallengeClass,
 } from "./types.js";
 
 export interface ReviewAuthorityProofV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   proposal_id: string;
   proposal_digest: string;
   principal_digest: string;
@@ -37,7 +49,7 @@ export interface ReviewAuthorityProofV1 {
 }
 
 export interface DispatchPreparationProofV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   proposal_id: string;
   proposal_digest: string;
   approval_id: string;
@@ -50,7 +62,7 @@ export interface DispatchPreparationProofV1 {
 }
 
 export interface DomainPreparedProofV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   operation_id: string;
   dispatch_record_digest: string;
   domain_prepared_record_digest: string;
@@ -59,10 +71,10 @@ export interface DomainPreparedProofV1 {
 }
 
 export interface DomainTerminalProofV1 {
-  schema_version: "1.0";
+  schema_version: typeof PUBLIC_ACTION_SCHEMA_VERSION;
   operation_id: string;
   dispatch_record_digest: string;
-  outcome: Extract<ActionOperationState, "succeeded" | "failed" | "needs_recovery">;
+  outcome: ActionOperationDomainTerminalState;
   domain_terminal_digest: string;
   recorded_at: string;
   proof_digest: string;
@@ -77,7 +89,7 @@ export interface ActionAuthorityResolverV1 {
   review(input: {
     proposal: ActionProposalV1;
     authority: ActionRequestAuthorityV1;
-    decision: "approved" | "denied";
+    decision: ActionApprovalV1["decision"];
     now: string;
   }): ReviewAuthorityProofV1;
   prevalidateDispatch?(input: {
@@ -113,7 +125,7 @@ export interface ActionAuthorityResolverV1 {
     proposal: ActionProposalV1;
     approval: ActionApprovalV1;
     dispatch: ActionDispatchRecordV1;
-    current_state: "committing" | "needs_recovery";
+    current_state: ActionOperationTerminalResolutionState;
   }): DomainTerminalProofV1;
   validateRecordedTerminal(input: {
     proposal: ActionProposalV1;
@@ -142,18 +154,21 @@ export function requiredChallengeClass(
   proposal: ActionProposalV1,
   authority: ActionRequestAuthorityV1,
 ): ChallengeClass {
-  if (proposal.action.type === "authority.repair")
-    return proposal.base.authority_binding_mode === "recovery-checkpoint"
-      ? "recovery-tty"
-      : "normal-confirm";
-  if (proposal.action.type === "conversation.publish_suspected_literal") return "public-literal";
-  if (authority.actor.credential_class === "automation-grant") return "automation-grant";
+  if (proposal.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR)
+    return proposal.base.authority_binding_mode ===
+      ACTION_AUTHORITY_BINDING_MODE.RECOVERY_CHECKPOINT
+      ? ACTION_CHALLENGE_CLASS.RECOVERY_TTY
+      : ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
+  if (proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL)
+    return ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL;
+  if (authority.actor.credential_class === CREDENTIAL_CLASS.AUTOMATION_GRANT)
+    return ACTION_CHALLENGE_CLASS.AUTOMATION_GRANT;
   if (
-    proposal.base.capability_scope === "user" ||
-    proposal.target_set.some((target) => target.target.scope === "user")
+    proposal.base.capability_scope === CAPABILITY_SCOPE.USER ||
+    proposal.target_set.some((target) => target.target.scope === CAPABILITY_SCOPE.USER)
   )
-    return "fresh-user-scope";
-  return "normal-confirm";
+    return ACTION_CHALLENGE_CLASS.FRESH_USER_SCOPE;
+  return ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
 }
 
 export function materializeReviewAuthorityProof(
@@ -164,7 +179,7 @@ export function materializeReviewAuthorityProof(
 ): ReviewAuthorityProofV1 {
   assertProposal(proposal);
   const preimage = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     proposal_id: proposal.proposal_id,
     proposal_digest: proposal.proposal_digest,
     principal_digest: authority.principal_digest,
@@ -247,7 +262,7 @@ export function materializeDispatchPreparationProof(
 ): DispatchPreparationProofV1 {
   assertApproval(proposal, approval);
   const preimage = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     proposal_id: proposal.proposal_id,
     proposal_digest: proposal.proposal_digest,
     approval_id: approval.approval_id,
@@ -288,7 +303,7 @@ export function materializeDomainPreparedProof(
   preparedAt: string,
 ): DomainPreparedProofV1 {
   const preimage = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     operation_id: dispatch.operation_id,
     dispatch_record_digest: dispatch.dispatch_record_digest,
     domain_prepared_record_digest: domainPreparedRecordDigest,
@@ -321,7 +336,7 @@ export function materializeDomainTerminalProof(
   recordedAt: string,
 ): DomainTerminalProofV1 {
   const preimage = {
-    schema_version: "1.0" as const,
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     operation_id: dispatch.operation_id,
     dispatch_record_digest: dispatch.dispatch_record_digest,
     outcome,
@@ -335,7 +350,7 @@ export function assertDomainTerminalProof(
   proof: DomainTerminalProofV1,
   dispatch: ActionDispatchRecordV1,
 ): void {
-  if (!new Set(["succeeded", "failed", "needs_recovery"]).has(proof.outcome))
+  if (!isActionOperationDomainTerminalState(proof.outcome))
     throw new Error("domain terminal proof outcome is invalid");
   const expected = materializeDomainTerminalProof(
     dispatch,

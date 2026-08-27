@@ -10,6 +10,12 @@
 // pass-order: build(typecheck) → lint(biome) → test(bun test).
 
 import type { GateState } from "../core.js";
+import {
+  GATE_STATE,
+  PENDING_REQUIRED_WORK_UNIT_GATES,
+  type RequiredWorkUnitGateName,
+  WORK_UNIT_GATE,
+} from "../core/workflow-contract.js";
 
 /** The minimal shape of a scoped-gate verdict this mapper consumes. */
 export interface MeasuredGate {
@@ -17,14 +23,7 @@ export interface MeasuredGate {
   failedGate?: "typecheck" | "biome" | "test" | "coverage";
 }
 
-type Gates = Record<"build" | "lint" | "test" | "review", GateState>;
-
-const ALL_PENDING: Gates = {
-  build: "pending",
-  lint: "pending",
-  test: "pending",
-  review: "pending",
-};
+type Gates = Record<RequiredWorkUnitGateName, GateState>;
 
 /**
  * Map a measured scoped-gate result onto the unit's gate slots. When `measured`
@@ -34,13 +33,21 @@ const ALL_PENDING: Gates = {
  * always "pending" here — the reviewer sets it later.
  */
 export function mapGateResult(measured: MeasuredGate | undefined): Gates {
-  if (!measured) return { ...ALL_PENDING };
-  if (measured.pass) return { build: "pass", lint: "pass", test: "pass", review: "pending" };
+  if (!measured) return { ...PENDING_REQUIRED_WORK_UNIT_GATES };
+  if (measured.pass)
+    return {
+      [WORK_UNIT_GATE.BUILD]: GATE_STATE.PASS,
+      [WORK_UNIT_GATE.LINT]: GATE_STATE.PASS,
+      [WORK_UNIT_GATE.TEST]: GATE_STATE.PASS,
+      [WORK_UNIT_GATE.REVIEW]: GATE_STATE.PENDING,
+    };
   const f = measured.failedGate;
   return {
-    build: f === "typecheck" ? "fail" : "pass",
-    lint: f === "typecheck" ? "pending" : f === "biome" ? "fail" : "pass",
-    test: !f || f === "typecheck" || f === "biome" ? "pending" : "fail",
-    review: "pending",
+    [WORK_UNIT_GATE.BUILD]: f === "typecheck" ? GATE_STATE.FAIL : GATE_STATE.PASS,
+    [WORK_UNIT_GATE.LINT]:
+      f === "typecheck" ? GATE_STATE.PENDING : f === "biome" ? GATE_STATE.FAIL : GATE_STATE.PASS,
+    [WORK_UNIT_GATE.TEST]:
+      !f || f === "typecheck" || f === "biome" ? GATE_STATE.PENDING : GATE_STATE.FAIL,
+    [WORK_UNIT_GATE.REVIEW]: GATE_STATE.PENDING,
   };
 }

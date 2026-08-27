@@ -1,4 +1,9 @@
+import {
+  CAPABILITY_REGISTRY_ENVELOPE_STATUS,
+  CAPABILITY_SOURCE_KIND,
+} from "../../actions/capability-security-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import {
   canonicalJson,
   canonicalJsonBytes,
@@ -54,7 +59,10 @@ function readCanonicalJson<T>(path: string, maxBytes: number, label: string): T 
 export function validateRetainedRegistryEnvelope(
   entry: CapabilityLockEntryV1 & {
     pin: CapabilityLockEntryV1["pin"] & {
-      source: Extract<CapabilityLockEntryV1["pin"]["source"], { kind: "registry" }>;
+      source: Extract<
+        CapabilityLockEntryV1["pin"]["source"],
+        { kind: typeof CAPABILITY_SOURCE_KIND.REGISTRY }
+      >;
     };
   },
   record: CapabilityPackageCacheRecordV1,
@@ -87,7 +95,7 @@ export function validateRetainedRegistryEnvelope(
       content_sha256: entry.pin.content_sha256,
     },
   });
-  if (verified.status === "blocked")
+  if (verified.status === CAPABILITY_REGISTRY_ENVELOPE_STATUS.BLOCKED)
     throw new CapabilityValidationError(
       "registry package signature is revoked",
       "registry_cache.envelope",
@@ -102,7 +110,7 @@ function validateEntryCache(
   input: {
     private_root: string;
     identity_path: string;
-    scope: "project" | "user";
+    scope: CapabilityScope;
     scope_identity_digest: string;
     at: string;
     trust_snapshot: ReturnType<typeof readDurableRegistryTrustSnapshot> | null;
@@ -122,7 +130,9 @@ function validateEntryCache(
     record.manifest_digest !== entry.manifest_digest ||
     record.authenticity_digest !== entry.authenticity_binding.authenticity_digest ||
     record.registry_envelope_digest !==
-      (entry.pin.source.kind === "registry" ? entry.pin.source.signature_envelope_digest : null)
+      (entry.pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY
+        ? entry.pin.source.signature_envelope_digest
+        : null)
   )
     throw new CapabilityValidationError(
       "package cache record does not bind the lock entry owner",
@@ -166,7 +176,7 @@ function validateEntryCache(
     );
   validateLockInputsAgainstManifest(entry, manifest.manifest);
   let verified = null;
-  if (entry.pin.source.kind === "registry") {
+  if (entry.pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY) {
     verified = validateRetainedRegistryEnvelope(
       entry as Parameters<typeof validateRetainedRegistryEnvelope>[0],
       record,
@@ -176,7 +186,7 @@ function validateEntryCache(
         trust_snapshot: input.trust_snapshot as RegistryTrustSnapshotV1,
       },
     );
-  } else if (entry.pin.source.kind === "legacy-adopt") {
+  } else if (entry.pin.source.kind === CAPABILITY_SOURCE_KIND.LEGACY_ADOPT) {
     const evidence = readCanonicalJson<LegacyInspectionEvidenceV1>(
       legacyInspectionEvidenceCachePath(
         input.private_root,
@@ -223,7 +233,7 @@ export function validateRegistryLockAuthorityFromDurableState(
   input: {
     private_root: string;
     identity_path: string;
-    scope: "project" | "user";
+    scope: CapabilityScope;
     scope_identity_digest: string;
     at: string;
     authority_transition_resolver?: DurableAuthorityTransitionResolverV1;
@@ -250,7 +260,7 @@ export function validateRegistryLockAuthorityFromDurableState(
           "integrity_failure",
         );
       entries.set(entry.pin.pin_digest, entry);
-      hasRegistry ||= entry.pin.source.kind === "registry";
+      hasRegistry ||= entry.pin.source.kind === CAPABILITY_SOURCE_KIND.REGISTRY;
     }
   }
   if (entries.size === 0) return;

@@ -1347,6 +1347,10 @@ button:disabled {
   border-color: #d8b39b;
   color: var(--home-red);
 }
+.home-message-queue li[data-state="retryable"] .home-message-queue__sequence {
+  border-color: #d8b39b;
+  color: var(--home-red);
+}
 .home-message-queue__content {
   display: grid;
   min-width: 0;
@@ -1367,7 +1371,11 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.home-message-queue__content .home-message-queue__failure {
+  color: var(--home-red);
+}
 .home-message-queue__edit,
+.home-message-queue__retry,
 .home-queue-edit button {
   min-width: 44px;
   min-height: 44px;
@@ -1380,8 +1388,13 @@ button:disabled {
   font-weight: 650;
 }
 .home-message-queue__edit:hover,
+.home-message-queue__retry:hover:not(:disabled),
 .home-queue-edit button:hover:not(:disabled) {
   background: var(--home-amber-soft);
+}
+.home-message-queue__retry:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 .home-quote-stack {
   display: grid;

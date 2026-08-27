@@ -6,11 +6,28 @@ import {
   classifyConversationResult,
   conversationJsonErrorCode,
 } from "./conversation-command-exit.js";
+import {
+  CONVERSATION_COMMAND_RESULT_STATUS,
+  CONVERSATION_COMMAND_TERMINAL_STATUSES,
+  type ConversationCommandTerminalStatus,
+} from "./conversation-command-result-contract.js";
+import {
+  CONVERSATION_ARTIFACT_TYPE,
+  CONVERSATION_ASSESSMENT_STAGE,
+  CONVERSATION_BRAINSTORM_ERROR_KIND,
+  type CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
+  CONVERSATION_DECISION_OUTCOME,
+  CONVERSATION_TRACE_EVENT_KIND,
+  type ConversationAssessmentStageV1,
+  type ConversationBrainstormErrorKindV1,
+  type ConversationContinuingDecisionOutcomeV1,
+  type ConversationTraceEventKindV1,
+} from "./conversation-public-wire-contract.js";
 import { projectDecisionMatrix } from "./debate-projection.js";
 import type { ConversationService } from "./types.js";
 
-type BrainstormStatus = "completed" | "stopped" | "failed" | "aborted";
-export type BrainstormErrorKind = "validation" | "engine_start" | "transport";
+type BrainstormStatus = ConversationCommandTerminalStatus;
+export type BrainstormErrorKind = ConversationBrainstormErrorKindV1;
 
 export type BrainstormJsonExecution = {
   conversationId: string;
@@ -19,6 +36,15 @@ export type BrainstormJsonExecution = {
 };
 
 const roundSix = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
+const DECISION_EVENT_KINDS = Object.freeze([
+  CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT,
+  CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
+  CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT,
+  CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE,
+] as const satisfies readonly ConversationTraceEventKindV1[]);
+
+const isDecisionEventKind = (value: ConversationTraceEventKindV1): boolean =>
+  DECISION_EVENT_KINDS.some((kind) => kind === value);
 
 const averageConsensusScore = (
   rounds: readonly { decision: { score?: number | null } | null }[],
@@ -32,22 +58,22 @@ const averageConsensusScore = (
 };
 
 const terminalStatus = (status: string): BrainstormStatus => {
-  if (!["completed", "stopped", "failed", "aborted"].includes(status))
+  if (!CONVERSATION_COMMAND_TERMINAL_STATUSES.some((candidate) => candidate === status))
     throw new Error("brainstorm did not reach a terminal state");
   return status as BrainstormStatus;
 };
 
 export const brainstormErrorKind = (exit: number): BrainstormErrorKind =>
   exit === CONVERSATION_EXIT.engineStart
-    ? "engine_start"
+    ? CONVERSATION_BRAINSTORM_ERROR_KIND.ENGINE_START
     : exit === CONVERSATION_EXIT.transport
-      ? "transport"
-      : "validation";
+      ? CONVERSATION_BRAINSTORM_ERROR_KIND.TRANSPORT
+      : CONVERSATION_BRAINSTORM_ERROR_KIND.VALIDATION;
 
 export const brainstormErrorMessage = (kind: BrainstormErrorKind): string =>
-  kind === "validation"
+  kind === CONVERSATION_BRAINSTORM_ERROR_KIND.VALIDATION
     ? "request validation failed"
-    : kind === "engine_start"
+    : kind === CONVERSATION_BRAINSTORM_ERROR_KIND.ENGINE_START
       ? "engine start failed"
       : "conversation transport failed";
 
@@ -90,20 +116,25 @@ const transcriptArtifactRef = (records: readonly PublicStoredTraceEvent[]): stri
   const created = findLastRecord(
     records,
     (record) =>
-      record.event.type === "artifact_created" &&
-      record.event.payload.artifact_type === "transcript",
+      record.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED &&
+      record.event.payload.artifact_type === CONVERSATION_ARTIFACT_TYPE.TRANSCRIPT,
   );
-  return created?.event.type === "artifact_created" ? String(created.event.payload.ref) : null;
+  return created?.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED
+    ? String(created.event.payload.ref)
+    : null;
 };
 
 const terminalError = (
   records: readonly PublicStoredTraceEvent[],
   exit: number,
 ): { error_kind: BrainstormErrorKind; code: string; message: string } | null => {
-  const error = findLastRecord(records, (record) => record.event.type === "error");
+  const error = findLastRecord(
+    records,
+    (record) => record.event.type === CONVERSATION_TRACE_EVENT_KIND.ERROR,
+  );
   const normalizedExit = normalizedBrainstormErrorExit(exit);
   const kind = brainstormErrorKind(normalizedExit);
-  return error?.event.type === "error"
+  return error?.event.type === CONVERSATION_TRACE_EVENT_KIND.ERROR
     ? Object.freeze({
         error_kind: kind,
         code: safeCode(error.event.payload.code, conversationJsonErrorCode(normalizedExit)),
@@ -113,11 +144,7 @@ const terminalError = (
 };
 
 const hasDecisionData = (records: readonly PublicStoredTraceEvent[]): boolean =>
-  records.some(({ event }) =>
-    ["precommit", "agent_response_delta", "evaluator_assessment", "consensus_update"].includes(
-      event.type,
-    ),
-  );
+  records.some(({ event }) => isDecisionEventKind(event.type));
 
 export const brainstormErrorJson = (exit: number) => {
   const kind = brainstormErrorKind(exit);
@@ -159,7 +186,10 @@ export const projectBrainstormDryRunParticipant = (participant: {
   model_valid: participant.model_valid,
 });
 
-const projectGate = (gate: { value: boolean | "not_applicable"; evidence: string }) => ({
+const projectGate = (gate: {
+  value: boolean | typeof CONVERSATION_CONVERGENCE_NOT_APPLICABLE;
+  evidence: string;
+}) => ({
   value: gate.value,
   evidence: gate.evidence,
 });
@@ -168,7 +198,10 @@ const projectAssessment = (assessment: {
   agreement: { value: boolean; evidence: string };
   conflict_resolution: { value: boolean; evidence: string };
   evidence_quality: { value: boolean; evidence: string };
-  convergence: { value: boolean | "not_applicable"; evidence: string };
+  convergence: {
+    value: boolean | typeof CONVERSATION_CONVERGENCE_NOT_APPLICABLE;
+    evidence: string;
+  };
 }) => ({
   agreement: projectGate(assessment.agreement),
   conflict_resolution: projectGate(assessment.conflict_resolution),
@@ -189,21 +222,25 @@ const projectRoundResponse = (response: {
 });
 
 const projectRoundAssessment = (item: {
-  stage: "blind" | "full";
+  stage: ConversationAssessmentStageV1;
   assessment: Parameters<typeof projectAssessment>[0];
 }) => ({ stage: item.stage, assessment: projectAssessment(item.assessment) });
 
 const projectRoundDecision = (
   decision:
-    | { outcome: "abort"; score: null; reason?: string | null }
+    | { outcome: typeof CONVERSATION_DECISION_OUTCOME.ABORT; score: null; reason?: string | null }
     | {
-        outcome: "consensus" | "continue" | "exhausted";
+        outcome: ConversationContinuingDecisionOutcomeV1;
         score: number;
         reason?: string | null;
       },
 ) =>
-  decision.outcome === "abort"
-    ? { outcome: "abort" as const, score: null, reason: decision.reason ?? null }
+  decision.outcome === CONVERSATION_DECISION_OUTCOME.ABORT
+    ? {
+        outcome: CONVERSATION_DECISION_OUTCOME.ABORT,
+        score: null,
+        reason: decision.reason ?? null,
+      }
     : { outcome: decision.outcome, score: decision.score };
 
 const projectRound = (round: {
@@ -261,6 +298,7 @@ export async function brainstormExecutionJson(
     decision_matrix: decisionMatrix,
     baseline_comparison: baselineComparison,
     transcript_path: transcriptPath(execution.conversationId, transcriptArtifactRef(records)),
-    error: status === "failed" ? terminalError(records, exit) : null,
+    error:
+      status === CONVERSATION_COMMAND_RESULT_STATUS.FAILED ? terminalError(records, exit) : null,
   });
 }

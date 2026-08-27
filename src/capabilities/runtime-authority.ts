@@ -1,8 +1,9 @@
 import { EMPTY_PERMISSION_DIGEST, EMPTY_SOURCE_AUTHORITY_SET_DIGEST } from "../actions/index.js";
+import type { CapabilityScope } from "../core/capability-contract.js";
 import { canonicalJsonBytes, privateFileBytes } from "../durability/index.js";
 import { validateAuthorityHead, validateAuthorityIdentity } from "./authority/index.js";
 import type { AuthorityScopeIdentityRecordV1 } from "./authority/types.js";
-import { CapabilityRuntimeError } from "./operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./operations/errors.js";
 import type { CapabilityRuntimeAuthorityReaderV1 } from "./operations/types.js";
 import { permissionBindingDigest } from "./permissions/index.js";
 import type {
@@ -20,7 +21,7 @@ import type { CapabilityStorePathsV1 } from "./storage/paths.js";
 import { acquireCapabilityAuthorityLock } from "./storage/scope-lock.js";
 
 function unavailable(message: string): never {
-  throw new CapabilityRuntimeError(message, "service-unavailable");
+  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE);
 }
 
 /** Read-only activation identity loader used before any runtime object is composed. */
@@ -41,7 +42,7 @@ export function readActivatedCapabilityIdentityV1(
   )
     throw new CapabilityRuntimeError(
       "capability authority identity closure is corrupt",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   return identity;
 }
@@ -55,7 +56,7 @@ export class FilesystemCapabilityRuntimeAuthorityReaderV1
     readonly transitionResolver: DurableAuthorityTransitionResolverV1,
   ) {}
 
-  read(scope: "project" | "user"): CapabilityRuntimeAuthorityV1 {
+  read(scope: CapabilityScope): CapabilityRuntimeAuthorityV1 {
     if (scope !== this.paths.scope) unavailable("capability authority reader scope mismatch");
     const identity = readActivatedCapabilityIdentityV1(this.paths);
 
@@ -84,7 +85,7 @@ export class FilesystemCapabilityRuntimeAuthorityReaderV1
     )
       throw new CapabilityRuntimeError(
         "capability authority identity/head closure is corrupt",
-        "integrity-failure",
+        CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
       );
     return {
       schema_version: "1.0",
@@ -104,7 +105,7 @@ export class FilesystemCapabilityRuntimeAuthorityReaderV1
     if (!Number.isFinite(checked) || new Date(checked).toISOString() !== checkedAt)
       throw new CapabilityRuntimeError(
         "permission authority frontier time is invalid",
-        "permission-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.PERMISSION_STALE,
       );
     const { plan } = graph;
     if (
@@ -117,13 +118,13 @@ export class FilesystemCapabilityRuntimeAuthorityReaderV1
     )
       throw new CapabilityRuntimeError(
         "typed permission authority differs from the approved execution graph",
-        "permission-stale",
+        CAPABILITY_RUNTIME_ERROR_CODE.PERMISSION_STALE,
       );
     return plan.permission_digest;
   }
 
   criticalSection<T>(
-    scope: "project" | "user",
+    scope: CapabilityScope,
     operation: string,
     now: () => string,
     callback: (authority: CapabilityRuntimeAuthorityV1, checkedAt: string) => T,

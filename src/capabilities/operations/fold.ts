@@ -1,4 +1,10 @@
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
+import { PUBLIC_TARGET_RESULT_OUTCOME } from "../../actions/public-operation-contract.js";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import {
+  CAPABILITY_PLAN_STATUS,
+  CAPABILITY_RUNTIME_ERROR_CODE,
+} from "../../core/capability-contract.js";
 import { privateFileBytes } from "../../durability/index.js";
 import { validateCapabilityPlanningGraph } from "../planning/execution-graph-validation.js";
 import type {
@@ -11,7 +17,14 @@ import { capabilityOperationPaths } from "../storage/paths.js";
 import { capabilityHistoryPath } from "../storage/paths.js";
 import type { CapabilityStorageV1 } from "../storage/store.js";
 import type { CapabilityLockV1 } from "../wire/lock.js";
-import type { CapabilityOperationV1 } from "../wire/operation.js";
+import {
+  CAPABILITY_OPERATION_DEFAULT_RECOVERY_ACTIONS_BY_STATUS,
+  CAPABILITY_OPERATION_STATUS,
+  CAPABILITY_OPERATION_STATUS_BY_ACTION_STATE,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityOperationV1,
+  isCapabilityOperationChangedTargetOutcome,
+} from "../wire/operation.js";
 import { CapabilityRuntimeError } from "./errors.js";
 import { assertCapabilityOperationHeaderClosure } from "./operation-closure.js";
 import { foldCapabilityTarget } from "./target-fold.js";
@@ -21,7 +34,10 @@ import type {
   CapabilityOperationReadV1,
   CapabilityOperationResultV1,
 } from "./types.js";
-import { assertCapabilityWalReferentialClosure } from "./wal-referential.js";
+import {
+  type CapabilityWalReferentialClosureOptionsV1,
+  assertCapabilityWalReferentialClosure,
+} from "./wal-referential.js";
 
 export function readOperationHeader(
   storage: CapabilityStorageV1,
@@ -32,7 +48,10 @@ export function readOperationHeader(
     2 * 1024 * 1024,
   );
   if (!bytes)
-    throw new CapabilityRuntimeError("capability operation was not found", "operation-not-found");
+    throw new CapabilityRuntimeError(
+      "capability operation was not found",
+      CAPABILITY_RUNTIME_ERROR_CODE.OPERATION_NOT_FOUND,
+    );
   const value = parseStrictJson(
     new TextDecoder("utf-8", { fatal: true }).decode(bytes),
   ) as unknown as CapabilityOperationV1;
@@ -40,7 +59,7 @@ export function readOperationHeader(
   if (value.operation_id !== operationId)
     throw new CapabilityRuntimeError(
       "operation header path identity mismatch",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   return value;
 }
@@ -58,54 +77,44 @@ export function foldCapabilityOperation(
   storage: CapabilityStorageV1,
   operationId: string,
   actionAuthority: CapabilityOperationActionAuthorityV1,
+  options: CapabilityWalReferentialClosureOptionsV1 = {},
 ): CapabilityOperationResultV1 {
   const header = readOperationHeader(storage, operationId);
   const graph = readOperationGraph(actionAuthority, header);
   const { plan } = graph;
   const events = readCapabilityWal(storage.paths, operationId);
   const baseLock = readOperationBaseLock(storage, plan);
-  assertCapabilityWalReferentialClosure(storage, header, plan, events, baseLock);
+  assertCapabilityWalReferentialClosure(storage, header, plan, events, baseLock, options);
   const transition = events
-    .filter((event) => event.payload.kind === "operation-transition")
-    .map((event) => (event.payload.kind === "operation-transition" ? event.payload : null))
-    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .flatMap((event) =>
+      event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.OPERATION_TRANSITION
+        ? [event.payload]
+        : [],
+    )
     .at(-1);
-  const state =
-    transition?.to === "succeeded"
-      ? ("succeeded" as const)
-      : transition?.to === "failed"
-        ? ("failed" as const)
-        : transition?.to === "needs_recovery"
-          ? ("needs_recovery" as const)
-          : ("committing" as const);
-  const status =
-    state === "succeeded"
-      ? "succeeded"
-      : state === "failed"
-        ? "failed"
-        : state === "needs_recovery"
-          ? "needs-recovery"
-          : "committing";
+  const state = transition?.to ?? ACTION_OPERATION_STATE.COMMITTING;
+  const status = CAPABILITY_OPERATION_STATUS_BY_ACTION_STATE[state];
   const targets = plan.targets.map((target) =>
     foldCapabilityTarget({ plan, events, targetId: target.target_id, terminal: state, baseLock }),
   );
   const effectiveStatus =
-    status === "succeeded" && targets.some((target) => target.outcome === "degraded")
-      ? "degraded"
+    status === CAPABILITY_OPERATION_STATUS.SUCCEEDED &&
+    targets.some((target) => target.outcome === PUBLIC_TARGET_RESULT_OUTCOME.DEGRADED)
+      ? CAPABILITY_OPERATION_STATUS.DEGRADED
       : status;
   const lockCommit = events
-    .filter((event) => event.payload.kind === "lock-commit")
-    .map((event) => (event.payload.kind === "lock-commit" ? event.payload : null))
+    .filter((event) => event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT)
+    .map((event) =>
+      event.payload.kind === CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT ? event.payload : null,
+    )
     .filter((row): row is NonNullable<typeof row> => row !== null)
     .at(-1);
   const changed =
-    plan.status === "no-op"
+    plan.status === CAPABILITY_PLAN_STATUS.NO_OP
       ? false
       : Boolean(
           lockCommit ||
-            targets.some((target) =>
-              ["applied", "degraded", "needs-recovery"].includes(target.outcome),
-            ),
+            targets.some((target) => isCapabilityOperationChangedTargetOutcome(target.outcome)),
         );
   return {
     schema_version: "1.0",
@@ -115,15 +124,12 @@ export function foldCapabilityOperation(
     status: effectiveStatus,
     changed,
     generation_id:
-      plan.status === "no-op" ? plan.base_generation_id : (lockCommit?.generation_id ?? null),
+      plan.status === CAPABILITY_PLAN_STATUS.NO_OP
+        ? plan.base_generation_id
+        : (lockCommit?.generation_id ?? null),
     targets,
     reason_code: transition?.reason_code ?? null,
-    recovery_actions:
-      effectiveStatus === "needs-recovery"
-        ? ["repair", "export-redacted-diagnostics"]
-        : effectiveStatus === "failed"
-          ? ["retry", "rollback"]
-          : [],
+    recovery_actions: [...CAPABILITY_OPERATION_DEFAULT_RECOVERY_ACTIONS_BY_STATUS[effectiveStatus]],
     latest_sequence: events.at(-1)?.sequence ?? -1,
   };
 }
@@ -138,7 +144,10 @@ export function readOperationBaseLock(
     8 * 1024 * 1024,
   );
   if (!bytes)
-    throw new CapabilityRuntimeError("operation base history is missing", "integrity-failure");
+    throw new CapabilityRuntimeError(
+      "operation base history is missing",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+    );
   const lock = validateCapabilityLock(
     parseStrictJson(
       new TextDecoder("utf-8", { fatal: true }).decode(bytes),
@@ -151,7 +160,7 @@ export function readOperationBaseLock(
   )
     throw new CapabilityRuntimeError(
       "operation base history identity mismatch",
-      "integrity-failure",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
     );
   return lock;
 }

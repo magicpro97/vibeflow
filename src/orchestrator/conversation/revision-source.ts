@@ -3,15 +3,18 @@ import {
   actionIdempotencyScopeDigest,
 } from "../../actions/index.js";
 import type { MaterializedAgentBinding } from "../../agents/binding.js";
+import { ENGINE_SESSION_MODE } from "../../dispatch/session-contract.js";
 import { digestHex, digestV1 } from "../../durability/index.js";
 import { ConversationArtifactStore } from "./artifact-store.js";
 import type { BindingAuthoritySnapshot, ConversationDurableRecord } from "./artifact-validation.js";
 import { conversationLockDigest, semanticConversationJournalHead } from "./catalog-lock.js";
 import { resolveActiveCompaction } from "./conversation-active-compaction.js";
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import { ConversationInteractionCorruptError } from "./conversation-interaction-store.js";
 import type { ConversationInteractionFoldV1 } from "./conversation-interaction-types.js";
 import { materializeConversationLockBinding } from "./conversation-lock.js";
+import { CONVERSATION_TERMINAL_LIFECYCLES } from "./conversation-public-wire-contract.js";
 import { type BuiltContextHandoffV1, buildContextHandoff } from "./handoff-selection.js";
 import type { PublicCompactionArtifactV1, PublicHandoffBindingV1 } from "./handoff-types.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
@@ -51,7 +54,7 @@ export type {
   RevisionQuoteSourceV1,
 } from "./revision-handoff-context.js";
 
-const TERMINAL = new Set(["COMPLETED", "STOPPED", "FAILED", "ABORTED"]);
+const TERMINAL = new Set<string>(CONVERSATION_TERMINAL_LIFECYCLES);
 const key = (node: LineageNodeIdentityV1): string =>
   `${node.conversation_id}\0${node.revision_id}\0${node.revision_ordinal}`;
 
@@ -140,7 +143,11 @@ export function resolveRevisionBase(input: {
     lineage,
     transitions,
   );
-  if (head.head_status !== "committed" || !head.active || key(head.active) !== key(parent.node))
+  if (
+    head.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED ||
+    !head.active ||
+    key(head.active) !== key(parent.node)
+  )
     throw new ConversationRevisionInactiveHeadError();
   if (!TERMINAL.has(parent.source.journal_head.lifecycle))
     throw new ConversationRevisionNotStableTerminalError();
@@ -239,7 +246,10 @@ export function materializeRevisionManifest(input: {
     parent_revision_id: input.parent.revision_id,
     bindings: (input.target ?? input.parent).bindings.map((binding) => ({
       ...structuredClone(binding),
-      input: { ...structuredClone(binding.input), sessionMode: "fresh" },
+      input: {
+        ...structuredClone(binding.input),
+        sessionMode: ENGINE_SESSION_MODE.FRESH,
+      },
     })),
     created_at: input.createdAt,
   };
@@ -258,7 +268,8 @@ export async function materializeFreshRevisionBindings(input: {
   if (
     bindings.some(
       (binding) =>
-        binding.resolved.sessionMode !== "fresh" || binding.spawn.sessionMode !== "fresh",
+        binding.resolved.sessionMode !== ENGINE_SESSION_MODE.FRESH ||
+        binding.spawn.sessionMode !== ENGINE_SESSION_MODE.FRESH,
     )
   )
     throw new ConversationRevisionConflictError("revision binding is not fresh");
@@ -278,7 +289,7 @@ export function revisionBindingProjection(input: {
 } {
   const intendedAuthorities = input.authorities.map((authority) => ({
     ...structuredClone(authority),
-    session_mode: "fresh" as const,
+    session_mode: ENGINE_SESSION_MODE.FRESH,
   }));
   const previousParticipants = new Set(
     input.previousManifest?.bindings.map((binding) => binding.participant_id) ??

@@ -7,8 +7,11 @@ import {
   privateFileBytes,
 } from "../../durability/index.js";
 import {
+  CONVERSATION_MESSAGE_QUEUE_DIGEST_DOMAIN,
+  CONVERSATION_MESSAGE_QUEUE_FIELD,
   CONVERSATION_MESSAGE_QUEUE_LIMITS,
   CONVERSATION_MESSAGE_QUEUE_PENDING_MUTATION_STATE,
+  CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS,
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
 } from "./conversation-message-queue-contract.js";
 import { assertConversationMessageQueueEventV1 } from "./conversation-message-queue-event-validation.js";
@@ -24,8 +27,6 @@ import {
   queueExactKeys,
   queueRecord,
 } from "./conversation-message-queue-validation.js";
-
-const PENDING_DOMAIN = "VF-CONVERSATION-MESSAGE-QUEUE-PENDING-MUTATION\0v1\0";
 
 export type PrivateConversationMessageQueuePendingMutationV1 = {
   schema_version: typeof CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION;
@@ -47,9 +48,12 @@ export type PrivateConversationMessageQueuePendingMutationV1 = {
 );
 
 function slotDigest(
-  value: Omit<PrivateConversationMessageQueuePendingMutationV1, "slot_digest">,
+  value: Omit<
+    PrivateConversationMessageQueuePendingMutationV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.SLOT_DIGEST
+  >,
 ): string {
-  return digestV1(PENDING_DOMAIN, value);
+  return digestV1(CONVERSATION_MESSAGE_QUEUE_DIGEST_DOMAIN.PENDING_MUTATION, value);
 }
 
 function assertPendingMutation(
@@ -57,16 +61,7 @@ function assertPendingMutation(
 ): asserts value is PrivateConversationMessageQueuePendingMutationV1 {
   if (
     !queueRecord(value) ||
-    !queueExactKeys(value, [
-      "schema_version",
-      "root_session_id",
-      "state",
-      "binding",
-      "event",
-      "previous_slot_digest",
-      "winning_event_digest",
-      "slot_digest",
-    ]) ||
+    !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.PENDING_MUTATION) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueReference(value.root_session_id) ||
     (value.state !== CONVERSATION_MESSAGE_QUEUE_PENDING_MUTATION_STATE.PENDING &&
@@ -90,13 +85,16 @@ function assertPendingMutation(
     throw new Error("settled queue pending slot retains mutation authority");
   }
   const typed = value as unknown as PrivateConversationMessageQueuePendingMutationV1;
-  const { slot_digest: _digest, ...preimage } = typed;
+  const { [CONVERSATION_MESSAGE_QUEUE_FIELD.SLOT_DIGEST]: _digest, ...preimage } = typed;
   if (slotDigest(preimage) !== typed.slot_digest)
     throw new Error("queue pending mutation digest changed");
 }
 
 function materialize(
-  value: Omit<PrivateConversationMessageQueuePendingMutationV1, "slot_digest">,
+  value: Omit<
+    PrivateConversationMessageQueuePendingMutationV1,
+    typeof CONVERSATION_MESSAGE_QUEUE_FIELD.SLOT_DIGEST
+  >,
 ): PrivateConversationMessageQueuePendingMutationV1 {
   return {
     ...value,

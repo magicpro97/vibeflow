@@ -23,6 +23,7 @@ import {
   runNormativeProofsAsync,
 } from "../verify/normative-proof-run-async.js";
 import type { NormativeProofRunV2 } from "../verify/normative-proof-run.js";
+import { VERIFY_RUNTIME_AUTHORITY } from "../verify/runtime-authority.js";
 import {
   e2eEvaluateDynamicImportWarning,
   e2eUnicodeSelectorWarning,
@@ -225,7 +226,11 @@ export async function collectVerifyReportAsync(
   const run: NormativeAsyncSpawner = inject.spawner ?? defaultNormativeAsyncSpawner;
 
   const runGate = async (label: string, cmd: string, args: string[], dir = base) => {
-    const r = await run(cmd, args, { stdio: "ignore", cwd: dir });
+    const r = await run(cmd, args, {
+      stdio: "ignore",
+      cwd: dir,
+      timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
+    });
     const result = { label, pass: r.status === 0 };
     toolchain.push(result);
     return result;
@@ -256,7 +261,7 @@ export async function collectVerifyReportAsync(
         legacyCoverage.pass ? "pass" : "fail",
         legacyCoverage.pass ? "coverage gate passed" : "coverage gate failed",
       );
-    } else coverageResult = gateResult("skipped", "coverage/lcov.info not found");
+    } else coverageResult = gateResult("fail", "coverage/lcov.info not found");
   }
 
   const rawState = readState(base);
@@ -265,14 +270,18 @@ export async function collectVerifyReportAsync(
     inject.goal &&
     inject.goalEvalFn &&
     toolchain.every((gate) => gate.pass) &&
-    (!legacyCoverage || legacyCoverage.pass)
+    coverageResult.status !== "fail"
   ) {
     const result = await inject.goalEvalFn(inject.goal);
     goalEval = { pass: result.covered, uncovered: result.uncovered, score: result.score };
   }
   let waiverResult = gateResult("skipped", "waiver-policy.cjs not found");
   if (existsSync(join(base, "scripts", "waiver-policy.cjs"))) {
-    const result = await run("node", ["scripts/waiver-policy.cjs"], { stdio: "ignore", cwd: base });
+    const result = await run("node", ["scripts/waiver-policy.cjs"], {
+      stdio: "ignore",
+      cwd: base,
+      timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
+    });
     waiverResult = gateResult(
       result.status === 0 ? "pass" : "fail",
       result.status === 0 ? "waiver policy passed" : "waiver policy failed",

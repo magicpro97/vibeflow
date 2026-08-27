@@ -13,6 +13,7 @@ import {
   parsePlaywrightJson,
   prepareNormativeProofRun,
 } from "./normative-proof-run.js";
+import { VERIFY_RUNTIME_AUTHORITY } from "./runtime-authority.js";
 
 export interface NormativeAsyncSpawnOptions {
   cwd: string;
@@ -174,7 +175,7 @@ export async function runNormativeProofsAsync(
         result = await safelySpawn(spawner, command.command, command.args, {
           cwd: base,
           stdio: "pipe",
-          timeout: 300_000,
+          timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
           maxBuffer: 64 * 1024 * 1024,
         });
         stdout = outputText(result.stdout);

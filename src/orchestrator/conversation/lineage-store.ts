@@ -16,6 +16,7 @@ import {
   readPrivateDirectoryNames,
   readPrivateFileBytesAt,
 } from "./catalog-read-safety.js";
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import { assertConversationLineageWritable } from "./conversation-lineage-mutation-guard.js";
 import {
   type LineageAssociationRecordV1,
@@ -64,12 +65,12 @@ function decodeCanonical<T>(bytes: Buffer, validate: (value: unknown) => void, l
 
 function deferredInitialHead(lineage: ConversationLineageReadV1): LineageHeadRecordV1 {
   const initial = lineage.initial_head_candidate;
-  if (!initial || initial.head_status !== "committed" || !initial.active)
+  if (!initial || initial.head_status !== CONVERSATION_HEAD_STATUS.COMMITTED || !initial.active)
     throw new Error("only one eligible legacy leaf may be explicitly deferred");
   const { content_digest: _initialDigest, ...initialPreimage } = initial;
   const preimage: Omit<LineageHeadRecordV1, "content_digest"> = {
     ...structuredClone(initialPreimage),
-    head_status: "unclaimed",
+    head_status: CONVERSATION_HEAD_STATUS.UNCLAIMED,
     active: null,
     candidate_heads: [structuredClone(initial.active)],
   };

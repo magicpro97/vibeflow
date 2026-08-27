@@ -1,5 +1,7 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import { materializeConversationRevisionActionPlan } from "./conversation-action-planner.js";
+import type { ConversationMessageQueueTargetParticipantsV1 } from "./conversation-message-queue-contract.js";
 import type { ConversationQueuedMessageDeliveryAuthorityV1 } from "./conversation-message-queue-runtime.js";
 import { contextHandoffSharedPromptBytes } from "./handoff-selection.js";
 import type { ConversationRevisionAuthorityOptions } from "./revision-authority.js";
@@ -15,7 +17,9 @@ const same = (left: unknown, right: unknown): boolean =>
 /** Rehydrates and resumes only the exact active durable revision reservation. */
 export async function resumeActiveConversationRevision(input: {
   base: ResolvedRevisionBaseV1;
-  request: MessageRequest & { target_participants: "all" | string[] };
+  request: MessageRequest & {
+    target_participants: ConversationMessageQueueTargetParticipantsV1;
+  };
   messageKey: string;
   queueDelivery?: ConversationQueuedMessageDeliveryAuthorityV1;
   options: ConversationRevisionAuthorityOptions;
@@ -34,7 +38,7 @@ export async function resumeActiveConversationRevision(input: {
   if (!operation || !revisionPlan || !action?.approval || !manifest)
     throw new Error("active revision preparation is incomplete");
   if (
-    action.proposal.action.type !== "conversation.continue_message" ||
+    action.proposal.action.type !== HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE ||
     action.proposal.idempotency_key !==
       revisionActionIdempotencyKey(messageKey, reservation.revision_claim_epoch) ||
     action.proposal.action.content !== request.content ||

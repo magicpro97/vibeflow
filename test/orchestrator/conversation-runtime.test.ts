@@ -9,6 +9,7 @@ import {
   ActionConflictError,
   type ActionProposalRequestV1,
   type BrowserHostActionRequestV1,
+  PUBLIC_OPERATION_PARTICIPANT_START_PHASE,
 } from "../../src/actions/index.js";
 import type { AgentBinding, MaterializedAgentBinding } from "../../src/agents/binding.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
@@ -29,6 +30,7 @@ import {
 import { ConversationArtifactStore } from "../../src/orchestrator/conversation/artifact-store.js";
 import { conversationLockDigest } from "../../src/orchestrator/conversation/catalog-lock.js";
 import { ConversationRevisionActionDomainV1 } from "../../src/orchestrator/conversation/conversation-action-domain.js";
+import { CONVERSATION_BASELINE_SKIP_REASON } from "../../src/orchestrator/conversation/conversation-baseline-contract.js";
 import { createConversationBrowserAuthorities } from "../../src/orchestrator/conversation/conversation-browser-authorities.js";
 import { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
 import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
@@ -438,7 +440,9 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
     const completion = new Promise<EngineSessionResult>((resolve) => {
       this.completions.set(request.attemptId, resolve);
     });
-    const nativeSessionId = `00000000-0000-4000-8000-${request.attemptId.endsWith("2") ? "000000000002" : "000000000001"}`;
+    const nativeSessionId =
+      request.nativeSessionId ??
+      `00000000-0000-4000-8000-${request.attemptId.endsWith("2") ? "000000000002" : "000000000001"}`;
     const authorityRoot = this.startRoot;
     const evidenceRef = authorityRoot
       ? join(authorityRoot, `${request.attemptId}.json`)
@@ -2232,7 +2236,11 @@ test("a real generation-zero start failure is retried with fresh durable adapter
     );
     if (!target) throw new Error("real failed revision operation header is absent");
     let events = fixture.homeAuthorities.revisions.readEvents(target.operation_id);
-    expect(foldRevisionOperation(target, events).state).toBe("start_failed");
+    const targetPlan = fixture.homeAuthorities.revisions.readPlan(target.operation_id);
+    if (!targetPlan) throw new Error("real failed revision preparation plan is absent");
+    expect(foldRevisionOperation(target, events, { preparationPlan: targetPlan }).state).toBe(
+      "start_failed",
+    );
     const failed = events.filter((event) => event.payload.kind === "participant-start").at(-1);
     if (failed?.payload.kind !== "participant-start")
       throw new Error("real generation-zero receipt is absent");
@@ -2314,7 +2322,9 @@ test("a real generation-zero start failure is retried with fresh durable adapter
       participant,
       attempt_key: failedReceipt.attempt_key,
       prepared_at: failedReceipt.prepared_at,
-      effect_action_operation_id: foldRevisionOperation(target, events).effect_action_operation_id,
+      effect_action_operation_id: foldRevisionOperation(target, events, {
+        preparationPlan: targetPlan,
+      }).effect_action_operation_id,
     };
     const liveRuntime = fixture.runtime as unknown as {
       runtime: { operationId(conversationId: string): string | null };
@@ -2374,7 +2384,9 @@ test("a real generation-zero start failure is retried with fresh durable adapter
           )
           .join(",")}; launches=${launched.length}; remaining=${processes.length}`,
       );
-    expect(foldRevisionOperation(target, events).state).toBe("started");
+    expect(foldRevisionOperation(target, events, { preparationPlan: targetPlan }).state).toBe(
+      "started",
+    );
     const accepted = events.filter((event) => event.payload.kind === "participant-start").at(-1);
     if (accepted?.payload.kind !== "participant-start")
       throw new Error("real generation-one receipt is absent");
@@ -2495,44 +2507,96 @@ test("a real two-round debate resumes only after the complete revision start bar
       return spawn.rendered_prompt.slice(offset).trimEnd();
     });
     expect(new Set(sharedHandoffs).size).toBe(1);
-    const responderStarts = [
-      adapter.starts[3],
-      adapter.starts[4],
-      adapter.starts[7],
-      adapter.starts[8],
-    ];
-    expect(responderStarts.map((request) => request?.spawn.sessionMode)).toEqual([
-      "exact",
-      "exact",
-      "exact",
-      "exact",
-    ]);
-    const firstResponderNative = adapter.nativeByAttempt.get(barrier[0]?.attemptId ?? "");
-    const secondResponderNative = adapter.nativeByAttempt.get(barrier[1]?.attemptId ?? "");
-    expect(responderStarts.map((request) => request?.nativeSessionId)).toEqual([
-      firstResponderNative,
-      secondResponderNative,
-      firstResponderNative,
-      secondResponderNative,
-    ]);
-    const turn = (index: number) => {
-      const prompt = responderStarts[index]?.spawn.rendered_prompt ?? "";
+    const revision = publishedRevisionOperationForChild(fixture.homeAuthorities, childId);
+    const acceptedReceipts = fixture.homeAuthorities.revisions
+      .readEvents(revision.operation_id)
+      .flatMap((event) =>
+        event.payload.kind === "participant-start" &&
+        event.payload.receipt.state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED
+          ? [event.payload.receipt]
+          : [],
+      );
+    expect(acceptedReceipts).toHaveLength(3);
+    expect(acceptedReceipts.map(({ attempt_key }) => attempt_key).sort()).toEqual(
+      barrier.map(({ attemptId }) => attemptId).sort(),
+    );
+    const nativeByParticipant = new Map(
+      acceptedReceipts.map(({ attempt_key, participant_id }) => [
+        participant_id,
+        adapter.nativeByAttempt.get(attempt_key),
+      ]),
+    );
+    expect(adapter.starts.findIndex(({ spawn }) => spawn.sessionMode === "exact")).toBe(
+      barrier.length,
+    );
+    const responderStarts = adapter.starts
+      .slice(barrier.length)
+      .filter(({ spawn }) => spawn.sessionMode === "exact");
+    expect(responderStarts).toHaveLength(4);
+    const turn = (request: EngineSessionRequest) => {
+      const prompt = request.spawn.rendered_prompt;
       const offset = prompt.lastIndexOf("VF-TURN/1\n");
       if (offset < 0) throw new Error("structured turn is absent");
-      return JSON.parse(prompt.slice(offset + "VF-TURN/1\n".length).trim());
+      return JSON.parse(prompt.slice(offset + "VF-TURN/1\n".length).trim()) as {
+        delivery_mode: string;
+        recipient_participant_id: string;
+        instruction: { kind: string; round: number };
+        public_responses: Array<{ author_public_id: string; answer: string }>;
+      };
     };
-    expect(turn(2)).toMatchObject({
+    const startsByTurn = new Map(
+      responderStarts.map((request) => {
+        const envelope = turn(request);
+        return [
+          `${envelope.instruction.round}:${envelope.recipient_participant_id}`,
+          {
+            envelope,
+            request,
+          },
+        ];
+      }),
+    );
+    expect([...startsByTurn.keys()].sort()).toEqual([
+      "1:participant-1",
+      "1:participant-2",
+      "2:participant-1",
+      "2:participant-2",
+    ]);
+    for (const participantId of ["participant-1", "participant-2"]) {
+      const nativeSessionId = nativeByParticipant.get(participantId);
+      if (!nativeSessionId)
+        throw new Error(`barrier native binding is absent for ${participantId}`);
+      for (const round of [1, 2]) {
+        const started = startsByTurn.get(`${round}:${participantId}`);
+        if (!started)
+          throw new Error(`responder start is absent for ${participantId} round ${round}`);
+        expect(started.request.nativeSessionId).toBe(nativeSessionId);
+        expect(started.envelope).toMatchObject({
+          delivery_mode: "exact-delta",
+          recipient_participant_id: participantId,
+          instruction: { kind: "debate-participant", round },
+        });
+      }
+    }
+    const firstResponderNative = nativeByParticipant.get("participant-1");
+    const secondResponderNative = nativeByParticipant.get("participant-2");
+    if (!firstResponderNative || !secondResponderNative)
+      throw new Error("responder barrier native bindings are incomplete");
+    expect(firstResponderNative).not.toBe(secondResponderNative);
+    const firstRoundTwo = startsByTurn.get("2:participant-1")?.envelope;
+    const secondRoundTwo = startsByTurn.get("2:participant-2")?.envelope;
+    expect(firstRoundTwo).toMatchObject({
       delivery_mode: "exact-delta",
       recipient_participant_id: "participant-1",
       public_responses: [{ author_public_id: "participant-2", answer: "Option" }],
     });
-    expect(turn(3)).toMatchObject({
+    expect(secondRoundTwo).toMatchObject({
       delivery_mode: "exact-delta",
       recipient_participant_id: "participant-2",
       public_responses: [{ author_public_id: "participant-1", answer: "Option" }],
     });
-    expect(JSON.stringify(turn(2))).not.toContain(firstResponderNative);
-    expect(JSON.stringify(turn(3))).not.toContain(secondResponderNative);
+    expect(JSON.stringify(firstRoundTwo)).not.toContain(firstResponderNative);
+    expect(JSON.stringify(secondRoundTwo)).not.toContain(secondResponderNative);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -2713,6 +2777,7 @@ test("direct policy uses the canonical participant id and launchAttempt exactly 
         prepareConversationTurn({
           conversation_id: "conversation",
           revision_id: "revision",
+          recipient_engine: "codex",
           request,
           events: [],
           resume: null,
@@ -3635,7 +3700,7 @@ test("failed PAUSED cancellation preserves deferred work and buffered active chu
             status: "skipped",
             answer: null,
             confidence: null,
-            skip_reason: "cancel rollback",
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
           },
         },
       })
@@ -5047,7 +5112,12 @@ test("STOPPED gate rejects every deferred approval continuation effect", async (
         idempotency_key: "stopped-continuation:late",
         event: {
           type: "baseline_result",
-          payload: { status: "skipped", answer: null, confidence: null, skip_reason: "late" },
+          payload: {
+            status: "skipped",
+            answer: null,
+            confidence: null,
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.ENGINE_UNAVAILABLE,
+          },
         },
       });
       continued = true;
@@ -6682,7 +6752,12 @@ test("remote PAUSE suspends every live member and drains owner effects before it
       idempotency_key: "owner:effect-before-pause",
       event: {
         type: "baseline_result",
-        payload: { status: "skipped", answer: null, confidence: null, skip_reason: "barrier" },
+        payload: {
+          status: "skipped",
+          answer: null,
+          confidence: null,
+          skip_reason: CONVERSATION_BASELINE_SKIP_REASON.SINGLE_PARTICIPANT,
+        },
       },
     });
     await started;
@@ -6720,7 +6795,12 @@ test("remote PAUSE suspends every live member and drains owner effects before it
       idempotency_key: "owner:effect-after-prepare",
       event: {
         type: "baseline_result",
-        payload: { status: "skipped", answer: null, confidence: null, skip_reason: "deferred" },
+        payload: {
+          status: "skipped",
+          answer: null,
+          confidence: null,
+          skip_reason: CONVERSATION_BASELINE_SKIP_REASON.ENGINE_UNAVAILABLE,
+        },
       },
     });
     const deferredAttempt = context.launchAttempt({
@@ -6737,7 +6817,9 @@ test("remote PAUSE suspends every live member and drains owner effects before it
     await Promise.all([ownerEffect, ownerArtifact, pausing]);
     const pausedEvents = await runtime.events(accepted.conversation_id, 0);
     const effectIndex = pausedEvents?.findIndex(
-      ({ event }) => event.type === "baseline_result" && event.payload.skip_reason === "barrier",
+      ({ event }) =>
+        event.type === "baseline_result" &&
+        event.payload.skip_reason === CONVERSATION_BASELINE_SKIP_REASON.SINGLE_PARTICIPANT,
     );
     const artifactIndex = pausedEvents?.findIndex(({ event }) => event.type === "artifact_created");
     const pauseIndex = pausedEvents?.findIndex(
@@ -7141,7 +7223,12 @@ test("pause preserves attempts; restart resume rehydrates exact binding and neve
         idempotency_key: "paused:forged-effect",
         event: {
           type: "baseline_result",
-          payload: { status: "skipped", answer: null, confidence: null, skip_reason: "paused" },
+          payload: {
+            status: "skipped",
+            answer: null,
+            confidence: null,
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
+          },
         },
       })
       .then(
@@ -7222,7 +7309,7 @@ test("policy effects suspend while PAUSED and continue only after durable resume
             status: "skipped" as const,
             answer: null,
             confidence: null,
-            skip_reason: "test",
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
           },
         },
       };
@@ -7256,7 +7343,10 @@ test("policy effects suspend while PAUSED and continue only after durable resume
       (await runtime.events(accepted.conversation_id, 0))?.find(
         (event) => event.event.type === "baseline_result",
       )?.event,
-    ).toMatchObject({ type: "baseline_result", payload: { skip_reason: "test" } });
+    ).toMatchObject({
+      type: "baseline_result",
+      payload: { skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED },
+    });
   } finally {
     release();
     await rm(root, { recursive: true, force: true });
@@ -8708,7 +8798,12 @@ test("policy and artifact keys cannot poison reserved terminal authority", async
           idempotency_key: "conversation:terminal-state",
           event: {
             type: "baseline_result",
-            payload: { status: "skipped", answer: null, confidence: null, skip_reason: "poison" },
+            payload: {
+              status: "skipped",
+              answer: null,
+              confidence: null,
+              skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
+            },
           },
         });
       } catch (error) {

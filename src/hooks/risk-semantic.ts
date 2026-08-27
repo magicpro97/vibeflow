@@ -1,4 +1,5 @@
-import { ENGINES, type Engine, type RiskLevel } from "../core.js";
+import { ENGINES, type Engine } from "../core.js";
+import { RISK_LEVEL, type RiskLevel } from "../core/hook-contract.js";
 import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 
 /**
@@ -21,10 +22,10 @@ export function parseSemanticRisk(raw: string): RiskLevel | undefined {
   const m = /\bRISK:\s*(LOW|MED(?:IUM)?|HIGH|CRIT(?:ICAL)?)\b/i.exec(raw);
   if (!m) return undefined;
   const tier = (m[1] ?? "").toUpperCase();
-  if (tier === "LOW") return "low";
-  if (tier === "HIGH") return "high";
-  if (tier.startsWith("MED")) return "medium";
-  return "critical";
+  if (tier === "LOW") return RISK_LEVEL.LOW;
+  if (tier === "HIGH") return RISK_LEVEL.HIGH;
+  if (tier.startsWith("MED")) return RISK_LEVEL.MEDIUM;
+  return RISK_LEVEL.CRITICAL;
 }
 
 /**
@@ -34,7 +35,7 @@ export function parseSemanticRisk(raw: string): RiskLevel | undefined {
  * `ls` never triggers a call; an already medium+ command is left to the deterministic verdict.
  */
 export function shouldConsultSemantic(regexRisk: RiskLevel, command: string): boolean {
-  if (regexRisk !== "none" && regexRisk !== "low") return false;
+  if (regexRisk !== RISK_LEVEL.NONE && regexRisk !== RISK_LEVEL.LOW) return false;
   return /(?:^|\s)-c(?:\s|["']|$)|\$\(|`|\b(?:https?|curl|wget|nc|base64|eval)\b/i.test(command);
 }
 

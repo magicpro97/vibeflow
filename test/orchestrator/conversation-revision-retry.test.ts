@@ -5,6 +5,7 @@ import type {
 } from "../../src/dispatch/session-types.js";
 import { digestV1 } from "../../src/durability/index.js";
 import type { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
+import { conversationRevisionActionPlanDigest } from "../../src/orchestrator/conversation/conversation-revision-action-plan.js";
 import { MAX_CANONICAL_HANDOFF_BYTES } from "../../src/orchestrator/conversation/handoff-limits.js";
 import type {
   RevisionOperationV1,
@@ -38,7 +39,7 @@ function operation(): RevisionOperationV1 {
     proposal_digest: digest("proposal"),
     approval_id: `vf-approval-${"4".repeat(64)}`,
     approval_digest: digest("approval"),
-    plan_digest: digest("plan"),
+    plan_digest: conversationRevisionActionPlanDigest("conversation-root", plan()),
     authority_epoch: 0,
     authority_head_digest: digest("authority"),
     root_session_id: "conversation-root",
@@ -291,7 +292,9 @@ describe("revision retry authority", () => {
       },
     });
     expect(appended).toEqual(result.slice(events.length));
-    expect(foldRevisionOperation(target, result).state).toBe("started");
+    expect(foldRevisionOperation(target, result, { preparationPlan: plan() }).state).toBe(
+      "started",
+    );
     const lanes = result.filter((event) => event.payload.kind === "participant-start");
     const lastLane = lanes.at(-1);
     if (lastLane?.payload.kind !== "participant-start") throw new Error("missing retry lane");

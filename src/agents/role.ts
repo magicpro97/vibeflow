@@ -1,3 +1,16 @@
+import type { AgentRoleSource } from "../core/agent-contract.js";
+import {
+  ROLE_MODEL,
+  ROLE_READ_ONLY_TOOL_INTENTS,
+  ROLE_SANDBOX,
+  type RoleModel,
+  type RoleSandbox,
+  type ToolIntent,
+  isMutatingRoleToolIntent,
+} from "../core/role-contract.js";
+
+export type { RoleModel, RoleSandbox, ToolIntent } from "../core/role-contract.js";
+
 /**
  * Engine-agnostic role specification.
  *
@@ -7,25 +20,6 @@
  * engine's native format. Keeping the spec engine-agnostic means a single
  * source of truth is shared across all three engines.
  */
-
-/** Tool intents the role needs. The renderer maps each intent to the
- * engine's native tool name (e.g. `read` → `Read` for Claude). */
-export type ToolIntent = "read" | "write" | "edit" | "bash" | "grep" | "glob" | "web";
-
-/** Supported model identifiers across engines. The renderer maps from
- * these canonical values to engine-specific strings (e.g. `sonnet` →
- * `gpt-5.4` for Codex). */
-export type RoleModel =
-  | "haiku"
-  | "sonnet"
-  | "opus"
-  | "gpt-5.4"
-  | "gpt-5.4-mini"
-  | "gpt-5.3-codex-spark"
-  | "gpt-5.4-codex";
-
-/** Codex sandbox mode. Ignored by Claude/Copilot renderers. */
-export type RoleSandbox = "read-only" | "workspace-write" | "danger-full-access";
 
 /** A single engine-agnostic role spec. */
 export interface RoleSpec {
@@ -44,7 +38,7 @@ export interface RoleSpec {
   sandbox?: RoleSandbox;
 }
 
-export type RoleSource = "builtin" | "repo";
+export type RoleSource = AgentRoleSource;
 
 /** A role after repo-overlay/built-in resolution. */
 export interface ResolvedRole {
@@ -54,12 +48,11 @@ export interface ResolvedRole {
   metadata: Record<string, string>;
 }
 
-const MUTATING_TOOL_INTENTS = new Set<ToolIntent>(["write", "edit", "bash"]);
-
 /** Read-only admission is an authority check, not merely a sandbox label. */
 export function isReadOnlyRole(spec: RoleSpec): boolean {
   return (
-    spec.sandbox === "read-only" && !spec.tools.some((tool) => MUTATING_TOOL_INTENTS.has(tool))
+    spec.sandbox === ROLE_SANDBOX.READ_ONLY &&
+    !spec.tools.some((tool) => isMutatingRoleToolIntent(tool))
   );
 }
 
@@ -153,8 +146,8 @@ export function conversationRoleSpecs(): RoleSpec[] {
     name: template.name,
     description: template.description,
     body: conversationRoleBody(template),
-    tools: ["read", "grep", "glob", "web"],
-    model: "sonnet",
-    sandbox: "read-only",
+    tools: [...ROLE_READ_ONLY_TOOL_INTENTS],
+    model: ROLE_MODEL.SONNET,
+    sandbox: ROLE_SANDBOX.READ_ONLY,
   }));
 }

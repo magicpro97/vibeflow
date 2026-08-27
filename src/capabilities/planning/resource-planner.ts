@@ -1,4 +1,6 @@
 import type { ActionTargetBindingV1 } from "../../actions/preview-types.js";
+import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
+import type { ActionPlanningMode } from "../../actions/public-action-contract.js";
 import { digestHex, digestV1 } from "../../durability/index.js";
 import { privateEffectDescriptor } from "../adapters/private-descriptors.js";
 import type {
@@ -43,7 +45,7 @@ export function buildComponentResources(input: {
   target: ActionTargetBindingV1;
   broker: CapabilityEffectBrokerV1;
   now: string;
-  persistence?: "transient" | "durable";
+  persistence?: ActionPlanningMode;
 }): CapabilityPreparedEffectV1[] {
   const { request, pkg, component, target, broker, now } = input;
   const operation =
@@ -123,10 +125,10 @@ export function buildEffectDescriptor(input: {
   targetId: string;
   prepared: CapabilityPreparedEffectV1;
   broker: CapabilityEffectBrokerV1;
-  persistence: "transient" | "durable";
+  persistence: ActionPlanningMode;
   actionRootLocator: Exclude<
     import("../../actions/types.js").PrivateActionRootLocatorV1,
-    { kind: "recovery-bootstrap" }
+    { kind: typeof ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP }
   >;
   ownerBinding?: CapabilityPrivateEffectBindingV1;
   descriptorKind: "intent" | "rollback";
@@ -176,13 +178,13 @@ export function buildExactRemovalResource(input: {
   resource: CapabilityOwnedResourceV1;
   broker: CapabilityEffectBrokerV1;
   request: CapabilityPlanningRequestV1;
-  persistence?: "transient" | "durable";
+  persistence?: ActionPlanningMode;
 }): CapabilityPreparedEffectV1 {
   return input.broker.prepareRemoval(
     input.resource,
     input.persistence,
     input.request.action_root_locator ?? {
-      kind: "capability",
+      kind: ACTION_ROOT_LOCATOR_KIND.CAPABILITY,
       scope: input.request.scope,
       scope_identity_digest: input.request.scope_identity_digest,
     },

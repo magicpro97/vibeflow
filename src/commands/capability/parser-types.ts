@@ -1,8 +1,17 @@
+import type {
+  CapabilityCliAuthorityMutationCommand,
+  CapabilityCliCapabilityMutationCommand,
+  CapabilityCliInspectionCommand,
+  CapabilityCliPrivateCommand,
+  CapabilityCliQueryCommand,
+} from "../../actions/capability-cli-contract.js";
+import type { CAPABILITY_CLI_COMMAND } from "../../actions/capability-cli-contract.js";
 import type { CapabilityPublicInputV1 } from "../../actions/request-types.js";
-import type { FabricCliMutationCommandV1 } from "../../capabilities/wire/cli.js";
+import type { Engine } from "../../core/agent-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
 
-export type Scope = "project" | "user";
-export type EngineName = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
+export type Scope = CapabilityScope;
+export type EngineName = Engine;
 export type PrivateReferenceV1 = Extract<CapabilityPublicInputV1["value"], object>;
 
 export interface CapabilityParserIo {
@@ -31,7 +40,7 @@ export interface ParsedCliCommonOptionsV1 {
 
 export interface ParsedCapabilityQueryV1 extends ParsedCliCommonOptionsV1 {
   kind: "query";
-  command: "capability.search" | "capability.list" | "capability.status";
+  command: CapabilityCliQueryCommand;
   query?: string;
   packageId?: string;
   engines: EngineName[];
@@ -40,14 +49,14 @@ export interface ParsedCapabilityQueryV1 extends ParsedCliCommonOptionsV1 {
 
 export interface ParsedCapabilityInspectionV1 extends ParsedCliCommonOptionsV1 {
   kind: "inspection";
-  command: "capability.adopt.inspect";
+  command: CapabilityCliInspectionCommand;
   mode: "direct";
   legacySources: string[];
 }
 
 export interface ParsedCapabilityDirectMutationV1 extends ParsedCliCommonOptionsV1 {
   kind: "mutation";
-  command: Exclude<FabricCliMutationCommandV1, `authority.${string}` | "authority.repair">;
+  command: CapabilityCliCapabilityMutationCommand;
   mode: "direct";
   packageId?: string;
   query?: string;
@@ -68,17 +77,14 @@ export interface ParsedCapabilityDirectMutationV1 extends ParsedCliCommonOptions
 
 export interface ParsedCapabilityRequestFileMutationV1 extends ParsedCliCommonOptionsV1 {
   kind: "mutation";
-  command: Exclude<
-    FabricCliMutationCommandV1,
-    `authority.${string}` | "authority.repair" | "capability.private-input.bind"
-  >;
+  command: CapabilityCliCapabilityMutationCommand;
   mode: "request-file";
   requestFile: string;
 }
 
 export interface ParsedCapabilityPrivateInputBindV1 extends ParsedCliCommonOptionsV1 {
   kind: "private-input";
-  command: "capability.private-input.bind";
+  command: CapabilityCliPrivateCommand;
   mode: "direct";
   packageId?: string;
   packagePinDigest?: string;
@@ -95,7 +101,7 @@ export type ParsedCapabilityCliArgvV1 =
 
 export interface ParsedAuthorityDirectMutationV1 extends ParsedCliCommonOptionsV1 {
   kind: "mutation";
-  command: Extract<FabricCliMutationCommandV1, `authority.${string}`>;
+  command: CapabilityCliAuthorityMutationCommand;
   mode: "direct";
   grantFile?: string;
   grantId?: string;
@@ -110,7 +116,10 @@ export interface ParsedAuthorityDirectMutationV1 extends ParsedCliCommonOptionsV
 
 export interface ParsedAuthorityRequestFileMutationV1 extends ParsedCliCommonOptionsV1 {
   kind: "mutation";
-  command: Exclude<Extract<FabricCliMutationCommandV1, `authority.${string}`>, "authority.repair">;
+  command: Exclude<
+    CapabilityCliAuthorityMutationCommand,
+    typeof CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR
+  >;
   mode: "request-file";
   requestFile: string;
 }

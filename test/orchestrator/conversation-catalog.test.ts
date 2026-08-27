@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { conversationManifestPath } from "../../src/orchestrator/conversation/artifact-store.js";
 import {
   CatalogCursorCodec,
+  CatalogCursorError,
   StaleCatalogCursorError,
 } from "../../src/orchestrator/conversation/catalog-cursor.js";
 import { projectConversationCatalog } from "../../src/orchestrator/conversation/catalog-projector.js";
@@ -262,6 +263,31 @@ test("catalog ordering and pagination remain bytewise stable", async () => {
     });
     expect(first.response.items.map((item) => item.root_session_id)).toEqual(["b", "a"]);
     expect(first.response.next_cursor).not.toBeNull();
+    const decodedFirstCursor = codec.decodeCatalog(first.response.next_cursor ?? "");
+    const absentBoundaryCursor = codec.encodeCatalog({
+      ...decodedFirstCursor,
+      last: {
+        sort_updated_at: decodedFirstCursor.last?.sort_updated_at ?? "",
+        root_session_id: "missing-root",
+      },
+    });
+    try {
+      projectConversationCatalog({
+        inventory,
+        lineages,
+        cursorCodec: codec,
+        scopeId: "project:demo",
+        limit: 2,
+        cursor: absentBoundaryCursor,
+        headRecords,
+      });
+      throw new Error("expected an absent catalog boundary rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CatalogCursorError);
+      if (!(error instanceof CatalogCursorError)) throw error;
+      expect(error.code).toBe("cursor_binding_mismatch");
+      expect(error.message).toBe("catalog cursor boundary is absent");
+    }
     try {
       projectConversationCatalog({
         inventory,

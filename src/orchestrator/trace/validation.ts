@@ -1,10 +1,41 @@
+import { ENGINES } from "../../core/agent-contract.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_LIMITS,
+  CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KINDS,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODES,
+} from "../conversation/conversation-message-queue-contract.js";
+import {
+  CONVERSATION_APPROVAL_OUTCOMES,
+  CONVERSATION_ARTIFACT_TYPES,
+  CONVERSATION_ASSESSMENT_STAGES,
+  CONVERSATION_BASELINE_REASONS,
+  CONVERSATION_BASELINE_STATUSES,
+  CONVERSATION_CONTINUING_DECISION_OUTCOMES,
+  CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
+  CONVERSATION_DECISION_OUTCOME,
+  CONVERSATION_HEALTH_VALUES,
+  CONVERSATION_INVALID_ASSESSMENT_REASON,
+  CONVERSATION_LIFECYCLES,
+  CONVERSATION_OPERATION_STATES,
+  CONVERSATION_RECONCILIATION_STATUSES,
+  CONVERSATION_ROUND_PHASES,
+  CONVERSATION_SANDBOXES,
+  CONVERSATION_SKILL_SOURCES,
+  CONVERSATION_TERMINAL_LIFECYCLES,
+  CONVERSATION_TOOL_ACTION_STATUSES,
+  CONVERSATION_TOOL_INTENTS,
+  CONVERSATION_TRACE_EVENT_PAYLOAD_SCHEMAS,
+  isConversationNonnegativeSafeInteger,
+  isConversationNullableScore,
+  isConversationPositiveSafeInteger,
+  isConversationScore,
+} from "../conversation/conversation-public-wire-contract.js";
 import { TRACE_LIMITS, utf8Bytes } from "./limits.js";
 import type {
   InternalTraceStoreRecord,
   StoredTraceEvent,
   TraceAppendInput,
   TraceCorrelation,
-  TraceEvent,
 } from "./types.js";
 
 type Rule = (value: unknown) => boolean;
@@ -29,14 +60,19 @@ const union =
   (value) =>
     rules.some((rule) => rule(value));
 const array =
-  (rule: Rule): Rule =>
+  (rule: Rule, maximum: number = TRACE_LIMITS.maxArrayItems): Rule =>
   (value) =>
-    Array.isArray(value) && value.length <= TRACE_LIMITS.maxArrayItems && value.every(rule);
+    Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Array.prototype &&
+    value.length <= maximum &&
+    Object.keys(value).length === value.length &&
+    Object.keys(value).every((key, index) => key === String(index)) &&
+    value.every(rule);
 const nullableText = union(nil, text);
 const nullableReference = union(nil, reference);
 const textArray = array(text);
 const referenceArray = array(reference);
-const engine = literal("claude", "codex", "copilot", "opencode", "antigravity");
+const engine = literal(...ENGINES);
 const modelCredential =
   /(?:^|[._/@:+-])(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|A[KS]IA[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[\w-]{20,})(?=$|[._/@:+-])|(?:^|[._/@:+-])(?:token|secret|password|credential|api[_-]?key|access[_-]?key)(?:$|[._/@:+-])/i;
 const localModelPath =
@@ -52,8 +88,8 @@ export const isValidParticipantModel = (value: unknown): value is string =>
   !modelCredential.test(value);
 const model = union(nil, isValidParticipantModel);
 const digest: Rule = (value) => typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value);
-const tools = array(literal("read", "write", "edit", "bash", "grep", "glob", "web"));
-const lifecycle = literal("INIT", "ACTIVE", "PAUSED", "COMPLETED", "STOPPED", "FAILED", "ABORTED");
+const tools = array(literal(...CONVERSATION_TOOL_INTENTS));
+const lifecycle = literal(...CONVERSATION_LIFECYCLES);
 
 function compileShape(spec: string, rules: Readonly<Record<string, Rule>>): Rule {
   const fields = new Map<string, { optional: boolean; rule: Rule }>();
@@ -91,30 +127,29 @@ const rules: Record<string, Rule> = {
   model,
   tools,
   lifecycle,
-  terminalLifecycle: literal("COMPLETED", "STOPPED", "FAILED", "ABORTED"),
-  operationState: literal("requested", "dispatched", "acknowledged", "completed", "ambiguous"),
-  artifactType: literal(
-    "decision_matrix",
-    "plan",
-    "diff",
-    "tests",
-    "synthesis",
-    "transcript",
-    "compaction",
-  ),
+  terminalLifecycle: literal(...CONVERSATION_TERMINAL_LIFECYCLES),
+  operationState: literal(...CONVERSATION_OPERATION_STATES),
+  artifactType: literal(...CONVERSATION_ARTIFACT_TYPES),
   true: literal(true),
-  sandbox: literal("read-only", "workspace-write", "danger-full-access"),
-  skillSource: literal("repo", "shared", "builtin"),
-  toolStatus: literal("started", "completed", "failed"),
-  assessmentStage: literal("blind", "full"),
-  targetParticipants: union(literal("all"), referenceArray),
-  roundPhase: literal("start", "end"),
-  health: literal("healthy", "degraded"),
-  baselineStatus: literal("success", "failed", "skipped"),
-  nullableNumber: union(nil, number),
+  sandbox: literal(...CONVERSATION_SANDBOXES),
+  skillSource: literal(...CONVERSATION_SKILL_SOURCES),
+  toolStatus: literal(...CONVERSATION_TOOL_ACTION_STATUSES),
+  assessmentStage: literal(...CONVERSATION_ASSESSMENT_STAGES),
+  targetParticipants: union(
+    literal(...CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODES),
+    referenceArray,
+  ),
+  roundPhase: literal(...CONVERSATION_ROUND_PHASES),
+  health: literal(...CONVERSATION_HEALTH_VALUES),
+  baselineStatus: literal(...CONVERSATION_BASELINE_STATUSES),
+  nullableBaselineReason: union(nil, literal(...CONVERSATION_BASELINE_REASONS)),
+  positiveInteger: isConversationPositiveSafeInteger,
+  nonnegativeInteger: isConversationNonnegativeSafeInteger,
+  nullableScore: isConversationNullableScore,
   engineArray: array(engine),
-  approvalOutcome: literal("approve", "reject"),
-  reconciliationStatus: literal("reconciled", "partial", "unavailable"),
+  approvalOutcome: literal(...CONVERSATION_APPROVAL_OUTCOMES),
+  reconciliationStatus: literal(...CONVERSATION_RECONCILIATION_STATUSES),
+  score: isConversationScore,
 };
 rules.participant = compileShape(
   "participant_id:reference role_ref:reference engine:engine model:model",
@@ -127,7 +162,7 @@ rules.dryRunParticipant = compileShape(
 rules.gate = compileShape("value:boolean evidence:text", rules);
 rules.convergenceGate = compileShape("value:convergenceValue evidence:text", {
   ...rules,
-  convergenceValue: union(boolean, literal("not_applicable")),
+  convergenceValue: union(boolean, literal(CONVERSATION_CONVERGENCE_NOT_APPLICABLE)),
 });
 rules.assessment = compileShape(
   "agreement:gate conflict_resolution:gate evidence_quality:gate convergence:convergenceGate",
@@ -136,12 +171,12 @@ rules.assessment = compileShape(
 rules.decision = union(
   compileShape("outcome:abort score:null reason:invalidAssessment", {
     ...rules,
-    abort: literal("abort"),
-    invalidAssessment: literal("invalid_assessment"),
+    abort: literal(CONVERSATION_DECISION_OUTCOME.ABORT),
+    invalidAssessment: literal(CONVERSATION_INVALID_ASSESSMENT_REASON),
   }),
-  compileShape("outcome:continuingOutcome score:number", {
+  compileShape("outcome:continuingOutcome score:score", {
     ...rules,
-    continuingOutcome: literal("consensus", "continue", "exhausted"),
+    continuingOutcome: literal(...CONVERSATION_CONTINUING_DECISION_OUTCOMES),
   }),
 );
 rules.approvalToken = compileShape(
@@ -157,52 +192,24 @@ rules.publicMessageLocator = compileShape(
   {
     ...rules,
     digest,
-    messageTargetKind: literal("user-message", "completed-agent-response"),
+    messageTargetKind: literal(...CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KINDS),
   },
 );
+const quoteReferenceList = array(
+  rules.publicMessageLocator as Rule,
+  CONVERSATION_MESSAGE_QUEUE_LIMITS.maxQuotes,
+);
 rules.quoteReferenceArray = (value) =>
-  Array.isArray(value) &&
-  value.length >= 1 &&
-  value.length <= 8 &&
-  value.every(rules.publicMessageLocator as Rule);
-const eventSchemas = {
-  conversation_configured: "topic:text participants:participantArray policy:text max_rounds:number",
-  coordinator_decision: "selected_policy:text reason:text",
-  participant_bound:
-    "participant_id:reference engine:engine model:model prompt_hash:reference tools:tools sandbox:sandbox",
-  skill_injected: "skill_refs:referenceArray resolved_hashes:referenceArray source:skillSource",
-  precommit: "round_id:reference participant_id:reference answer:text evidence:textArray",
-  agent_response_delta:
-    "round_id:reference participant_id:reference content_delta:text final_claim:nullableText final_evidence:textArray completes_response:boolean",
-  tool_action:
-    "tool:reference action:text status:toolStatus input_ref:nullableReference output_ref:nullableReference",
-  evaluator_assessment: "round_id:reference stage:assessmentStage assessment:assessment",
-  user_message:
-    "content:text target_participants:targetParticipants quote_refs?:quoteReferenceArray",
-  consensus_update: "round_id:reference decision:decision",
-  round_boundary: "round_id:reference phase:roundPhase",
-  state_change: "lifecycle:lifecycle health:health terminal:boolean reason:nullableText",
-  baseline_result:
-    "status:baselineStatus answer:nullableText confidence:nullableNumber skip_reason:nullableText",
-  synthesis_completed: "decision_matrix_ref:reference baseline_comparison_ref:reference",
-  conversation_terminal: "lifecycle:terminalLifecycle terminal:true final_score:nullableNumber",
-  dry_run_result:
-    "participants:dryRunParticipantArray evaluator_auto_added:boolean engines_available:engineArray models_valid:boolean",
-  error: "agent_id:nullableReference code:reference message:text",
-  operation_lifecycle: "operation_id:reference attempt_id:reference state:operationState",
-  approval_requested: "token:approvalToken description:text",
-  approval_resolved: "decision:approvalDecision",
-  caller_cancelled: "operation_id:reference actor:reference reason:nullableText",
-  artifact_created: "artifact_id:reference artifact_type:artifactType ref:reference",
-  artifact_updated:
-    "artifact_id:reference artifact_type:reference ref:reference previous_ref:reference",
-  native_history_reconciled:
-    "public_session_ref:reference status:reconciliationStatus imported_turn_count:number imported_tool_count:number provenance_refs:referenceArray evidence_refs:referenceArray completeness_reason:text",
-} satisfies Record<TraceEvent["type"], string>;
+  quoteReferenceList(value) && (value as unknown[]).length >= 1;
+export const TRACE_EVENT_PAYLOAD_SCHEMAS = CONVERSATION_TRACE_EVENT_PAYLOAD_SCHEMAS;
+rules.terminalTrue = literal(true);
 rules.participantArray = array(rules.participant);
 rules.dryRunParticipantArray = array(rules.dryRunParticipant);
 const eventRules = new Map(
-  Object.entries(eventSchemas).map(([type, spec]) => [type, compileShape(spec, rules)]),
+  Object.entries(TRACE_EVENT_PAYLOAD_SCHEMAS).map(([type, spec]) => [
+    type,
+    compileShape(spec, rules),
+  ]),
 );
 const correlationSchema =
   "workflow_id:reference conversation_id:reference revision_id:reference run_id:reference turn_id:reference operation_id:reference attempt_id:reference unit_id?:reference participant_id?:reference role_ref?:reference role_resolved_hash?:reference parent_attempt_id?:reference skill_refs?:referenceArray skill_resolved_hashes?:referenceArray evidence_refs?:referenceArray engine?:engine";

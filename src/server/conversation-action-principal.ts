@@ -1,4 +1,5 @@
 import { type ActionRequestAuthorityV1, actionIdempotencyScopeDigest } from "../actions/index.js";
+import { UI_LAN_TOKEN_HEADER } from "../core/ui-cli-contract.js";
 import { digestHex, digestV1 } from "../durability/index.js";
 import { conversationSessionCapabilityDigest } from "./conversation-auth.js";
 
@@ -18,7 +19,7 @@ export function deriveBrowserActionAuthority(
   const controlSessionDigest = conversationSessionCapabilityDigest(request);
   if (controlSessionDigest === null)
     throw new Error("authenticated browser session capability is absent");
-  const csrfEpochDigest = requestBinding(request, "x-vibeflow-token");
+  const csrfEpochDigest = requestBinding(request, UI_LAN_TOKEN_HEADER);
   const principalDigest = digestV1("VF-BROWSER-ACTION-PRINCIPAL\0v1\0", {
     schema_version: "1.0",
     control_session_digest: controlSessionDigest,

@@ -1,11 +1,18 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type {
   ActionApprovalV1,
   ActionDispatchRecordV1,
   ActionProposalV1,
 } from "../../actions/index.js";
+import {
+  ACTION_OPERATION_STATE,
+  type ActionOperationDomainTerminalState,
+} from "../../actions/protocol-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type { ConversationReceiptNativePlanV1 } from "./conversation-action-receipt-store.js";
+import { CONVERSATION_HEAD_STATUS } from "./conversation-catalog-contract.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { ConversationAuthorityFactV1 } from "./conversation-receipt-authority-facts.js";
 import {
   materializeReceiptAssociationRecord,
@@ -22,7 +29,7 @@ export interface ConversationReceiptEffectResultV1 {
 }
 
 export interface ConversationReceiptEffectObservationV1 extends ConversationReceiptEffectResultV1 {
-  outcome: "succeeded" | "failed" | "needs_recovery";
+  outcome: ActionOperationDomainTerminalState;
   reason_code: string | null;
 }
 
@@ -50,15 +57,15 @@ export class ConversationReceiptEffectExecutor {
     dispatch: ActionDispatchRecordV1;
   }): Promise<ConversationReceiptEffectResultV1> {
     let result: ConversationReceiptEffectResultV1;
-    if (input.plan.action_type === "conversation.select_lineage_head") {
+    if (input.plan.action_type === HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD) {
       try {
         result = this.select(input.plan, input.proposal, input.approval, input.dispatch);
       } finally {
         this.options.service.wakeMessageQueue(input.plan.expected.conversation_id);
       }
-    } else if (input.plan.action_type === "conversation.associate_lineages")
+    } else if (input.plan.action_type === HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES)
       result = this.associate(input.plan, input.proposal, input.approval, input.dispatch);
-    else if (input.plan.action_type === "conversation.stop_operation")
+    else if (input.plan.action_type === HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION)
       result = await this.stop(input.plan, input.proposal);
     else throw new Error("unsupported conversation receipt effect");
     this.options.fault?.("after-effect-publish");
@@ -72,11 +79,12 @@ export class ConversationReceiptEffectExecutor {
     dispatch: ActionDispatchRecordV1;
     expectedFacts: readonly ConversationAuthorityFactV1[];
   }): Promise<ConversationReceiptEffectObservationV1> {
-    if (input.plan.action_type === "conversation.select_lineage_head")
+    if (input.plan.action_type === HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD)
       return this.observeSelection(input);
-    if (input.plan.action_type === "conversation.associate_lineages")
+    if (input.plan.action_type === HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES)
       return this.observeAssociation(input);
-    if (input.plan.action_type === "conversation.stop_operation") return this.observeStop(input);
+    if (input.plan.action_type === HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION)
+      return this.observeStop(input);
     throw new Error("unsupported conversation receipt observation");
   }
 
@@ -104,7 +112,7 @@ export class ConversationReceiptEffectExecutor {
     const withoutDigest: Omit<LineageHeadRecordV1, "content_digest"> = {
       schema_version: "1.0",
       root_session_id: current.root_session_id,
-      head_status: "committed",
+      head_status: CONVERSATION_HEAD_STATUS.COMMITTED,
       active: structuredClone(native.candidate),
       candidate_heads: [],
       head_epoch: current.head_epoch + 1,
@@ -159,7 +167,8 @@ export class ConversationReceiptEffectExecutor {
     proposal: ActionProposalV1,
   ): Promise<ConversationReceiptEffectResultV1> {
     const action = plan.action;
-    if (action.type !== "conversation.stop_operation") throw new Error("stop plan action mismatch");
+    if (action.type !== HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION)
+      throw new Error("stop plan action mismatch");
     const actor = proposal.requested_by.public_actor_id;
     const reason = `action:${proposal.proposal_id}`;
     const result = await this.options.service.cancelOperation({
@@ -186,11 +195,19 @@ export class ConversationReceiptEffectExecutor {
       current.previous_head_digest === native.expected_head_digest &&
       JSON.stringify(current.active) === JSON.stringify(native.candidate)
     )
-      return { outcome: "succeeded", reason_code: null, facts: [this.headFact(current)] };
+      return {
+        outcome: ACTION_OPERATION_STATE.SUCCEEDED,
+        reason_code: null,
+        facts: [this.headFact(current)],
+      };
     if (current.content_digest === native.expected_head_digest)
-      return { outcome: "failed", reason_code: "effect-refused", facts: [...input.expectedFacts] };
+      return {
+        outcome: ACTION_OPERATION_STATE.FAILED,
+        reason_code: "effect-refused",
+        facts: [...input.expectedFacts],
+      };
     return {
-      outcome: "needs_recovery",
+      outcome: ACTION_OPERATION_STATE.NEEDS_RECOVERY,
       reason_code: "effect-state-unknown",
       facts: [this.headFact(current)],
     };
@@ -213,7 +230,7 @@ export class ConversationReceiptEffectExecutor {
       if (JSON.stringify(persisted) !== JSON.stringify(record))
         throw new Error("lineage association durable record changed");
       return {
-        outcome: "succeeded",
+        outcome: ACTION_OPERATION_STATE.SUCCEEDED,
         reason_code: null,
         facts: this.associationFacts(native, record.content_digest, record.association_id),
       };
@@ -226,9 +243,13 @@ export class ConversationReceiptEffectExecutor {
         (head, index) => head.content_digest === native.root_bindings[index]?.expected_head_digest,
       )
     )
-      return { outcome: "failed", reason_code: "effect-refused", facts: [...input.expectedFacts] };
+      return {
+        outcome: ACTION_OPERATION_STATE.FAILED,
+        reason_code: "effect-refused",
+        facts: [...input.expectedFacts],
+      };
     return {
-      outcome: "needs_recovery",
+      outcome: ACTION_OPERATION_STATE.NEEDS_RECOVERY,
       reason_code: "effect-state-unknown",
       facts: this.associationFacts(
         native,
@@ -244,9 +265,13 @@ export class ConversationReceiptEffectExecutor {
   ): Promise<ConversationReceiptEffectObservationV1> {
     const fact = await this.stopFact(input.plan, input.proposal);
     return fact
-      ? { outcome: "succeeded", reason_code: null, facts: [this.lockFact(input.plan), fact] }
+      ? {
+          outcome: ACTION_OPERATION_STATE.SUCCEEDED,
+          reason_code: null,
+          facts: [this.lockFact(input.plan), fact],
+        }
       : {
-          outcome: "needs_recovery",
+          outcome: ACTION_OPERATION_STATE.NEEDS_RECOVERY,
           reason_code: "effect-state-unknown",
           facts: [...input.expectedFacts],
         };
@@ -257,11 +282,12 @@ export class ConversationReceiptEffectExecutor {
     proposal: ActionProposalV1,
   ): Promise<ConversationAuthorityFactV1 | null> {
     const action = plan.action;
-    if (action.type !== "conversation.stop_operation") throw new Error("stop plan action mismatch");
+    if (action.type !== HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION)
+      throw new Error("stop plan action mismatch");
     const events = (await this.options.service.events(plan.expected.conversation_id, 0)) ?? [];
     const found = events.some(
       (event) =>
-        event.event.type === "caller_cancelled" &&
+        event.event.type === CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED &&
         event.event.payload.operation_id === action.operation_id &&
         event.event.payload.actor === proposal.requested_by.public_actor_id &&
         event.event.payload.reason === `action:${proposal.proposal_id}`,

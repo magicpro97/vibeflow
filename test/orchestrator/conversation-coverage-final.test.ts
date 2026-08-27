@@ -26,6 +26,7 @@ import {
   projectRuntimePreviewRequest,
 } from "../../src/orchestrator/conversation/boundary-projection.js";
 import { ControlRuntime } from "../../src/orchestrator/conversation/control-runtime.js";
+import { CONVERSATION_BASELINE_SKIP_REASON } from "../../src/orchestrator/conversation/conversation-baseline-contract.js";
 import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
 import { projectDecisionMatrix } from "../../src/orchestrator/conversation/debate-projection.js";
 import {
@@ -295,6 +296,7 @@ function policyContext(overrides: Record<string, unknown> = {}): ConversationCon
         prepareConversationTurn({
           conversation_id: correlation.conversation_id,
           revision_id: correlation.revision_id,
+          recipient_engine: "codex",
           request,
           events: [],
           resume: null,
@@ -378,12 +380,15 @@ describe("conversation final validation and projection coverage", () => {
               status: "skipped",
               answer: null,
               confidence: null,
-              skip_reason: "maintenance",
+              skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
             },
           }),
         ],
       }),
-    ).toMatchObject({ status: "skipped", skip_reason: "maintenance" });
+    ).toMatchObject({
+      status: "skipped",
+      skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
+    });
 
     const emitted: TraceEvent[] = [];
     const run = async (context: ConversationContext) => {

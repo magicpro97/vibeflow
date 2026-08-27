@@ -14,7 +14,16 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CTX_DIR, VERSION, readState, writeState } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { syncSkillMirrors } from "../skills/sync.js";
+
+/** Engines whose skill mirrors are maintained by the init updater, in legacy sync order. */
+export const INIT_SKILL_MIRROR_ENGINES = Object.freeze([
+  AGENT_ENGINE.CLAUDE,
+  AGENT_ENGINE.CODEX,
+  AGENT_ENGINE.COPILOT,
+  AGENT_ENGINE.OPENCODE,
+] as const);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -46,7 +55,7 @@ export function ensureInitUpdated(base: string): InitUpdateResult {
   let synced: string[] = [];
 
   if (seeded || needsVersionUpdate) {
-    const result = syncSkillMirrors(base, { engines: ["claude", "codex", "copilot", "opencode"] });
+    const result = syncSkillMirrors(base, { engines: INIT_SKILL_MIRROR_ENGINES });
     synced = result.synced;
   }
 

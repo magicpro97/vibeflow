@@ -1,9 +1,24 @@
+import { isAgentEngine } from "../core/agent-contract.js";
+import {
+  CAPABILITY_SCOPE,
+  type CapabilityScope,
+  isCapabilityScope,
+} from "../core/capability-contract.js";
 import { digestV1 } from "../durability/index.js";
+import {
+  CAPABILITY_MANIFEST_ACCESSES,
+  CAPABILITY_MANIFEST_FILESYSTEM_ROOT,
+  CAPABILITY_MANIFEST_NETWORK_TRANSPORTS,
+  CAPABILITY_MANIFEST_PERMISSION_KIND,
+} from "./capability-manifest-vocabulary-contract.js";
+import { isAuthorizableActionKind } from "./host-action-contract.js";
+import {
+  ACTION_PERMISSION_ENFORCEMENT_VALUE,
+  PUBLIC_ACTION_SCHEMA_VERSION,
+} from "./public-action-contract.js";
 import { assertDigest, assertOpaqueId, assertTimestamp, bytewise } from "./record-primitives.js";
-import { HOST_ACTION_KINDS } from "./request-types.js";
 import { ActionValidationError, boundedString, exactObject, safeInteger } from "./strict-json.js";
 
-const ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
 const LOCAL_ID = /^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$/;
 
 export function validateGrantInput(value: unknown, path: string): void {
@@ -13,19 +28,15 @@ export function validateGrantInput(value: unknown, path: string): void {
     [],
     path,
   );
-  if (row.scope !== "project" && row.scope !== "user")
-    invalid("invalid grant scope", `${path}.scope`);
+  if (!isCapabilityScope(row.scope)) invalid("invalid grant scope", `${path}.scope`);
+  const grantScope = row.scope;
   assertOpaqueId(row.principal_id, `${path}.principal_id`);
   const actionTypes = stringArray(row.action_types, `${path}.action_types`, { min: 1 });
   for (const action of actionTypes)
-    if (action !== "capability.discover" && !HOST_ACTION_KINDS.has(action as never))
+    if (!isAuthorizableActionKind(action))
       invalid("unsupported grant action type", `${path}.action_types`);
   const permissions = array(row.permissions, `${path}.permissions`, 512).map((item, index) =>
-    validateGrantedPermission(
-      item,
-      row.scope as "project" | "user",
-      `${path}.permissions[${index}]`,
-    ),
+    validateGrantedPermission(item, grantScope, `${path}.permissions[${index}]`),
   );
   orderedUnique(
     permissions.map((permission) => `${permission.permission_id}\0${permission.binding_digest}`),
@@ -33,7 +44,7 @@ export function validateGrantInput(value: unknown, path: string): void {
   );
   const targetEngines = stringArray(row.target_engines, `${path}.target_engines`);
   for (const engine of targetEngines)
-    if (!ENGINES.has(engine)) invalid("invalid grant target engine", `${path}.target_engines`);
+    if (!isAgentEngine(engine)) invalid("invalid grant target engine", `${path}.target_engines`);
   assertTimestamp(row.expires_at, `${path}.expires_at`);
 }
 
@@ -45,7 +56,7 @@ interface ValidatedPermission {
 export function validateManifestPermission(
   value: unknown,
   packageId: string,
-  installScope: "project" | "user",
+  installScope: CapabilityScope,
   path: string,
 ): string {
   const row = exactObject(
@@ -65,8 +76,8 @@ export function validateManifestPermission(
   if (permissionId.startsWith("vf.source/"))
     invalid("reserved source permission ID", `${path}.permission_id`);
   if (
-    !["brokered", "sandboxed", "engine-enforced", "disclosed-not-enforced"].includes(
-      row.required_enforcement as string,
+    !Object.values(ACTION_PERMISSION_ENFORCEMENT_VALUE).some(
+      (candidate) => candidate === row.required_enforcement,
     )
   )
     invalid("invalid manifest permission enforcement", `${path}.required_enforcement`);
@@ -76,7 +87,7 @@ export function validateManifestPermission(
 
 function validateGrantedPermission(
   value: unknown,
-  grantScope: "project" | "user",
+  grantScope: CapabilityScope,
   path: string,
 ): ValidatedPermission {
   const row = exactObject(
@@ -93,7 +104,8 @@ function validateGrantedPermission(
     [],
     path,
   );
-  if (row.schema_version !== "1.0") invalid("unsupported permission version", path);
+  if (row.schema_version !== PUBLIC_ACTION_SCHEMA_VERSION)
+    invalid("unsupported permission version", path);
   const permissionId = localId(row.permission_id, `${path}.permission_id`);
   if (permissionId.startsWith("vf.source."))
     invalid("reserved source permission ID", `${path}.permission_id`);
@@ -102,8 +114,8 @@ function validateGrantedPermission(
     if (!/^vf-target-[a-f0-9]{64}$/.test(targetId))
       invalid("invalid permission target ID", `${path}.target_ids[${index}]`);
   if (
-    !new Set(["brokered", "sandboxed", "engine-enforced", "disclosed-not-enforced"]).has(
-      row.enforcement as string,
+    !Object.values(ACTION_PERMISSION_ENFORCEMENT_VALUE).some(
+      (candidate) => candidate === row.enforcement,
     )
   )
     invalid("invalid permission enforcement", `${path}.enforcement`);
@@ -118,21 +130,27 @@ function validateGrantedPermission(
 function validatePermissionScope(
   kind: unknown,
   value: unknown,
-  grantScope: "project" | "user",
+  grantScope: CapabilityScope,
   path: string,
 ): void {
   switch (kind) {
-    case "filesystem": {
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.FILESYSTEM: {
       const row = exactObject(value, ["root", "access", "path_prefix"], [], path);
-      const expectedRoot = grantScope === "project" ? "project" : "user-home";
-      if (row.root !== expectedRoot || !["read", "write"].includes(row.access as string))
+      const expectedRoot =
+        grantScope === CAPABILITY_SCOPE.PROJECT
+          ? CAPABILITY_MANIFEST_FILESYSTEM_ROOT.PROJECT
+          : CAPABILITY_MANIFEST_FILESYSTEM_ROOT.USER_HOME;
+      if (
+        row.root !== expectedRoot ||
+        !CAPABILITY_MANIFEST_ACCESSES.some((access) => access === row.access)
+      )
         invalid("filesystem scope/root mismatch", path);
       relativePrefix(row.path_prefix, `${path}.path_prefix`);
       return;
     }
-    case "network": {
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.NETWORK: {
       const row = exactObject(value, ["transport", "host", "port", "path_prefix"], [], path);
-      if (!["https", "git-https", "mcp-https"].includes(row.transport as string))
+      if (!CAPABILITY_MANIFEST_NETWORK_TRANSPORTS.some((transport) => transport === row.transport))
         invalid("invalid network transport", `${path}.transport`);
       canonicalHost(row.host, `${path}.host`);
       if (row.port !== null && safeInteger(row.port, `${path}.port`, 1) > 65_535)
@@ -140,7 +158,7 @@ function validatePermissionScope(
       canonicalUrlPath(row.path_prefix, `${path}.path_prefix`);
       return;
     }
-    case "process": {
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.PROCESS: {
       const row = exactObject(
         value,
         ["executable_class", "argv_prefix", "allow_additional_args"],
@@ -154,30 +172,30 @@ function validatePermissionScope(
         invalid("invalid additional-argument flag", `${path}.allow_additional_args`);
       return;
     }
-    case "shell": {
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SHELL: {
       const row = exactObject(value, ["adapter_id", "template_id"], [], path);
       localId(row.adapter_id, `${path}.adapter_id`);
       localId(row.template_id, `${path}.template_id`);
       return;
     }
-    case "config": {
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.CONFIG: {
       const row = exactObject(value, ["engine", "namespace", "access", "key_prefix"], [], path);
-      if (!ENGINES.has(row.engine as string)) invalid("invalid config engine", `${path}.engine`);
+      if (!isAgentEngine(row.engine)) invalid("invalid config engine", `${path}.engine`);
       localId(row.namespace, `${path}.namespace`);
-      if (!new Set(["read", "write"]).has(row.access as string))
+      if (!CAPABILITY_MANIFEST_ACCESSES.some((access) => access === row.access))
         invalid("invalid config access", `${path}.access`);
       structuredKey(row.key_prefix, `${path}.key_prefix`);
       return;
     }
-    case "secret": {
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.SECRET: {
       const row = exactObject(value, ["input_ids"], [], path);
       const ids = stringArray(row.input_ids, `${path}.input_ids`, { min: 1 });
       ids.forEach((id, index) => localId(id, `${path}.input_ids[${index}]`));
       return;
     }
-    case "hook": {
+    case CAPABILITY_MANIFEST_PERMISSION_KIND.HOOK: {
       const row = exactObject(value, ["engine", "hook_point", "participant_id"], [], path);
-      if (!ENGINES.has(row.engine as string)) invalid("invalid hook engine", `${path}.engine`);
+      if (!isAgentEngine(row.engine)) invalid("invalid hook engine", `${path}.engine`);
       localId(row.hook_point, `${path}.hook_point`);
       if (row.participant_id !== null) assertOpaqueId(row.participant_id, `${path}.participant_id`);
       return;

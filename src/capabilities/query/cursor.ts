@@ -1,6 +1,6 @@
 import { parseStrictJson } from "../../actions/strict-json.js";
 import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
-import { CapabilityRuntimeError } from "../operations/errors.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "../operations/errors.js";
 
 interface CapabilityCursorV1 {
   schema_version: "1.0";
@@ -42,7 +42,7 @@ export function decodeCapabilityCursor(raw: string): CapabilityCursorV1 {
 
 export class CapabilityCursorErrorV1 extends CapabilityRuntimeError {
   constructor() {
-    super("invalid capability cursor", "integrity-failure");
+    super("invalid capability cursor", CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE);
     this.name = "CapabilityCursorErrorV1";
   }
 }
@@ -52,7 +52,10 @@ export class StaleCapabilityCursorErrorV1 extends CapabilityRuntimeError {
     readonly restart_cursor: string,
     readonly source_watermark: string,
   ) {
-    super("stale capability cursor; restart pagination", "scope-base-stale");
+    super(
+      "stale capability cursor; restart pagination",
+      CAPABILITY_RUNTIME_ERROR_CODE.SCOPE_BASE_STALE,
+    );
     this.name = "StaleCapabilityCursorErrorV1";
   }
 }

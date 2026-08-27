@@ -1,50 +1,26 @@
-export interface HomePrivateContextPresence {
-  schema_version: "1.0";
-  private_context_present: boolean;
-}
+import type {
+  ConversationHomeCreateWireRequestV1,
+  ConversationPrivateRangeSelectionV1,
+  DiscardConversationDraftPrivateContextRequestV1,
+  DiscardConversationMessagePrivateContextRequestV1,
+  PublicConversationPrivateContextPresenceV1,
+  StageConversationDraftPrivateContextRequestV1,
+  StageConversationMessagePrivateContextRequestV1,
+} from "../../orchestrator/conversation/conversation-private-context-broker-wire.js";
+import type { CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT } from "../../orchestrator/conversation/conversation-private-context-broker-wire.js";
 
-export interface HomePrivateRangeSelectionRequest {
-  repo_relative_path: string;
-  start_line: number;
-  end_line: number;
-}
-
-export interface HomeStageMessagePrivateContextRequest extends HomePrivateRangeSelectionRequest {
-  schema_version: "1.0";
-  enqueue_idempotency_key: string;
-  source_kind: "private-file-range";
-}
-
-export interface HomeDiscardMessagePrivateContextRequest {
-  schema_version: "1.0";
-  idempotency_key: string;
-  enqueue_idempotency_key: string;
-  expected_private_context_present: true;
-}
-
-export interface HomeStageDraftPrivateContextRequest extends HomePrivateRangeSelectionRequest {
-  schema_version: "1.0";
-  create_idempotency_key: string;
-  source_kind: "private-file-range";
-}
-
-export interface HomeDiscardDraftPrivateContextRequest {
-  schema_version: "1.0";
-  idempotency_key: string;
-  create_idempotency_key: string;
-  expected_private_context_present: true;
-}
-
-export interface HomeConversationCreateRequest {
-  schema_version: "1.0";
-  idempotency_key: string;
-  topic: string;
-  private_context_present: boolean;
-}
+export type HomePrivateContextPresence = PublicConversationPrivateContextPresenceV1;
+export type HomePrivateRangeSelectionRequest = ConversationPrivateRangeSelectionV1;
+export type HomeStageMessagePrivateContextRequest = StageConversationMessagePrivateContextRequestV1;
+export type HomeDiscardMessagePrivateContextRequest =
+  DiscardConversationMessagePrivateContextRequestV1;
+export type HomeStageDraftPrivateContextRequest = StageConversationDraftPrivateContextRequestV1;
+export type HomeDiscardDraftPrivateContextRequest = DiscardConversationDraftPrivateContextRequestV1;
+export type HomeConversationCreateRequest = ConversationHomeCreateWireRequestV1;
 
 export interface HomePrivateContextCapture {
   readonly idempotency_key: string;
-  readonly private_context_present: true;
+  readonly private_context_present: typeof CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT;
   clearIfCurrent(): void;
   restoreIfVacant(): boolean;
 }

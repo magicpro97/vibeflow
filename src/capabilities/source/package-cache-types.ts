@@ -1,3 +1,4 @@
+import type { CapabilityScope } from "../../core/capability-contract.js";
 import type {
   PackageAuthenticityBindingV1,
   PackagePinV1,
@@ -6,7 +7,7 @@ import type {
 
 export interface CapabilityPackageCacheRecordV1 {
   schema_version: "1.0";
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   package_pin: PackagePinV1;
   manifest_digest: string;

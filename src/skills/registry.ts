@@ -1,8 +1,18 @@
-// biome-ignore format: entire-file — tight formatting keeps file ≤400 lines
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { SkillScope } from "../core.js";
-import type { Skill, SkillMatch, SkillRequires, SkillStatus } from "../core.js";
+import type { Skill, SkillMatch, SkillRequires } from "../core.js";
+import {
+  SKILL_MCP_TRANSPORT,
+  SKILL_STATUS,
+  SKILL_TYPE,
+  type SkillStatus,
+  isSkillFilesystemRequirement,
+  isSkillMcpTransport,
+  isSkillScope,
+  isSkillStatus,
+  isSkillType,
+} from "../core/skill-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import type { UserMcpServer } from "../tools/index.js";
 import { parseSourceAnchors } from "./anchor-freshness.js";
@@ -12,7 +22,6 @@ import {
   parseLifecycleOwners,
   parseLifecycleSupersedes,
 } from "./lifecycle.js";
-// biome-ignore format: compact single-line keeps file ≤400
 import { type ParseSkillOpts, hasValidReviewProof } from "./review-proof.js";
 
 /**
@@ -28,17 +37,6 @@ import { type ParseSkillOpts, hasValidReviewProof } from "./review-proof.js";
  *
  * Extracted to `./discovery.js` to keep this file ≤400 lines. */
 export { discoverSkills } from "./discovery.js";
-
-const VALID_STATUS: SkillStatus[] = [
-  "verified",
-  "enriched",
-  "experimental",
-  "baseline",
-  "template",
-  "draft",
-  "deprecated",
-  "unverified",
-];
 
 export const MAX_SKILL_FILE_BYTES = 1024 * 1024;
 // biome-ignore format: compact descriptor stats keep this capped module within 400 lines
@@ -100,16 +98,16 @@ export function readSkillFileSnapshot(path: string): string {
 export type SkillProvenance = "local" | "discovered";
 
 /** Rank order used by the resolver: higher = preferred. `deprecated` is never selectable. */
-export const STATUS_RANK: Record<SkillStatus, number> = {
-  verified: 7,
-  enriched: 6,
-  experimental: 5,
-  baseline: 4,
-  template: 3,
-  draft: 2,
-  unverified: 1,
-  deprecated: 0,
-};
+export const STATUS_RANK: Readonly<Record<SkillStatus, number>> = Object.freeze({
+  [SKILL_STATUS.VERIFIED]: 7,
+  [SKILL_STATUS.ENRICHED]: 6,
+  [SKILL_STATUS.EXPERIMENTAL]: 5,
+  [SKILL_STATUS.BASELINE]: 4,
+  [SKILL_STATUS.TEMPLATE]: 3,
+  [SKILL_STATUS.DRAFT]: 2,
+  [SKILL_STATUS.UNVERIFIED]: 1,
+  [SKILL_STATUS.DEPRECATED]: 0,
+});
 
 function asStringArray(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
@@ -124,15 +122,14 @@ export function asMcp(v: unknown, skillName: string): Skill["mcp"] | undefined {
   const r = v as Record<string, unknown>;
   // Transport defaults to stdio; unknown values fall back to stdio.
   const t = r.transport;
-  const transport: "stdio" | "http" | "sse" = t === "http" || t === "sse" ? t : "stdio";
+  const transport = isSkillMcpTransport(t) ? t : SKILL_MCP_TRANSPORT.STDIO;
   // Name: use mcp.name if valid kebab-case, else fall back to skillName.
   const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
   const rawName = typeof r.name === "string" ? r.name : undefined;
   const name = rawName && NAME_RE.test(rawName) ? rawName : undefined;
-  // Validate skillName as fallback identity.
   const resolvedName = name ?? skillName;
   if (!NAME_RE.test(resolvedName)) return undefined;
-  if (transport === "stdio") {
+  if (transport === SKILL_MCP_TRANSPORT.STDIO) {
     if (typeof r.command !== "string" || !r.command) return undefined;
     const args = Array.isArray(r.args) ? r.args.map(String).filter(Boolean) : [];
     return { name: resolvedName, transport, command: r.command, args };
@@ -159,19 +156,17 @@ function asRequires(v: unknown): SkillRequires | undefined {
   const r = v as Record<string, unknown>;
   const fs = r.filesystem;
   const requires: SkillRequires = {};
-  if (fs === "read" || fs === "write" || fs === "none") requires.filesystem = fs;
+  if (isSkillFilesystemRequirement(fs)) requires.filesystem = fs;
   if (typeof r.network === "boolean") requires.network = r.network;
   if (typeof r.shell === "boolean") requires.shell = r.shell;
   return Object.keys(requires).length ? requires : undefined;
 }
 
-const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
-
 function parseScope(data: Record<string, unknown>): SkillScope | undefined {
   const raw = data.scope;
   if (typeof raw !== "string") return undefined;
-  const s = raw.trim().toLowerCase() as SkillScope;
-  return VALID_SCOPES.has(s) ? s : undefined;
+  const scope = raw.trim().toLowerCase();
+  return isSkillScope(scope) ? scope : undefined;
 }
 
 /**
@@ -207,15 +202,13 @@ export function parseSkillText(
   if (!description || description.length > 1024) return null;
 
   const statusRaw = typeof ownStatus === "string" ? ownStatus : "";
-  let status: SkillStatus = (VALID_STATUS as string[]).includes(statusRaw)
-    ? (statusRaw as SkillStatus)
-    : "unverified";
+  let status: SkillStatus = isSkillStatus(statusRaw) ? statusRaw : SKILL_STATUS.UNVERIFIED;
 
   // External claims are untrusted. Only a caller-supplied identity plus matching
   // local proof can preserve verified; frontmatter never supplies proof identity.
   const provenance: SkillProvenance = opts.provenance ?? "local";
-  if (provenance !== "local" && status === "verified") {
-    status = hasValidReviewProof(name, opts) ? "verified" : "experimental";
+  if (provenance !== "local" && status === SKILL_STATUS.VERIFIED) {
+    status = hasValidReviewProof(name, opts) ? SKILL_STATUS.VERIFIED : SKILL_STATUS.EXPERIMENTAL;
   }
 
   const { domain, owns, dependsOn } = parseDomainMeta(data as Record<string, unknown>);
@@ -233,7 +226,7 @@ export function parseSkillText(
     extends: asStringArray(data.extends),
     capabilities: asStringArray(data.capabilities),
     triggers: asStringArray(data.triggers),
-    type: data.type === "repo" ? "repo" : data.type === "knowledge" ? "knowledge" : undefined,
+    type: isSkillType(data.type) ? data.type : undefined,
     requires: asRequires(data.requires),
     mcp: asMcp(data.mcp, name),
     domain,
@@ -265,17 +258,20 @@ export function parseSkill(
 export function skillMcpServers(skills: Skill[]): Record<string, UserMcpServer> {
   const out: Record<string, UserMcpServer> = {};
   for (const skill of skills) {
-    if (skill.status === "deprecated" || !skill.mcp) continue;
+    if (skill.status === SKILL_STATUS.DEPRECATED || !skill.mcp) continue;
     const { name: serverName, transport, command, args, url, headers } = skill.mcp;
     if (!serverName) continue;
-    if (transport === "stdio" && command) {
+    if (transport === SKILL_MCP_TRANSPORT.STDIO && command) {
       const entry: UserMcpServer = {
-        transport: "stdio",
+        transport: SKILL_MCP_TRANSPORT.STDIO,
         command,
         ...(args?.length ? { args } : {}),
       };
       out[serverName] = entry;
-    } else if ((transport === "http" || transport === "sse") && url) {
+    } else if (
+      (transport === SKILL_MCP_TRANSPORT.HTTP || transport === SKILL_MCP_TRANSPORT.SSE) &&
+      url
+    ) {
       const entry: UserMcpServer = {
         transport,
         url,
@@ -297,7 +293,7 @@ export function matchSkillsForFile(skills: Skill[], filename: string): SkillMatc
   const ext = lower.split(".").pop() ?? "";
   const matches: SkillMatch[] = [];
   for (const skill of skills) {
-    if (skill.status === "deprecated") continue;
+    if (skill.status === SKILL_STATUS.DEPRECATED) continue;
     const triggers = (skill.triggers ?? []).map((t) => t.toLowerCase());
     if (triggers.includes(ext)) {
       matches.push({ skill, reason: `extension .${ext} matches a declared trigger`, score: 1 });
@@ -312,7 +308,7 @@ export function matchSkillsForFile(skills: Skill[], filename: string): SkillMatc
  *  keyword match. Deprecated excluded; higher-trust status first. */
 export function repoSkills(skills: Skill[]): Skill[] {
   return skills
-    .filter((s) => s.type === "repo" && s.status !== "deprecated")
+    .filter((s) => s.type === SKILL_TYPE.REPO && s.status !== SKILL_STATUS.DEPRECATED)
     .sort((a, b) => STATUS_RANK[b.status] - STATUS_RANK[a.status]);
 }
 
@@ -334,12 +330,16 @@ export function selectDispatchSkills(allSkills: Skill[], unitText: string): Disp
   // always-on project law — NOT a knowledge match. Exclude repo-typed matches from
   // matchedNames so the knowledge-gap flag (matchedNames.length === 0) is not falsely
   // suppressed by an always-on skill. (Copilot review #591.)
-  const matchedNames = skillMatches.filter((m) => m.skill.type !== "repo").map((m) => m.skill.name);
+  const matchedNames = skillMatches
+    .filter((m) => m.skill.type !== SKILL_TYPE.REPO)
+    .map((m) => m.skill.name);
   const skillNames = [...new Set([...alwaysNames, ...matchedNames])];
   const skillsRequired = [
     ...new Set([
-      ...alwaysOn.filter((s) => s.status === "verified").map((s) => s.name),
-      ...skillMatches.filter((m) => m.skill.status === "verified").map((m) => m.skill.name),
+      ...alwaysOn.filter((s) => s.status === SKILL_STATUS.VERIFIED).map((s) => s.name),
+      ...skillMatches
+        .filter((m) => m.skill.status === SKILL_STATUS.VERIFIED)
+        .map((m) => m.skill.name),
     ]),
   ];
   return { skillNames, alwaysNames, matchedNames, skillsRequired };
@@ -353,7 +353,7 @@ export function matchSkillsForTask(skills: Skill[], task: string): SkillMatch[] 
   const text = task.toLowerCase();
   const matches: SkillMatch[] = [];
   for (const skill of skills) {
-    if (skill.status === "deprecated") continue;
+    if (skill.status === SKILL_STATUS.DEPRECATED) continue;
     const terms = [...(skill.triggers ?? []), ...(skill.capabilities ?? [])].map((t) =>
       t.toLowerCase(),
     );

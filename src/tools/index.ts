@@ -15,7 +15,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Engine } from "../core.js";
+import { AGENT_ENGINE, type Engine } from "../core/agent-contract.js";
 import * as codegraph from "./codegraph.js";
 import * as lsp from "./lsp.js";
 
@@ -71,7 +71,7 @@ export type UserMcpServer =
 
 /** Claude/Copilot MCP entry: a `mcpServers` map fragment ready to merge into JSON. */
 export interface JsonMcpEntry {
-  engine: "claude" | "copilot";
+  engine: typeof AGENT_ENGINE.CLAUDE | typeof AGENT_ENGINE.COPILOT;
   /** Merge target file (repo-relative for claude, absolute-ish for copilot). */
   configPath: string;
   servers: Record<string, McpServerDef>;
@@ -81,7 +81,7 @@ export interface JsonMcpEntry {
 
 /** Codex MCP entry: a structured TOML section the caller serializes to config.toml. */
 export interface TomlMcpEntry {
-  engine: "codex";
+  engine: typeof AGENT_ENGINE.CODEX;
   configPath: string;
   /** e.g. "mcp_servers.codegraph" → [mcp_servers.codegraph]. */
   section: string;
@@ -104,14 +104,14 @@ export type OpencodeServerDef =
 
 /** opencode MCP entry: merges into the top-level `mcp` map in opencode.json. */
 export interface OpencodeMcpEntry {
-  engine: "opencode";
+  engine: typeof AGENT_ENGINE.OPENCODE;
   configPath: string;
   servers: Record<string, OpencodeServerDef>;
   tools: string[];
 }
 
 export interface AntigravityMcpEntry {
-  engine: "antigravity";
+  engine: typeof AGENT_ENGINE.ANTIGRAVITY;
   configPath: string;
   servers: Record<string, StdioServer | AntigravityRemoteServer>;
   tools: string[];
@@ -170,7 +170,7 @@ export function buildStdioEntry(
   server: StdioServer,
   tools: string[],
 ): McpEntry {
-  if (engine === "codex") {
+  if (engine === AGENT_ENGINE.CODEX) {
     return {
       engine,
       configPath: CODEX_CONFIG,
@@ -181,7 +181,7 @@ export function buildStdioEntry(
       tools,
     };
   }
-  if (engine === "opencode") {
+  if (engine === AGENT_ENGINE.OPENCODE) {
     return {
       engine,
       configPath: OPENCODE_CONFIG,
@@ -189,10 +189,10 @@ export function buildStdioEntry(
       tools,
     };
   }
-  if (engine === "antigravity") {
+  if (engine === AGENT_ENGINE.ANTIGRAVITY) {
     return { engine, configPath: ANTIGRAVITY_CONFIG, servers: { [name]: server }, tools };
   }
-  if (engine === "copilot") {
+  if (engine === AGENT_ENGINE.COPILOT) {
     return {
       engine,
       configPath: COPILOT_CONFIG,
@@ -211,7 +211,7 @@ export function buildStdioEntry(
  */
 export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer): McpEntry | null {
   const transport = def.transport ?? "stdio";
-  if (engine === "opencode") {
+  if (engine === AGENT_ENGINE.OPENCODE) {
     // opencode's remote type covers both http and sse (single "remote" shape,
     // see https://opencode.ai/docs/mcp-servers/) — unlike codex, sse is not rejected.
     if (transport === "http" || transport === "sse") {
@@ -235,7 +235,7 @@ export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer)
       tools: [],
     };
   }
-  if (engine === "antigravity") {
+  if (engine === AGENT_ENGINE.ANTIGRAVITY) {
     const configPath = ANTIGRAVITY_CONFIG;
     let server: StdioServer | AntigravityRemoteServer;
     if (transport === "stdio") {
@@ -247,7 +247,7 @@ export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer)
     }
     return { engine, configPath, servers: { [name]: server }, tools: [] };
   }
-  if (engine === "codex") {
+  if (engine === AGENT_ENGINE.CODEX) {
     if (transport === "sse") return null;
     if (transport === "http") {
       return {
@@ -270,7 +270,7 @@ export function buildUserEntry(engine: Engine, name: string, def: UserMcpServer)
       tools: [],
     };
   }
-  const configPath = engine === "copilot" ? COPILOT_CONFIG : CLAUDE_CONFIG;
+  const configPath = engine === AGENT_ENGINE.COPILOT ? COPILOT_CONFIG : CLAUDE_CONFIG;
   let server: McpServerDef;
   if (transport === "stdio") {
     const s = def as { command: string; args?: string[]; env?: Record<string, string> };

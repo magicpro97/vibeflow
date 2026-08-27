@@ -1,3 +1,4 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import type {
   ActionApprovalV1,
   ActionDispatchRecordV1,
@@ -53,7 +54,7 @@ export function expectedReceiptAuthorityFacts(
   approval: ActionApprovalV1,
   dispatch: ActionDispatchRecordV1,
 ): ConversationAuthorityFactV1[] {
-  if (plan.action_type === "conversation.select_lineage_head") {
+  if (plan.action_type === HOST_ACTION_KIND.CONVERSATION_SELECT_LINEAGE_HEAD) {
     const native = plan.effect_binding;
     assertLineageHeadSelectionPlanV1(native);
     return [
@@ -64,7 +65,7 @@ export function expectedReceiptAuthorityFacts(
       },
     ];
   }
-  if (plan.action_type === "conversation.associate_lineages") {
+  if (plan.action_type === HOST_ACTION_KIND.CONVERSATION_ASSOCIATE_LINEAGES) {
     const native = receiptAssociationPlan(plan.effect_binding);
     const association = materializeReceiptAssociationRecord(native, proposal, approval, dispatch);
     return [
@@ -86,7 +87,7 @@ export function expectedReceiptAuthorityFacts(
   const action = plan.action;
   const binding = plan.effect_binding as { expected_operation_state_digest?: unknown };
   if (
-    action.type !== "conversation.stop_operation" ||
+    action.type !== HOST_ACTION_KIND.CONVERSATION_STOP_OPERATION ||
     typeof binding.expected_operation_state_digest !== "string"
   )
     throw new Error("invalid conversation stop authority plan");

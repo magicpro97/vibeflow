@@ -1,10 +1,11 @@
 import * as fs from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
-import type { Engine } from "../core.js";
+import { AGENT_ENGINE, type Engine } from "../core/agent-contract.js";
 import { assertNoSymlinkComponents, writeAll } from "../durability/path.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { ENGINE_ARG_PROMPT_LIMIT_BYTES } from "./prompt-limits.js";
 
-export const SESSION_PROMPT_FILE_ENGINE = "copilot" satisfies Engine;
+export const SESSION_PROMPT_FILE_ENGINE = AGENT_ENGINE.COPILOT;
 export const COPILOT_ARG_PROMPT_FILE_THRESHOLD_BYTES = ENGINE_ARG_PROMPT_LIMIT_BYTES;
 export const MAX_SESSION_PROMPT_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_SESSION_PROMPT_POINTER_BYTES = 4 * 1024;
@@ -12,7 +13,6 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const PERMISSION_BITS_MASK = 0o777;
 const PRIVATE_FILE_LINK_COUNT = 1;
-const WINDOWS_PLATFORM = "win32" satisfies NodeJS.Platform;
 const SESSION_PROMPT_FILE_SUFFIX = ".prompt.md";
 
 export interface SessionPromptFile {
@@ -29,13 +29,16 @@ const ownerMatches = (stat: fs.Stats): boolean =>
   typeof process.geteuid !== "function" || stat.uid === process.geteuid();
 
 function assertPrivateMode(stat: fs.Stats, expected: number): void {
-  if (process.platform !== WINDOWS_PLATFORM && (stat.mode & PERMISSION_BITS_MASK) !== expected) {
+  if (
+    process.platform !== RUNTIME_PLATFORM.WINDOWS &&
+    (stat.mode & PERMISSION_BITS_MASK) !== expected
+  ) {
     privateFileError();
   }
 }
 
 function syncDirectory(path: string): void {
-  if (process.platform === WINDOWS_PLATFORM) return;
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS) return;
   let fd: number | undefined;
   try {
     fd = fs.openSync(
@@ -114,7 +117,7 @@ function createOrReuse(path: string, bytes: Buffer): void {
       fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
       PRIVATE_FILE_MODE,
     );
-    if (process.platform !== WINDOWS_PLATFORM) fs.fchmodSync(fd, PRIVATE_FILE_MODE);
+    if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fchmodSync(fd, PRIVATE_FILE_MODE);
     writeAll(fd, bytes, 0);
     fs.fsyncSync(fd);
   } catch (error) {

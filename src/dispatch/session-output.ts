@@ -1,42 +1,62 @@
 import type { Engine } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { TRACE_LIMITS } from "../orchestrator/trace/limits.js";
 import { projectPublicEngineFrames, sanitizePublicEngineText } from "./public-redaction.js";
+import {
+  ENGINE_OUTPUT_STREAM,
+  ENGINE_SESSION_PROTOCOL,
+  type EngineOutputStream,
+} from "./session-contract.js";
 import { observeSessionStdout } from "./session-protocol.js";
 import { observeSessionTerminal } from "./session-terminal.js";
 import type { EngineSessionAdapterOptions } from "./session-types.js";
 
 const OUTPUT_TRUNCATION = "[redacted-oversize]\n";
 const RETAINED_STDOUT_BYTES = TRACE_LIMITS.maxTextBytes - Buffer.byteLength(OUTPUT_TRUNCATION);
-type PublicStream = "stdout" | "stderr";
 interface PublicFrame {
-  readonly stream: PublicStream;
+  readonly stream: EngineOutputStream;
   readonly content: string;
 }
 
 /** Bounded internal state for public output retention and raw protocol observation. */
 export class SessionStdoutState {
   readonly #retained = Buffer.alloc(RETAINED_STDOUT_BYTES);
-  readonly #publicBuffers = { stdout: "", stderr: "" };
-  readonly #discardingOversize = { stdout: false, stderr: false };
+  readonly #publicBuffers: Record<EngineOutputStream, string> = {
+    [ENGINE_OUTPUT_STREAM.STDOUT]: "",
+    [ENGINE_OUTPUT_STREAM.STDERR]: "",
+  };
+  readonly #discardingOversize: Record<EngineOutputStream, boolean> = {
+    [ENGINE_OUTPUT_STREAM.STDOUT]: false,
+    [ENGINE_OUTPUT_STREAM.STDERR]: false,
+  };
   #protocolBuffer = "";
   #discardingOversizeProtocol = false;
-  readonly #openCodeFlushed = { stdout: false, stderr: false };
+  readonly #openCodeFlushed: Record<EngineOutputStream, boolean> = {
+    [ENGINE_OUTPUT_STREAM.STDOUT]: false,
+    [ENGINE_OUTPUT_STREAM.STDERR]: false,
+  };
   #pendingOpenCodeFrames: PublicFrame[] = [];
   #pendingOpenCodeBytes = 0;
   #pendingOpenCodeTruncated = false;
   readonly #protocol: EngineSessionAdapterOptions["protocol"];
   readonly #engine: Engine;
+  readonly #expectedNativeSessionId: string | undefined;
   #start = 0;
   #length = 0;
   #truncated = false;
 
-  constructor(protocol: EngineSessionAdapterOptions["protocol"], engine: Engine) {
+  constructor(
+    protocol: EngineSessionAdapterOptions["protocol"],
+    engine: Engine,
+    expectedNativeSessionId?: string,
+  ) {
     this.#protocol = protocol;
     this.#engine = engine;
+    this.#expectedNativeSessionId = expectedNativeSessionId;
   }
 
   consume(
-    stream: PublicStream,
+    stream: EngineOutputStream,
     content: string,
     flush: boolean,
     nativeSessionId: string | undefined,
@@ -46,14 +66,17 @@ export class SessionStdoutState {
     observation?: {
       acknowledged: boolean;
       nativeSessionId?: string;
+      nativeSessionMismatch?: true;
+      nativeSessionMismatchId?: string;
       terminal?: ReturnType<typeof observeSessionTerminal>;
     };
   } {
     const buffered = this.#publicBuffers[stream] + content;
-    const observation = stream === "stdout" ? this.#observe(content, flush) : undefined;
+    const observation =
+      stream === ENGINE_OUTPUT_STREAM.STDOUT ? this.#observe(content, flush) : undefined;
     const projected = projectPublicEngineFrames(
       buffered,
-      nativeSessionId ?? observation?.nativeSessionId,
+      observation?.nativeSessionMismatchId ?? observation?.nativeSessionId ?? nativeSessionId,
       flush,
       privateValues,
       this.#discardingOversize[stream],
@@ -63,34 +86,36 @@ export class SessionStdoutState {
     const frames = this.#releaseOpenCodeFrames(
       stream,
       projected.frames,
-      nativeSessionId ?? observation?.nativeSessionId,
+      observation?.nativeSessionMismatchId ?? observation?.nativeSessionId ?? nativeSessionId,
       flush,
       privateValues,
     );
     for (const frame of frames) {
-      if (frame.stream === "stdout") this.#retainPublicFrame(frame.content);
+      if (frame.stream === ENGINE_OUTPUT_STREAM.STDOUT) this.#retainPublicFrame(frame.content);
     }
     return { frames, ...(observation ? { observation } : {}) };
   }
 
   #releaseOpenCodeFrames(
-    stream: PublicStream,
+    stream: EngineOutputStream,
     frames: readonly string[],
     nativeSessionId: string | undefined,
     flush: boolean,
     privateValues: readonly string[],
   ): PublicFrame[] {
     const projected = frames.map((content) => ({ stream, content }));
-    if (this.#engine !== "opencode") return projected;
+    if (this.#engine !== AGENT_ENGINE.OPENCODE) return projected;
     if (flush) this.#openCodeFlushed[stream] = true;
     for (const frame of projected) {
       if (this.#pendingOpenCodeTruncated) continue;
       const bytes = Buffer.byteLength(frame.content);
       if (this.#pendingOpenCodeBytes + bytes > RETAINED_STDOUT_BYTES) {
         const retainedStream =
-          frame.stream === "stdout" ||
-          this.#pendingOpenCodeFrames.some((pending) => pending.stream === "stdout")
-            ? "stdout"
+          frame.stream === ENGINE_OUTPUT_STREAM.STDOUT ||
+          this.#pendingOpenCodeFrames.some(
+            (pending) => pending.stream === ENGINE_OUTPUT_STREAM.STDOUT,
+          )
+            ? ENGINE_OUTPUT_STREAM.STDOUT
             : frame.stream;
         this.#pendingOpenCodeFrames = [{ stream: retainedStream, content: OUTPUT_TRUNCATION }];
         this.#pendingOpenCodeBytes = Buffer.byteLength(OUTPUT_TRUNCATION);
@@ -100,7 +125,13 @@ export class SessionStdoutState {
       this.#pendingOpenCodeFrames.push(frame);
       this.#pendingOpenCodeBytes += bytes;
     }
-    if (!nativeSessionId && !(this.#openCodeFlushed.stdout && this.#openCodeFlushed.stderr)) {
+    if (
+      !nativeSessionId &&
+      !(
+        this.#openCodeFlushed[ENGINE_OUTPUT_STREAM.STDOUT] &&
+        this.#openCodeFlushed[ENGINE_OUTPUT_STREAM.STDERR]
+      )
+    ) {
       return [];
     }
     const released = this.#pendingOpenCodeFrames;
@@ -144,11 +175,21 @@ export class SessionStdoutState {
   ): {
     acknowledged: boolean;
     nativeSessionId?: string;
+    nativeSessionMismatch?: true;
+    nativeSessionMismatchId?: string;
     terminal?: ReturnType<typeof observeSessionTerminal>;
   } {
     const incremental =
-      this.#protocol === "bridge" || this.#engine === "copilot" || this.#engine === "antigravity";
-    if (incremental) return observeSessionStdout(this.#protocol, this.#engine, content);
+      this.#protocol === ENGINE_SESSION_PROTOCOL.BRIDGE ||
+      this.#engine === AGENT_ENGINE.COPILOT ||
+      this.#engine === AGENT_ENGINE.ANTIGRAVITY;
+    if (incremental)
+      return observeSessionStdout(
+        this.#protocol,
+        this.#engine,
+        content,
+        this.#expectedNativeSessionId,
+      );
 
     let input = this.#protocolBuffer + content;
     this.#protocolBuffer = "";
@@ -164,15 +205,24 @@ export class SessionStdoutState {
 
     let acknowledged = false;
     let nativeSessionId: string | undefined;
+    let nativeSessionMismatch = false;
+    let nativeSessionMismatchId: string | undefined;
     let terminal = undefined as ReturnType<typeof observeSessionTerminal>;
     const observeRecord = (record: string) => {
       if (Buffer.byteLength(record) > TRACE_LIMITS.maxRecordBytes) return;
-      const observed = observeSessionStdout(this.#protocol, this.#engine, record);
+      const observed = observeSessionStdout(
+        this.#protocol,
+        this.#engine,
+        record,
+        this.#expectedNativeSessionId,
+      );
       terminal ??= observeSessionTerminal(this.#protocol, this.#engine, record);
       acknowledged ||= observed.acknowledged;
+      nativeSessionMismatch ||= observed.nativeSessionMismatch === true;
+      nativeSessionMismatchId ??= observed.nativeSessionMismatchId;
       if (
         observed.nativeSessionId &&
-        (this.#engine === "claude" || nativeSessionId === undefined)
+        (this.#engine === AGENT_ENGINE.CLAUDE || nativeSessionId === undefined)
       ) {
         nativeSessionId = observed.nativeSessionId;
       }
@@ -195,6 +245,8 @@ export class SessionStdoutState {
     return {
       acknowledged,
       ...(nativeSessionId ? { nativeSessionId } : {}),
+      ...(nativeSessionMismatch ? { nativeSessionMismatch: true as const } : {}),
+      ...(nativeSessionMismatchId ? { nativeSessionMismatchId } : {}),
       ...(terminal ? { terminal } : {}),
     };
   }

@@ -1,8 +1,13 @@
+import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
+import { CONVERSATION_HEAD_STATUS } from "../../orchestrator/conversation/conversation-catalog-contract.js";
+import { CONVERSATION_CLIENT_STREAM_STATE } from "../../orchestrator/conversation/conversation-sse-contract.js";
 import { createHomeActivePaginationRuntime } from "./conversation-home-active-pagination.js";
-import { conversationHomeApi } from "./conversation-home-api.js";
 import { createHomeCapabilityQueryRuntime } from "./conversation-home-capability-query.js";
+import { createHomeOperationReconciler } from "./conversation-home-operation-reconcile.js";
 import { mergeHomePage, staleHomeCursor } from "./conversation-home-pagination.js";
 import { refreshHomeActiveSelection } from "./conversation-home-query-active.js";
+import { captureHomeQueryRuntimeAuthority } from "./conversation-home-query-authority.js";
+import type { HomeQueryRuntimeAuthority } from "./conversation-home-query-authority.js";
 import type { HomeQueryRuntimeInput } from "./conversation-home-query-input.js";
 import { readableHomeError, retainSelectedHomeSession } from "./conversation-home-runtime.js";
 import { type ActivationEpoch, ActivationResourceRegistry } from "./conversation-home-state.js";
@@ -12,7 +17,10 @@ import {
   shouldStreamHomeRevision,
   watchHomeConversationStream,
 } from "./conversation-home-stream.js";
-export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
+export function createHomeQueryRuntime(
+  input: HomeQueryRuntimeInput,
+  authority: HomeQueryRuntimeAuthority = captureHomeQueryRuntimeAuthority(),
+) {
   let catalogController: AbortController | null = null;
   let catalogMoreController: AbortController | null = null;
   let catalogGeneration = 0;
@@ -21,25 +29,32 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
   let activeQueueRefresh: (() => Promise<boolean>) | null = null;
   let activeStreamReconcile: (() => void) | null = null;
   let activeDataGeneration = 0;
-  const capabilityRuntime = createHomeCapabilityQueryRuntime({
-    capabilities: input.capabilities,
-    query: input.capabilityQuery,
-    scope: input.capabilityScope,
-    loading: input.capabilityLoading,
-    error: input.capabilityError,
-    paging: input.paging.capability,
-  });
-  const activePagination = createHomeActivePaginationRuntime({
-    token: () => activeToken,
-    generation: () => activeDataGeneration,
-    activeRootId: input.activeRootId,
-    selectedConversationId: input.selectedConversationId,
-    timeline: input.timeline,
-    pendingActions: input.pendingActions,
-    paging: input.paging,
-    activationError: input.activationError,
-    restart: selectSession,
-  });
+  const capabilityRuntime = createHomeCapabilityQueryRuntime(
+    {
+      capabilities: input.capabilities,
+      query: input.capabilityQuery,
+      scope: input.capabilityScope,
+      loading: input.capabilityLoading,
+      error: input.capabilityError,
+      paging: input.paging.capability,
+    },
+    authority.api,
+  );
+  const operationReconciler = createHomeOperationReconciler(authority.operationStream);
+  const activePagination = createHomeActivePaginationRuntime(
+    {
+      token: () => activeToken,
+      generation: () => activeDataGeneration,
+      activeRootId: input.activeRootId,
+      selectedConversationId: input.selectedConversationId,
+      timeline: input.timeline,
+      pendingActions: input.pendingActions,
+      paging: input.paging,
+      activationError: input.activationError,
+      restart: selectSession,
+    },
+    authority.api,
+  );
 
   async function refreshSessions(query = input.sessionQuery.value): Promise<void> {
     const generation = ++catalogGeneration;
@@ -53,7 +68,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     input.catalogLoading.value = true;
     input.catalogError.value = "";
     try {
-      const response = await conversationHomeApi.sessions(
+      const response = await authority.api.sessions(
         { query: query.trim() || undefined, limit: 50 },
         controller.signal,
       );
@@ -82,7 +97,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     const controller = new AbortController();
     catalogMoreController = controller;
     try {
-      const response = await conversationHomeApi.sessions(
+      const response = await authority.api.sessions(
         { query: query || undefined, cursor, limit: 50 },
         controller.signal,
       );
@@ -103,7 +118,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     } catch (error) {
       if (controller.signal.aborted || generation !== catalogGeneration) return;
       if (
-        staleHomeCursor(error) === "stale_catalog_cursor" &&
+        staleHomeCursor(error) === PUBLIC_ERROR_CODE.STALE_CATALOG_CURSOR &&
         input.sessionQuery.value.trim() === query
       )
         await refreshSessions(query);
@@ -119,6 +134,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     rootSessionId: string,
     expectedConversationId?: string,
   ): Promise<void> {
+    const streamAuthority = authority.conversationStream;
     let requiredConversationId = expectedConversationId;
     const rootChanged = input.activeRootId.value !== rootSessionId;
     if (rootChanged) input.commandAuthority.begin(rootSessionId);
@@ -141,6 +157,10 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     let refreshAgain = false;
     let queueRefreshing: Promise<boolean> | null = null;
     let queueRefreshAgain = false;
+    const invalidOperationUpdate = () => {
+      input.activationError.value =
+        "An operation update could not be read. The durable state will reload.";
+    };
 
     function rebindLiveConversation(): void {
       if (!token.isCurrent()) return;
@@ -156,49 +176,52 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
       )
         return;
       liveBinding?.stream.close();
-      const stream = watchHomeConversationStream({
-        conversationId: revision.conversation_id,
-        rootSessionId,
-        cursor: () =>
-          homeTimelineCursorForRevision(
-            input.timeline.value,
-            revision.conversation_id,
-            revision.revision_id,
-          ),
-        signal: token.signal,
-        isCurrent: token.isCurrent,
-        setStatus(status, error) {
-          if (!token.isCurrent()) return;
-          input.streamStatus.value = status;
-          input.streamError.value = error ?? "";
-        },
-        onSnapshot(snapshot) {
-          if (!token.isCurrent()) return;
-          if (
-            snapshot.conversation_id === revision.conversation_id &&
-            snapshot.last_seq >
-              homeTimelineCursorForRevision(
-                input.timeline.value,
-                revision.conversation_id,
-                revision.revision_id,
-              )
-          )
+      const stream = watchHomeConversationStream(
+        {
+          conversationId: revision.conversation_id,
+          rootSessionId,
+          cursor: () =>
+            homeTimelineCursorForRevision(
+              input.timeline.value,
+              revision.conversation_id,
+              revision.revision_id,
+            ),
+          signal: token.signal,
+          isCurrent: token.isCurrent,
+          setStatus(status, error) {
+            if (!token.isCurrent()) return;
+            input.streamStatus.value = status;
+            input.streamError.value = error ?? "";
+          },
+          onSnapshot(snapshot) {
+            if (!token.isCurrent()) return;
+            if (
+              snapshot.conversation_id === revision.conversation_id &&
+              snapshot.last_seq >
+                homeTimelineCursorForRevision(
+                  input.timeline.value,
+                  revision.conversation_id,
+                  revision.revision_id,
+                )
+            )
+              void refresh().catch(() => undefined);
+          },
+          onTrace(record) {
+            if (!token.isCurrent()) return;
+            input.timeline.value = appendHomeTimelineTrace(input.timeline.value, revision, record);
+          },
+          onRefreshNeeded() {
             void refresh().catch(() => undefined);
+          },
+          onQueueInvalidation() {
+            void refreshQueue().catch(() => undefined);
+          },
+          onQueueRefreshNeeded() {
+            void refreshQueue().catch(() => undefined);
+          },
         },
-        onTrace(record) {
-          if (!token.isCurrent()) return;
-          input.timeline.value = appendHomeTimelineTrace(input.timeline.value, revision, record);
-        },
-        onRefreshNeeded() {
-          void refresh().catch(() => undefined);
-        },
-        onQueueInvalidation() {
-          void refreshQueue().catch(() => undefined);
-        },
-        onQueueRefreshNeeded() {
-          void refreshQueue().catch(() => undefined);
-        },
-      });
+        streamAuthority,
+      );
       liveBinding = {
         conversationId: revision.conversation_id,
         revisionId: revision.revision_id,
@@ -216,7 +239,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
         let adopted = false;
         do {
           queueRefreshAgain = false;
-          const response = await conversationHomeApi.messageQueue(rootSessionId, token.signal);
+          const response = await authority.api.messageQueue(rootSessionId, token.signal);
           if (!token.isCurrent()) return false;
           input.adoptMessageQueueSnapshot(response, rootSessionId);
           adopted = true;
@@ -243,23 +266,24 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
           if (!token.isCurrent()) return;
           const generation = ++activeDataGeneration;
           activePagination.beginRefresh();
-          await refreshHomeActiveSelection({
-            token,
-            streams,
-            rootSessionId,
-            ...(requiredConversationId ? { expectedConversationId: requiredConversationId } : {}),
-            authoritativeHead: input.authoritativeHead,
-            timeline: input.timeline,
-            pendingActions: input.pendingActions,
-            adoptMessageQueueSnapshot: input.adoptMessageQueueSnapshot,
-            paging: input.paging,
-            isRefreshCurrent: () => generation === activeDataGeneration,
-            reload: refresh,
-            invalidUpdate: () => {
-              input.activationError.value =
-                "An operation update could not be read. The durable state will reload.";
+          await refreshHomeActiveSelection(
+            {
+              token,
+              streams,
+              rootSessionId,
+              ...(requiredConversationId ? { expectedConversationId: requiredConversationId } : {}),
+              authoritativeHead: input.authoritativeHead,
+              timeline: input.timeline,
+              pendingActions: input.pendingActions,
+              adoptMessageQueueSnapshot: input.adoptMessageQueueSnapshot,
+              paging: input.paging,
+              isRefreshCurrent: () => generation === activeDataGeneration,
+              reload: refresh,
+              invalidUpdate: invalidOperationUpdate,
             },
-          });
+            authority.api,
+            authority.operationStream,
+          );
           requiredConversationId = undefined;
           rebindLiveConversation();
         } while (refreshAgain);
@@ -273,6 +297,14 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     activeRefresh = refresh;
     activeQueueRefresh = refreshQueue;
     activeStreamReconcile = rebindLiveConversation;
+    operationReconciler.bind({
+      token,
+      streams,
+      conversationId: () => input.selectedConversationId.value,
+      pendingActions: input.pendingActions,
+      reload: refresh,
+      invalidUpdate: invalidOperationUpdate,
+    });
     token.addCleanup(() => {
       if (activeRefresh === refresh) activeRefresh = null;
       if (activeQueueRefresh === refreshQueue) activeQueueRefresh = null;
@@ -291,15 +323,11 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     }
     input.activationLoading.value = true;
     input.activationError.value = "";
-    input.streamStatus.value = "idle";
+    input.streamStatus.value = CONVERSATION_CLIENT_STREAM_STATE.IDLE;
     input.streamError.value = "";
     try {
       await refresh();
       if (!token.isCurrent()) return;
-      const timer = setInterval(() => {
-        if (token.isCurrent() && input.online.value) void refresh().catch(() => undefined);
-      }, 8_000);
-      token.addCleanup(() => clearInterval(timer));
     } catch (error) {
       if (token.isCurrent()) input.activationError.value = readableHomeError(error);
       if (requiredConversationId) throw error;
@@ -319,7 +347,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     const current = input.authoritativeHead.value;
     return Boolean(
       current?.root_session_id === rootSessionId &&
-        current.head_status === "committed" &&
+        current.head_status === CONVERSATION_HEAD_STATUS.COMMITTED &&
         current.active?.conversation_id === expectedConversationId,
     );
   }
@@ -345,6 +373,7 @@ export function createHomeQueryRuntime(input: HomeQueryRuntimeInput) {
     adoptAuthoritativeActiveHead,
     refreshActiveSelection,
     refreshMessageQueue,
+    reconcileActionOperation: operationReconciler.reconcile,
     reconcileActiveStream() {
       activeStreamReconcile?.();
     },

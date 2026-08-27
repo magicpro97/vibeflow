@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { parseStrictJson } from "../../actions/strict-json.js";
+import { CAPABILITY_SCOPE, type CapabilityScope } from "../../core/capability-contract.js";
 import { canonicalJsonBytes, privateFileBytes } from "../../durability/index.js";
 import { readProjectionFile } from "../adapters/filesystem-io.js";
 import { validateAuthorityIdentity } from "../authority/index.js";
@@ -46,7 +47,7 @@ function parseCanonical<T>(bytes: Uint8Array | null, label: string): T {
 export function readDurableRegistryTrustSnapshot(input: {
   private_root: string;
   identity_path: string;
-  scope: "project" | "user";
+  scope: CapabilityScope;
   scope_identity_digest: string;
   authority_transition_resolver: DurableAuthorityTransitionResolverV1;
 }): RegistryTrustSnapshotV1 {
@@ -61,7 +62,8 @@ export function readDurableRegistryTrustSnapshot(input: {
       "authority.identity",
       "integrity_failure",
     );
-  const identityKind = input.scope === "project" ? "project-authority" : "user-authority";
+  const identityKind =
+    input.scope === CAPABILITY_SCOPE.PROJECT ? "project-authority" : "user-authority";
   const receipt = parseCanonical<FabricAuthorityActivationReceiptV1>(
     privateFileBytes(
       join(input.private_root, "activation", "v1", `${identityKind}.json`),
