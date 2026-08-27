@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -15,6 +16,7 @@ import {
   reviewEvidence,
   reviewerFromResult,
 } from "../src/commands/review-evidence.js";
+import { sanitizedGitEnvironment } from "../src/git-environment.js";
 import { appendReviewEvidence } from "../src/hooks/review-evidence-gate.js";
 import {
   type Changed,
@@ -22,6 +24,7 @@ import {
   changedFiles,
   changedManifestDigest,
   checkReviewEvidence,
+  defaultGit,
   isSha,
   parseRecord,
   recordPath,
@@ -130,6 +133,73 @@ describe("review evidence primitives", () => {
       ),
     ).toBeNull();
   });
+
+  test("current-HEAD evidence preserves a bounded manifest larger than the legacy 64 KiB cap", () => {
+    const repo = mkdtempSync(join("/tmp", "vf-review-large-manifest-"));
+    const runGit = (args: string[]): string => {
+      const result = spawnSync("git", args, {
+        cwd: repo,
+        encoding: "utf8",
+        env: sanitizedGitEnvironment(),
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      expect(result.status).toBe(0);
+      return String(result.stdout ?? "");
+    };
+    try {
+      runGit(["init", "--quiet"]);
+      runGit([
+        "-c",
+        "user.name=VibeFlow Test",
+        "-c",
+        "user.email=vf@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "--quiet",
+        "-m",
+        "base",
+      ]);
+      const largeBase = runGit(["rev-parse", "HEAD"]).trim();
+      mkdirSync(join(repo, "src", "routes"), { recursive: true });
+      for (let index = 0; index < 1_600; index++) {
+        const ordinal = String(index).padStart(4, "0");
+        writeFileSync(
+          join(repo, "src", "routes", `review-manifest-${ordinal}-${"x".repeat(24)}.ts`),
+          `export const route${ordinal} = ${index};\n`,
+        );
+      }
+      mkdirSync(join(repo, "test"), { recursive: true });
+      writeFileSync(join(repo, "test", "routes.test.ts"), "export {};\n");
+      runGit(["add", "--all"]);
+      runGit([
+        "-c",
+        "user.name=VibeFlow Test",
+        "-c",
+        "user.email=vf@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--quiet",
+        "-m",
+        "large manifest",
+      ]);
+      const largeHead = runGit(["rev-parse", "HEAD"]).trim();
+      const diff = defaultGit(repo, ["diff", "--name-status", "-M", `${largeBase}..${largeHead}`]);
+      expect(diff.status).toBe(0);
+      expect(Buffer.byteLength(diff.stdout, "utf8")).toBeGreaterThan(64 * 1024);
+      expect(changedFiles(repo, largeBase, largeHead, defaultGit)).toHaveLength(1_601);
+      expect(
+        reviewEvidence(repo, ["--base", largeBase], defaultGit, (input) => reviewerResult(input)),
+      ).toBe(0);
+      const evidence = readFileSync(recordPath(repo, largeHead), "utf8");
+      expect(Buffer.byteLength(evidence, "utf8")).toBeGreaterThan(64 * 1024);
+      expect(checkReviewEvidence(repo, true, defaultGit, largeBase)).toMatchObject({ ok: true });
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   test("parseRecord accepts valid record and rejects malformed variants", () => {
     expect(parseRecord(record(), base, head, changed).ok).toBe(true);
