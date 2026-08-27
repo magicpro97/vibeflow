@@ -2,6 +2,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { actionIdempotencyScopeDigest } from "../../actions/idempotency.js";
 import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
 import type { ActionRequestAuthorityV1 } from "../../actions/types.js";
+import type { AuthorityRepairDomainBackendSetV1 } from "../../capabilities/authority-repair/index.js";
+import type {
+  AuthorityApprovalCliInteractionV1,
+  AuthorityRepairCliInteractionV1,
+  CapabilityCliAuthorityRepairRuntimeV1,
+} from "../../capabilities/cli/ports.js";
 import {
   type CapabilityRuntimeFactoryV1,
   productionCapabilityRuntimeV1,
@@ -18,12 +24,18 @@ export interface CapabilityCommandRuntimeOptions {
   userVibeflowRoot?: string;
   now?: () => string;
   vfVersion?: string;
+  authorityRepairInteraction?: AuthorityRepairCliInteractionV1;
+  authorityApprovalInteraction?: AuthorityApprovalCliInteractionV1;
+  authorityStdinIsTTY?: boolean;
+  authorityRepairRuntime?: CapabilityCliAuthorityRepairRuntimeV1;
+  authorityRepairBackends?: AuthorityRepairDomainBackendSetV1;
   runtimeFactory?: (input: {
     projectRoot: string;
     userHomeRoot?: string;
     userVibeflowRoot?: string;
     now?: () => string;
     vfVersion?: string;
+    authorityRepairBackends?: AuthorityRepairDomainBackendSetV1;
   }) => CapabilityRuntimeFactoryV1;
 }
 
@@ -39,6 +51,9 @@ export function commandRuntime(
     ...(options.userHomeRoot ? { userHomeRoot: options.userHomeRoot } : {}),
     ...(options.userVibeflowRoot ? { userVibeflowRoot: options.userVibeflowRoot } : {}),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.authorityRepairBackends
+      ? { authorityRepairBackends: options.authorityRepairBackends }
+      : {}),
     vfVersion: options.vfVersion ?? VERSION,
   });
 }
@@ -51,7 +66,7 @@ export function commandService(
 }
 
 export function cliAuthority(
-  service: CapabilityFabricServiceV1,
+  service: { options: { storage: CapabilityFabricServiceV1["options"]["storage"] } },
   actor: ActionRequestAuthorityV1["actor"],
 ): ActionRequestAuthorityV1 {
   const scope = service.options.storage.paths.scope;

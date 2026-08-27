@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { ACTION_ROOT_LOCATOR_KIND } from "../../actions/protocol-contract.js";
-import { canonicalJsonBytes, digestV1 } from "../../durability/index.js";
+import { parseStrictJson } from "../../actions/strict-json.js";
+import { canonicalJsonBytes, digestV1, privateFileBytes } from "../../durability/index.js";
 import {
   appendVffrFrame,
   createOrVerifyPrivateFile,
@@ -129,6 +130,35 @@ export function writeCapabilityOperationHeader(
     lock: lock.processLock,
     maxBytes: 2 * 1024 * 1024,
   });
+}
+
+export function readCapabilityOperationHeader(
+  paths: CapabilityStorePathsV1,
+  operationId: string,
+): CapabilityOperationV1 | null {
+  const bytes = privateFileBytes(
+    capabilityOperationPaths(paths, operationId).header,
+    2 * 1024 * 1024,
+  );
+  if (bytes === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = parseStrictJson(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new CapabilityValidationError(
+      "capability operation header is corrupt",
+      "operation.header",
+      "integrity_failure",
+    );
+  }
+  if (!Buffer.from(bytes).equals(canonicalJsonBytes(parsed, { maxBytes: 2 * 1024 * 1024 })))
+    throw new CapabilityValidationError(
+      "capability operation header is not canonical",
+      "operation.header",
+      "integrity_failure",
+    );
+  validateCapabilityOperation(parsed as CapabilityOperationV1);
+  return structuredClone(parsed as CapabilityOperationV1);
 }
 
 export function appendCapabilityWalEvent(

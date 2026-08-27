@@ -1,3 +1,7 @@
+import {
+  CAPABILITY_CLI_COMMAND,
+  isCapabilityCliCapabilityMutationCommand,
+} from "../../actions/capability-cli-contract.js";
 import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
   ACTION_ROOT_LOCATOR_KIND,
@@ -11,33 +15,48 @@ import {
   ACTION_DECISION,
   ACTION_PLANNING_MODE,
   ACTION_PLANNING_NETWORK_READ_VALUE,
+  ACTOR_KIND,
+  CREDENTIAL_CLASS,
 } from "../../actions/public-action-contract.js";
-import { materializeCapabilityPreview } from "../../capabilities/action-domain/preview.js";
 import type {
+  AuthorityApprovalCliInteractionV1,
+  AuthorityRepairCliInteractionV1,
+  CapabilityCliAuthorityRepairExecutionV1,
+  CapabilityCliAuthorityRepairRuntimeV1,
   CapabilityCliMutationInputV1,
   CapabilityCliMutationPortV1,
 } from "../../capabilities/cli/ports.js";
 import { validateCapabilityIntentAction } from "../../capabilities/controller.js";
 import { CapabilityRuntimeError } from "../../capabilities/operations/errors.js";
-import type { CapabilityOperationResultV1 } from "../../capabilities/operations/types.js";
 import type { CapabilityHostActionV1 } from "../../capabilities/planning/types.js";
 import type { CapabilityFabricServiceV1 } from "../../capabilities/service.js";
-import type {
-  CapabilityCliResultV1,
-  FabricCliCapabilityMutationCommandV1,
-} from "../../capabilities/wire/cli.js";
-import { CAPABILITY_OPERATION_STATUS } from "../../capabilities/wire/operation-state-contract.js";
+import type { FabricCliCapabilityMutationCommandV1 } from "../../capabilities/wire/cli.js";
 import {
   CAPABILITY_PLAN_STATUS,
   CAPABILITY_RUNTIME_ERROR_CODE,
   type CapabilityScope,
 } from "../../core/capability-contract.js";
+import { AuthorityRepairCliMutationRuntimeV1 } from "./authority-repair-cli-runtime.js";
+import {
+  capabilityChallengeResult,
+  capabilityMutationResult,
+  capabilityPlanResult,
+  mutationFailedResult,
+} from "./authority-repair-mutation-results.js";
 import { materializeStandaloneCapabilityProposal } from "./mutation-port-proposal.js";
 import { StandaloneCapabilityActionAuthorityResolver } from "./mutation-port-resolver.js";
-import { resultError } from "./render.js";
+import {
+  assertOrdinaryAuthorityCommandAction,
+  isOrdinaryAuthorityMutationCommand,
+} from "./ordinary-authority-command-contract.js";
+import { executeOrdinaryAuthorityMutation } from "./ordinary-authority-mutation-runtime.js";
 import { type CapabilityCommandRuntimeOptions, cliAuthority, commandRuntime } from "./runtime.js";
 
 type DurableMutationInput = Extract<CapabilityCliMutationInputV1, { request: unknown }>;
+const AUTHORITY_REPAIR_LOCAL_TTY_MESSAGE =
+  "authority repair requires an authenticated local TTY interaction";
+const ORDINARY_AUTHORITY_INTERACTION_MISMATCH_MESSAGE =
+  "ordinary authority interaction context does not match its credential";
 
 interface ScopeMutationRuntime {
   service: CapabilityFabricServiceV1;
@@ -57,167 +76,71 @@ function isDurableMutationInput(
   return "request" in input;
 }
 
-function isCapabilityCommand(
-  command: CapabilityCliMutationInputV1["command"],
-): command is FabricCliCapabilityMutationCommandV1 {
-  return command.startsWith("capability.");
+function isAuthorityRepairInput(
+  input: CapabilityCliMutationInputV1,
+): input is CapabilityCliAuthorityRepairExecutionV1 {
+  return input.command === CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR;
 }
 
-function planResult(
-  command: FabricCliCapabilityMutationCommandV1,
-  action: CapabilityHostActionV1,
-  plan: ReturnType<CapabilityFabricServiceV1["prepareIntent"]>,
-  base: ReturnType<CapabilityFabricServiceV1["options"]["storage"]["readStatus"]>["lock"],
-): CapabilityCliResultV1 {
-  const preview = materializeCapabilityPreview({ action, plan, base });
-  if (plan.status === CAPABILITY_PLAN_STATUS.NO_OP) {
-    return {
-      schema_version: "1.0",
-      kind: "plan",
-      command,
-      status: CAPABILITY_PLAN_STATUS.NO_OP,
-      proposal_id: null,
-      proposal_digest: null,
-      plan_digest: plan.plan_digest,
-      preview,
-      base_generation_id: plan.base_generation_id,
-      generation_id: null,
-      targets: plan.targets,
-      recovery_actions: preview.recovery_actions,
-      error: null,
-    };
-  }
-  return {
-    schema_version: "1.0",
-    kind: "plan",
-    command,
-    status: plan.status,
-    proposal_id: null,
-    proposal_digest: null,
-    plan_digest: plan.plan_digest,
-    preview,
-    base_generation_id: plan.base_generation_id,
-    generation_id: null,
-    targets: plan.targets,
-    recovery_actions: preview.recovery_actions,
-    error: null,
-  };
+function validatedOrdinaryAuthorityActor(
+  input: Exclude<CapabilityCliMutationInputV1, CapabilityCliAuthorityRepairExecutionV1>,
+  observedStdinIsTty: boolean,
+  interaction: AuthorityApprovalCliInteractionV1 | undefined,
+): CapabilityCliMutationInputV1["context"]["actor"] {
+  const { actor, stdin_is_tty: stdinIsTty, automation_grant_proof: proof } = input.context;
+  const interactive =
+    observedStdinIsTty === true &&
+    stdinIsTty === true &&
+    interaction?.authenticated_local_tty === true &&
+    actor.kind === ACTOR_KIND.HUMAN_CLI &&
+    actor.credential_class === CREDENTIAL_CLASS.INTERACTIVE_TTY &&
+    proof == null;
+  const automation =
+    observedStdinIsTty === false &&
+    stdinIsTty === false &&
+    actor.kind === ACTOR_KIND.HUMAN_CLI &&
+    actor.credential_class === CREDENTIAL_CLASS.AUTOMATION_GRANT &&
+    proof != null &&
+    actor.public_actor_id === proof.public_actor_id;
+  if (!interactive && !automation)
+    throw new CapabilityRuntimeError(
+      ORDINARY_AUTHORITY_INTERACTION_MISMATCH_MESSAGE,
+      CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
+    );
+  return actor;
 }
 
-function challengeResult(
-  command: FabricCliCapabilityMutationCommandV1,
-  action: CapabilityHostActionV1,
-  plan: ReturnType<CapabilityFabricServiceV1["prepareIntent"]>,
-  proposal: { proposal_id: string; proposal_digest: string },
-  base: ReturnType<CapabilityFabricServiceV1["options"]["storage"]["readStatus"]>["lock"],
-): CapabilityCliResultV1 {
-  const preview = materializeCapabilityPreview({ action, plan, base });
-  return {
-    schema_version: "1.0",
-    kind: "plan",
-    command,
-    status: CAPABILITY_PLAN_STATUS.ACTION_REQUIRED,
-    proposal_id: proposal.proposal_id,
-    proposal_digest: proposal.proposal_digest,
-    plan_digest: plan.plan_digest,
-    preview,
-    base_generation_id: plan.base_generation_id,
-    generation_id: null,
-    targets: plan.targets,
-    recovery_actions: preview.recovery_actions,
-    error: null,
-  };
+function hasAuthenticatedLocalTtyInteraction(
+  interaction: AuthorityRepairCliInteractionV1 | undefined,
+): interaction is AuthorityRepairCliInteractionV1 {
+  return interaction?.authenticated_local_tty === true;
 }
 
-function mutationFailed(
-  command: CapabilityCliMutationInputV1["command"],
-  error: unknown,
-): CapabilityCliResultV1 {
-  return {
-    schema_version: "1.0",
-    kind: "plan",
-    command,
-    status: CAPABILITY_OPERATION_STATUS.FAILED,
-    proposal_id: null,
-    proposal_digest: null,
-    plan_digest: null,
-    preview: null,
-    base_generation_id: null,
-    generation_id: null,
-    targets: [],
-    recovery_actions: [],
-    error: resultError(error),
-  };
-}
-
-function mutationResult(
-  command: FabricCliCapabilityMutationCommandV1,
-  proposalId: string,
-  result: CapabilityOperationResultV1,
-): CapabilityCliResultV1 {
+function executeAuthorityRepair(
+  input: CapabilityCliAuthorityRepairExecutionV1,
+  runtime: CapabilityCliAuthorityRepairRuntimeV1,
+  interaction: AuthorityRepairCliInteractionV1 | undefined,
+  observedStdinIsTty: boolean,
+): ReturnType<CapabilityCliMutationPortV1["execute"]> {
   if (
-    result.status === CAPABILITY_OPERATION_STATUS.SUCCEEDED ||
-    result.status === CAPABILITY_OPERATION_STATUS.DEGRADED
-  ) {
-    if (result.generation_id === null)
-      return mutationFailed(
-        command,
-        new CapabilityRuntimeError(
-          "capability operation result omitted generation identity",
-          CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
-        ),
-      );
-    return {
-      schema_version: "1.0",
-      kind: "mutation",
-      command,
-      status: result.status,
-      changed: true,
-      operation_id: result.operation_id,
-      proposal_id: proposalId,
-      plan_digest: result.plan_digest,
-      generation_id: result.generation_id,
-      targets: result.targets,
-      recovery_actions: result.recovery_actions,
-      error: null,
-    };
+    input.context.actor.kind !== ACTOR_KIND.HUMAN_CLI ||
+    input.context.actor.credential_class !== CREDENTIAL_CLASS.RECOVERY ||
+    observedStdinIsTty !== true ||
+    input.context.stdin_is_tty !== true ||
+    !hasAuthenticatedLocalTtyInteraction(interaction)
+  )
+    return mutationFailedResult(
+      input.command,
+      new CapabilityRuntimeError(
+        AUTHORITY_REPAIR_LOCAL_TTY_MESSAGE,
+        CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
+      ),
+    );
+  try {
+    return runtime.execute(input, interaction);
+  } catch (error) {
+    return mutationFailedResult(input.command, error);
   }
-  const error = resultError(
-    new CapabilityRuntimeError(
-      result.reason_code ?? "capability operation failed",
-      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
-    ),
-  );
-  if (result.status === CAPABILITY_OPERATION_STATUS.NEEDS_RECOVERY) {
-    return {
-      schema_version: "1.0",
-      kind: "mutation",
-      command,
-      status: CAPABILITY_OPERATION_STATUS.NEEDS_RECOVERY,
-      changed: result.changed,
-      operation_id: result.operation_id,
-      proposal_id: proposalId,
-      plan_digest: result.plan_digest,
-      generation_id: result.generation_id,
-      targets: result.targets,
-      recovery_actions: result.recovery_actions,
-      error,
-    };
-  }
-  return {
-    schema_version: "1.0",
-    kind: "mutation",
-    command,
-    status: CAPABILITY_OPERATION_STATUS.FAILED,
-    changed: false,
-    operation_id: result.operation_id,
-    proposal_id: proposalId,
-    plan_digest: result.plan_digest,
-    generation_id: result.generation_id,
-    targets: result.targets,
-    recovery_actions: result.recovery_actions,
-    error,
-  };
 }
 
 function internalCapabilityAction(service: CapabilityFabricServiceV1, input: DurableMutationInput) {
@@ -248,6 +171,16 @@ export function createCapabilityCliMutationPort(
   options: CapabilityCommandRuntimeOptions,
 ): CapabilityCliMutationPortV1 {
   const runtime = commandRuntime(options);
+  const authorityRepairRuntime =
+    options.authorityRepairRuntime ??
+    new AuthorityRepairCliMutationRuntimeV1({
+      registry: runtime.authorityRepairRegistry,
+      user_vibeflow_root: runtime.userVibeflowRoot,
+      ...(options.now ? { now: options.now } : {}),
+    });
+  const authorityRepairInteraction = options.authorityRepairInteraction;
+  const authorityApprovalInteraction = options.authorityApprovalInteraction;
+  const authorityStdinIsTTY = options.authorityStdinIsTTY === true;
   const scopes = new Map<CapabilityScope, ScopeMutationRuntime>();
   const scopeRuntime = (scope: CapabilityScope): ScopeMutationRuntime => {
     const prior = scopes.get(scope);
@@ -287,8 +220,40 @@ export function createCapabilityCliMutationPort(
 
   return {
     execute(input) {
-      if (!isDurableMutationInput(input) || !isCapabilityCommand(input.command))
-        return mutationFailed(
+      if (isAuthorityRepairInput(input))
+        return executeAuthorityRepair(
+          input,
+          authorityRepairRuntime,
+          authorityRepairInteraction,
+          authorityStdinIsTTY,
+        );
+      if (isOrdinaryAuthorityMutationCommand(input.command)) {
+        try {
+          assertOrdinaryAuthorityCommandAction(input);
+          const scope = isDurableMutationInput(input) ? input.request.scope : input.scope;
+          const actor = validatedOrdinaryAuthorityActor(
+            input,
+            authorityStdinIsTTY,
+            authorityApprovalInteraction,
+          );
+          const ordinary = input.approve
+            ? runtime.ordinaryAuthority(scope)
+            : runtime.ordinaryAuthorityPreview(scope);
+          return executeOrdinaryAuthorityMutation({
+            mutation: input,
+            runtime: ordinary,
+            authority: cliAuthority(ordinary.service, actor),
+            interaction: authorityStdinIsTTY ? authorityApprovalInteraction : undefined,
+          });
+        } catch (error) {
+          return mutationFailedResult(input.command, error);
+        }
+      }
+      if (
+        !isDurableMutationInput(input) ||
+        !isCapabilityCliCapabilityMutationCommand(input.command)
+      )
+        return mutationFailedResult(
           input.command,
           new CapabilityRuntimeError(
             "standalone authority CLI mutation runtime is unavailable",
@@ -315,7 +280,7 @@ export function createCapabilityCliMutationPort(
         });
         const base = scoped.service.options.storage.readStatus().lock;
         if (graph.plan.status !== CAPABILITY_PLAN_STATUS.PLANNED || !input.approve)
-          return planResult(input.command, action, graph.plan, base);
+          return capabilityPlanResult(input.command, action, graph.plan, base);
         runtime.actionObjects.persistGraph(graph);
         const { canonical_request, proposal } = materializeStandaloneCapabilityProposal({
           service: scoped.service,
@@ -343,7 +308,13 @@ export function createCapabilityCliMutationPort(
             (challengeClass) => challengeClass === review.required_challenge_class,
           )
         )
-          return challengeResult(input.command, action, graph.plan, created.proposal, base);
+          return capabilityChallengeResult(
+            input.command,
+            action,
+            graph.plan,
+            created.proposal,
+            base,
+          );
         const approval = scoped.store.decide({
           proposal_id: created.proposal.proposal_id,
           proposal_digest: created.proposal.proposal_digest,
@@ -359,16 +330,20 @@ export function createCapabilityCliMutationPort(
           approval,
         });
         if ("result" in prepared)
-          return mutationResult(input.command, created.proposal.proposal_id, prepared.result);
+          return capabilityMutationResult(
+            input.command,
+            created.proposal.proposal_id,
+            prepared.result,
+          );
         scoped.withClock(prepared.prepared_at, () => {
           scoped.store.prepareDispatch(created.proposal.proposal_id, approval.approval_id);
           scoped.store.beginDispatch(created.proposal.proposal_id, approval.approval_id);
         });
         const result = scoped.service.executePrepared(prepared.operation_id);
         scoped.store.recordTerminal(created.proposal.proposal_id);
-        return mutationResult(input.command, created.proposal.proposal_id, result);
+        return capabilityMutationResult(input.command, created.proposal.proposal_id, result);
       } catch (error) {
-        return mutationFailed(input.command, error);
+        return mutationFailedResult(input.command, error);
       }
     },
   };

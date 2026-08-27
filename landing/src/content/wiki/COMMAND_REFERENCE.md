@@ -123,22 +123,7 @@ until that job is green; a local macOS/Linux run is not a Windows canary.
 
 ## Conversations
 
-`ask`, `chat`, and `brainstorm` all enter the same durable conversation runtime. That runtime
-owns lifecycle state, FIFO queue order, public trace replay, approvals, and artifact
-projections. User topics, messages, and engine outputs appear in the public trace only after
-redaction. Internal role/provider prompt templates, the rendered provider prompt, native engine
-session identifiers, credentials, environment values, and local paths remain private. The home
-composer keeps queued user messages in order; only the latest queued human message is editable
-(ArrowUp in an empty composer; Escape cancels). If dispatch wins the edit race, the draft is
-preserved for an explicit send-as-new action. Add an agent with **Agent** or the prepared
-`+@participant` command; plain `@` mentions an existing participant. Remove one with
-**Remove**, the participant-details `−` action, or the prepared `-@participant` command.
-Quote chips are ordered, can move earlier or later, and reactions are
-restricted to 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, and ❗.
-An admission failure that was not acknowledged remains an explicit retryable queue row.
-Retry is user-triggered and reuses the exact request plus idempotency key; it does not clear
-or replace a newer composer draft. The rejected row is current Home UI state, not
-browser-storage persistence.
+`ask`, `chat`, and `brainstorm` all enter the same durable conversation runtime. That runtime owns lifecycle state, FIFO queue order, public trace replay, approvals, and artifact projections. User topics, messages, and engine outputs appear in the public trace only after redaction. Internal role/provider prompt templates, the rendered provider prompt, native engine session identifiers, credentials, environment values, and local paths remain private. The home composer keeps queued user messages in order; only the latest queued human message is editable (ArrowUp in an empty composer; Escape cancels). If dispatch wins the edit race, the draft is preserved for an explicit send-as-new action. Add an agent with **Agent** or the prepared `+@participant` command; a typed add-participant request creates a proposal that can promote a direct route into coordinate through proposal/review/commit. Remove one with **Remove**, the participant-details `−` action, or the prepared `-@participant` command; if that removes the last executor, the route collapses back to direct. Quote chips are ordered, can move earlier or later, and reactions are restricted to 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, and ❗. Only a transport-ambiguous request, or a typed admission failure with `retryable: true` and `recovery_action: retry`, becomes a retryable queue row. Typed failure retries are user-triggered and reuse the exact request plus idempotency key. An in-flight admission interrupted by browser offline remains **Reconciling**; after an authoritative refresh Home automatically replays that same idempotency key to settle whether the server already admitted it. A non-retryable collision retains its exact payload as **Needs action** for typed recovery or confirmed dismissal; it never auto-resends or replaces newer composer state. Rejected rows are current Home UI state, not browser-storage persistence.
 
 ### Engine capability matrix
 
@@ -153,20 +138,7 @@ matrix below reflects the exact conversation/runtime behavior enforced by the cu
 | OpenCode | yes | no: conversation launches reject requested tools or sandbox | yes (`run --session <validated ses_...> --format json`) | native history when exact; bounded public replay otherwise | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 | Antigravity | yes | no: conversation launches reject requested tools or sandbox | unavailable; no evidenced exact binding | bounded public replay | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 
-Exact native resume is the by-id conversation/session path. `VF-TURN/1` delivers turns with
-`delivery_mode: "exact-delta"` when the runtime can prove the prior public cursor and the
-interaction cursor; in that case it sends only newly applicable public user messages plus concise
-peer responses and reactions. It does not re-send the recipient's own earlier response because
-that response remains in the CLI's native session history. When proof is unavailable or stale,
-the runtime uses `delivery_mode: "full-history"`, re-sends applicable canonical user/peer
-context, and includes up to eight of the recipient's own public responses. Each own-history
-summary is capped at 2 KiB UTF-8 and carries source digest, provenance, and count/truncation
-metadata. A fresh/full turn may also carry the content-addressed `VF-HANDOFF/1` shared
-handoff. Exact by-id authority exists only for Claude, Codex, and OpenCode; Copilot and
-Antigravity fail closed from exact mode instead of silently starting fresh. Phase 1 admits
-only built-in read-only Claude/Codex bindings; phase 2+ requires a
-verified engine and live canonical
-isolation for repo overlays.
+Exact native resume is the by-id conversation/session path. `VF-TURN/1` delivers turns with `delivery_mode: "exact-delta"` when the runtime can prove the prior public cursor and the interaction cursor; in that case it sends only newly applicable public user messages plus concise peer responses and reactions. It does not re-send the recipient's own earlier response because that response remains in the CLI's native session history. When proof is unavailable or supported native reconciliation detects compaction, the runtime revokes exact authority, uses `delivery_mode: "full-history"`, re-sends applicable canonical user/peer context, and includes up to eight of the recipient's own public responses. Each own-history summary is capped at 2 KiB UTF-8 and carries source digest, provenance, and count/truncation metadata. A fresh/full turn may also carry the content-addressed `VF-HANDOFF/1` shared handoff. Exact by-id authority exists only for Claude, Codex, and OpenCode; Copilot and Antigravity fail closed from exact mode instead of silently starting fresh. Phase 1 admits only built-in read-only Claude/Codex bindings; phase 2+ requires a verified engine and live canonical isolation for repo overlays.
 
 Private file ranges are not embedded in that public envelope. They use a separate one-shot
 `VF-PRIVATE-FILE-RANGES/1` canonical JSON payload and are cleared after delivery. Claude,
@@ -203,19 +175,13 @@ local target, file, readiness, and unsupported-resume errors retain the legacy `
 ```bash
 vf chat "Explain why this function is pure"
 vf chat --policy plan --max-rounds 2 "Draft a migration plan"
+vf chat --policy coordinate "Implement the scoped change"
 vf chat --participant direct@codex --participant direct@claude "Compare implementations"
 vf chat --resume conversation-123 "Revise the previous answer"
 vf chat --no-baseline --json "Compare without a baseline run"
 ```
 
-`vf chat` is the canonical conversational entry. The coordinator selects a policy unless
-`--policy <direct|debate|plan|review|verify|orchestrate>` overrides it. Repeat
-`--participant <role@engine[:model]>` to bind explicit participants. `--max-rounds <n>` must
-be an integer from `1` through `100`. `--no-baseline` disables the independent debate baseline.
-`--resume <conversation-id>` injects the topic into an active conversation or creates a child
-revision from a completed one. Resume accepts only `--resume`, `--json`, and the new message:
-combining it with create-only `--policy`, `--participant`, `--max-rounds`, or `--no-baseline`
-is a validation error rather than a silently ignored option.
+`vf chat` is the canonical conversational entry. The coordinator selects a policy unless `--policy <direct|coordinate|debate|plan|review|verify|orchestrate>` overrides it. Repeat `--participant <role@engine[:model]>` to bind explicit participants. A typed add-participant request in Home can promote a direct route into coordinate through proposal/review/commit, and removing the last executor collapses it back to direct. `--max-rounds <n>` must be an integer from `1` through `100`. `--no-baseline` disables the independent debate baseline. `--resume <conversation-id>` injects the topic into an active conversation or creates a child revision from a completed one. Resume accepts only `--resume`, `--json`, and the new message: combining it with create-only `--policy`, `--participant`, `--max-rounds`, or `--no-baseline` is a validation error rather than a silently ignored option.
 
 With `--json`, stdout contains exactly one JSON document and no streamed deltas. A new
 conversation returns:
@@ -335,6 +301,8 @@ vf orchestrate --yes                   # real dispatch via the engine CLI
 Modes: `--yes` → CLI, else `$VIBEFLOW_AI` → bridge, else dry. Dispatches units in
 parallel, runs an independent reviewer (pass only at confidence `1.0` with evidence),
 then prints the goal-eval verdict (`met | partial | blocked`).
+
+When `vf orchestrate` is used for an explicit multi-participant route, the coordinator is the sole authority and the executor is a different admitted engine. Clarifications route back to the coordinator first; the coordinator resolves ambiguity by checking the task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort. Exact native session resume stays engine-local; when supported native reconciliation detects compaction or exact proof is unavailable, VibeFlow revokes exact authority and falls back to bounded replay. Bare coordinate routes currently admit Claude and Codex because both can enforce the resolved role sandbox and return authenticated structured coordination output. Copilot, OpenCode, and Antigravity remain available on workflow transports and fail closed for coordinate authority until their adapters can prove both contracts. `--isolate` keeps each unit in its own linked git worktree so clarification and recovery stay in the same filesystem state. On a proved exact resume, the coordinator sends only fresh user and peer-agent context; after detected compaction or missing exact proof, it also sends bounded public history from the receiving CLI. Executors must commit in their worktree, and the host only fast-forwards a clean, quiescent HEAD after verification; failure and divergence stay preserved for recovery.
 
 ## Work units (ledger)
 

@@ -3,6 +3,10 @@ import {
   CONVERSATION_CATALOG_HEALTH,
   type ConversationCatalogHealth,
 } from "../../orchestrator/conversation/conversation-catalog-contract.js";
+import {
+  CONVERSATION_LIFECYCLE,
+  type ConversationLifecycleV1,
+} from "../../orchestrator/conversation/conversation-public-wire-contract.js";
 import { CONVERSATION_CLIENT_STREAM_STATE } from "../../orchestrator/conversation/conversation-sse-contract.js";
 import type { HomeConversationStreamStatus } from "./conversation-home-types.js";
 
@@ -19,6 +23,7 @@ export interface HomeCatalogLoadingCopy extends HomeLoadingCopy {
 
 export interface HomeComposerBusyCopy {
   active: boolean;
+  blocksSubmit: boolean;
   label: string;
   detail: string;
 }
@@ -145,34 +150,59 @@ export function describeHomeComposerBusy(input: {
   hasActiveSession: boolean;
   submitting: boolean;
   savingQueuedEdit: boolean;
+  queueAdmissionPending?: boolean;
+  lifecycle?: ConversationLifecycleV1 | null;
 }): HomeComposerBusyCopy {
   if (input.savingQueuedEdit) {
     return {
       active: true,
-      label: "Saving slot",
+      blocksSubmit: true,
+      label: "Saving edit",
       detail:
         "Updating the latest queued message without changing its targets or attached context.",
     };
   }
-  if (!input.submitting) {
-    return {
-      active: false,
-      label: "",
-      detail: "",
-    };
-  }
-  if (input.hasActiveSession) {
+  if (input.submitting) {
+    if (input.hasActiveSession) {
+      return {
+        active: true,
+        blocksSubmit: true,
+        label: "Preparing change",
+        detail:
+          "Building a reviewed conversation or capability change. No message queue slot is being created.",
+      };
+    }
     return {
       active: true,
-      label: "Queueing brief",
-      detail: "Preserving this message in the durable queue before participants pick it up.",
+      blocksSubmit: true,
+      label: "Opening room",
+      detail:
+        "Creating the durable conversation shell and staging your first brief for the transcript.",
+    };
+  }
+  if (input.queueAdmissionPending) {
+    if (input.lifecycle === CONVERSATION_LIFECYCLE.NEEDS_INPUT) {
+      return {
+        active: true,
+        blocksSubmit: false,
+        label: "Adding reply to queue",
+        detail:
+          "Waiting for the durable queue to accept your clarification. You can keep typing another message.",
+      };
+    }
+    return {
+      active: true,
+      blocksSubmit: false,
+      label: "Adding message to queue",
+      detail:
+        "Waiting for durable queue admission. You can keep typing while this message is confirmed.",
     };
   }
   return {
-    active: true,
-    label: "Opening room",
-    detail:
-      "Creating the durable conversation shell and staging your first brief for the transcript.",
+    active: false,
+    blocksSubmit: false,
+    label: "",
+    detail: "",
   };
 }
 

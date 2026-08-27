@@ -3,12 +3,11 @@ import {
   type ActionRequestAuthorityV1,
   EMPTY_PERMISSION_DIGEST,
 } from "../../actions/index.js";
+import { ENGINE_SESSION_MODE } from "../../dispatch/session-contract.js";
 import { materializeConversationRevisionProposal } from "./conversation-action-planner.js";
 import { rethrowWithOversizedCandidate } from "./conversation-handoff-overflow.js";
-import {
-  applyConversationRevisionMutation,
-  isConversationRevisionMutation,
-} from "./revision-action-manifest.js";
+import { conversationRevisionTopologyPreview } from "./conversation-revision-policy-authority.js";
+import { isConversationRevisionMutation } from "./revision-action-manifest.js";
 import type { ConversationRevisionAuthorityOptions } from "./revision-authority.js";
 import { ConversationRevisionConflictError } from "./revision-errors.js";
 import { materializeRevisionPreparationPlan } from "./revision-planner.js";
@@ -19,10 +18,24 @@ import {
   resolveRevisionBase,
   revisionBindingProjection,
 } from "./revision-source.js";
+import {
+  assertConversationTopologyMaterialization,
+  projectConversationRevisionTopology,
+} from "./revision-topology-authority.js";
 import type { ConversationSnapshot } from "./types.js";
+import type { ConversationManifest } from "./types.js";
 
 function plusHour(timestamp: string): string {
   return new Date(Date.parse(timestamp) + 60 * 60_000).toISOString();
+}
+
+function freshManifest(manifest: ConversationManifest): ConversationManifest {
+  const source = structuredClone(manifest);
+  source.bindings = source.bindings.map((binding) => ({
+    ...binding,
+    input: { ...binding.input, sessionMode: ENGINE_SESSION_MODE.FRESH },
+  }));
+  return source;
 }
 
 function assertExpected(
@@ -63,11 +76,12 @@ export async function prepareDeferredRevisionProposal(input: {
   assertExpected(input.request, base);
   if (base.reservation?.status === "active")
     throw new ConversationRevisionConflictError("conversation has an active revision reservation");
-  const target = applyConversationRevisionMutation({
+  const topology = projectConversationRevisionTopology({
     parent: base.parent.source.manifest,
     action,
     idempotencyKey: input.request.idempotency_key,
   });
+  const target = topology.target;
   const claim = input.options.home.revisions.claimRequest({
     root_session_id: base.lineage.root_session_id,
     parent_conversation_id: base.parent.node.conversation_id,
@@ -78,6 +92,16 @@ export async function prepareDeferredRevisionProposal(input: {
   const materialized = await materializeFreshRevisionBindings({
     manifest: target,
     rehydrate: input.options.rehydrateBinding,
+  });
+  assertConversationTopologyMaterialization({ manifest: target, bindings: materialized.bindings });
+  const sourceManifest = freshManifest(base.parent.source.manifest);
+  const sourceMaterialized = await materializeFreshRevisionBindings({
+    manifest: sourceManifest,
+    rehydrate: input.options.rehydrateBinding,
+  });
+  assertConversationTopologyMaterialization({
+    manifest: sourceManifest,
+    bindings: sourceMaterialized.bindings,
   });
   const projection = revisionBindingProjection({
     manifest: target,
@@ -130,6 +154,19 @@ export async function prepareDeferredRevisionProposal(input: {
     message_key: input.request.idempotency_key,
     authority: input.authority,
     revision_plan: revisionPlan,
+    topology_authority: {
+      before: conversationRevisionTopologyPreview({
+        manifest: sourceManifest,
+        bindings: sourceMaterialized.bindings,
+      }),
+      after: conversationRevisionTopologyPreview({
+        manifest: target,
+        bindings: materialized.bindings,
+      }),
+      before_topology_digest: topology.before_authority.topology_digest,
+      topology_digest: topology.authority.topology_digest,
+      resolved_binding_set_digest: projection.bindingSetDigest,
+    },
     created_at: claim.created_at,
   });
   input.options.home.handoffs.write(
@@ -140,6 +177,8 @@ export async function prepareDeferredRevisionProposal(input: {
   input.proposals.write({
     proposal_id: planned.proposal.proposal_id,
     proposal_digest: planned.proposal.proposal_digest,
+    policy_authority_digest: planned.proposal.policy_digest,
+    topology_digest: topology.authority.topology_digest,
     revision_plan: revisionPlan,
     handoff_digest: handoff.handoff.digest,
   });

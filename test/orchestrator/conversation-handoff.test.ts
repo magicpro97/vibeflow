@@ -186,6 +186,15 @@ describe("canonical context handoff", () => {
     expect(buildContextHandoff({ ...result.input }).handoff).toEqual(result.handoff);
   });
 
+  test("preserves needs-input as a valid terminal response in a revision handoff", () => {
+    const handoff = structuredClone(completeHandoffFixture().handoff);
+    const response = handoff.prompt_projection.transcript.final_responses[0];
+    if (!response) throw new Error("missing response fixture");
+    response.terminal_status = CONVERSATION_PUBLIC_RESPONSE_TERMINAL_STATUS.NEEDS_INPUT;
+
+    expect(() => assertContextHandoffV1(redigestHandoff(handoff))).not.toThrow();
+  });
+
   test("fails closed when mandatory bytes exceed the common bound", () => {
     expect(() =>
       buildContextHandoff({

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, posix, relative, resolve } from "node:path";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { sanitizedGitEnvironment } from "../git-environment.js";
 import { ENGINE_ISOLATION_KIND } from "./session-contract.js";
 import type { IsolationLeaseProjection } from "./session-types.js";
 
@@ -77,6 +78,7 @@ function git(cwd: string, args: readonly string[]): string {
     encoding: "utf8",
     timeout: 5000,
     stdio: ["ignore", "pipe", "ignore"],
+    env: sanitizedGitEnvironment(),
   }).trim();
 }
 

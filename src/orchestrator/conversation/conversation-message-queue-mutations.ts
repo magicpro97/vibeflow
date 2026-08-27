@@ -1,4 +1,5 @@
 import { resolveQueuedMessageEffectiveAuthorityV1 } from "./conversation-message-queue-authority.js";
+import { assertNextConversationMessageClientOrder } from "./conversation-message-queue-client-order.js";
 import {
   CONVERSATION_MESSAGE_QUEUE_AUTHORITY_STATUS,
   CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
@@ -14,7 +15,11 @@ import {
 } from "./conversation-message-queue-contract.js";
 import type { FoldedConversationMessageQueueV1 } from "./conversation-message-queue-fold.js";
 import type { ConversationMessageQueueJournalV1 } from "./conversation-message-queue-journal.js";
-import { assertQueueContextBindingV1 } from "./conversation-message-queue-private-validation.js";
+import {
+  assertQueueMutationPrincipal,
+  assertQueueMutationPrivateBinding,
+  assertQueueMutationResolvedTargets,
+} from "./conversation-message-queue-mutation-validation.js";
 import type {
   ConversationMessageQueueAuthorityV1,
   EditQueuedUserMessageRequestV1,
@@ -38,8 +43,6 @@ import {
   assertEditQueuedUserMessageRequestV1,
   assertEnqueueConversationUserMessageRequestV1,
   assertPublicQueuedUserMessageV1,
-  isQueueDigest,
-  isQueueReference,
 } from "./conversation-message-queue-validation.js";
 
 export interface ConversationMessageQueueMutationResultV1 {
@@ -129,42 +132,11 @@ function findBound(
   });
 }
 
-function assertPrincipal(value: string): void {
-  if (!isQueueDigest(value)) throw new Error("invalid queue authenticated principal digest");
-}
-
-function assertPrivateBinding(
-  requestPresent: boolean,
-  binding: PrivateConversationMessageQueueContextBindingV1 | null,
-): void {
-  if (requestPresent !== (binding !== null))
-    throw new Error("queue private context binding authority does not match request");
-  if (binding) assertQueueContextBindingV1(binding);
-}
-
-function assertResolvedTargets(
-  requestTargets: ConversationMessageQueueTargetParticipantsV1,
-  resolvedTargets: string[],
-  binding: PrivateConversationMessageQueueContextBindingV1 | null,
-): void {
-  if (
-    !Array.isArray(resolvedTargets) ||
-    resolvedTargets.length < 1 ||
-    resolvedTargets.length > CONVERSATION_MESSAGE_QUEUE_LIMITS.maxTargets ||
-    resolvedTargets.some((target) => !isQueueReference(target)) ||
-    new Set(resolvedTargets).size !== resolvedTargets.length ||
-    (requestTargets !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL &&
-      JSON.stringify(requestTargets) !== JSON.stringify(resolvedTargets)) ||
-    (binding && JSON.stringify(binding.target_participant_ids) !== JSON.stringify(resolvedTargets))
-  )
-    throw new Error("queue private context resolved target authority changed");
-}
-
 export function enqueueConversationUserMessageV1(
   journal: ConversationMessageQueueJournalV1,
   input: ConversationMessageQueueEnqueueInputV1,
 ): ConversationMessageQueueMutationResultV1 {
-  assertPrincipal(input.principal_digest);
+  assertQueueMutationPrincipal(input.principal_digest);
   assertEnqueueConversationUserMessageRequestV1(input.request);
   const { idempotency_key: _key, ...canonicalRequest } = structuredClone(input.request);
   const canonicalDigest = enqueueQueueRequestDigest({
@@ -181,6 +153,11 @@ export function enqueueConversationUserMessageV1(
     });
     if (bound) return replay(journal, bound, canonicalDigest, lock);
     const fold = journal.readFold();
+    assertNextConversationMessageClientOrder({
+      fold,
+      principalDigest: input.principal_digest,
+      request: input.request,
+    });
     if (
       fold.items.filter(
         (row) =>
@@ -224,8 +201,8 @@ export function enqueueConversationUserMessageV1(
       private_context_present: input.request.private_context_present,
     });
     const privateContextBinding = privateContextAuthority.binding;
-    assertPrivateBinding(input.request.private_context_present, privateContextBinding);
-    assertResolvedTargets(
+    assertQueueMutationPrivateBinding(input.request.private_context_present, privateContextBinding);
+    assertQueueMutationResolvedTargets(
       input.request.target_participants,
       privateContextAuthority.resolved_target_participant_ids,
       privateContextBinding,
@@ -274,6 +251,8 @@ export function enqueueConversationUserMessageV1(
         item,
         owner_principal_digest: input.principal_digest,
         admitted_authority: structuredClone(authority),
+        client_instance_id: input.request.client_instance_id,
+        client_order: input.request.client_order,
         private_context_binding_digest: privateContextBindingDigest,
         idempotency_key_digest: keyDigest,
         canonical_request_digest: canonicalDigest,
@@ -301,7 +280,7 @@ export function editQueuedConversationUserMessageV1(
   journal: ConversationMessageQueueJournalV1,
   input: ConversationMessageQueueEditInputV1,
 ): ConversationMessageQueueMutationResultV1 {
-  assertPrincipal(input.principal_digest);
+  assertQueueMutationPrincipal(input.principal_digest);
   assertEditQueuedUserMessageRequestV1(input.request);
   const { idempotency_key: _key, ...canonicalRequest } = structuredClone(input.request);
   const canonicalDigest = editQueueRequestDigest({

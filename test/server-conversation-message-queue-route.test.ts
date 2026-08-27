@@ -146,6 +146,8 @@ const enqueueBody = {
   schema_version: "1.0",
   idempotency_key: "enqueue-http",
   expected_authority_digest: digest("authority"),
+  client_instance_id: "enqueue-http-client",
+  client_order: 1,
   content: "queued content",
   target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
   quote_refs: [],

@@ -1,3 +1,5 @@
+import { AGENT_ENGINE } from "../../core/agent-contract.js";
+import { CONVERSATION_ROLE_NAME, WORKFLOW_ROLE_NAME } from "../../core/role-name-contract.js";
 import type { HomeParticipant } from "./conversation-home-types.js";
 
 export interface HomeComposerSuggestion {
@@ -10,21 +12,21 @@ export interface HomeComposerSuggestion {
 const AGENT_SUGGESTIONS: HomeComposerSuggestion[] = [
   {
     glyph: "+",
-    label: "Reviewer",
-    description: "Independent code review",
-    value: "+reviewer@codex",
+    label: "Implementation agent",
+    description: "Delegate a scoped task to Codex",
+    value: `+${CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR}@${AGENT_ENGINE.CODEX}`,
   },
   {
     glyph: "+",
-    label: "Implementer",
-    description: "Focused production work",
-    value: "+implementer@claude",
+    label: "Web UI",
+    description: "Delegate interface work to Codex",
+    value: `+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`,
   },
   {
     glyph: "+",
-    label: "Security",
-    description: "Threat and authority review",
-    value: "+security@codex",
+    label: "Docs",
+    description: "Delegate documentation to Claude",
+    value: `+${WORKFLOW_ROLE_NAME.DOC_WRITER}@${AGENT_ENGINE.CLAUDE}`,
   },
 ];
 

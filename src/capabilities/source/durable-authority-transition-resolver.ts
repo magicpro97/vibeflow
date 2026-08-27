@@ -9,7 +9,6 @@ import type {
   ActionAuthoritySnapshotV1,
   ActionDispatchRecordV1,
   HostActionV1,
-  NonRecoveryActionRootLocatorV1,
   PrivateActionRootLocatorV1,
 } from "../../actions/index.js";
 import {
@@ -21,7 +20,6 @@ import {
   isNonRecoveryActionRootLocatorV1,
   materializeDispatchRecord,
 } from "../../actions/index.js";
-import type { DurableActionAuthorityReaderV1 } from "../../actions/index.js";
 import type { CapabilityScope } from "../../core/capability-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import type {
@@ -30,6 +28,12 @@ import type {
   AuthorityTransitionEvidenceV1,
 } from "../authority/index.js";
 import { CapabilityValidationError, exactKeys } from "../wire/primitives.js";
+import type {
+  DurableActionAuthorityHostV1,
+  DurableAuthorityRepairTransitionVerifierV1,
+  DurableAuthorityTransitionResolverV1,
+  DurableAuthorityTransitionVerificationInputV1,
+} from "./durable-authority-transition-contract.js";
 import {
   readActionAuthorityObject as actionObject,
   canonicalJsonMatches as exact,
@@ -37,22 +41,12 @@ import {
 } from "./durable-authority-transition-records.js";
 
 export { readCanonicalAuthorityRecord } from "./durable-authority-transition-records.js";
-
-export interface DurableAuthorityTransitionVerificationInputV1 {
-  private_root: string;
-  prior: AuthorityEpochHeadV1;
-  event: AuthorityEpochEventV1;
-  evidence: AuthorityTransitionEvidenceV1;
-  next: AuthorityEpochHeadV1;
-}
-
-export interface DurableActionAuthorityHostV1 {
-  resolve(locator: NonRecoveryActionRootLocatorV1): DurableActionAuthorityReaderV1;
-}
-
-export interface DurableAuthorityTransitionResolverV1 {
-  verify(input: DurableAuthorityTransitionVerificationInputV1): void;
-}
+export type {
+  DurableActionAuthorityHostV1,
+  DurableAuthorityRepairTransitionVerifierV1,
+  DurableAuthorityTransitionResolverV1,
+  DurableAuthorityTransitionVerificationInputV1,
+} from "./durable-authority-transition-contract.js";
 
 type OrdinaryAuthorityChangeV1 = Exclude<
   AuthorityEpochEventV1["change"],
@@ -364,13 +358,17 @@ function validateChange(
 
 function verify(
   host: DurableActionAuthorityHostV1,
+  repair: DurableAuthorityRepairTransitionVerifierV1 | null,
   input: DurableAuthorityTransitionVerificationInputV1,
 ) {
-  if (
-    input.event.change === CAPABILITY_AUTHORITY_CHANGE.AUTHORITY_REPAIRED ||
-    input.evidence.change === CAPABILITY_AUTHORITY_CHANGE.AUTHORITY_REPAIRED
-  )
-    fail("authority-repair replay requires the dedicated durable bootstrap resolver");
+  const eventRepair = input.event.change === CAPABILITY_AUTHORITY_CHANGE.AUTHORITY_REPAIRED;
+  const evidenceRepair = input.evidence.change === CAPABILITY_AUTHORITY_CHANGE.AUTHORITY_REPAIRED;
+  if (eventRepair || evidenceRepair) {
+    if (!eventRepair || !evidenceRepair || !repair)
+      fail("authority-repair replay requires the dedicated durable bootstrap resolver");
+    repair.verify(input);
+    return;
+  }
   const ordinary = input as OrdinaryAuthorityTransitionVerificationInputV1;
   const records = validateActionRecords(host, ordinary);
   validateChange(records, ordinary);
@@ -378,10 +376,12 @@ function verify(
 
 export function createDurableAuthorityTransitionResolver(
   host: DurableActionAuthorityHostV1,
+  options: { repair?: DurableAuthorityRepairTransitionVerifierV1 } = {},
 ): DurableAuthorityTransitionResolverV1 {
   if (!host || typeof host.resolve !== "function") fail("durable action authority host is invalid");
   const resolver = Object.freeze({
-    verify: (input: DurableAuthorityTransitionVerificationInputV1) => verify(host, input),
+    verify: (input: DurableAuthorityTransitionVerificationInputV1) =>
+      verify(host, options.repair ?? null, input),
   });
   RESOLVERS.add(resolver);
   return resolver;

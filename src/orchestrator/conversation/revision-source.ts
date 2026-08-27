@@ -14,7 +14,7 @@ import type { ConversationHomeAuthorities } from "./conversation-home-authoritie
 import { ConversationInteractionCorruptError } from "./conversation-interaction-store.js";
 import type { ConversationInteractionFoldV1 } from "./conversation-interaction-types.js";
 import { materializeConversationLockBinding } from "./conversation-lock.js";
-import { CONVERSATION_TERMINAL_LIFECYCLES } from "./conversation-public-wire-contract.js";
+import { isConversationTerminalLifecycle } from "./conversation-public-wire-contract.js";
 import { type BuiltContextHandoffV1, buildContextHandoff } from "./handoff-selection.js";
 import type { PublicCompactionArtifactV1, PublicHandoffBindingV1 } from "./handoff-types.js";
 import { validateLineageHeadForRead } from "./lineage-head-reader.js";
@@ -54,7 +54,6 @@ export type {
   RevisionQuoteSourceV1,
 } from "./revision-handoff-context.js";
 
-const TERMINAL = new Set<string>(CONVERSATION_TERMINAL_LIFECYCLES);
 const key = (node: LineageNodeIdentityV1): string =>
   `${node.conversation_id}\0${node.revision_id}\0${node.revision_ordinal}`;
 
@@ -149,7 +148,7 @@ export function resolveRevisionBase(input: {
     key(head.active) !== key(parent.node)
   )
     throw new ConversationRevisionInactiveHeadError();
-  if (!TERMINAL.has(parent.source.journal_head.lifecycle))
+  if (!isConversationTerminalLifecycle(parent.source.journal_head.lifecycle))
     throw new ConversationRevisionNotStableTerminalError();
   const reservation = input.home.lineage.readReservation(lineage.root_session_id);
   const claimEpoch = reservation?.revision_claim_epoch ?? 0;

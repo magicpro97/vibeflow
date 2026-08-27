@@ -20,6 +20,11 @@ import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { type LogEvent, Logbus } from "../../src/logbus.js";
 import {
+  type ConversationLifecycleV1,
+  type ConversationTerminalLifecycleV1,
+  isConversationTerminalLifecycle,
+} from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
+import {
   type ArtifactRegistry,
   DurableArtifactRegistry,
   type RebuildableArtifactRegistry,
@@ -279,7 +284,7 @@ const independentStore = (dir: string, suffix: string, mirrored: unknown[]) => {
 };
 const lifecycleInput = (
   key: string,
-  lifecycle: "ACTIVE" | "PAUSED" | "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED",
+  lifecycle: ConversationLifecycleV1,
   health: "healthy" | "degraded" = "healthy",
 ) => ({
   idempotency_key: key,
@@ -288,12 +293,12 @@ const lifecycleInput = (
     payload: {
       lifecycle,
       health,
-      terminal: ["COMPLETED", "STOPPED", "FAILED", "ABORTED"].includes(lifecycle),
+      terminal: isConversationTerminalLifecycle(lifecycle),
       reason: null,
     },
   },
 });
-const terminalInput = (lifecycle: "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED") => ({
+const terminalInput = (lifecycle: ConversationTerminalLifecycleV1) => ({
   idempotency_key: "conversation:terminal",
   event: {
     type: "conversation_terminal" as const,
@@ -408,7 +413,7 @@ test("canonical lifecycle append rejects stale transition and terminal races und
   }
 });
 
-test("canonical lifecycle append admits ABORTED but rejects COMPLETED from durable PAUSED", async () => {
+test("canonical lifecycle append admits ABORTED but rejects graceful terminals from PAUSED", async () => {
   const dir = await mkdtemp(join(tmpdir(), "trace-lifecycle-paused-"));
   try {
     const store = new TraceStore(options(dir));
@@ -417,6 +422,15 @@ test("canonical lifecycle append admits ABORTED but rejects COMPLETED from durab
     await expect(store.append(correlation, input("stale-paused", "too late"))).rejects.toThrow(
       /lifecycle/i,
     );
+    await expect(
+      store.appendBatch?.([
+        {
+          correlation,
+          input: lifecycleInput("conversation:terminal-state", "NEEDS_INPUT"),
+        },
+        { correlation, input: terminalInput("NEEDS_INPUT") },
+      ]),
+    ).rejects.toThrow(/lifecycle/i);
     await expect(
       store.appendBatch?.([
         {
@@ -435,6 +449,35 @@ test("canonical lifecycle append admits ABORTED but rejects COMPLETED from durab
         { correlation, input: terminalInput("ABORTED") },
       ]),
     ).resolves.toHaveLength(2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("NEEDS_INPUT closes active trace authority as a stable terminal", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "trace-lifecycle-needs-input-"));
+  try {
+    const store = new TraceStore(options(dir));
+    await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE"));
+    await expect(
+      store.appendBatch?.([
+        {
+          correlation,
+          input: lifecycleInput("conversation:terminal-state", "NEEDS_INPUT"),
+        },
+        { correlation, input: terminalInput("NEEDS_INPUT") },
+      ]),
+    ).resolves.toHaveLength(2);
+    await expect(store.append(correlation, input("late-after-input", "too late"))).rejects.toThrow(
+      /lifecycle/i,
+    );
+    const replay = (await store.readConversation("safe")).map(
+      ({ stored_event }) => stored_event.event,
+    );
+    expect(replay.at(-1)).toEqual({
+      type: "conversation_terminal",
+      payload: { lifecycle: "NEEDS_INPUT", terminal: true, final_score: null },
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

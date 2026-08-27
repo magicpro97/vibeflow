@@ -2,10 +2,20 @@ import { CAPABILITY_PACKAGE_PIN_TRUST } from "../../actions/capability-security-
 import { HOST_ACTION_KIND, HOST_ACTION_NAMESPACE } from "../../actions/host-action-contract.js";
 import type { ActionRisk, HostRenderedPreviewV1, RecoveryAction } from "../../actions/index.js";
 import {
+  ACTION_CONFIG_DIFF_MODE,
+  ACTION_DEPENDENCY_CHANGE,
+  ACTION_EFFECT_RISK_RANK,
+  ACTION_PERMISSION_CHANGE,
   ACTION_PERMISSION_ENFORCEMENT_VALUE,
   ACTION_PLANNING_MODE,
   ACTION_PLANNING_NETWORK_READ_VALUE,
   ACTION_PREVIEW_PROJECTOR_VERSION,
+  ACTION_REVERSIBILITY_RISK_RANK,
+  ACTION_RISK_BY_RANK,
+  ACTION_RISK_RANK,
+  ACTION_TARGET_DISPOSITION_EXECUTION_VALUE,
+  type ActionConfigDiffMode,
+  PUBLIC_ACTION_SCHEMA_VERSION,
 } from "../../actions/public-action-contract.js";
 import {
   PUBLIC_RECOVERY_ACTION,
@@ -39,7 +49,13 @@ function dependencies(plan: CapabilityFabricPlanV1, base: CapabilityLockV1 | nul
       const from = before.get(package_id) ?? null;
       const to = after.get(package_id) ?? null;
       const change =
-        from === null ? "add" : to === null ? "remove" : from === to ? "unchanged" : "update";
+        from === null
+          ? ACTION_DEPENDENCY_CHANGE.ADD
+          : to === null
+            ? ACTION_DEPENDENCY_CHANGE.REMOVE
+            : from === to
+              ? ACTION_DEPENDENCY_CHANGE.UNCHANGED
+              : ACTION_DEPENDENCY_CHANGE.UPDATE;
       return { package_id, change, from_version: from, to_version: to } as const;
     })
     .sort((left, right) =>
@@ -56,7 +72,7 @@ function configDiffs(plan: CapabilityFabricPlanV1) {
     {
       target: string;
       target_ids: string[];
-      mode: "surgical" | "full-file" | "manual";
+      mode: ActionConfigDiffMode;
       resources: Array<{
         ownership_key: string;
         before: string | null;
@@ -68,10 +84,10 @@ function configDiffs(plan: CapabilityFabricPlanV1) {
     if (descriptor.descriptor_kind !== "intent") continue;
     const mode =
       descriptor.resource.kind === "config-key"
-        ? "surgical"
+        ? ACTION_CONFIG_DIFF_MODE.SURGICAL
         : descriptor.resource.kind === "external-effect"
-          ? "manual"
-          : "full-file";
+          ? ACTION_CONFIG_DIFF_MODE.MANUAL
+          : ACTION_CONFIG_DIFF_MODE.FULL_FILE;
     const key = `${descriptor.resource.public_target}\0${mode}`;
     const row = rows.get(key) ?? {
       target: descriptor.resource.public_target,
@@ -141,7 +157,11 @@ function recovery(plan: CapabilityFabricPlanV1): RecoveryAction[] {
     PUBLIC_RECOVERY_ACTION.REPAIR,
     PUBLIC_RECOVERY_ACTION.EXPORT_REDACTED_DIAGNOSTICS,
   ]);
-  if (plan.target_dispositions.some((row) => row.execution !== "host"))
+  if (
+    plan.target_dispositions.some(
+      (row) => row.execution !== ACTION_TARGET_DISPOSITION_EXECUTION_VALUE.HOST,
+    )
+  )
     selected.add(PUBLIC_RECOVERY_ACTION.COMPLETE_MANUAL_STEP);
   return RECOVERY_ORDER.filter((row) => selected.has(row));
 }
@@ -160,7 +180,7 @@ export function materializeCapabilityPreview(input: {
 }): HostRenderedPreviewV1 {
   const { action, plan, base } = input;
   const rules = digestV1("VF-CAPABILITY-ACTION-PREVIEW-RULES\0v1\0", {
-    schema_version: "1.0",
+    schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
     action_type: action.type,
     adapter_registry_digest: plan.adapter_registry_digest,
   });
@@ -187,7 +207,7 @@ export function materializeCapabilityPreview(input: {
     projector_version: ACTION_PREVIEW_PROJECTOR_VERSION,
     rules_digest: rules,
     redaction_manifest_digest: digestV1("VF-CAPABILITY-ACTION-REDACTION-MANIFEST\0v1\0", {
-      schema_version: "1.0",
+      schema_version: PUBLIC_ACTION_SCHEMA_VERSION,
       rules_digest: rules,
       action_type: action.type,
       private_input_binding_digests: plan.runtime_closure.packages
@@ -203,21 +223,15 @@ export function capabilityPreviewRisk(
   scope: CapabilityScope,
   actionType: CapabilityHostActionV1["type"],
 ): ActionRisk {
-  const effects = new Map([
-    ["pure-local-read", 0],
-    ["local-read-with-cache", 0],
-    ["network-read", 0],
-    ["process-probe", 0],
-    ["project-write", 1],
-    ["user-write", 2],
-    ["external-compensatable", 2],
-    ["external-irreversible", 3],
-  ]);
-  let rank = actionType === HOST_ACTION_KIND.CAPABILITY_ADOPT ? 2 : 1;
-  for (const effect of preview.effect_classes) rank = Math.max(rank, effects.get(effect) ?? 4);
+  let rank: number =
+    actionType === HOST_ACTION_KIND.CAPABILITY_ADOPT
+      ? ACTION_RISK_RANK.HIGH
+      : ACTION_RISK_RANK.MEDIUM;
+  for (const effect of preview.effect_classes)
+    rank = Math.max(rank, ACTION_EFFECT_RISK_RANK[effect] ?? ACTION_RISK_RANK.UNKNOWN);
   rank = Math.max(
     rank,
-    { reversible: 0, compensatable: 1, manual: 2, irreversible: 3 }[preview.reversibility],
+    ACTION_REVERSIBILITY_RISK_RANK[preview.reversibility] ?? ACTION_RISK_RANK.UNKNOWN,
   );
   if (
     scope === CAPABILITY_SCOPE.USER ||
@@ -226,13 +240,22 @@ export function capabilityPreviewRisk(
         pin.trust === CAPABILITY_PACKAGE_PIN_TRUST.DEV_UNVERIFIED ||
         pin.trust === CAPABILITY_PACKAGE_PIN_TRUST.LEGACY_VERIFIED,
     ) ||
-    preview.permission_delta.some((row) => ["add", "expand"].includes(row.change)) ||
+    preview.permission_delta.some(
+      (row) =>
+        row.change === ACTION_PERMISSION_CHANGE.ADD ||
+        row.change === ACTION_PERMISSION_CHANGE.EXPAND,
+    ) ||
     preview.enforcement.some(
       (row) => row.enforcement === ACTION_PERMISSION_ENFORCEMENT_VALUE.DISCLOSED_NOT_ENFORCED,
     ) ||
-    preview.config_diffs.some((row) => ["full-file", "manual"].includes(row.mode))
+    preview.config_diffs.some(
+      (row) =>
+        row.mode === ACTION_CONFIG_DIFF_MODE.FULL_FILE ||
+        row.mode === ACTION_CONFIG_DIFF_MODE.MANUAL,
+    )
   )
-    rank = Math.max(rank, 2);
-  if (rank > 3) throw new Error("capability preview contains an unknown effect class");
-  return (["low", "medium", "high", "critical"] as const)[rank] as ActionRisk;
+    rank = Math.max(rank, ACTION_RISK_RANK.HIGH);
+  if (rank >= ACTION_RISK_RANK.UNKNOWN)
+    throw new Error("capability preview contains an unknown effect class");
+  return ACTION_RISK_BY_RANK[rank] as ActionRisk;
 }

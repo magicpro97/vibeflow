@@ -248,6 +248,39 @@ describe("AgentBinding materialization", () => {
     expect(Object.isFrozen(out.spawn.trace_metadata.skill_resolved_hashes)).toBe(true);
   });
 
+  test("materializes dedicated coordinator and generic executor with least role authority", async () => {
+    const root = repo();
+    const coordinator = await materializeAgentBinding(
+      direct({ roleRef: "coordination-coordinator", engine: "claude", sessionMode: "fresh" }),
+      options(root, { phase: 2, taskText: "coordinate the implementation" }),
+    );
+    const executor = await materializeAgentBinding(
+      direct({ roleRef: "coordination-executor", engine: "codex", sessionMode: "fresh" }),
+      options(root, { phase: 2, taskText: "implement an arbitrary scoped task" }),
+    );
+    expect(coordinator.resolved.role.spec).toMatchObject({
+      name: "coordination-coordinator",
+      sandbox: "read-only",
+    });
+    expect(coordinator.resolved.tool_intents).toEqual(["read", "grep", "glob", "web"]);
+    expect(coordinator.spawn.rendered_prompt).toContain("Ask the user only");
+    expect(executor.resolved.role.spec).toMatchObject({
+      name: "coordination-executor",
+      sandbox: "workspace-write",
+    });
+    expect(executor.resolved.tool_intents).toEqual([
+      "read",
+      "write",
+      "edit",
+      "bash",
+      "grep",
+      "glob",
+    ]);
+    expect(executor.spawn.sandbox).toBe("workspace-write");
+    expect(executor.spawn.rendered_prompt).toContain("arbitrary scoped task");
+    expect(executor.spawn.rendered_prompt).not.toContain("You own the command-line");
+  });
+
   test("materialization snapshots caller-owned binding selections before launch authority exists", async () => {
     const binding = direct({ modelOverride: "claude-sonnet-4-5" });
     const out = await materializeAgentBinding(binding, options(repo()));

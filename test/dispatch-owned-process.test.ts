@@ -15,6 +15,7 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { AGENT_ENGINE } from "../src/core/agent-contract.js";
 import { makeAsyncSpawner } from "../src/dispatch.js";
 import { OWNED_PROCESS_AUTHORITY_ERROR } from "../src/dispatch/owned-process-authority-contract.js";
 import {
@@ -180,6 +181,61 @@ describe("owned CLI lifecycle", () => {
     },
     15_000,
   );
+
+  test.if(process.platform !== "win32")(
+    "spawned CLI cannot observe supervisor-only control paths",
+    async () => {
+      const root = tempRoot("vf-owned-private-env-");
+      const marker = join(root, "cli-environment.json");
+      try {
+        const spawner = makeAsyncSpawner({
+          graceMs: 100,
+          timeoutMs: 5_000,
+          evidenceRoot: root,
+          ownedProcessPlatform: createOwnedProcessPlatform(),
+        });
+        const keys = Object.values(OWNED_PROCESS_ENV);
+        const result = await spawner(
+          process.execPath,
+          [
+            "-e",
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map((key) => [key, Object.hasOwn(process.env, key)]))));`,
+          ],
+          "",
+          { attemptId: "owned-private-env", engine: AGENT_ENGINE.CODEX, evidenceRoot: root },
+        );
+        expect(result.status).toBe(0);
+        expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual(
+          Object.fromEntries(keys.map((key) => [key, false])),
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
+  test("supervisor containment must match the reserved quiescence scope", () => {
+    const root = tempRoot("vf-owned-containment-");
+    try {
+      const platform = createOwnedProcessPlatform();
+      const store = new OwnedProcessRecordStore(root);
+      const controller = new OwnedProcessController(
+        store,
+        platform,
+        store.reserve("owned-containment", AGENT_ENGINE.CODEX, platform),
+      );
+      const mismatched =
+        platform.strategy === OWNED_PROCESS_STRATEGY.WINDOWS_TREE
+          ? OWNED_PROCESS_QUIESCENCE_SCOPE.POSIX_PROCESS_GROUP
+          : OWNED_PROCESS_QUIESCENCE_SCOPE.WINDOWS_JOB;
+      expect(() => controller.assertSupervisorContainment(mismatched)).toThrow(
+        "owned supervisor containment receipt changed",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   test.if(process.platform === "darwin")(
     "Darwin process identity includes kernel start-time microseconds",

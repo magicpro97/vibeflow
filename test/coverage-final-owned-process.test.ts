@@ -507,6 +507,7 @@ describe("final owned-process launch and status coverage", () => {
             ownedRuntime: {
               bindSupervisor: () => undefined,
               bindLaunch: () => undefined,
+              assertSupervisorContainment: () => undefined,
               failLaunch: (_supervisor: number, _cli: number, reason: string) => {
                 launchFailure = reason;
               },

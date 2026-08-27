@@ -37,6 +37,10 @@ ${c.bold("Examples:")}
 
 ${c.bold("Notes:")}
   authority mutations use the dedicated Fabric authority runtime
+  non-interactive mutations require --idempotency-key and --automation-grant-file
+  the proof file binds scope, actor, grant frame, authority epoch, and authority head
+  user-scope TTY approval displays one fresh phrase that must be typed exactly
+  --dry-run is read-only: it publishes no proposal, candidate, key, lock owner, or action object
   legacy writer surfaces stay fenced while Fabric owns the project lock; run \`vf doctor\`
   --request-file is available except on \`vf authority repair\``;
 }

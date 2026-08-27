@@ -29,6 +29,7 @@ import {
   applyState,
   exact,
   fail,
+  isCoordinationResponseSummary,
   object,
   stringArray,
   terminal,
@@ -210,6 +211,7 @@ export function foldConversation(
         const participant = participants.get(payload.participant_id);
         if (!participant) return fail("response lacks configured participant correlation");
         validateParticipantCorrelation(record, participant);
+        if (isCoordinationResponseSummary(configured.policy, payload)) break;
         if (!activeRound && direct && rounds.length === 0) {
           activeRound = createRound(payload.round_id);
           rounds.push(activeRound);

@@ -18,19 +18,38 @@ export interface DoctorOwnedProcessInject {
   ownedProcessPlatform?: OwnedProcessPlatform;
 }
 
+export const DOCTOR_OWNED_PROCESS_RECORD_ROOTS = Object.freeze([
+  Object.freeze(["attempts"] as const),
+  Object.freeze(["conversation", "attempts"] as const),
+] as const);
+
+function emptyHealthReport(): OwnedProcessHealthReport {
+  return { active: [], recovered: [], uncertain: [] };
+}
+
+function appendHealthReport(
+  target: OwnedProcessHealthReport,
+  source: OwnedProcessHealthReport,
+): void {
+  target.active.push(...source.active);
+  target.recovered.push(...source.recovered);
+  target.uncertain.push(...source.uncertain);
+}
+
 export function inspectDoctorOwnedProcesses(
   base: string,
   fix: boolean,
   inject: DoctorOwnedProcessInject = {},
 ): OwnedProcessHealthReport {
-  if (!existsSync(join(base, CTX_DIR, "attempts"))) {
-    return { active: [], recovered: [], uncertain: [] };
+  const report = emptyHealthReport();
+  const inspect = inject.inspectOwnedProcesses ?? inspectOwnedAttemptProcesses;
+  const platform = inject.ownedProcessPlatform ?? createOwnedProcessPlatform();
+  for (const segments of DOCTOR_OWNED_PROCESS_RECORD_ROOTS) {
+    const root = join(base, CTX_DIR, ...segments);
+    if (!existsSync(root)) continue;
+    appendHealthReport(report, inspect(new OwnedProcessRecordStore(root), platform, fix));
   }
-  return (inject.inspectOwnedProcesses ?? inspectOwnedAttemptProcesses)(
-    new OwnedProcessRecordStore(join(base, CTX_DIR, "attempts")),
-    inject.ownedProcessPlatform ?? createOwnedProcessPlatform(),
-    fix,
-  );
+  return report;
 }
 
 export function printDoctorOwnedProcessHealth(report: OwnedProcessHealthReport): void {

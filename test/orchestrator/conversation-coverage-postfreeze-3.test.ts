@@ -1334,7 +1334,7 @@ describe("post-freeze public runtime surfaces", () => {
             home,
             runtime: { operationId: () => null },
             now: () => NOW,
-            rehydrateBinding: async () => binding(),
+            rehydrateBinding: async () => binding("direct"),
           } as never,
           proposals: new DeferredRevisionProposalStore(artifactRoot),
           conversationId,
@@ -1383,6 +1383,7 @@ describe("post-freeze public runtime surfaces", () => {
             });
         },
         readResumeBinding: () => undefined,
+        readModelOutputBinding: () => undefined,
         readEvidenceBinding: () => undefined,
       }),
       reconcileHistory: async () => ({ engine: "codex", status: "missing" }),
@@ -1559,6 +1560,7 @@ describe("post-freeze public runtime surfaces", () => {
             settleSecond(uncertainResult(attemptId));
           },
           readResumeBinding: () => undefined,
+          readModelOutputBinding: () => undefined,
           readEvidenceBinding: () => undefined,
         }),
         reconcileHistory: async () => ({ engine: "codex", status: "missing" }),

@@ -23,11 +23,20 @@ import {
   createIsolationLease,
   releaseIsolationLease,
 } from "../src/dispatch/isolation.js";
+import {
+  OWNED_PROCESS_EXIT_CODE,
+  OWNED_PROCESS_STATE,
+  OWNED_PROCESS_TERMINAL_KIND,
+} from "../src/dispatch/owned-process-contract.js";
 import { markOwnedRuntimeSpawner } from "../src/dispatch/owned-process-launch-runtime.js";
 import type { OwnedProcessPlatform } from "../src/dispatch/owned-process-platform.js";
 import { OwnedProcessRecordStore } from "../src/dispatch/owned-process-runtime.js";
+import { OWNED_SUPERVISOR_TERMINAL_PHASE } from "../src/dispatch/owned-process-status.js";
 import { prepareSessionLaunch } from "../src/dispatch/session-launch-prep.js";
-import { reapOwnedSessionRootExit } from "../src/dispatch/session-owned-runtime.js";
+import {
+  OWNED_SESSION_TERMINATION_REASON,
+  reapOwnedSessionRootExit,
+} from "../src/dispatch/session-owned-runtime.js";
 import {
   COPILOT_ARG_PROMPT_FILE_THRESHOLD_BYTES,
   materializeCopilotSessionPrompt,
@@ -338,6 +347,52 @@ describe("final session runtime coverage", () => {
       state: "released",
       terminal_kind: "claude-result-success",
       release_reason: "authenticated terminal release",
+    });
+  });
+
+  test("authenticated terminal plus unproven drain finalizes as ambiguous", async () => {
+    const root = tempRoot("vf-final-authenticated-terminal-unproven-drain-");
+    const platform = ownedRuntimeFixturePlatform();
+    const spawn = markOwnedRuntimeSpawner(((_argv, options) => {
+      options.ownedRuntime?.bindLaunch(
+        OWNED_RUNTIME_FIXTURE_PID.SUPERVISOR,
+        OWNED_RUNTIME_FIXTURE_PID.CLI,
+      );
+      return {
+        ...completedProcess([
+          `${JSON.stringify({
+            type: "result",
+            subtype: "success",
+            session_id: "50c1c208-9518-44e7-9fc5-d63b0bfcbec2",
+          })}\n`,
+        ]),
+        rootExited: Promise.resolve({
+          phase: OWNED_SUPERVISOR_TERMINAL_PHASE.STREAMS_DRAIN_UNPROVEN,
+          exitCode: OWNED_PROCESS_EXIT_CODE.OUTPUT_DRAIN_UNPROVEN,
+        }),
+      };
+    }) as EngineProcessSpawner);
+    const result = await createEngineSessionAdapter({
+      evidenceRoot: root,
+      ownedProcessPlatform: platform,
+      spawn,
+      writeEvidence: async () => "evidence/authenticated-terminal-unproven-drain.json",
+    }).start({
+      attemptId: "authenticated-terminal-unproven-drain",
+      signal: new AbortController().signal,
+      spawn: spawnProjection("claude"),
+    }).completion;
+
+    expect(result).toMatchObject({
+      state: "ambiguous",
+      reason: OWNED_SESSION_TERMINATION_REASON.OUTPUT_DRAIN_UNPROVEN,
+    });
+    expect(
+      new OwnedProcessRecordStore(root).read("authenticated-terminal-unproven-drain"),
+    ).toMatchObject({
+      state: OWNED_PROCESS_STATE.RELEASED,
+      terminal_kind: OWNED_PROCESS_TERMINAL_KIND.CLAUDE_RESULT_SUCCESS,
+      release_reason: OWNED_SESSION_TERMINATION_REASON.OUTPUT_DRAIN_UNPROVEN,
     });
   });
 

@@ -1,12 +1,14 @@
 import type { Engine } from "../core.js";
 import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { TRACE_LIMITS } from "../orchestrator/trace/limits.js";
+import type { OwnedProcessTerminalKind } from "./owned-process-contract.js";
 import { projectPublicEngineFrames, sanitizePublicEngineText } from "./public-redaction.js";
 import {
   ENGINE_OUTPUT_STREAM,
   ENGINE_SESSION_PROTOCOL,
   type EngineOutputStream,
 } from "./session-contract.js";
+import { NativeModelOutputAccumulator } from "./session-model-output.js";
 import { observeSessionStdout } from "./session-protocol.js";
 import { observeSessionTerminal } from "./session-terminal.js";
 import type { EngineSessionAdapterOptions } from "./session-types.js";
@@ -44,6 +46,7 @@ export class SessionStdoutState {
   #start = 0;
   #length = 0;
   #truncated = false;
+  readonly #modelOutput: NativeModelOutputAccumulator;
 
   constructor(
     protocol: EngineSessionAdapterOptions["protocol"],
@@ -53,6 +56,7 @@ export class SessionStdoutState {
     this.#protocol = protocol;
     this.#engine = engine;
     this.#expectedNativeSessionId = expectedNativeSessionId;
+    this.#modelOutput = new NativeModelOutputAccumulator(engine, protocol);
   }
 
   consume(
@@ -72,6 +76,7 @@ export class SessionStdoutState {
     };
   } {
     const buffered = this.#publicBuffers[stream] + content;
+    if (stream === ENGINE_OUTPUT_STREAM.STDOUT) this.#modelOutput.consume(content, flush);
     const observation =
       stream === ENGINE_OUTPUT_STREAM.STDOUT ? this.#observe(content, flush) : undefined;
     const projected = projectPublicEngineFrames(
@@ -265,5 +270,10 @@ export class SessionStdoutState {
       nativeIds,
       privateValues,
     );
+  }
+
+  /** Private, bounded model-authored output. Callers must additionally prove terminal auth. */
+  internalModelOutput(authenticatedTerminal: OwnedProcessTerminalKind | null): string | undefined {
+    return this.#modelOutput.seal(authenticatedTerminal);
   }
 }

@@ -91,7 +91,10 @@ export class ConversationExecutionRuntime {
         operation_id: operationId,
         status,
         artifact_refs:
-          status === CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED ? result.artifact_refs : [],
+          status === CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED ||
+          status === CONVERSATION_COMMAND_RESULT_STATUS.NEEDS_INPUT
+            ? result.artifact_refs
+            : [],
       };
     }
     if (
@@ -139,10 +142,7 @@ export class ConversationExecutionRuntime {
         ? result
         : {
             operation_id: operationId,
-            status:
-              effective === CONVERSATION_TERMINAL_LIFECYCLE.STOPPED
-                ? CONVERSATION_COMMAND_RESULT_STATUS.STOPPED
-                : CONVERSATION_COMMAND_RESULT_STATUS.ABORTED,
+            status: terminalResultStatus(effective),
             artifact_refs: [],
           };
     } catch {

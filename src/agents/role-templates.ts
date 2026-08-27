@@ -1,4 +1,10 @@
 import { ROLE_MODEL, ROLE_SANDBOX, ROLE_WORKFLOW_TOOL_INTENTS } from "../core/role-contract.js";
+import {
+  BUILTIN_ROLE_NAMES,
+  CONVERSATION_ROLE_NAMES as CANONICAL_CONVERSATION_ROLE_NAMES,
+  WORKFLOW_ROLE_NAME,
+  WORKFLOW_ROLE_NAMES,
+} from "../core/role-name-contract.js";
 import type { ProjectProfile } from "../scanner.js";
 import { type RoleSpec, conversationRoleSpecs } from "./role.js";
 
@@ -266,7 +272,7 @@ routed sub-task named "doc-writer" / "docs".
 function buildSpecs(ctx: RoleContext): RoleSpec[] {
   return [
     {
-      name: "cli-engine",
+      name: WORKFLOW_ROLE_NAME.CLI_ENGINE,
       description:
         "CLI specialist. Use proactively for any CLI flag, subcommand, or help-text work in this repo.",
       body: cliEngineBody(ctx),
@@ -275,7 +281,7 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
-      name: "web-ui",
+      name: WORKFLOW_ROLE_NAME.WEB_UI,
       description:
         "Web UI specialist. Use for the local web console, intake wizard, and live log streaming.",
       body: webUiBody(ctx),
@@ -284,7 +290,7 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
-      name: "skill-author",
+      name: WORKFLOW_ROLE_NAME.SKILL_AUTHOR,
       description:
         "Skill author. Use for creating, validating, syncing, and importing skills in .vibeflow/skills/.",
       body: skillAuthorBody(ctx),
@@ -293,7 +299,7 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
-      name: "preflight-engine",
+      name: WORKFLOW_ROLE_NAME.PREFLIGHT_ENGINE,
       description:
         "Preflight specialist. Use for engine readiness, probe cache, and pre-dispatch quota gates.",
       body: preflightEngineBody(ctx),
@@ -302,7 +308,7 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
-      name: "dispatch-runner",
+      name: WORKFLOW_ROLE_NAME.DISPATCH_RUNNER,
       description:
         "Dispatch specialist. Use for work-unit orchestration, engine launching, and evidence recording.",
       body: dispatchRunnerBody(ctx),
@@ -311,7 +317,7 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
       sandbox: ROLE_SANDBOX.WORKSPACE_WRITE,
     },
     {
-      name: "doc-writer",
+      name: WORKFLOW_ROLE_NAME.DOC_WRITER,
       description:
         "Documentation specialist. Use for README, docs/, AGENTS.md, and changelog maintenance.",
       body: docWriterBody(ctx),
@@ -324,24 +330,9 @@ function buildSpecs(ctx: RoleContext): RoleSpec[] {
 }
 
 /** Legacy workflow roles. Kept separate so workflow auto-detection is unchanged. */
-export const ROLE_NAMES = [
-  "cli-engine",
-  "web-ui",
-  "skill-author",
-  "preflight-engine",
-  "dispatch-runner",
-  "doc-writer",
-] as const;
-
-export const CONVERSATION_ROLE_NAMES = [
-  "direct",
-  "brainstorm-participant",
-  "brainstorm-skeptic",
-  "brainstorm-domain-expert",
-  "brainstorm-evaluator",
-] as const;
-
-export const ALL_ROLE_NAMES = [...ROLE_NAMES, ...CONVERSATION_ROLE_NAMES] as const;
+export const ROLE_NAMES = WORKFLOW_ROLE_NAMES;
+export const CONVERSATION_ROLE_NAMES = CANONICAL_CONVERSATION_ROLE_NAMES;
+export const ALL_ROLE_NAMES = BUILTIN_ROLE_NAMES;
 
 export type RoleName = (typeof ROLE_NAMES)[number];
 export type CanonicalRoleName = (typeof ALL_ROLE_NAMES)[number];

@@ -1,5 +1,11 @@
-import { ENGINE_OUTPUT_STREAM } from "../../dispatch/session-contract.js";
+import { isReadOnlyRole } from "../../agents/role.js";
+import { ROLE_SANDBOX } from "../../core/role-contract.js";
+import {
+  ENGINE_OUTPUT_STREAM,
+  supportsConversationRoleAuthority,
+} from "../../dispatch/session-contract.js";
 import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
+import { CONVERSATION_POLICY } from "./conversation-policy-contract.js";
 import {
   CONVERSATION_OPERATION_STATE,
   CONVERSATION_TRACE_EVENT_KIND,
@@ -17,9 +23,28 @@ import type {
 
 /** One-participant compatibility policy; all execution still flows through launchAttempt. */
 export class DirectConversationPolicy implements ConversationPolicy {
-  readonly name = "direct";
+  readonly name = CONVERSATION_POLICY.DIRECT;
+
+  private canonical(context: ConversationContext): boolean {
+    const binding = context.bindings[0];
+    return (
+      context.policy === this.name &&
+      context.bindings.length === 1 &&
+      context.participantIds.length === 1 &&
+      binding !== undefined &&
+      binding.sandbox === ROLE_SANDBOX.READ_ONLY &&
+      isReadOnlyRole(binding.role.spec)
+    );
+  }
 
   async dryRun(context: ConversationContext): Promise<DryRunResult> {
+    if (!this.canonical(context))
+      return {
+        participants: [],
+        evaluator_auto_added: context.evaluatorAutoAdded,
+        engines_available: [],
+        models_valid: false,
+      };
     const binding = context.bindings[0];
     const participantId = context.participantIds[0];
     const readiness = context.bindingReadiness[0];
@@ -44,7 +69,12 @@ export class DirectConversationPolicy implements ConversationPolicy {
   }
 
   async execute(context: ConversationContext): Promise<ConversationOrchestrationResult> {
-    if (context.bindings.length !== 1) {
+    const binding = context.bindings[0];
+    if (
+      !this.canonical(context) ||
+      !binding ||
+      !supportsConversationRoleAuthority(binding.engine)
+    ) {
       return {
         operation_id: context.correlation.operation_id,
         status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,

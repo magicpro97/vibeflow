@@ -192,6 +192,7 @@ function completedHandle(
     }),
     terminate: async () => {},
     readResumeBinding: () => (nativeSessionId ? { attemptId, engine, nativeSessionId } : undefined),
+    readModelOutputBinding: () => undefined,
     readEvidenceBinding: () => ({ attemptId, internalRef: "internal/evidence" }),
   };
 }
@@ -842,6 +843,7 @@ describe("engine session execution projection", () => {
       const result = await handle.completion;
 
       expect(handle.readResumeBinding()).toBeUndefined();
+      expect(handle.readModelOutputBinding()).toBeUndefined();
       expect(result.state).toBe("ambiguous");
       expect(result.lifecycle).not.toContain("acknowledged");
       expect(result.nativeSessionStatus).toBe("unavailable");
@@ -871,6 +873,7 @@ describe("engine session execution projection", () => {
     const result = await handle.completion;
 
     expect(handle.readResumeBinding()).toBeUndefined();
+    expect(handle.readModelOutputBinding()).toBeUndefined();
     expect(result.state).toBe("ambiguous");
     expect(result.lifecycle).not.toContain("acknowledged");
     expect(result.output).not.toContain(mismatchedId);
@@ -901,6 +904,7 @@ describe("engine session execution projection", () => {
     const result = await handle.completion;
 
     expect(handle.readResumeBinding()).toBeUndefined();
+    expect(handle.readModelOutputBinding()).toBeUndefined();
     expect(result.state).toBe("ambiguous");
     expect(result.output).not.toContain(requestedId);
     expect(result.output).not.toContain(mismatchedId);
@@ -1996,6 +2000,182 @@ describe("native resume evidence and history reconciliation", () => {
     expect(result.nativeSessionStatus).toBe("captured");
   });
 
+  test("keeps Claude model output byte-exact on the authenticated private channel only", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-private-model-output-"));
+    temporaryPaths.push(root);
+    const modelOutput = JSON.stringify({
+      schema_version: "1.0",
+      scope: ["src/private-coordination.ts"],
+      evidence_refs: ["artifact_private-coordination-proof"],
+    });
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      session_id: CLAUDE_UUID,
+      result: modelOutput,
+    });
+    const adapter = createEngineSessionAdapter({
+      evidenceRoot: root,
+      spawn: () => completedProcess([`${envelope}\n`]),
+    });
+    const handle = adapter.start(request("claude", { attemptId: "attempt-private-claude" }));
+
+    const result = await handle.completion;
+    expect(handle.readModelOutputBinding?.()).toEqual({
+      attemptId: "attempt-private-claude",
+      engine: "claude",
+      nativeSessionId: CLAUDE_UUID,
+      output: modelOutput,
+    });
+    expect(result.output).not.toContain("src/private-coordination.ts");
+    expect(JSON.stringify(result)).not.toContain(modelOutput);
+    expect(readFileSync(handle.readEvidenceBinding()?.internalRef as string, "utf8")).not.toContain(
+      modelOutput,
+    );
+  });
+
+  test("accepts only the last Codex agent message before one authenticated turn terminal", async () => {
+    const modelOutput = JSON.stringify({ schema_version: "1.0", kind: "delegate_task" });
+    const raw = [
+      JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "reasoning", text: "untrusted reasoning decoy" },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: modelOutput },
+      }),
+      JSON.stringify({ type: "turn.completed" }),
+    ].join("\n");
+    const adapter = createEngineSessionAdapter({
+      spawn: () => completedProcess([`${raw}\n`]),
+      writeEvidence: async () => "evidence/private-codex.json",
+    });
+    const handle = adapter.start(request("codex", { attemptId: "attempt-private-codex" }));
+
+    await handle.completion;
+    expect(handle.readModelOutputBinding?.()).toEqual({
+      attemptId: "attempt-private-codex",
+      engine: "codex",
+      nativeSessionId: CODEX_UUID,
+      output: modelOutput,
+    });
+    expect(handle.readModelOutputBinding?.()?.output).not.toContain("reasoning decoy");
+  });
+
+  test.each([
+    [
+      "opencode",
+      [
+        JSON.stringify({ type: "step_start", sessionID: "opencode-private-session" }),
+        JSON.stringify({ type: "text", part: { text: '{"kind":"complete"}' } }),
+      ].join("\n"),
+      "opencode-private-session",
+    ],
+    ["copilot", '{"kind":"complete"}', null],
+    ["antigravity", '{"kind":"complete"}', null],
+  ] as const)(
+    "captures bounded native %s model output without public fallback",
+    async (engine, raw, id) => {
+      const adapter = createEngineSessionAdapter({
+        spawn: () => completedProcess([`${raw}\n`]),
+        writeEvidence: async () => `evidence/private-${engine}.json`,
+      });
+      const handle = adapter.start(
+        request(engine, {
+          attemptId: `attempt-private-${engine}`,
+          spawn: spawnProjection(engine, {
+            ...(engine === "opencode" || engine === "antigravity"
+              ? { rendered_tools: [], sandbox: null }
+              : {}),
+          }),
+        }),
+      );
+
+      await handle.completion;
+      expect(handle.readModelOutputBinding()).toEqual({
+        attemptId: `attempt-private-${engine}`,
+        engine,
+        nativeSessionId: id,
+        output: engine === "opencode" ? '{"kind":"complete"}' : '{"kind":"complete"}\n',
+      });
+    },
+  );
+
+  test("never mints private model output for bridge protocol text", async () => {
+    const adapter = createEngineSessionAdapter({
+      protocol: "bridge",
+      spawn: () => completedProcess(['{"kind":"complete"}\n']),
+      writeEvidence: async () => "evidence/no-private-bridge.json",
+    });
+    const handle = adapter.start(request("copilot", { attemptId: "attempt-private-bridge" }));
+
+    await handle.completion;
+    expect(handle.readModelOutputBinding()).toBeUndefined();
+  });
+
+  test.each([
+    [
+      "missing Codex terminal",
+      "codex",
+      [
+        JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: '{"kind":"complete"}' },
+        }),
+      ].join("\n"),
+    ],
+    [
+      "duplicate Codex terminal",
+      "codex",
+      [
+        JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: '{"kind":"complete"}' },
+        }),
+        JSON.stringify({ type: "turn.completed" }),
+        JSON.stringify({ type: "turn.completed" }),
+      ].join("\n"),
+    ],
+    [
+      "Claude error envelope",
+      "claude",
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        session_id: CLAUDE_UUID,
+        result: '{"kind":"complete"}',
+      }),
+    ],
+    [
+      "oversized Claude model output",
+      "claude",
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        session_id: CLAUDE_UUID,
+        result: "x".repeat(70 * 1024),
+      }),
+    ],
+  ] as const)("does not mint private model output for %s", async (_label, engine, raw) => {
+    const adapter = createEngineSessionAdapter({
+      spawn: () => completedProcess([`${raw}\n`]),
+      writeEvidence: async () => `evidence/no-private-${engine}.json`,
+    });
+    const handle = adapter.start(
+      request(engine, { attemptId: `attempt-no-private-${engine}-${raw.length}` }),
+    );
+
+    await handle.completion;
+    expect(handle.readModelOutputBinding?.()).toBeUndefined();
+  });
+
   test("captures native identity internally but keeps status and immutable evidence opaque", async () => {
     const root = mkdtempSync(join(tmpdir(), "vf-attempt-evidence-"));
     temporaryPaths.push(root);
@@ -2248,6 +2428,7 @@ describe("native resume evidence and history reconciliation", () => {
         status: "reconciled",
         imported_turn_count: 1,
         imported_tool_count: 1,
+        native_history_continuity: "intact",
         completeness_reason: "supported native history supplied",
       });
       expect(JSON.stringify(result)).not.toContain(nativeSessionId);
@@ -2280,6 +2461,35 @@ describe("native resume evidence and history reconciliation", () => {
     });
     expect(codex.imported_turn_count).toBe(1);
     expect(codex.imported_tool_count).toBe(1);
+  });
+
+  test.each([
+    {
+      engine: "claude" as const,
+      nativeSessionId: CLAUDE_UUID,
+      history: [
+        { type: "assistant", sessionId: CLAUDE_UUID, message: { content: [] } },
+        { type: "system", subtype: "compact_boundary", sessionId: CLAUDE_UUID },
+      ],
+    },
+    {
+      engine: "codex" as const,
+      nativeSessionId: CODEX_UUID,
+      history: [
+        { type: "session_meta", payload: { id: CODEX_UUID } },
+        { type: "compacted", payload: { replacement_history: [] } },
+      ],
+    },
+  ])("$engine reports a native compaction boundary as partial continuity", async (request) => {
+    const adapter = createEngineSessionAdapter({ spawn: () => completedProcess() });
+    const result = await adapter.reconcileHistory(request);
+
+    expect(result).toMatchObject({
+      status: "partial",
+      native_history_continuity: "compacted",
+    });
+    expect(result.completeness_reason).toContain("compaction boundary");
+    expect(JSON.stringify(result)).not.toContain(request.nativeSessionId);
   });
 
   test.each(["claude", "codex"] as const)(
@@ -2326,6 +2536,7 @@ describe("native resume evidence and history reconciliation", () => {
         status: "reconciled",
         imported_turn_count: 1,
         imported_tool_count: 1,
+        native_history_continuity: "intact",
         completeness_reason: "supported native history loaded",
       });
     },
@@ -2347,6 +2558,7 @@ describe("native resume evidence and history reconciliation", () => {
       status: "partial",
       imported_turn_count: 0,
       imported_tool_count: 0,
+      native_history_continuity: "unproved",
       completeness_reason: "supported native history was not supplied",
     });
   });
@@ -2375,6 +2587,7 @@ describe("native resume evidence and history reconciliation", () => {
         status: "unavailable",
         imported_turn_count: 0,
         imported_tool_count: 0,
+        native_history_continuity: "unproved",
         completeness_reason: `${engine} native history completeness is not supported`,
       });
     },

@@ -58,6 +58,7 @@ describe("Home loading copy", () => {
       }),
     ).toEqual({
       active: true,
+      blocksSubmit: true,
       label: "Opening room",
       detail:
         "Creating the durable conversation shell and staging your first brief for the transcript.",
@@ -71,8 +72,53 @@ describe("Home loading copy", () => {
       }),
     ).toEqual({
       active: true,
-      label: "Queueing brief",
-      detail: "Preserving this message in the durable queue before participants pick it up.",
+      blocksSubmit: true,
+      label: "Preparing change",
+      detail:
+        "Building a reviewed conversation or capability change. No message queue slot is being created.",
+    });
+
+    expect(
+      describeHomeComposerBusy({
+        hasActiveSession: true,
+        submitting: true,
+        savingQueuedEdit: false,
+        queueAdmissionPending: true,
+      }),
+    ).toMatchObject({
+      blocksSubmit: true,
+      label: "Preparing change",
+    });
+
+    expect(
+      describeHomeComposerBusy({
+        hasActiveSession: true,
+        submitting: false,
+        savingQueuedEdit: false,
+        queueAdmissionPending: true,
+        lifecycle: "NEEDS_INPUT",
+      }),
+    ).toEqual({
+      active: true,
+      blocksSubmit: false,
+      label: "Adding reply to queue",
+      detail:
+        "Waiting for the durable queue to accept your clarification. You can keep typing another message.",
+    });
+
+    expect(
+      describeHomeComposerBusy({
+        hasActiveSession: true,
+        submitting: false,
+        savingQueuedEdit: false,
+        queueAdmissionPending: true,
+      }),
+    ).toEqual({
+      active: true,
+      blocksSubmit: false,
+      label: "Adding message to queue",
+      detail:
+        "Waiting for durable queue admission. You can keep typing while this message is confirmed.",
     });
 
     expect(
@@ -83,7 +129,8 @@ describe("Home loading copy", () => {
       }),
     ).toEqual({
       active: true,
-      label: "Saving slot",
+      blocksSubmit: true,
+      label: "Saving edit",
       detail:
         "Updating the latest queued message without changing its targets or attached context.",
     });

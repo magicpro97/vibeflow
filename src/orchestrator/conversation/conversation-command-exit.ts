@@ -1,8 +1,8 @@
 import type { PublicStoredTraceEvent } from "../trace/types.js";
 import {
   CONVERSATION_COMMAND_RESULT_STATUS,
-  CONVERSATION_COMMAND_SUCCESS_STATUS,
   type ConversationCommandResultStatus,
+  isConversationCommandSuccessStatus,
 } from "./conversation-command-result-contract.js";
 import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 
@@ -17,7 +17,8 @@ export const CONVERSATION_EXIT = Object.freeze({
   aborted: 5,
 });
 
-const START_ERROR_HINTS = /no ready admitted engine|explicit_engine_unavailable|unsupported engine/;
+const START_ERROR_HINTS =
+  /no ready admitted engine|explicit_engine_unavailable|coordinate_executor_unavailable|unsupported engine/;
 const TRANSPORT_ERROR_HINTS = /conversation not found|configure failed|persistence failed/;
 const VALIDATION_ERROR_HINTS =
   /invalid|unknown explicit|unsupported engine|missing --max-rounds|participant/;
@@ -42,13 +43,7 @@ export function classifyConversationResult(
   status: ConversationCommandResultStatus,
   events: readonly PublicStoredTraceEvent[],
 ): number {
-  if (
-    status === CONVERSATION_COMMAND_SUCCESS_STATUS.COMPLETED ||
-    status === CONVERSATION_COMMAND_SUCCESS_STATUS.ACCEPTED ||
-    status === CONVERSATION_COMMAND_SUCCESS_STATUS.AWAITING_APPROVAL ||
-    status === CONVERSATION_COMMAND_SUCCESS_STATUS.STOPPED
-  )
-    return CONVERSATION_EXIT.ok;
+  if (isConversationCommandSuccessStatus(status)) return CONVERSATION_EXIT.ok;
   if (status === CONVERSATION_COMMAND_RESULT_STATUS.ABORTED) return CONVERSATION_EXIT.aborted;
   const errorCodes = events.flatMap((event) =>
     event.event.type === CONVERSATION_TRACE_EVENT_KIND.ERROR && "code" in event.event.payload

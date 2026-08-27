@@ -13,12 +13,13 @@ import type { ActionTargetBindingV1, PackagePinV1 } from "./preview-types.js";
 import { validateProposalPreview } from "./preview-validation.js";
 import {
   ACTION_CONFIG_DIFF_MODE,
-  ACTION_EFFECT_CLASS,
+  ACTION_EFFECT_RISK_RANK,
   ACTION_PACKAGE_PIN_TRUST_VALUE,
   ACTION_PERMISSION_CHANGE,
   ACTION_PERMISSION_ENFORCEMENT_VALUE,
-  ACTION_RISK,
-  type ActionEffectClass,
+  ACTION_REVERSIBILITY_RISK_RANK,
+  ACTION_RISK_BY_RANK,
+  ACTION_RISK_RANK,
   PUBLIC_ACTION_SCHEMA_VERSION,
 } from "./public-action-contract.js";
 import {
@@ -70,17 +71,6 @@ const _authorityActionKindParity = true satisfies SameUnion<
   AuthorityHostActionKind
 >;
 void _authorityActionKindParity;
-const EFFECT_RANK = new Map<ActionEffectClass, number>([
-  [ACTION_EFFECT_CLASS.PURE_LOCAL_READ, 0],
-  [ACTION_EFFECT_CLASS.LOCAL_READ_WITH_CACHE, 0],
-  [ACTION_EFFECT_CLASS.NETWORK_READ, 0],
-  [ACTION_EFFECT_CLASS.PROCESS_PROBE, 0],
-  [ACTION_EFFECT_CLASS.PROJECT_WRITE, 1],
-  [ACTION_EFFECT_CLASS.USER_WRITE, 2],
-  [ACTION_EFFECT_CLASS.EXTERNAL_COMPENSATABLE, 2],
-  [ACTION_EFFECT_CLASS.EXTERNAL_IRREVERSIBLE, 3],
-]);
-const RISKS = Object.freeze(Object.values(ACTION_RISK));
 export function isCapabilityAction(type: string): type is CapabilityHostActionKind {
   return isCapabilityHostActionKind(type);
 }
@@ -198,18 +188,19 @@ function validateDigests(draft: ActionProposalDraftV1): void {
 }
 
 function deriveRisk(draft: ActionProposalDraftV1): ActionRisk {
-  let rank =
+  let rank: number =
     draft.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR ||
     draft.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL
-      ? 3
+      ? ACTION_RISK_RANK.CRITICAL
       : isAuthorityAction(draft.action.type) ||
           draft.action.type === HOST_ACTION_KIND.CAPABILITY_ADOPT
-        ? 2
-        : 1;
-  for (const effect of draft.effect_classes) rank = Math.max(rank, EFFECT_RANK.get(effect) ?? 4);
+        ? ACTION_RISK_RANK.HIGH
+        : ACTION_RISK_RANK.MEDIUM;
+  for (const effect of draft.effect_classes)
+    rank = Math.max(rank, ACTION_EFFECT_RISK_RANK[effect] ?? ACTION_RISK_RANK.UNKNOWN);
   rank = Math.max(
     rank,
-    { reversible: 0, compensatable: 1, manual: 2, irreversible: 3 }[draft.reversibility],
+    ACTION_REVERSIBILITY_RISK_RANK[draft.reversibility] ?? ACTION_RISK_RANK.UNKNOWN,
   );
   if (
     draft.base.capability_scope === CAPABILITY_SCOPE.USER ||
@@ -233,9 +224,9 @@ function deriveRisk(draft: ActionProposalDraftV1): ActionRisk {
         row.mode === ACTION_CONFIG_DIFF_MODE.MANUAL,
     )
   )
-    rank = Math.max(rank, 2);
-  if (rank > 3) invalid("unknown effect class");
-  return RISKS[rank] as ActionRisk;
+    rank = Math.max(rank, ACTION_RISK_RANK.HIGH);
+  if (rank >= ACTION_RISK_RANK.UNKNOWN) invalid("unknown effect class");
+  return ACTION_RISK_BY_RANK[rank] as ActionRisk;
 }
 
 function assertOrderedUnique(values: string[], label: string): void {

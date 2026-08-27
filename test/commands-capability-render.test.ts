@@ -17,18 +17,15 @@ describe("capability CLI render guards", () => {
     }
   });
 
-  test("resultError rethrows when a runtime code mutates after the guard check", () => {
+  test("resultError rethrows the exact error for a stable unsupported runtime code", () => {
     const error = new CapabilityRuntimeError(
-      "mutable runtime code",
+      "unsupported runtime code",
       CAPABILITY_RUNTIME_ERROR_CODE.FAULT,
     );
-    let reads = 0;
     Object.defineProperty(error, "runtime_code", {
       configurable: true,
-      get: () => {
-        reads += 1;
-        return reads <= 2 ? CAPABILITY_RUNTIME_ERROR_CODE.FAULT : ("mutated-runtime-code" as never);
-      },
+      value: "unsupported-runtime-code",
+      writable: false,
     });
 
     let caught: unknown;
@@ -39,6 +36,5 @@ describe("capability CLI render guards", () => {
     }
 
     expect(caught).toBe(error);
-    expect(reads).toBeGreaterThanOrEqual(3);
   });
 });

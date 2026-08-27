@@ -553,6 +553,7 @@ describe("final command and compatibility coverage", () => {
       signal: new AbortController().signal,
       terminate: () => undefined,
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     });
     await expect(handle.completion).rejects.toThrow("completion rejected");

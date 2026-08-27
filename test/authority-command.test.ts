@@ -3,7 +3,11 @@ import { AssertionError } from "node:assert";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CapabilityCliMutationInputV1 } from "../src/capabilities/cli/ports.js";
+import type {
+  AuthorityRepairCliInteractionV1,
+  CapabilityCliAuthorityRepairRuntimeV1,
+  CapabilityCliMutationInputV1,
+} from "../src/capabilities/cli/ports.js";
 import { CapabilityRuntimeError } from "../src/capabilities/operations/errors.js";
 import type {
   CapabilityCliResultV1,
@@ -59,6 +63,90 @@ function grantPayload(scope: "project" | "user") {
 }
 
 describe("authority CLI durable mutation contract", () => {
+  test("authority repair forwards the authenticated local TTY interaction to the injected runtime", async () => {
+    const calls: string[] = [];
+    const interaction: AuthorityRepairCliInteractionV1 = {
+      authenticated_local_tty: true,
+      selectCandidate(input) {
+        calls.push(`select:${input.scope}:${input.candidates.length}`);
+        return input.candidates[0]?.candidate_id ?? null;
+      },
+      confirmCriticalReview(input) {
+        calls.push(`critical:${input.candidate.candidate_id}:${input.plan_digest}`);
+        return true;
+      },
+      confirmRecoveryReview(input) {
+        calls.push(
+          `recovery:${input.candidate.candidate_id}:${String(input.observed_authority_digest)}`,
+        );
+        return false;
+      },
+    };
+    const runtime: CapabilityCliAuthorityRepairRuntimeV1 = {
+      execute(input, interactive) {
+        const candidate = {
+          candidate_id: "candidate-1",
+          action_domain: "conversation" as const,
+          authority_scope: "conversation" as const,
+          scope_id: "conv-1",
+          control_state: "recovery-checkpoint-only" as const,
+          strategy: "replace-json-head",
+          created_at: "2026-08-27T00:00:00.000Z",
+          expires_at: "2026-08-27T00:05:00.000Z",
+        };
+        expect(
+          interactive.selectCandidate({
+            scope: input.scope,
+            conversation_id: input.conversation_id,
+            candidates: [candidate],
+          }),
+        ).toBe("candidate-1");
+        expect(
+          interactive.confirmCriticalReview({
+            scope: input.scope,
+            conversation_id: input.conversation_id,
+            candidate,
+            plan_digest: `sha256:${"3".repeat(64)}`,
+            repair_id: "vf-repair-1",
+            bootstrap_required: true,
+          }),
+        ).toBe(true);
+        expect(
+          interactive.confirmRecoveryReview({
+            scope: input.scope,
+            conversation_id: input.conversation_id,
+            candidate,
+            operation_id: "vf-repair-op",
+            observed_authority_digest: null,
+          }),
+        ).toBe(false);
+        return success("authority.repair");
+      },
+    };
+    const code = await authority(
+      ["repair", "--scope", "user", "--conversation", "conv-1", "--json"],
+      {
+        stdinIsTTY: true,
+        stdinHasData: false,
+        authorityRepairInteraction: interaction,
+        authorityRepairRuntime: runtime,
+        runtimeFactory: () =>
+          ({
+            service() {
+              throw new Error("unused");
+            },
+          }) as never,
+        writer: () => undefined,
+      },
+    );
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      "select:user:1",
+      `critical:candidate-1:sha256:${"3".repeat(64)}`,
+      "recovery:candidate-1:null",
+    ]);
+  });
+
   test("grant create forwards the exact request DTO to the mutation port", async () => {
     const root = tempDir();
     try {
@@ -123,7 +211,7 @@ describe("authority CLI durable mutation contract", () => {
         "--json",
       ],
       {
-        stdinIsTTY: false,
+        stdinIsTTY: true,
         stdinHasData: false,
         mutationPort: {
           execute(input) {
@@ -147,7 +235,7 @@ describe("authority CLI durable mutation contract", () => {
       candidate_id: "vf-secret-revocation-binding-id",
       candidate_digest: `sha256:${"2".repeat(64)}`,
     });
-    expect(input.context.actor.credential_class).toBe("automation-grant");
+    expect(input.context.actor.credential_class).toBe("interactive-tty");
   });
 
   test("authority repair uses recovery credentials and never accepts request-file automation", async () => {

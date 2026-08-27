@@ -1,5 +1,10 @@
 import { randomBytes as systemRandomBytes } from "node:crypto";
 import { type ActionAuthorityResolverV1, requiredChallengeClass } from "./authority-proofs.js";
+import { requiresApprovalChallenge } from "./challenge-class.js";
+import {
+  type ApprovalChallengeHmacKeySourceV1,
+  approvalChallengeHmacKeySource,
+} from "./challenge-key-source.js";
 import {
   ApprovalChallengeAuthority,
   type ApprovalChallengeRequestV1,
@@ -13,12 +18,7 @@ import {
 } from "./idempotency.js";
 import { ActionFilePersistence } from "./persistence.js";
 import { ACTION_AUTHORITY_EVENT_KIND, ACTION_OPERATION_STATE } from "./protocol-contract.js";
-import {
-  ACTION_APPROVAL_CHALLENGE_CLASSES,
-  ACTION_CHALLENGE_CLASS,
-  ACTION_DECISION,
-  ACTOR_KIND,
-} from "./public-action-contract.js";
+import { ACTION_CHALLENGE_CLASS, ACTION_DECISION, ACTOR_KIND } from "./public-action-contract.js";
 import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import { materializeApproval } from "./records.js";
 import { type CancelActionInputV1, cancelAction } from "./store-cancel.js";
@@ -31,6 +31,7 @@ import {
   reserveActionDispatch,
 } from "./store-dispatch.js";
 import { readRecordedActionSnapshot, readVerifiedActionSnapshot } from "./store-read-validation.js";
+import { listActionSnapshots, listRecordedActionsForRecovery } from "./store-recovery.js";
 import {
   assertRequestAuthority,
   equalCanonical,
@@ -50,7 +51,7 @@ import type {
 export interface ActionAuthorityStoreOptions {
   now?: () => number;
   random_bytes?: (size: number) => Uint8Array;
-  hmac_key?: Uint8Array;
+  hmac_key?: ApprovalChallengeHmacKeySourceV1;
   authority_resolver?: ActionAuthorityResolverV1;
   fault?: (
     point:
@@ -60,6 +61,7 @@ export interface ActionAuthorityStoreOptions {
       | "after-action-committing",
   ) => void;
 }
+export type ActionAuthorityStoreFaultV1 = NonNullable<ActionAuthorityStoreOptions["fault"]>;
 export interface CreateProposalInputV1 {
   authority: ActionRequestAuthorityV1;
   canonical_request: CanonicalActionRequestV1;
@@ -75,13 +77,11 @@ export interface DecideActionInputV1 {
 }
 export type { CancelActionInputV1 } from "./store-cancel.js";
 
-const requiresApprovalChallenge = (value: ActionApprovalV1["challenge_class"]): boolean =>
-  ACTION_APPROVAL_CHALLENGE_CLASSES.some((challengeClass) => challengeClass === value);
 export class ActionAuthorityStore {
   private readonly files: ActionFilePersistence;
   private readonly now: () => number;
   private readonly random: (size: number) => Uint8Array;
-  private readonly hmacKey: Buffer | null;
+  private readonly hmacKey: (() => Buffer) | null;
   private readonly challenges: ApprovalChallengeAuthority;
   private readonly authorityResolver: ActionAuthorityResolverV1 | null;
   private readonly fault: ActionAuthorityStoreOptions["fault"];
@@ -92,14 +92,12 @@ export class ActionAuthorityStore {
     this.random = options.random_bytes ?? systemRandomBytes;
     this.authorityResolver = options.authority_resolver ?? null;
     this.fault = options.fault;
-    this.hmacKey = options.hmac_key ? Buffer.from(options.hmac_key) : null;
-    if (this.hmacKey && this.hmacKey.length !== 32)
-      throw new Error("approval challenge HMAC key must be 256 bits");
+    this.hmacKey = approvalChallengeHmacKeySource(options.hmac_key);
     this.challenges = new ApprovalChallengeAuthority(
       this.files,
       this.now,
       this.random,
-      this.hmacKey ?? Buffer.alloc(0),
+      this.hmacKey ?? (() => Buffer.alloc(0)),
       (proposalId, proposalDigest, authority) =>
         requireOwnedSnapshot(
           this.files,
@@ -141,15 +139,15 @@ export class ActionAuthorityStore {
       throw new Error("prepared action idempotency authority changed");
     const proposal = this.files.readProposal(prepared.proposal_id);
     const authority = this.files.readAuthority(prepared.proposal_id);
-    if (authority.length === 0) return null;
     if (
       !proposal ||
       proposal.idempotency_key !== input.idempotency_key ||
       proposal.proposal_digest !== prepared.proposal_digest ||
-      !equalCanonical(authority[0]?.payload, {
-        kind: ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED,
-        proposal,
-      })
+      (authority.length > 0 &&
+        !equalCanonical(authority[0]?.payload, {
+          kind: ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED,
+          proposal,
+        }))
     )
       throw new Error("prepared action proposal closure is missing or mismatched");
     return structuredClone(proposal);
@@ -179,28 +177,19 @@ export class ActionAuthorityStore {
   }
 
   list(): ActionAuthoritySnapshotV1[] {
-    return this.files
-      .proposalIds()
-      .map((proposalId) => this.get(proposalId))
-      .filter((value): value is ActionAuthoritySnapshotV1 => value !== null)
-      .sort(
-        (left, right) =>
-          right.proposal.created_at.localeCompare(left.proposal.created_at) ||
-          right.proposal.proposal_id.localeCompare(left.proposal.proposal_id),
-      );
+    return listActionSnapshots(this.files.proposalIds(), (proposalId) => this.get(proposalId));
   }
 
   /** Structural-only snapshots for domain bootstrap before a retained resolver is rebound. */
   listRecorded(): ActionAuthoritySnapshotV1[] {
-    return this.files
-      .proposalIds()
-      .map((proposalId) => this.getRecorded(proposalId))
-      .filter((value): value is ActionAuthoritySnapshotV1 => value !== null)
-      .sort(
-        (left, right) =>
-          right.proposal.created_at.localeCompare(left.proposal.created_at) ||
-          right.proposal.proposal_id.localeCompare(left.proposal.proposal_id),
-      );
+    return listActionSnapshots(this.files.proposalIds(), (proposalId) =>
+      this.getRecorded(proposalId),
+    );
+  }
+
+  /** Bootstrap excludes crash-interrupted proposal publication until its caller completes it. */
+  listRecordedForRecovery(): ActionAuthoritySnapshotV1[] {
+    return listRecordedActionsForRecovery(this.files, (proposalId) => this.getRecorded(proposalId));
   }
 
   assertMutationController(input: {

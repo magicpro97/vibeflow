@@ -13,6 +13,7 @@ import type {
   AttemptHandle,
   EngineProcess,
   EngineSessionAdapterOptions,
+  InternalAuthenticatedModelOutputBinding,
   InternalResumeBinding,
   OperationLifecycleState,
 } from "./session-types.js";
@@ -203,6 +204,7 @@ export interface AttemptHandleInput<T> {
   signal: AbortSignal;
   terminate: (reason?: string) => void | Promise<void>;
   readResumeBinding: () => InternalResumeBinding | undefined;
+  readModelOutputBinding: () => InternalAuthenticatedModelOutputBinding | undefined;
   readEvidenceBinding: () => { attemptId: string; internalRef: string } | undefined;
 }
 
@@ -241,6 +243,7 @@ export function createAttemptHandle<T>(input: AttemptHandleInput<T>): AttemptHan
     completion: input.completion,
     terminate,
     readResumeBinding: input.readResumeBinding,
+    readModelOutputBinding: input.readModelOutputBinding,
     readEvidenceBinding: input.readEvidenceBinding,
   };
 }

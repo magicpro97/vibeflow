@@ -14,6 +14,7 @@ import type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
 export type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
 import { projectConversationAgentTurnResult } from "./agent-turn-output-projection.js";
 import { reconcileAttemptHistory } from "./attempt-history-reconciliation.js";
+import { captureAttemptModelOutputBinding } from "./attempt-model-output-binding.js";
 import { publishAttemptResumeBinding } from "./attempt-resume-publication.js";
 import type { AttemptRuntimeOptions } from "./attempt-runtime-options.js";
 import { startAttemptRevisionBarrier } from "./attempt-runtime-revision-barrier.js";
@@ -21,7 +22,12 @@ import { prepareInitialRevisionLane, startAndAdmitAttempt } from "./attempt-star
 import { renderAttemptPrompt, resolveAttemptTurnPrompt } from "./attempt-turn-delivery.js";
 import { publishAttemptTurnDelivery } from "./attempt-turn-publication.js";
 import { AGENT_ACTION_CANDIDATE_ROLE } from "./conversation-agent-action-candidate-contract.js";
-import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
+import { projectEngineCoordinationWorkspace } from "./conversation-coordination-workspace-binding.js";
+import {
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
+import { createDeferredPolicyAttempt } from "./deferred-policy-attempt.js";
 import { assertAttemptEmission, snapshotRuntimeValue } from "./emission-authority.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
 import type { RegisteredOperation } from "./operation-registry.js";
@@ -58,35 +64,14 @@ export class AttemptRuntime {
       return this.launchNow(live, operation, request, refs);
     }
     const ref = randomBytes(32).toString("base64url") as AttemptRef;
-    let inner: PolicyAttempt | undefined;
-    let listener: ((chunk: Readonly<EngineChunk>) => void) | undefined;
-    let unsubscribe: (() => void) | undefined;
-    const ready = this.options
-      .awaitOpen(live.manifest.conversation_id, live.operationId)
-      .then(() => {
-        if (!operation.isLive()) throw new Error("operation is not live");
-        inner = this.launchNow(live, operation, request, refs, ref);
-        if (listener) unsubscribe = inner.onChunk(listener);
-        return inner;
-      });
-    const completion = ready.then((attempt) => attempt.completion);
-    void completion.catch(() => undefined);
-    return Object.freeze({
+    return createDeferredPolicyAttempt(
       ref,
-      completion,
-      emit: (emission: AttemptEmission) => {
-        const captured = snapshotRuntimeValue(emission);
-        return ready.then((attempt) => attempt.emit(captured));
+      this.options.awaitOpen(live.manifest.conversation_id, live.operationId),
+      () => {
+        if (!operation.isLive()) throw new Error("operation is not live");
+        return this.launchNow(live, operation, request, refs, ref);
       },
-      onChunk: (next: (chunk: Readonly<EngineChunk>) => void) => {
-        if (listener) throw new Error("attempt chunk stream already consumed");
-        listener = next;
-        return () => {
-          listener = undefined;
-          unsubscribe?.();
-        };
-      },
-    });
+    );
   }
   private launchNow(
     live: AttemptConversationAuthority,
@@ -158,6 +143,7 @@ export class AttemptRuntime {
           request.purpose !== "evaluator" &&
           manifestBinding.input.roleRef !== AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR &&
           manifestBinding.host_tools?.includes(AGENT_HOST_TOOL.PROPOSE_ACTION) === true,
+        delivery: request.delivery,
       },
     );
     const spawn = createSpawnOptionsProjection({
@@ -183,6 +169,7 @@ export class AttemptRuntime {
     };
     let chain: Promise<unknown> = Promise.resolve();
     let evidenceRef: string | undefined;
+    let modelOutputBinding: ReturnType<typeof captureAttemptModelOutputBinding>;
     let nativeId: string | null = resume?.nativeSessionId ?? null;
     let chunkBytes = 0;
     let chunkError: Error | undefined;
@@ -303,6 +290,14 @@ export class AttemptRuntime {
       request: {
         attemptId,
         spawn,
+        ...(request.coordinationWorkspace
+          ? {
+              coordinationWorkspace: projectEngineCoordinationWorkspace(
+                live.manifest.workflow_id,
+                request.coordinationWorkspace,
+              ),
+            }
+          : {}),
         ...(resume ? { nativeSessionId: resume.nativeSessionId } : {}),
         signal: operation.signal,
         onChunk: receiveChunk,
@@ -318,6 +313,12 @@ export class AttemptRuntime {
       try {
         const result = await handle.completion;
         const captured = handle.readResumeBinding();
+        modelOutputBinding = captureAttemptModelOutputBinding(
+          handle,
+          attemptId,
+          resolved.engine,
+          captured,
+        );
         nativeId = captured?.nativeSessionId ?? nativeId;
         evidenceRef = handle.readEvidenceBinding()?.internalRef;
         if (revisionLane) {
@@ -373,6 +374,7 @@ export class AttemptRuntime {
     return Object.freeze({
       ref,
       completion,
+      readModelOutputBinding: () => modelOutputBinding,
       emit: append,
       onChunk: (next: (chunk: Readonly<EngineChunk>) => void) => {
         if (!this.options.isRetained(live.manifest.conversation_id, live.operationId)) {
@@ -389,12 +391,9 @@ export class AttemptRuntime {
       },
     });
   }
-  async reconcile(
-    live: AttemptConversationAuthority,
-    operation: RegisteredOperation,
-  ): Promise<void> {
+  reconcile(live: AttemptConversationAuthority, operation: RegisteredOperation): Promise<void> {
     const reconciliations = this.reconciliations.get(live) ?? new Map<string, string | null>();
     this.reconciliations.set(live, reconciliations);
-    await reconcileAttemptHistory({ options: this.options, live, operation, reconciliations });
+    return reconcileAttemptHistory({ options: this.options, live, operation, reconciliations });
   }
 }

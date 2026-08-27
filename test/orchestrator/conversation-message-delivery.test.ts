@@ -176,6 +176,7 @@ class ControlledAdapter implements EngineSessionAdapter {
         engine: this.engine,
         nativeSessionId,
       }),
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => ({ attemptId: request.attemptId, internalRef: evidenceRef }),
     };
   }

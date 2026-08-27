@@ -1,13 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import type { Engine } from "../../src/core.js";
+import { AGENT_ENGINE } from "../../src/core/agent-contract.js";
+import { CONVERSATION_ROLE_NAME, WORKFLOW_ROLE_NAME } from "../../src/core/role-name-contract.js";
+import { CONVERSATION_POLICY } from "../../src/orchestrator/conversation/conversation-policy-contract.js";
 import {
+  CONVERSATION_ROUTING_ERROR_CODE,
   type ConversationRoutingAuthority,
   ConversationRoutingError,
   type ConversationRoutingInput,
   routeConversation,
 } from "../../src/orchestrator/conversation/router.js";
 
-const policies = ["direct", "plan", "debate", "review", "verify", "orchestrate"] as const;
+const policies = [
+  "direct",
+  "coordinate",
+  "plan",
+  "debate",
+  "review",
+  "verify",
+  "orchestrate",
+] as const;
 const roles = [
   "direct",
   "brainstorm-participant",
@@ -15,6 +27,9 @@ const roles = [
   "brainstorm-domain-expert",
   "security-expert",
   "spreadsheet-expert",
+  "cli-engine",
+  "coordination-coordinator",
+  "coordination-executor",
 ] as const;
 
 const engine = (
@@ -102,6 +117,100 @@ describe("deterministic conversation routing", () => {
     });
   });
 
+  test("coordinate defaults to a Claude coordinator and a distinct writable executor role", () => {
+    expect(
+      routeConversation(
+        { topic: "implement the feature", explicitPolicy: CONVERSATION_POLICY.COORDINATE },
+        authority(),
+      ),
+    ).toEqual({
+      policy: CONVERSATION_POLICY.COORDINATE,
+      participants: [
+        {
+          roleRef: CONVERSATION_ROLE_NAME.COORDINATION_COORDINATOR,
+          engine: AGENT_ENGINE.CLAUDE,
+        },
+        {
+          roleRef: CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+          engine: AGENT_ENGINE.CODEX,
+        },
+      ],
+      reason: "explicit_policy",
+    });
+  });
+
+  test("coordinate skips ready engines without authenticated terminal output", () => {
+    const ready = authority({
+      engines: [
+        engine(AGENT_ENGINE.CLAUDE),
+        engine(AGENT_ENGINE.COPILOT),
+        engine(AGENT_ENGINE.CODEX),
+      ],
+    });
+    expect(
+      routeConversation(
+        { topic: "implement the feature", explicitPolicy: CONVERSATION_POLICY.COORDINATE },
+        ready,
+      ).participants.map(({ engine }) => engine),
+    ).toEqual([AGENT_ENGINE.CLAUDE, AGENT_ENGINE.CODEX]);
+    expect(() =>
+      routeConversation(
+        {
+          topic: "implement the feature",
+          explicitPolicy: CONVERSATION_POLICY.COORDINATE,
+          participants: [
+            { roleRef: CONVERSATION_ROLE_NAME.DIRECT, engine: AGENT_ENGINE.CLAUDE },
+            { roleRef: WORKFLOW_ROLE_NAME.CLI_ENGINE, engine: AGENT_ENGINE.COPILOT },
+          ],
+        },
+        ready,
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: CONVERSATION_ROUTING_ERROR_CODE.COORDINATE_ENGINE_UNSUPPORTED,
+      }) as unknown as Error,
+    );
+  });
+
+  test.each([CONVERSATION_POLICY.COORDINATE, undefined])(
+    "rejects same-engine %s coordinate creation",
+    (explicitPolicy) => {
+      expect(() =>
+        routeConversation(
+          {
+            topic: "implement the feature",
+            ...(explicitPolicy ? { explicitPolicy } : {}),
+            participants: [
+              { roleRef: CONVERSATION_ROLE_NAME.DIRECT, engine: AGENT_ENGINE.CLAUDE },
+              { roleRef: WORKFLOW_ROLE_NAME.CLI_ENGINE, engine: AGENT_ENGINE.CLAUDE },
+            ],
+          },
+          authority(),
+        ),
+      ).toThrow(
+        expect.objectContaining({
+          code: CONVERSATION_ROUTING_ERROR_CODE.COORDINATE_ENGINE_NOT_DISTINCT,
+        }) as unknown as Error,
+      );
+    },
+  );
+
+  test("bare coordinate requires a distinct ready executor engine", () => {
+    expect(() =>
+      routeConversation(
+        { topic: "implement the feature", explicitPolicy: CONVERSATION_POLICY.COORDINATE },
+        authority({
+          engines: [
+            engine("claude"),
+            engine("codex", false),
+            engine("copilot", false),
+            engine("opencode", true, false),
+          ],
+        }),
+      ),
+    ).toThrow("coordinate_executor_unavailable");
+  });
+
   test("explicit participants outrank natural intent and preserve order", () => {
     const one = routeConversation(
       {
@@ -135,6 +244,29 @@ describe("deterministic conversation routing", () => {
       participants: [
         { roleRef: "brainstorm-skeptic", engine: "codex" },
         { roleRef: "brainstorm-participant", engine: "claude" },
+      ],
+      reason: "explicit_participants",
+    });
+
+    expect(
+      routeConversation(
+        {
+          topic: "implement the approved change",
+          participants: [
+            { roleRef: "direct", engine: "claude" },
+            { roleRef: WORKFLOW_ROLE_NAME.CLI_ENGINE, engine: AGENT_ENGINE.CODEX },
+          ],
+        },
+        authority(),
+      ),
+    ).toEqual({
+      policy: CONVERSATION_POLICY.COORDINATE,
+      participants: [
+        {
+          roleRef: CONVERSATION_ROLE_NAME.COORDINATION_COORDINATOR,
+          engine: AGENT_ENGINE.CLAUDE,
+        },
+        { roleRef: WORKFLOW_ROLE_NAME.CLI_ENGINE, engine: AGENT_ENGINE.CODEX },
       ],
       reason: "explicit_participants",
     });

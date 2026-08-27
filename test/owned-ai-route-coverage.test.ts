@@ -46,6 +46,9 @@ const DIRECT_PROCESS_BOUNDARIES: Readonly<Record<string, BoundaryClass>> = {
   "src/memory/claude-mem.ts": "tool-extension",
   "src/notify.ts": "tool-extension",
   "src/orchestrator/conversation/bootstrap-isolation.ts": "git-or-system-command",
+  "src/orchestrator/conversation/conversation-delegation-workspace-git.ts": "git-or-system-command",
+  "src/orchestrator/conversation/conversation-delegation-workspace-verification.ts":
+    "git-or-system-command",
   "src/orchestrator/marker.ts": "git-or-system-command",
   "src/orchestrator/publish-unit.ts": "git-or-system-command",
   "src/orchestrator/scoped-gate.ts": "git-or-system-command",

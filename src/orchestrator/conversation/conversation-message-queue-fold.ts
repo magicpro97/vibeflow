@@ -24,6 +24,8 @@ export interface FoldedConversationMessageQueueItemV1 {
   item: PublicQueuedUserMessageV1;
   owner_principal_digest: string;
   admitted_authority: ConversationMessageQueueAuthorityV1;
+  client_instance_id: string;
+  client_order: number;
   enqueue_idempotency_key_digest: string;
   private_context_binding_digest: string | null;
   claim_epoch: number | null;
@@ -96,6 +98,13 @@ function foldAdmitted(
         row.item.state === CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED,
     )
     .at(-1);
+  const priorClientOrder = ordered
+    .filter(
+      (row) =>
+        row.owner_principal_digest === payload.owner_principal_digest &&
+        row.client_instance_id === payload.client_instance_id,
+    )
+    .at(-1)?.client_order;
   if (
     items.has(payload.item.queue_item_id) ||
     payload.item.queue_sequence !== sequence ||
@@ -106,13 +115,16 @@ function foldAdmitted(
     payload.item.admitted_authority_digest !== payload.admitted_authority.authority_digest ||
     payload.item.effective_authority_digest !== payload.admitted_authority.authority_digest ||
     payload.item.private_context_present !== (payload.private_context_binding_digest !== null) ||
-    payload.item.admitted_at !== event.recorded_at
+    payload.item.admitted_at !== event.recorded_at ||
+    payload.client_order !== (priorClientOrder ?? 0) + 1
   )
     fail("queue admission authority changed");
   items.set(payload.item.queue_item_id, {
     item: structuredClone(payload.item),
     owner_principal_digest: payload.owner_principal_digest,
     admitted_authority: structuredClone(payload.admitted_authority),
+    client_instance_id: payload.client_instance_id,
+    client_order: payload.client_order,
     enqueue_idempotency_key_digest: payload.idempotency_key_digest,
     private_context_binding_digest: payload.private_context_binding_digest,
     claim_epoch: null,

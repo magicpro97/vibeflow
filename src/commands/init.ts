@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 // src/commands/init.ts
 //
 //
@@ -55,6 +56,7 @@ import type {
   UnitDispatcher,
 } from "./_shared.js";
 
+import { activateRecoveryBootstrapForTrustedInstall } from "../capabilities/authority-repair/index.js";
 import { activateProjectCapabilityAuthorityForVfInit } from "../capabilities/source/authority-activation.js";
 import { writeInitArtifacts } from "./init-artifacts.js";
 
@@ -147,6 +149,8 @@ export async function init(
     // real install. Forwarded to runMemoryPhase. Production callers leave
     // this undefined; the real prompt + install run.
     memoryInject?: MemoryPhaseInject;
+    /** Fixed user authority root for trusted recovery-bootstrap activation. */
+    userVibeflowRoot?: string;
   } = {},
 ): Promise<number> {
   // A1 brief-surface gate (#167 + #194): `vf init` ALWAYS consults the
@@ -239,6 +243,9 @@ export async function init(
   if (!dry) {
     ensurePortableProjectIdentityTracked(cwd());
     activateProjectCapabilityAuthorityForVfInit(cwd());
+    activateRecoveryBootstrapForTrustedInstall(
+      inject.userVibeflowRoot ?? process.env.VF_USER_VIBEFLOW_ROOT ?? join(homedir(), ".vibeflow"),
+    );
   }
   const label = dry ? "dry run" : "init";
   out("vf", panel("VibeFlow", c.bold(label)));

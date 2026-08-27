@@ -4,13 +4,17 @@ name: Release
 # into main. release-please (running in ci.yml) opens a Release PR that bumps
 # version in package.json + .release-please-manifest.json, adds changelog, and
 # applies the `autorelease:pending` label. When a human merges that PR, this
-# workflow runs, verifies the label is still present, then publishes + tags.
+# workflow runs the build gate and live Windows owned-process gate for that
+# merge SHA, then publishes + tags.
 #
-# Two jobs:
+# Four jobs:
 #   - verify  (ubuntu-latest by default): runs the full `bun run check` gate and
 #     builds dist/. The coverage gate counts DA entries (executable lines), so it
 #     reaches 100% on ubuntu WITHOUT the codegraph binary. Switches to the
 #     self-hosted MacBook only when repo var USE_SELF_HOSTED=true.
+#   - windows-owned-process (windows-latest): proves native PID, Job Object,
+#     release, and orphan handling against the exact merge SHA.
+#   - release-prerequisites: requires both gates before exposing publish inputs.
 #   - publish (github-hosted): `npm publish --provenance` requires a github-hosted
 #     runner (sigstore rejects "self-hosted"). Downloads dist/ and publishes.
 #
@@ -36,6 +40,9 @@ jobs:
       version: ${{ steps.local.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: true
+          ref: ${{ github.sha }}
       - uses: oven-sh/setup-bun@v2
 
       - name: Read local version
@@ -78,15 +85,60 @@ jobs:
           retention-days: 1
           include-hidden-files: true
 
+  windows-owned-process:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      VF_REQUIRE_LIVE_WINDOWS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: true
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun ci
+      - name: Assert the release commit on a real Windows runtime
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bun -e "if (process.platform !== 'win32') throw new Error('live Windows evidence requires win32')"
+      - name: Windows PID, Job Object, release, and orphan release gate
+        run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
+
+  release-prerequisites:
+    needs:
+      - verify
+      - windows-owned-process
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true) }}
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ needs.verify.outputs.exists }}
+      version: ${{ needs.verify.outputs.version }}
+    steps:
+      - name: Require same-SHA build and native Windows evidence
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          WINDOWS_RESULT: ${{ needs.windows-owned-process.result }}
+        run: |
+          test "$VERIFY_RESULT" = success
+          test "$WINDOWS_RESULT" = success
+          echo "Release prerequisites passed for $GITHUB_SHA"
+
   publish:
-    needs: verify
-    if: needs.verify.outputs.exists == 'false'
+    needs: release-prerequisites
+    if: needs.release-prerequisites.outputs.exists == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: true
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -108,5 +160,5 @@ jobs:
 
       - name: Tag the release
         run: |
-          git tag "v${{ needs.verify.outputs.version }}"
-          git push origin "v${{ needs.verify.outputs.version }}"
+          git tag "v${{ needs.release-prerequisites.outputs.version }}"
+          git push origin "v${{ needs.release-prerequisites.outputs.version }}"

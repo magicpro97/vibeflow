@@ -156,6 +156,9 @@ export function assertEnqueueConversationUserMessageRequestV1(
     !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.ENQUEUE_REQUEST) ||
     value.schema_version !== CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION ||
     !isQueueDigest(value.expected_authority_digest) ||
+    !isQueueReference(value.client_instance_id, 128) ||
+    !Number.isSafeInteger(value.client_order) ||
+    (value.client_order as number) < 1 ||
     !Array.isArray(value.quote_refs) ||
     value.quote_refs.length > CONVERSATION_MESSAGE_QUEUE_LIMITS.maxQuotes ||
     typeof value.private_context_present !== "boolean"

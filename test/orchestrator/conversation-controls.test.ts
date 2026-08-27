@@ -15,6 +15,10 @@ import {
   operationAuthorityPath,
 } from "../../src/orchestrator/conversation/artifact-store.js";
 import { ControlRuntime } from "../../src/orchestrator/conversation/control-runtime.js";
+import {
+  CONVERSATION_GRACEFUL_TERMINAL_LIFECYCLES,
+  CONVERSATION_TERMINAL_LIFECYCLE,
+} from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
 import { assertAttemptEmission } from "../../src/orchestrator/conversation/emission-authority.js";
 import {
   ConversationAuthorityClosedError,
@@ -103,6 +107,7 @@ function handle(attemptId: string, calls: string[]): AttemptHandle {
       calls.push(`terminate:${attemptId}:${reason ?? ""}`);
     },
     readResumeBinding: () => undefined,
+    readModelOutputBinding: () => undefined,
     readEvidenceBinding: () => undefined,
   };
 }
@@ -174,6 +179,7 @@ test("attempt purpose lanes admit only their frozen event families", () => {
     review: ["agent_response_delta", "tool_action", "error"],
     verify: ["agent_response_delta", "tool_action", "error"],
     orchestrate: ["agent_response_delta", "tool_action", "error"],
+    coordinate: ["agent_response_delta", "tool_action", "error"],
   };
   for (const [purpose, allowed] of Object.entries(expected) as Array<
     [PolicyAttemptPurpose, AttemptEmission["event"]["type"][]]
@@ -463,19 +469,25 @@ test("a failed terminal reservation never masquerades as a committed winner", as
   expect(fallbackAppends).toBe(1);
 });
 
-test("adopting a durable terminal winner bypasses local pause remapping", async () => {
-  const gate = new ConversationEmissionGate();
-  gate.open("conversation-1", "operation-1", true);
-  let locallyReserved: "ABORTED" | undefined;
-  const failed = gate.terminal("conversation-1", "operation-1", "COMPLETED", async (winner) => {
-    locallyReserved = winner as "ABORTED";
-    throw new Error("durable competitor won");
-  });
-  await expect(failed).rejects.toThrow("durable competitor won");
-  expect(locallyReserved).toBe("ABORTED");
-  gate.releaseFailedTerminal("conversation-1", "operation-1", "ABORTED");
-  expect(gate.adoptTerminal("conversation-1", "operation-1", "COMPLETED")).toBe("COMPLETED");
-  expect(gate.finish("conversation-1", "operation-1")).toBe(true);
+test("adopting a durable graceful terminal winner bypasses local pause remapping", async () => {
+  for (const lifecycle of CONVERSATION_GRACEFUL_TERMINAL_LIFECYCLES) {
+    const gate = new ConversationEmissionGate();
+    gate.open("conversation-1", "operation-1", true);
+    let locallyReserved: typeof CONVERSATION_TERMINAL_LIFECYCLE.ABORTED | undefined;
+    const failed = gate.terminal("conversation-1", "operation-1", lifecycle, async (winner) => {
+      locallyReserved = winner as typeof CONVERSATION_TERMINAL_LIFECYCLE.ABORTED;
+      throw new Error("durable competitor won");
+    });
+    await expect(failed).rejects.toThrow("durable competitor won");
+    expect(locallyReserved).toBe(CONVERSATION_TERMINAL_LIFECYCLE.ABORTED);
+    gate.releaseFailedTerminal(
+      "conversation-1",
+      "operation-1",
+      CONVERSATION_TERMINAL_LIFECYCLE.ABORTED,
+    );
+    expect(gate.adoptTerminal("conversation-1", "operation-1", lifecycle)).toBe(lifecycle);
+    expect(gate.finish("conversation-1", "operation-1")).toBe(true);
+  }
 });
 
 test("subscriber replay drains events synchronously enqueued by its listener", async () => {
@@ -545,6 +557,20 @@ test("policy result projection contains hostile accessors as a failed result", a
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("policy result projection preserves the canonical needs-input boundary status", () => {
+  const store = {
+    readRecord: () => ({ artifacts: [] }),
+  } as unknown as ConversationArtifactStore;
+  expect(
+    projectOrchestrationResult(
+      { operation_id: "operation-1", status: "needs_input", artifact_refs: [] },
+      "operation-1",
+      "conversation-1",
+      store,
+    ),
+  ).toEqual({ operation_id: "operation-1", status: "needs_input", artifact_refs: [] });
 });
 
 test("conversation manifest is durable and existence is independent from a trace journal", async () => {
@@ -919,6 +945,7 @@ test("reentrant and concurrent termination callers share one complete drain prom
       await drained;
     },
     readResumeBinding: () => undefined,
+    readModelOutputBinding: () => undefined,
     readEvidenceBinding: () => undefined,
   });
   let reentrant: Promise<void> | undefined;

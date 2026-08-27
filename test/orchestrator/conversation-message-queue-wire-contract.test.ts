@@ -172,6 +172,8 @@ describe("conversation message queue typed runtime contract", () => {
       schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
       idempotency_key: "queue-wire-reference",
       expected_authority_digest: digest,
+      client_instance_id: "queue-wire-client",
+      client_order: 1,
       content: "queued",
       target_participants: ["agent-a"],
       quote_refs: [canonicalQuote],
@@ -193,6 +195,10 @@ describe("conversation message queue typed runtime contract", () => {
     expect(() => assertEnqueueConversationUserMessageRequestV1(canonicalRequest)).not.toThrow();
 
     for (const request of [
+      { ...canonicalRequest, client_instance_id: "client\nprivate" },
+      { ...canonicalRequest, client_instance_id: "a".repeat(129) },
+      { ...canonicalRequest, client_order: 0 },
+      { ...canonicalRequest, client_order: Number.MAX_SAFE_INTEGER + 1 },
       { ...canonicalRequest, target_participants: ["agent\nname"] },
       {
         ...canonicalRequest,

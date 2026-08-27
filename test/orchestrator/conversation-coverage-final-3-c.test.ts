@@ -174,6 +174,8 @@ describe("final conversation authority coverage C", () => {
         schema_version: "1.0",
         idempotency_key: "private-runtime-validation",
         expected_authority_digest: authority.authority_digest,
+        client_instance_id: "private-runtime-validation-client",
+        client_order: 1,
         content: "deliver with exact private context",
         target_participants: ["participant-a"],
         quote_refs: [],

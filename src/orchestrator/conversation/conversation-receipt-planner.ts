@@ -6,6 +6,7 @@ import {
   type ActionProposalDraftV1,
   type ActionProposalRequestV1,
   type ActionRequestAuthorityV1,
+  type ActionRisk,
   type CanonicalActionRequestV1,
   EMPTY_ADAPTER_SET_DIGEST,
   EMPTY_PERMISSION_DIGEST,
@@ -17,7 +18,12 @@ import {
   canonicalActionRequestDigest,
   materializeProposal,
 } from "../../actions/index.js";
-import { ACTION_PREVIEW_PROJECTOR_VERSION } from "../../actions/public-action-contract.js";
+import {
+  ACTION_EFFECT_CLASS,
+  ACTION_PREVIEW_PROJECTOR_VERSION,
+  ACTION_REVERSIBILITY_VALUE,
+  ACTION_RISK,
+} from "../../actions/public-action-contract.js";
 import { digestV1 } from "../../durability/index.js";
 import { conversationActionAuthorityHead } from "./conversation-action-planner.js";
 import type {
@@ -53,7 +59,7 @@ function plus(timestamp: string, milliseconds: number): string {
 function effect(action: HostActionV1): {
   classes: ActionEffectClass[];
   reversibility: Reversibility;
-  risk: "medium" | "critical";
+  risk: ActionRisk;
 } {
   if (
     action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL ||
@@ -61,11 +67,15 @@ function effect(action: HostActionV1): {
     action.type === HOST_ACTION_KIND.CONVERSATION_ABANDON_REVISION_OPERATION
   )
     return {
-      classes: ["project-write"],
-      reversibility: "irreversible",
-      risk: "critical",
+      classes: [ACTION_EFFECT_CLASS.PROJECT_WRITE],
+      reversibility: ACTION_REVERSIBILITY_VALUE.IRREVERSIBLE,
+      risk: ACTION_RISK.CRITICAL,
     };
-  return { classes: ["project-write"], reversibility: "reversible", risk: "medium" };
+  return {
+    classes: [ACTION_EFFECT_CLASS.PROJECT_WRITE],
+    reversibility: ACTION_REVERSIBILITY_VALUE.REVERSIBLE,
+    risk: ACTION_RISK.MEDIUM,
+  };
 }
 
 function preview(action: HostActionV1, publicCandidate: ActionProposalRequestV1["candidate"]) {

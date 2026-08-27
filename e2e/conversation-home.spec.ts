@@ -19,6 +19,7 @@ import {
   PUBLIC_OPERATION_PROGRESS_STATUS,
 } from "../src/actions/public-operation-contract.js";
 import { AGENT_ENGINE } from "../src/core/agent-contract.js";
+import { WORKFLOW_ROLE_NAME } from "../src/core/role-name-contract.js";
 import { projectConversationAgentTurnOutput } from "../src/orchestrator/conversation/agent-turn-output-projection.js";
 import {
   CONVERSATION_CATALOG_HEALTH,
@@ -485,24 +486,24 @@ test.describe("AI-first conversation Home", () => {
     await expect(combobox).toHaveAttribute("aria-label", "Message");
     await expect(combobox).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByRole("listbox", { name: "Composer suggestions" })).toBeVisible();
-    await expect(page.getByRole("option", { name: /Reviewer/ })).toBeVisible();
+    await expect(page.getByRole("option", { name: /Implementation agent/ })).toBeVisible();
     await expectAxeClean(page, "composer suggestions");
-    await page.getByRole("option", { name: /Implementer/ }).click();
-    await expect(composer).toHaveValue("+implementer@claude");
+    await page.getByRole("option", { name: /Web UI/ }).click();
+    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`);
     await composer.fill("+");
     await expect(composer).toHaveAttribute("aria-controls", "composer-suggestions");
-    const reviewerId = await page.getByRole("option", { name: /Reviewer/ }).getAttribute("id");
-    await expect(combobox).toHaveAttribute("aria-activedescendant", reviewerId ?? "");
-    await page.keyboard.press("ArrowDown");
-    const implementerId = await page
-      .getByRole("option", { name: /Implementer/ })
+    const implementationAgentId = await page
+      .getByRole("option", { name: /Implementation agent/ })
       .getAttribute("id");
-    await expect(combobox).toHaveAttribute("aria-activedescendant", implementerId ?? "");
+    await expect(combobox).toHaveAttribute("aria-activedescendant", implementationAgentId ?? "");
+    await page.keyboard.press("ArrowDown");
+    const webUiId = await page.getByRole("option", { name: /Web UI/ }).getAttribute("id");
+    await expect(combobox).toHaveAttribute("aria-activedescendant", webUiId ?? "");
     await page.keyboard.press("Enter");
-    await expect(composer).toHaveValue("+implementer@claude");
+    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("listbox", { name: "Composer suggestions" })).toHaveCount(0);
-    await expect(composer).toHaveValue("+implementer@claude");
+    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`);
 
     const capabilitiesTrigger = page.getByRole("button", { name: "Open CLI capabilities" });
     await capabilitiesTrigger.click();
@@ -658,6 +659,137 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByText("Action A stale page")).toHaveCount(0);
     await expect(directMessage.getByText("READY", { exact: true })).toBeVisible();
     await expect(actionCard("Action B current")).toBeVisible();
+  });
+
+  test("isolates queued edits and keeps queue admission non-blocking", async ({ page }) => {
+    const session = homeSession("root-edit-isolation", "Edit isolation");
+    const queued = homeQueuedMessage("root-edit-isolation", 1, "Queued draft");
+    const admission = deferred<void>();
+    let queueItems = [queued];
+
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route(
+      "**/api/conversation-sessions/root-edit-isolation/timeline?**",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: homeTimeline("root-edit-isolation", [
+            homeAssistantEvent("root-edit-isolation", "event-edit-source", "Verified source"),
+          ]),
+        });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-edit-isolation-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-edit-isolation-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: {
+            stream_token: "edit-isolation-stream-token",
+            stream_token_expires_at: HOME_FUTURE_TS,
+          },
+        });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-edit-isolation-conversation/events?**",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+          body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+            retryMilliseconds: 60_000,
+          }),
+        });
+      },
+    );
+    await page.route(
+      "**/api/conversation-sessions/root-edit-isolation/messages/queue",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({
+            status: 200,
+            json: homeMessageQueue("root-edit-isolation", queueItems),
+          });
+          return;
+        }
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        await admission.promise;
+        const accepted = {
+          ...homeQueuedMessage("root-edit-isolation", 2, String(body.content)),
+          target_participants: body.target_participants,
+          quote_refs: body.quote_refs,
+          private_context_present: body.private_context_present,
+        } as ReturnType<typeof homeQueuedMessage>;
+        queueItems = [...queueItems, accepted];
+        await route.fulfill({ status: 201, json: accepted });
+      },
+    );
+
+    await page.goto("/");
+    await waitForPage(page);
+    const queueReady = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname ===
+          "/api/conversation-sessions/root-edit-isolation/messages/queue",
+    );
+    await page.getByRole("button", { name: /Edit isolation/ }).click();
+    await queueReady;
+    const composer = page.locator("#home-composer");
+
+    await composer.press("ArrowUp");
+    await expect(composer).toHaveValue("Queued draft");
+    await expect(page.getByRole("button", { name: "Details" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Open CLI capabilities" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Agent", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
+    await expect(page.locator(".home-quote-stack--selection")).toHaveCount(0);
+    await composer.press("Escape");
+    await composer.fill("Keep this draft");
+    await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(4, 4));
+    await page.getByRole("button", { name: "Agent", exact: true }).click();
+    await expect(composer).toHaveValue("Keep + this draft");
+
+    const admitted = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          "/api/conversation-sessions/root-edit-isolation/messages/queue",
+    );
+    await composer.fill("First queued message");
+    await composer.press("Enter");
+    await expect(page.locator("#composer-status")).toContainText(
+      "Waiting for durable queue admission",
+    );
+    await expect(page.getByRole("button", { name: "Send message" })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+    await composer.fill("Second draft stays interactive");
+    await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+    admission.resolve();
+    await admitted;
+    await expect(composer).toHaveValue("Second draft stays interactive");
   });
 
   test("queues rapid sends and quick-edits the latest FIFO slot without intercepting IME", async ({
@@ -838,12 +970,15 @@ test.describe("AI-first conversation Home", () => {
       "B",
       "C",
     ]);
-    expect(new Set(postBodies.map((body) => body.idempotency_key)).size).toBe(4);
+    expect(postBodies).toHaveLength(3);
+    expect(new Set(postBodies.map((body) => body.idempotency_key)).size).toBe(2);
 
     gates.get("C")?.resolve();
     gates.get("A")?.resolve();
     gates.get("B")?.resolve();
     await expect(page.locator(".home-message-queue__sequence")).toHaveText(["1", "2", "3", "4"]);
+    expect(postBodies).toHaveLength(5);
+    expect(new Set(postBodies.map((body) => body.idempotency_key)).size).toBe(4);
 
     await composer.dispatchEvent("compositionstart");
     await composer.press("ArrowUp");
@@ -897,6 +1032,164 @@ test.describe("AI-first conversation Home", () => {
     browserFailures.set(
       page,
       failures.filter((failure) => failure !== expectedUnavailable && failure !== expectedConflict),
+    );
+  });
+
+  test("keeps typed non-retryable admission collisions unsent until explicit recovery", async ({
+    page,
+  }) => {
+    const session = homeSession("root-needs-action", "Needs action session");
+    const gates = new Map(["Restore A", "Dismiss A"].map((content) => [content, deferred<void>()]));
+    const postBodies: Array<Record<string, unknown>> = [];
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "needs-action-catalog",
+          source_watermark: "needs-action-watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route(
+      "**/api/conversation-sessions/root-needs-action/timeline?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homeTimeline("root-needs-action", []) });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-needs-action-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-needs-action-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: {
+            stream_token: "needs-action-stream-token",
+            stream_token_expires_at: HOME_FUTURE_TS,
+          },
+        });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-needs-action-conversation/events?**",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+          body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+            retryMilliseconds: 60_000,
+          }),
+        });
+      },
+    );
+    await page.route(
+      "**/api/conversation-sessions/root-needs-action/messages/queue",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({ status: 200, json: homeMessageQueue("root-needs-action") });
+          return;
+        }
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        postBodies.push(structuredClone(body));
+        const content = String(body.content);
+        await gates.get(content)?.promise;
+        await route.fulfill({
+          status: 400,
+          json: {
+            schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
+            error: {
+              code: CONVERSATION_MESSAGE_QUEUE_ERROR_CODE.INVALID_REQUEST,
+              message: "Review this queued message before sending it again.",
+              correlation_id: `vf-needs-action-${postBodies.length}`,
+              retryable: false,
+              recovery_action: CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.EDIT,
+              details: null,
+            },
+          },
+        });
+      },
+    );
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: "Open conversation list" }).click();
+    await page.getByRole("button", { name: /Needs action session/ }).click();
+    const composer = page.locator("#home-composer");
+
+    await composer.fill("Restore A");
+    await composer.press("Enter");
+    await composer.fill("Newer B");
+    gates.get("Restore A")?.resolve();
+    const restoreRow = page.locator('.home-message-queue li[data-state="needs-action"]', {
+      hasText: "Restore A",
+    });
+    await expect(restoreRow).toContainText("Needs action");
+    await expect(restoreRow.getByRole("button", { name: /Retry queued message/ })).toHaveCount(0);
+    const restore = restoreRow.getByRole("button", { name: "Restore to edit: Restore A" });
+    await expect(restore).toBeDisabled();
+    await expect(composer).toHaveValue("Newer B");
+    expect(postBodies).toHaveLength(1);
+
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+    ).toBeLessThanOrEqual(0);
+    const dismissAtZoom = restoreRow.getByRole("button", {
+      name: "Dismiss failed unsent message: Restore A",
+    });
+    for (const button of [restore, dismissAtZoom]) {
+      const box = await button.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect((box?.x ?? -1) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+    }
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "";
+    });
+
+    await composer.fill("");
+    await expect(restore).toBeEnabled();
+    await restore.click();
+    await expect(composer).toHaveValue("Restore A");
+    await expect(restoreRow).toHaveCount(0);
+    expect(postBodies).toHaveLength(1);
+
+    await composer.fill("Dismiss A");
+    await composer.press("Enter");
+    await composer.fill("Newer B remains");
+    gates.get("Dismiss A")?.resolve();
+    const dismissRow = page.locator('.home-message-queue li[data-state="needs-action"]', {
+      hasText: "Dismiss A",
+    });
+    await expect(dismissRow).toContainText("Needs action");
+    await expect(dismissRow.getByRole("button", { name: /Retry queued message/ })).toHaveCount(0);
+    page.once("dialog", (dialog) => void dialog.accept());
+    await dismissRow
+      .getByRole("button", { name: "Dismiss failed unsent message: Dismiss A" })
+      .click();
+    await expect(dismissRow).toHaveCount(0);
+    await expect(composer).toHaveValue("Newer B remains");
+    expect(postBodies).toHaveLength(2);
+
+    const failures = browserFailures.get(page) ?? [];
+    const expectedBadRequest =
+      "console: Failed to load resource: the server responded with a status of 400 (Bad Request)";
+    expect(failures.filter((failure) => failure === expectedBadRequest)).toHaveLength(2);
+    browserFailures.set(
+      page,
+      failures.filter((failure) => failure !== expectedBadRequest),
     );
   });
 
@@ -1080,6 +1373,8 @@ test.describe("AI-first conversation Home", () => {
       schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
       idempotency_key: expect.any(String),
       expected_authority_digest: homeDigest("root-home-queue-authority"),
+      client_instance_id: expect.any(String),
+      client_order: 1,
       content: "Use the reviewed source.",
       target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
       quote_refs: [
@@ -1364,6 +1659,8 @@ test.describe("AI-first conversation Home", () => {
       schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
       idempotency_key: stageRequests[2]?.enqueue_idempotency_key,
       expected_authority_digest: homeDigest("root-private-queue-authority"),
+      client_instance_id: expect.any(String),
+      client_order: 1,
       content: "Use the private excerpt.",
       target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
       quote_refs: [],
@@ -1465,6 +1762,10 @@ test.describe("AI-first conversation Home", () => {
     await railToggle.click();
     await page.getByRole("button", { name: /Focus session/ }).click();
     const details = page.getByRole("button", { name: "Details" });
+    await page.locator("#home-composer").fill("Keep this");
+    await page
+      .locator("#home-composer")
+      .evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(4, 4));
     await details.click();
     await expect(page.getByRole("complementary", { name: "Conversation details" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Close details" })).toBeFocused();
@@ -1482,7 +1783,7 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "Remove builder from conversation" }).click();
     await expect(page.getByRole("complementary", { name: "Conversation details" })).toHaveCount(0);
     await expect(page.locator("#home-composer")).toBeFocused();
-    await expect(page.locator("#home-composer")).toHaveValue("-@builder");
+    await expect(page.locator("#home-composer")).toHaveValue("Keep -@builder this");
     await page.locator("#home-composer").fill("");
 
     await details.click();

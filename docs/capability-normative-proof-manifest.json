@@ -3,7 +3,7 @@
   "profile": "vf-normative-proof-manifest/2",
   "design": {
     "path": "docs/superpowers/specs/2026-08-24-ai-first-home-capability-fabric-design.md",
-    "sha256": "204efac78401ae29e2d01d5bb3278e2ec43f14f04cd815486128e4e5c6118c78"
+    "sha256": "fa3ade830c066c78bf84985feeb1d00e4c8b7cc7d48f4a7b85203c488b7a9f23"
   },
   "proof_catalog": [
     {
@@ -17,8 +17,8 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "7a153cd1e0b24e5f3b6893e79da1abcf30f04cf8e796fc89a2145ce5f03da4c7",
-      "production_sha256": "6a10df41a48599bd871413be7e6cfd55158cc00795c952e32e8ab822722f1e6e"
+      "test_sha256": "2af5cdd495f03c0e0171fcc0cd4b29512a7d94a0160ec04ded260d9acb05372c",
+      "production_sha256": "a8256f739acfc4a67892d327773c1416fbba258dd2e510add16a9698d51c8e57"
     },
     {
       "id": "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
@@ -31,7 +31,7 @@
         "src/actions"
       ],
       "test_sha256": "d608d3bb58f047f5ae50cfafaa90ef6b01ab8dc80e96b6e26273c2822dd126a0",
-      "production_sha256": "92cfd435f6ac71df4fa3d0c83450013200dc8acf4d7932c52e590c0367be4b6a"
+      "production_sha256": "066aabe7f2bd782205bc1dda4efa115b7f739fe881e3d3b062a802e858166d2c"
     },
     {
       "id": "proof:bun:test/durability/canonical.test.ts#canonical-digest-golden",
@@ -70,7 +70,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "3e46045dff918bbea213dfe9d9d5dee37674747ab6911fcc06c9eee97283caec",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
@@ -83,7 +83,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "85a0a194ca28b34799bb088a779ce83803ea50602027c81e1e2277608f6684e4",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
@@ -96,7 +96,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "d3e02717d898de49a939373aff451600c27b9f8bf4e1802fff563ab7ccedb631",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
@@ -108,8 +108,8 @@
       "production_paths": [
         "src/orchestrator/conversation"
       ],
-      "test_sha256": "1d7a94db26d5ce0a5fde954b8576ee3419b623f4c9893f385266d1beb2187d6f",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "test_sha256": "e1306d0ebc2ac626d482feef82ba097488e90a965148d47286658a22c7cd38cb",
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
@@ -122,7 +122,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "60727a4e46c76d4bf46d76cbfb8ab5a0084e7cdab0920bf23c43e492a9b36fe2",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
@@ -134,8 +134,8 @@
       "production_paths": [
         "src/orchestrator/conversation"
       ],
-      "test_sha256": "80646b3454ffbdd0c38eda8c2784422349f3038099d6eea1b3a1fddbcfdb3b95",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "test_sha256": "fa6a83fb19daecfd5180b05ce5b3ac7bd012dae5dc765eedd61ac5518ff928a9",
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
@@ -148,7 +148,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "7e2a3b586bed16924d7d1d423b840af352696654c9a559fc68bd0eb4767ec16b",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
@@ -162,7 +162,7 @@
         "src/durability"
       ],
       "test_sha256": "8355f07c58b791316f317a8042119269ae897aaeb6f59b0c20c0dadab818cc86",
-      "production_sha256": "6569dffce5c6c9826e47a74f7f2e9eb1679d4da3282842d12045e6df6f1a43fb"
+      "production_sha256": "f0b12d049a680fe86274a091724c954964fa1aef7c86aa59f44a204f99e378da"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
@@ -176,8 +176,8 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "70cba6f6b9cf2e539f49e51d95be04d6253a354ae3c9f2e2d212c295cbedaa70",
-      "production_sha256": "b232fc4287dc75841b3444acc4dd017e980bc7da10225e08228152259977c168"
+      "test_sha256": "a17a1acc330e8333e21e6416543d133159a1a81421e66799625ea0ea814b74e2",
+      "production_sha256": "ab4e50337c036cad8024535f924157fe7a680bc8ce7c24253384156c37855095"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
@@ -191,8 +191,8 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "70cba6f6b9cf2e539f49e51d95be04d6253a354ae3c9f2e2d212c295cbedaa70",
-      "production_sha256": "b232fc4287dc75841b3444acc4dd017e980bc7da10225e08228152259977c168"
+      "test_sha256": "a17a1acc330e8333e21e6416543d133159a1a81421e66799625ea0ea814b74e2",
+      "production_sha256": "ab4e50337c036cad8024535f924157fe7a680bc8ce7c24253384156c37855095"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
@@ -206,8 +206,8 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "70cba6f6b9cf2e539f49e51d95be04d6253a354ae3c9f2e2d212c295cbedaa70",
-      "production_sha256": "b232fc4287dc75841b3444acc4dd017e980bc7da10225e08228152259977c168"
+      "test_sha256": "a17a1acc330e8333e21e6416543d133159a1a81421e66799625ea0ea814b74e2",
+      "production_sha256": "ab4e50337c036cad8024535f924157fe7a680bc8ce7c24253384156c37855095"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
@@ -219,8 +219,8 @@
       "production_paths": [
         "src/orchestrator/conversation"
       ],
-      "test_sha256": "e45ca4a1546ed19211c2f9679aed3bf14f6fc4047b72ca3776b64dedc58a27c9",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "test_sha256": "990d738433386f757c2ed037d792c0dfc799314453896e4e7b28dd0cd1c131d1",
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
@@ -233,8 +233,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "04a3ad479cc18467f991e125ea3435abe92e3c80a2a6f4113a8468febc213bc5",
-      "production_sha256": "30fe789a504e2599e3b101603d6917f66f3f7d3f91f9701bd1bf0fd6adfc957d"
+      "test_sha256": "b505741f2480fee7793a3515441ef454bfd082e3434ac5c4426d44ae21aa37aa",
+      "production_sha256": "cf55439327f929070d3ea1c5d179d6ead3114440b3bc45658ec44f9f84cb787c"
     },
     {
       "id": "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
@@ -247,7 +247,7 @@
         "src/capabilities"
       ],
       "test_sha256": "a1b730ecef1332164e10e01cf2208cb5333a9e218243dd504bfc57d38855f93c",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
@@ -260,7 +260,7 @@
         "src/capabilities"
       ],
       "test_sha256": "50107fd79bd49652570290926e2dda18de7b2cef8e0abca9cd84377c714782ba",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
@@ -273,7 +273,7 @@
         "src/capabilities"
       ],
       "test_sha256": "86e00527b41f4f46dc0be032e0043450de101b858a72cb60bb0159d0468429d0",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
@@ -286,7 +286,7 @@
         "src/capabilities"
       ],
       "test_sha256": "3b46291b5df5ece1e396ca41286b12d30979583b6deee1fa0a28223b8e4218d7",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
@@ -299,7 +299,7 @@
         "src/capabilities"
       ],
       "test_sha256": "ce694e5ea8894beceb119d37ddf37d6bc6b9f7b210ba67cc9e7abf9708ce562b",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance",
@@ -326,7 +326,7 @@
         "src/safety/checkpoint.ts"
       ],
       "test_sha256": "838295477689727947a3e5258a63c8d64ece2e28c2a8aca35c2f1231abffcbfd",
-      "production_sha256": "94aac7440d91eb2a7e6a3ad1fd2edd734c1cd7e098f8c57158c147588a57056b"
+      "production_sha256": "d0dbf07428b7e04c625c5d23c7f8c0decf35ad9dfc6161be9a8100a56a930db2"
     },
     {
       "id": "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
@@ -340,7 +340,7 @@
         "src/server"
       ],
       "test_sha256": "8a5a7b96a46d6c0ad97856ee1f23ec51ee303500abcf2b229b992883b19fd1a8",
-      "production_sha256": "8e1e8a7af6375fb660262fde6a3d326114e8cac3dba7202ff4407521d64d215a"
+      "production_sha256": "224298ac75e624666fc78caf001614d988670e0e6d03bc294d9f0ff613bda817"
     },
     {
       "id": "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
@@ -353,7 +353,7 @@
         "src/capabilities"
       ],
       "test_sha256": "e06661f2ccdd61b2b8ecb156f52ae26ba053abfb6218a90a51548622cbfbb6d4",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
@@ -366,7 +366,7 @@
         "src/capabilities"
       ],
       "test_sha256": "2b0b4662489319e1e24c3fc13ea18627da4e70aeb2993532fdd774dfbd6127e9",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
@@ -379,7 +379,7 @@
         "src/capabilities"
       ],
       "test_sha256": "42cfa76b9437cbdd90dc6a7b1e08ea1ae194de848faafceaa49113c00b22e1df",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
@@ -392,7 +392,7 @@
         "src/capabilities"
       ],
       "test_sha256": "5c5f929e35305c04de1890d42e28d009e995281dd48a24874e01c7017d04fc25",
-      "production_sha256": "9f4a3d9913c888324a87daa738bcf45e7c0369d6aa7ad7234a78d898a2427c9b"
+      "production_sha256": "2ced7fc445b4c8dab6515b390539cf032e34e433fba2a35d4e43bf4fe0e14d99"
     },
     {
       "id": "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
@@ -408,7 +408,7 @@
         "src/cli.ts"
       ],
       "test_sha256": "cee85522624eabc26381b1e7fb3d72236cc94be147d0d35508d25786a27569c4",
-      "production_sha256": "98cc745c660f2b40f482d3bc021fd609e29c9c35aadf1ece8c525e25a46bcef1"
+      "production_sha256": "0c573c39c859b0bb2734af08fce04853dafa4647f68ab47e17495b16e1a3d18a"
     },
     {
       "id": "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
@@ -424,7 +424,7 @@
         "src/cli.ts"
       ],
       "test_sha256": "3b02b8134fe89d265d65f6195ce52167b3df277f0c645f3f26e11d8920f37ebe",
-      "production_sha256": "98cc745c660f2b40f482d3bc021fd609e29c9c35aadf1ece8c525e25a46bcef1"
+      "production_sha256": "0c573c39c859b0bb2734af08fce04853dafa4647f68ab47e17495b16e1a3d18a"
     },
     {
       "id": "proof:bun:test/capability-command.test.ts#private-input-no-echo",
@@ -438,7 +438,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "e812b6d04fb5a3a038c8404b0bcdd3bf2fe63e955fce4e1135d8e6989ef8eb2b",
-      "production_sha256": "d12b148db2fd1ccebf47f11967d54e2422a3b89312f20872202f068598567f00"
+      "production_sha256": "c1a543b6b78e28aae5bb23fdeb5c01c5cc73343ec7bb0427399d21717b24033e"
     },
     {
       "id": "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
@@ -452,7 +452,55 @@
         "src/commands/capability"
       ],
       "test_sha256": "cb783beffefb4551b578bf144539a8be1e66b2f356b4719ac636c55c96aaf0b5",
-      "production_sha256": "d12b148db2fd1ccebf47f11967d54e2422a3b89312f20872202f068598567f00"
+      "production_sha256": "c1a543b6b78e28aae5bb23fdeb5c01c5cc73343ec7bb0427399d21717b24033e"
+    },
+    {
+      "id": "proof:bun:test/authority-default-port-hardening.test.ts#automation-grant-live-binding",
+      "owner": "capability-cli-compat",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/authority-default-port-hardening.test.ts",
+      "title": "binds an exact current automation grant through public non-TTY execution",
+      "production_paths": [
+        "src/actions",
+        "src/capabilities",
+        "src/commands/authority.ts",
+        "src/commands/capability"
+      ],
+      "test_sha256": "a11473fe722b0967cb63cdb39a9ba550c8eb28b5b7c0b2a1717bb354d9100d52",
+      "production_sha256": "d4e796137567051e002ed7fc31698c2838f576c6fd1943b59eb4f4e8f7d627c8"
+    },
+    {
+      "id": "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect",
+      "owner": "capability-cli-compat",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/authority-default-port-hardening.test.ts",
+      "title": "keeps cold dry-run read-only without resuming a committing authority action",
+      "production_paths": [
+        "src/actions",
+        "src/capabilities",
+        "src/commands/authority.ts",
+        "src/commands/capability"
+      ],
+      "test_sha256": "a11473fe722b0967cb63cdb39a9ba550c8eb28b5b7c0b2a1717bb354d9100d52",
+      "production_sha256": "d4e796137567051e002ed7fc31698c2838f576c6fd1943b59eb4f4e8f7d627c8"
+    },
+    {
+      "id": "proof:bun:test/authority-request-file-hardening.test.ts#all-request-files",
+      "owner": "capability-cli-compat",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/authority-request-file-hardening.test.ts",
+      "title": "forwards all nine non-TTY request files without a contradictory outer idempotency key",
+      "production_paths": [
+        "src/actions",
+        "src/capabilities",
+        "src/commands/authority.ts",
+        "src/commands/capability"
+      ],
+      "test_sha256": "027e780b3811b6adb03cc5c58cf2cc3905bf4a1ce2b1fa9a4011285451561f98",
+      "production_sha256": "d4e796137567051e002ed7fc31698c2838f576c6fd1943b59eb4f4e8f7d627c8"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
@@ -464,8 +512,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "714d0821e3f3cd3a03bb4688db37ed864315a0b950a00166344ccb602006a314",
-      "production_sha256": "dbfcdf3e3de08fcb0d9d50e2be76e3cd81447574cc137a802c916344328619ca"
+      "test_sha256": "166a5d38ea75a672e0f05eb31826c5b989cf8135f330dd2d5b3d6d62fafd0961",
+      "production_sha256": "1f4c9a490a2434b6e3e58ed8f76343fe41bc678a6b74709a9ed96736e4c0f440"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
@@ -477,8 +525,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "714d0821e3f3cd3a03bb4688db37ed864315a0b950a00166344ccb602006a314",
-      "production_sha256": "dbfcdf3e3de08fcb0d9d50e2be76e3cd81447574cc137a802c916344328619ca"
+      "test_sha256": "166a5d38ea75a672e0f05eb31826c5b989cf8135f330dd2d5b3d6d62fafd0961",
+      "production_sha256": "1f4c9a490a2434b6e3e58ed8f76343fe41bc678a6b74709a9ed96736e4c0f440"
     },
     {
       "id": "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
@@ -491,7 +539,7 @@
         "src/ui/src"
       ],
       "test_sha256": "8e62143168f8ee72c165cff055c48cbb2a2dbde178653a2dd2cb32f886cd3e61",
-      "production_sha256": "dbfcdf3e3de08fcb0d9d50e2be76e3cd81447574cc137a802c916344328619ca"
+      "production_sha256": "1f4c9a490a2434b6e3e58ed8f76343fe41bc678a6b74709a9ed96736e4c0f440"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
@@ -503,8 +551,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "714d0821e3f3cd3a03bb4688db37ed864315a0b950a00166344ccb602006a314",
-      "production_sha256": "dbfcdf3e3de08fcb0d9d50e2be76e3cd81447574cc137a802c916344328619ca"
+      "test_sha256": "166a5d38ea75a672e0f05eb31826c5b989cf8135f330dd2d5b3d6d62fafd0961",
+      "production_sha256": "1f4c9a490a2434b6e3e58ed8f76343fe41bc678a6b74709a9ed96736e4c0f440"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
@@ -516,8 +564,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "714d0821e3f3cd3a03bb4688db37ed864315a0b950a00166344ccb602006a314",
-      "production_sha256": "dbfcdf3e3de08fcb0d9d50e2be76e3cd81447574cc137a802c916344328619ca"
+      "test_sha256": "166a5d38ea75a672e0f05eb31826c5b989cf8135f330dd2d5b3d6d62fafd0961",
+      "production_sha256": "1f4c9a490a2434b6e3e58ed8f76343fe41bc678a6b74709a9ed96736e4c0f440"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
@@ -531,8 +579,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
@@ -546,8 +594,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
@@ -561,8 +609,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
@@ -576,8 +624,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
@@ -591,8 +639,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
@@ -606,8 +654,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
@@ -622,8 +670,8 @@
         "src/server",
         "src/actions"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "fda1dba72a42b449e461261a32cdc2602c6bdeaa1febe5a70c1b8e9cff9b6977"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "adc11178b6373ea1796ff8fc16b42ccbc92023e9b3588c9b358cec760a113514"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
@@ -637,8 +685,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
@@ -652,8 +700,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
@@ -667,8 +715,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
@@ -682,8 +730,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
@@ -697,8 +745,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "49f0a40e19340dd525e044fb1977c1109a3c869912850680954814f6df01e3ef",
-      "production_sha256": "6644a130943cee31805d64efc4961c57c73597f2ab436abba4ff1307797b6b5d"
+      "test_sha256": "649b5b8059323ad7a2ec84aed25d8564b327ca9a27d0ca88f6e2d224d1dc2730",
+      "production_sha256": "13b45cfe94277697541b6fb1471a757248ff00a14c887ef4547d085816f278ea"
     },
     {
       "id": "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
@@ -712,7 +760,7 @@
         "src/server"
       ],
       "test_sha256": "5601d1646d444f8541cc96b0b911528b3d67607db362d136e12195a6a9fd0d04",
-      "production_sha256": "30fe789a504e2599e3b101603d6917f66f3f7d3f91f9701bd1bf0fd6adfc957d"
+      "production_sha256": "cf55439327f929070d3ea1c5d179d6ead3114440b3bc45658ec44f9f84cb787c"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
@@ -724,8 +772,8 @@
       "production_paths": [
         "src/orchestrator/conversation"
       ],
-      "test_sha256": "e8efa99b91f972e8cb1a1df51c34413c34e125c70fe32292b92cff122658a4f6",
-      "production_sha256": "758af870f9801802d916571de04935421d03a38766633c8b81a52a8603fc8fd0"
+      "test_sha256": "4a7142c361e4c8b0b4d1923d35de7938181dc7f2bbcb43083e27882f4fefec60",
+      "production_sha256": "e9505064702fc5482cb407d055b2c5423421ebde1cfca8641b341b2b3162a6f7"
     },
     {
       "id": "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment",
@@ -739,7 +787,7 @@
         "src/durability"
       ],
       "test_sha256": "69d7d0ad1ae9ed3d12e7caed89427cdbb2867cc3b8adf513a14b84d764951be4",
-      "production_sha256": "3acef28abb11c54796df50d8e5e9bd226e9940346466b3b84351aa1c3bffe33a"
+      "production_sha256": "500a70cd54898dd03628d23f0985ad5b8452139efe8ff3ead1f922afe7c6b6e3"
     }
   ],
   "section_dispositions": [
@@ -1462,9 +1510,12 @@
         "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
         "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
         "proof:bun:test/capability-command.test.ts#private-input-no-echo",
-        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write"
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+        "proof:bun:test/authority-default-port-hardening.test.ts#automation-grant-live-binding",
+        "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect",
+        "proof:bun:test/authority-request-file-hardening.test.ts#all-request-files"
       ],
-      "rationale": "Parser, early routing, private-input no-echo, and noninteractive zero-write proofs cover the CLI surface.",
+      "rationale": "Parser, routing, private-input no-echo, exact automation grants, cold zero-effect dry-run, and all request-file forms cover the CLI surface.",
       "waiver_id": null
     },
     {
@@ -1480,18 +1531,20 @@
       ],
       "proof_ids": [
         "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
-        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write"
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+        "proof:bun:test/authority-default-port-hardening.test.ts#automation-grant-live-binding",
+        "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect"
       ],
-      "rationale": "The direct-mode grammar and noninteractive admission rule are executable.",
+      "rationale": "The direct-mode grammar, exact live automation proof, and zero-effect dry-run are executable.",
       "waiver_id": null
     },
     {
       "section_id": "section:request-file-mode-is-the-exclusive-alternative-its-dto-owns-the-key-auth:964be6b3ce16",
       "heading": "request-file mode is the exclusive alternative; its DTO owns the key (authority repair excluded)",
-      "semantic_atom_count": 106,
-      "semantic_atom_sha256": "6f364cf3fdea6d875dabc63e49789ead6069afb6f83fd367c4ae6550c20c4dba",
-      "candidate_count": 41,
-      "candidate_sha256": "501a5b78a3e5cda476c2edfbd26ede47dcf4d0b3e15eb4cefcd44fb09d07bf6d",
+      "semantic_atom_count": 116,
+      "semantic_atom_sha256": "66dd719bb7d7ec3203685648241360a3dbcdc87613127962d0bb78ac52a77e87",
+      "candidate_count": 44,
+      "candidate_sha256": "58e082ca2262da58631367a2a9edd2fe8ed85e582f6c7b659e748f1a9eb006df",
       "disposition": "behavioral",
       "owners": [
         "capability-cli-compat"
@@ -1499,16 +1552,18 @@
       "proof_ids": [
         "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
         "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
-        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write"
+        "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+        "proof:bun:test/authority-default-port-hardening.test.ts#automation-grant-live-binding",
+        "proof:bun:test/authority-request-file-hardening.test.ts#all-request-files"
       ],
-      "rationale": "Exclusive request-file parsing, routing, and zero-write refusal are directly exercised.",
+      "rationale": "Exclusive request-file parsing, routing, all nine DTO forms, exact automation proof, and zero-write refusal are directly exercised.",
       "waiver_id": null
     },
     {
       "section_id": "section:migration-and-cutover:74f000ca6040",
       "heading": "Migration and cutover",
       "semantic_atom_count": 1,
-      "semantic_atom_sha256": "9f05329264538aa7bc7d5f641c96129680e98c67563ebb01cf9d587069e5ab71",
+      "semantic_atom_sha256": "2bdf89b672fb67f67c7e71bebaee917e2b0feb6b3a9533bf75a1f9403f94dcad",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -1529,9 +1584,9 @@
       "section_id": "section:phase-1-characterization-and-reader-compatibility:8dec9cf0e91e",
       "heading": "Phase 1: characterization and reader compatibility",
       "semantic_atom_count": 8,
-      "semantic_atom_sha256": "f5bdc45219e2fb79de767dbf8215c3b7ac98e9db925f6aa618a363c0d7ce907d",
+      "semantic_atom_sha256": "591d790fe88be219df58117b1882d98a1250006fef3d311bb6e2d5952fc8fe6d",
       "candidate_count": 2,
-      "candidate_sha256": "79b5fe9cf1dba8943fee54d8b6f7fd814080012700e0920a633a60d7f6b9577e",
+      "candidate_sha256": "3f4c035641f8ed60a01ce34d723a23deec984c3cd70a308d7fd67bba4c1c6d0b",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1549,9 +1604,9 @@
       "section_id": "section:phase-2-derived-catalog-and-shared-action-authority:a72e0015bfc0",
       "heading": "Phase 2: derived catalog and shared action authority",
       "semantic_atom_count": 22,
-      "semantic_atom_sha256": "9a15aa2e00b2f5804af33c9fc111a2727e428659b451e07b9ab3275dfcce07ca",
+      "semantic_atom_sha256": "a3fae5563ffd0c1dfdc013153e84956a7890c34a61e03fce98547a8626258ba5",
       "candidate_count": 4,
-      "candidate_sha256": "2e21058a1857b8ec4c486af056d1bebaa8641165b9e3a4cd48eb1206a34fe1d4",
+      "candidate_sha256": "b8120459c20c58ce64ff7ccc7d077876e1c8ae5f9d52a166c98a38f66f6b0c5f",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1571,9 +1626,9 @@
       "section_id": "section:phase-3-revision-continuity-and-capability-fabric:bcfee721a849",
       "heading": "Phase 3: revision continuity and Capability Fabric",
       "semantic_atom_count": 135,
-      "semantic_atom_sha256": "04186a78b1047dbad2b1d2c60d968f71773869270258409482b8fc9dcd11f3d8",
+      "semantic_atom_sha256": "281689609ba223ba7904177827f425ca967c54aea0b89b2c4514789f8195298f",
       "candidate_count": 43,
-      "candidate_sha256": "71b4c1a22e92451d2e0829a197b8c6b04ce486966b7e68e0631d2cd849759d0b",
+      "candidate_sha256": "88e2c6bb0caba92bcc90427430a4c894b49c0ae903b35135b3b5be120c45f219",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1614,9 +1669,9 @@
       "section_id": "section:phase-4-ai-home-cutover:7f81f95a5383",
       "heading": "Phase 4: AI Home cutover",
       "semantic_atom_count": 11,
-      "semantic_atom_sha256": "694d9721a3c7cd1aaebdcae7588bbbf14034c247f88aed47249aeb4f0f3a3871",
+      "semantic_atom_sha256": "8d2876b2b4abc80b1bdbfba8bee65d9f39910b2eb48fbbc5eae09dfbe763ea42",
       "candidate_count": 1,
-      "candidate_sha256": "c9f3ec1b503814df5c892b63d01ca036defdfe024f6609ad97d58149a13862d1",
+      "candidate_sha256": "507f06763d8d86cf4ec5c917b46b148429c0fa753a75b74ebcf9c24ee508038f",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui"
@@ -1647,9 +1702,9 @@
       "section_id": "section:phase-5-delete-duplicate-implementations:7e07ecdb1652",
       "heading": "Phase 5: delete duplicate implementations",
       "semantic_atom_count": 15,
-      "semantic_atom_sha256": "70b96a7d21f398d18f03d7ed7a2567766a9b554324cda30a8cfc617b60ea3208",
+      "semantic_atom_sha256": "30351b93556792aa0b2db86e479be786d02f4c13bbb9208aefb67c0b9f47ece3",
       "candidate_count": 2,
-      "candidate_sha256": "f275d0bc5104da93b216fc67cd3ef1df1ed213fc4b78b7c9f2ad77fac03efebd",
+      "candidate_sha256": "0546d5c50c9377c17df4356441271783c03580ee07b2d53191f2c494c57d6809",
       "disposition": "behavioral",
       "owners": [
         "capability-cli-compat",
@@ -1668,9 +1723,9 @@
       "section_id": "section:normative-wire-and-storage-contract:8049de246ac8",
       "heading": "Normative wire and storage contract",
       "semantic_atom_count": 2,
-      "semantic_atom_sha256": "93248e226f87ae12e4ad638d4f28874510ddf39a373c7d92d3198ef59ac11fa3",
+      "semantic_atom_sha256": "0fc2ae71af1293de46d0e869034310f5ce3491cff02cdf8f945f1bef9f7b332c",
       "candidate_count": 1,
-      "candidate_sha256": "4ec767768f994a6b42b6488be77d8dca63f4fba70787a550b9d2919538884ee9",
+      "candidate_sha256": "619aacf391d031824e89d5153ee7b7fc103289e3a8a3c33151bd801032535b7a",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1689,9 +1744,9 @@
       "section_id": "section:canonical-values-and-bounds:c04074a55273",
       "heading": "Canonical values and bounds",
       "semantic_atom_count": 48,
-      "semantic_atom_sha256": "40fc9a666f1e0002003c6176eebc62e1934ab6c6642592de6b69cc7360c92301",
+      "semantic_atom_sha256": "970f9b2f10b63acc55f778b81b21eaef5082c901aaced26f7e185b80f3266f75",
       "candidate_count": 14,
-      "candidate_sha256": "78aee43b8fcf1bfb4b6c1e6cfd149980bc7fe4869b914292adcb5a6065dfeb8c",
+      "candidate_sha256": "d5b0f4a124e884edd8bcec0bb6f65ad0b7deabf3c2348339dfa9e7c2930ff803",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1710,9 +1765,9 @@
       "section_id": "section:handoff-wire-contract:4b062d57e2cf",
       "heading": "Handoff wire contract",
       "semantic_atom_count": 349,
-      "semantic_atom_sha256": "2b61ee46cf5568802124aff86fe756dc90eb4e8a6c970d7ae7991809ee450508",
+      "semantic_atom_sha256": "441775425ad42f27dee12454b34a276ffc6d1f54c8779a3d2c79f1a12b285f0f",
       "candidate_count": 55,
-      "candidate_sha256": "254ff7e819d3c3ffc6e9eb87efefc2331583d2796314532488032be3a85059f8",
+      "candidate_sha256": "9242f4e5326186db8f2206415006f2e9c45a4c3053a740e414f079ad756b7bb0",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api"
@@ -1729,9 +1784,9 @@
       "section_id": "section:action-enums-and-preview:0890ae5f93b0",
       "heading": "Action enums and preview",
       "semantic_atom_count": 3598,
-      "semantic_atom_sha256": "3c0db60de3604dd0e346a9cf27593e0f88e4877cb86e22caa90c84eab834796d",
+      "semantic_atom_sha256": "d393c0643acc38695775c3edc5045ac9fcf9e60e09b516ea645d223e8539e9f6",
       "candidate_count": 590,
-      "candidate_sha256": "dc5e126c2cd809e53a69660e5410558b08cb001c12c15899b93c8e406d9b33e0",
+      "candidate_sha256": "29b48204c2464fd255b9168a67a50fcfed0b14ee159ef3be7a7dadff0188d239",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1751,9 +1806,9 @@
       "section_id": "section:proposal-and-operation-wire-bodies:96731e9d398a",
       "heading": "Proposal and operation wire bodies",
       "semantic_atom_count": 446,
-      "semantic_atom_sha256": "a0056437db591d0f2f15c95dc197f4721ab3f15ef4209ebf62c9b5070cbbc508",
+      "semantic_atom_sha256": "7b24da0461062b136cf3d060a78cf58b56568e78227ad120bc659651461f6546",
       "candidate_count": 75,
-      "candidate_sha256": "d77f719d3a9d761707720aba84d41b504d9602e4cb813c7f2a0f99a830dd849e",
+      "candidate_sha256": "32a8a6d5479ec73bc1f3949068a13a56f9ba894cbee06123ef01ba74a447b8df",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1771,9 +1826,9 @@
       "section_id": "section:action-approval-and-challenge-authority-records:b30cf5d9e880",
       "heading": "Action, approval, and challenge authority records",
       "semantic_atom_count": 236,
-      "semantic_atom_sha256": "3688ae99e5488d124060ec64de3ccee4bb5702f43bcd053c3e729317dbd2d641",
+      "semantic_atom_sha256": "cb516ff283e4310fb964f51902bbf45a26d085f539dfb9bfadc2ed1a2a7355cc",
       "candidate_count": 51,
-      "candidate_sha256": "f61cafcf76ab7bf649a1a6aafbe81949feda53636f6aa8a474df69a28beaa7ed",
+      "candidate_sha256": "3121bd6f365182cedd98e2c6611e4f8512bdbd255f7d423526867fa547768ab2",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1790,9 +1845,9 @@
       "section_id": "section:authoritative-capability-records:4187611fc949",
       "heading": "Authoritative capability records",
       "semantic_atom_count": 1061,
-      "semantic_atom_sha256": "e9f44cf1de03774de1b4d1433cc54482a0cde45fb241c2e865ec7944bcc56197",
+      "semantic_atom_sha256": "08da3d75f71fe7bbbe0a25437790f7bd3daa50f1c74866b1d2e30bbccefddcd3",
       "candidate_count": 164,
-      "candidate_sha256": "b5964d9fa93bb2f7aab24df584cd4f36934e8f38c54e0dad7a90806260da2173",
+      "candidate_sha256": "1a6d9cedefee96754a4551c88048899fbffeddf9a2f1e5fec68c8d017894539b",
       "disposition": "behavioral",
       "owners": [
         "capability-core",
@@ -1815,9 +1870,9 @@
       "section_id": "section:lineage-revision-start-and-grant-authority-records:d3cdb272d2fe",
       "heading": "Lineage, revision-start, and grant authority records",
       "semantic_atom_count": 1755,
-      "semantic_atom_sha256": "26f2cca8a41849142958c54e8229429f2648fbe078b3ae47ade771dea3774c0b",
+      "semantic_atom_sha256": "fce97f01aad2014d7cc84e43a39cd7e58618cea92d82f54adfaf1bb5de97d827",
       "candidate_count": 470,
-      "candidate_sha256": "17974743605f7e9d31bd8441a3b78fc74cc8580c0e234d169e3985f1aa86f90c",
+      "candidate_sha256": "6ee4a2b0bcf1701fa2bbb62ee64d92d995de681390a943df46101fd601bf9e98",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -1842,9 +1897,9 @@
       "section_id": "section:http-errors-and-status-mapping:c36fa1a9bfdb",
       "heading": "HTTP errors and status mapping",
       "semantic_atom_count": 299,
-      "semantic_atom_sha256": "133be49e02dd0c56f50ab5fed7e69dbe6b7be56448ae80bc8351ab3b81ae7c69",
+      "semantic_atom_sha256": "2dc479042b00d60b86d09ee2179c418e87f615b33e4bac3570dc124bcb690c38",
       "candidate_count": 11,
-      "candidate_sha256": "499b3c1f0fbe024b1908da3b03c983a2d443648463abb4c88bfdffdd9ea42fed",
+      "candidate_sha256": "ea59e14564c2e82ad57516e720a3af6cd9a555ad3a7c2c4c699cedfea77d5c4c",
       "disposition": "behavioral",
       "owners": [
         "conversation-revisions-api",
@@ -1863,9 +1918,9 @@
       "section_id": "section:cli-json-and-exit-contract:ed80509e174e",
       "heading": "CLI JSON and exit contract",
       "semantic_atom_count": 471,
-      "semantic_atom_sha256": "66d8522412f5051ca74ec52cd835c308eb23d91a1ab422d3c567e3cdbed53bda",
+      "semantic_atom_sha256": "2c91b3b6ffdbe75630d2d29852b0e2c466120586ac40cc5671b77b1d4af1d386",
       "candidate_count": 33,
-      "candidate_sha256": "1438be720d1e25f6f7f352792aa32cb4b905c069d9fae3132a98b5f324eeddeb",
+      "candidate_sha256": "d132cb52790230930da1bd7725685cd8fb32f225cf178fbc752a5306ccba92eb",
       "disposition": "behavioral",
       "owners": [
         "capability-cli-compat"
@@ -1883,9 +1938,9 @@
       "section_id": "section:storage-framing-and-permissions:40a57a65427c",
       "heading": "Storage framing and permissions",
       "semantic_atom_count": 306,
-      "semantic_atom_sha256": "82ea6f4cce162b9b3872db7735ebd62dda22f8e17c832b44cdda425bf03f1149",
+      "semantic_atom_sha256": "160cb369062697c7498859c126df0a91b2d1f6eb7ddfbdfc4027a129bb5a76ca",
       "candidate_count": 66,
-      "candidate_sha256": "dd83b56ab76104c41524510abaca31e6ddf71856396bd3ba996309fd25412421",
+      "candidate_sha256": "faedd71697a17bb3c1debdad6e0d68fc66796994c32929c41b5be272b7f1518f",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1905,9 +1960,9 @@
       "section_id": "section:error-and-recovery-contract:2fb3df9f09a7",
       "heading": "Error and recovery contract",
       "semantic_atom_count": 35,
-      "semantic_atom_sha256": "966c35a05ab588addc739b075d303a092d84ffcfeb8cf34de0e569c30b6ad0c4",
+      "semantic_atom_sha256": "34143728ffbb4bd9d951b93f087a272fd662c89fbef1ff01092ae5da413c9e70",
       "candidate_count": 36,
-      "candidate_sha256": "dd4636f5f1092593f00d1ad1a4f72d0cb5889142ef2a86cdfa10557c4e21e58e",
+      "candidate_sha256": "d0a6d4a32c4172a5c6bd61015ed0ff91ebb2b5d77886dff16c9e4546ee7ef0e0",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1933,9 +1988,9 @@
       "section_id": "section:security-requirements:bc4ab2b454b6",
       "heading": "Security requirements",
       "semantic_atom_count": 33,
-      "semantic_atom_sha256": "08601145f55a0a6359bdeb8b4c729f3534be184ef50e7673492e460ea52605c5",
+      "semantic_atom_sha256": "95a60fd8b9ed643827cf952dd1c7c12183e2e4e99a95211d6c17b263f1b51eff",
       "candidate_count": 12,
-      "candidate_sha256": "eb1ec5e1b582a10fcfca5caf4b9ea09476d9886908236662e4cfd7e13ce3aff4",
+      "candidate_sha256": "e82b6391ee27e80c0d95bf83e6b7d967c95bd0b1e23cb9a7903f291c66c83db1",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -1993,9 +2048,9 @@
       "section_id": "section:characterization-tests:73c09992b026",
       "heading": "Characterization tests",
       "semantic_atom_count": 11,
-      "semantic_atom_sha256": "95ce37745a985fbbf6016abdae47b3e056316b3850d6fd3165cea4fac6faa1c6",
+      "semantic_atom_sha256": "81b2c3a501260a124a49b7078fd5bd396921f3fa319f8c3bad69881f5fbe31ff",
       "candidate_count": 1,
-      "candidate_sha256": "aeb04d416123207a41df72b3c1274c8184d6bd887e59f44ccf6c0f058a287e1b",
+      "candidate_sha256": "c6aa47d620784e4df8460091eb67a1f7157e41f4e018c245f07a25fa5ca96d60",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -2013,9 +2068,9 @@
       "section_id": "section:unit-and-property-tests:1d706bff3f0d",
       "heading": "Unit and property tests",
       "semantic_atom_count": 268,
-      "semantic_atom_sha256": "72e5e4d774625841058a64a7baf1dd766b1f2ac13afb2dafcfdf2a0ed1e2cd5f",
+      "semantic_atom_sha256": "169a72cc53e92e717d873aba2b9e8862ba6c8479575ece135a3b13bdcbe93765",
       "candidate_count": 51,
-      "candidate_sha256": "fe4b76547a0d795f088a0285698b8b3a79035040eb6ae6fdddc6397bb098c4f7",
+      "candidate_sha256": "d4e46a68e7ceedd7431dfbec05583f93c12eb3e63196438acf49ac94b90185be",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2058,6 +2113,9 @@
         "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
         "proof:bun:test/capability-command.test.ts#private-input-no-echo",
         "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+        "proof:bun:test/authority-default-port-hardening.test.ts#automation-grant-live-binding",
+        "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect",
+        "proof:bun:test/authority-request-file-hardening.test.ts#all-request-files",
         "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
         "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
         "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
@@ -2074,15 +2132,16 @@
       "section_id": "section:integration-and-fault-injection-tests:9cc1eaa72e6c",
       "heading": "Integration and fault-injection tests",
       "semantic_atom_count": 172,
-      "semantic_atom_sha256": "2b585dc8aec3371ffd430b5350a5b10228911ab2932559f433cfd8c12de0959f",
+      "semantic_atom_sha256": "da87dec745cb9d32115d62090d6ddf7989a665de2f6a1e09594d83964185d707",
       "candidate_count": 49,
-      "candidate_sha256": "f9a28ce2e277248b6a390cd7c93a17547d39363e04b750bd2a4362496228b338",
+      "candidate_sha256": "4c9678c08176ae7eab5aea4b234cde0d85338c6dfc31ac8dda4cd84e2e1ad613",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
         "conversation-catalog-lineage",
         "conversation-revisions-api",
         "capability-runtime",
+        "capability-cli-compat",
         "ai-home-ui"
       ],
       "proof_ids": [
@@ -2095,21 +2154,22 @@
         "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
         "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
         "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
+        "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect",
         "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
         "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
         "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
         "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment"
       ],
-      "rationale": "Crash, race, owner-loss, terminal-mirror, restart, route, and real browser integration proofs are selected.",
+      "rationale": "Crash, race, owner-loss, terminal-mirror, cold zero-effect dry-run, restart, route, and real browser integration proofs are selected.",
       "waiver_id": null
     },
     {
       "section_id": "section:owned-cli-process-lifecycle-and-orphan-recovery:7115418d87a2",
       "heading": "Owned CLI process lifecycle and orphan recovery",
       "semantic_atom_count": 39,
-      "semantic_atom_sha256": "0aac78905b3af721142d4248252bb3b8c71ecfb96c1905977b0c622709b3b1c7",
+      "semantic_atom_sha256": "9c8f8ad02ff271532763d441b367cb5eb73ac76e4717c22397f29ef9a1f4a6c2",
       "candidate_count": 13,
-      "candidate_sha256": "10cf54fad5f12b91e069e7a824dba0fea80c2520e564615a057e787a33886124",
+      "candidate_sha256": "dda4e8b37ac6c0f2cb2db5c4a46cc81d706e44bf0cafdb0912fd5d7cf7f688a2",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions"
@@ -2124,9 +2184,9 @@
       "section_id": "section:ui-and-end-to-end-tests:ddcadd3a61e0",
       "heading": "UI and end-to-end tests",
       "semantic_atom_count": 26,
-      "semantic_atom_sha256": "a08addb9d699d8b96081bcc317911c1ad53d96dff754d79da39d32d3ac9ca4cd",
+      "semantic_atom_sha256": "fd9fc9824d669a044ca201e169c1a99ea98098394ae79088a1480b3f0fc31899",
       "candidate_count": 5,
-      "candidate_sha256": "096adc6f5d19164b15750b5d5d7890a125154cc385adc91619a39a645dd797a7",
+      "candidate_sha256": "18204ee5068c5813b113805edd2dd4a60b32817d0fed62065118a73077c188bf",
       "disposition": "behavioral",
       "owners": [
         "ai-home-ui"
@@ -2157,9 +2217,9 @@
       "section_id": "section:migration-and-release-rehearsal:a1883e32b951",
       "heading": "Migration and release rehearsal",
       "semantic_atom_count": 14,
-      "semantic_atom_sha256": "60568092fd0633296c07224831d8d6dcc8f1de109878d766a6f371994d137849",
+      "semantic_atom_sha256": "0773e5badb9fd583a4c9b459a0c78eb0aed7c1578b4179a5d10b7b1805e69c28",
       "candidate_count": 2,
-      "candidate_sha256": "771af4da294b835aa960a1601935375d3b8bc9fab6ed2dcb97526994a9c1dd13",
+      "candidate_sha256": "27a373e19c72da4e86ded0bf136a9a31b2b5f6fe8520bd29084dc795b04dd6e2",
       "disposition": "behavioral",
       "owners": [
         "conversation-catalog-lineage",
@@ -2182,9 +2242,9 @@
       "section_id": "section:whole-repository-gate:0dfabe20ccbf",
       "heading": "Whole-repository gate",
       "semantic_atom_count": 10,
-      "semantic_atom_sha256": "d003880459e978c09d5c0e51f6c8585a041b39494767d55c6af7907e31a7bc25",
+      "semantic_atom_sha256": "fee7f417860b339729451ae41ae1d325532f695178db0b50a21c556d5a74e194",
       "candidate_count": 5,
-      "candidate_sha256": "55232fe2b64331b9946381d648222f524a326da9e0dfb8d69f3d339e930ee291",
+      "candidate_sha256": "78e9ea992475434816aca36974eb091f3af6b9ca7a6aead185f52cae7507985f",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2216,9 +2276,9 @@
       "section_id": "section:implementation-boundaries-and-sequencing:65577cf5d6d1",
       "heading": "Implementation boundaries and sequencing",
       "semantic_atom_count": 32,
-      "semantic_atom_sha256": "e5092ea2938dfa87455435d43415ecb81e80fc758ca5c2f269c4a54e599b95b1",
+      "semantic_atom_sha256": "883fcb2a8ae98060ae3a59ec1581116acf1f24f372351304958ae35ea6e712ad",
       "candidate_count": 1,
-      "candidate_sha256": "2012aac81a76c3313e0d5e0ee2925937e52bec2b90a5a8de1273b0da4b1d91b6",
+      "candidate_sha256": "4cd9f7e27861d72bf414fbcbd9b86cf8aea0d95a3e52b0099b21eb0ff4495959",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2262,7 +2322,7 @@
       "section_id": "section:general-plugin-ui-platform:6603f9128587",
       "heading": "General plugin UI platform",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "0c04984dafc9f1465d3dc48b99344f65b7003514b27011a01279cd3a0a66db94",
+      "semantic_atom_sha256": "6ed832a42815629d008b702c0f1af91b4789760115381b312c2db31366e53242",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2281,9 +2341,9 @@
       "section_id": "section:mcp-for-every-capability:a2b50d9ee3e2",
       "heading": "MCP for every capability",
       "semantic_atom_count": 2,
-      "semantic_atom_sha256": "840da9944ad635f454d2ae330715e0445ac8322ceeda39f481c09ac2c9fdc493",
+      "semantic_atom_sha256": "e6d9e0c0c8d882b66183c9625526e6d12c51f3f86b9a909a552e87a0abeb7300",
       "candidate_count": 1,
-      "candidate_sha256": "f06b1e71ffa39d48036824e5af45037c0179769ed4b83a0079a37b5158c36013",
+      "candidate_sha256": "99fb1d3adb183fe105e7cc6535a0d75a6982b9a82605bcdb8dfb2131e28fbd14",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime"
@@ -2299,9 +2359,9 @@
       "section_id": "section:independent-installers-behind-chat-cards:6de17146a98c",
       "heading": "Independent installers behind chat cards",
       "semantic_atom_count": 2,
-      "semantic_atom_sha256": "61b0a822e55af5b92b7be365dc6b232f2291f4195abecc3d5a86b0e0b008f376",
+      "semantic_atom_sha256": "1e185833271531dcddfd92175dfdc3cc7cb666734fedd8ec0a43478b6d21eb24",
       "candidate_count": 1,
-      "candidate_sha256": "4e532a3d4aa13eba630319e6fb34a6dfb3f8fcbfcd0adcff94de71d85c5c3a81",
+      "candidate_sha256": "89c1624cce0c45c3b000964a5fb8697498d49592bcb295e1e9118055a025e9d1",
       "disposition": "behavioral",
       "owners": [
         "capability-runtime",
@@ -2319,7 +2379,7 @@
       "section_id": "section:in-place-participant-mutation-or-retained-native-sessions:2c958eccfd3d",
       "heading": "In-place participant mutation or retained native sessions",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "a0ecb66de79f20011d354e10733dd16d857b513e6c8fbb1126207ac96ea6e522",
+      "semantic_atom_sha256": "381d55e73972512ca59aa1c41a4953bce1fd7ca8a4b8463c76d9969f11c4ac9f",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2337,7 +2397,7 @@
       "section_id": "section:in-memory-session-list-or-journal-fold-on-every-request:a22e96fca75e",
       "heading": "In-memory session list or journal fold on every request",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "aab21a3442fb42bec72c5c545cb24e4c9550a77b48fade531cf049df3c141700",
+      "semantic_atom_sha256": "5ebb7fb31c9af12e1c4ce968eadf3aea04c2b142cbdfe2e435d045d52ecb65b6",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2356,7 +2416,7 @@
       "section_id": "section:big-bang-cutover-or-permanent-dual-implementation:2ea159c0b751",
       "heading": "Big-bang cutover or permanent dual implementation",
       "semantic_atom_count": 3,
-      "semantic_atom_sha256": "4b31b52c16a03f322f515395b160bb837b1cd3962d58b8c06042c88af68e3d15",
+      "semantic_atom_sha256": "eee3b162630ba92d1e76191abbea8589d2565c59e047ef6af6730886a0560e03",
       "candidate_count": 0,
       "candidate_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "disposition": "behavioral",
@@ -2377,9 +2437,9 @@
       "section_id": "section:completion-criteria:74382a22fa1f",
       "heading": "Completion criteria",
       "semantic_atom_count": 29,
-      "semantic_atom_sha256": "5e60993baa89dfdfefd53fd1c26d263539cdb663ac4344748d7bdd44858d50f4",
+      "semantic_atom_sha256": "5e36245bb43d520da9651ea1d5cc3a1bded1b1a8c4386f7f4821c8a7a8e6ccc0",
       "candidate_count": 4,
-      "candidate_sha256": "d366bc75a57739e71adb2ed23a8d4fddd0db44e8e54595563b5b307f76e16bca",
+      "candidate_sha256": "4d9e59637c31974ce6073cb5b95183f98f9aa1287db517a9732530542cb35475",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2423,6 +2483,9 @@
         "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
         "proof:bun:test/capability-command.test.ts#private-input-no-echo",
         "proof:bun:test/capability-mutation-contract.test.ts#noninteractive-zero-write",
+        "proof:bun:test/authority-default-port-hardening.test.ts#automation-grant-live-binding",
+        "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect",
+        "proof:bun:test/authority-request-file-hardening.test.ts#all-request-files",
         "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
         "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
         "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
@@ -2452,8 +2515,8 @@
   ],
   "waivers": [],
   "review": {
-    "reviewer": "codex-normative-review-2026-08-27",
+    "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "794f92c792c4cf1024679859a6b093b1a2a7512ca2061028db8478b09c94295b"
+    "reviewed_payload_sha256": "d2800a57b2f20d1b6acc1cb5f2c155a951c7c1a5d6235feb67990bbb518bd136"
   }
 }

@@ -121,6 +121,8 @@ export type PrivateConversationMessageQueueEventPayloadV1 =
       };
       owner_principal_digest: string;
       admitted_authority: ConversationMessageQueueAuthorityV1;
+      client_instance_id: string;
+      client_order: number;
       private_context_binding_digest: string | null;
       idempotency_key_digest: string;
       canonical_request_digest: string;

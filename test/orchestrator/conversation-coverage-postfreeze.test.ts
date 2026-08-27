@@ -2190,6 +2190,53 @@ describe("post-freeze reaction and timeline projections", () => {
     ).toThrow("reaction sequence authority is absent");
   });
 
+  test("keeps zero-count change tombstones after a peer removes the last visible reaction", () => {
+    const operations = [
+      reactionOperation("op-own", "add", "recipient", "event-own", "👀"),
+      reactionOperation("op-peer", "add", "peer", "event-own", "👀"),
+      reactionOperation("op-peer-remove", "remove", "peer", "event-own", "👀"),
+      reactionOperation("op-only-peer", "add", "peer", "event-peer", "👍"),
+      reactionOperation("op-only-peer-remove", "remove", "peer", "event-peer", "👍"),
+    ];
+    const fold: ConversationInteractionFoldV1 = {
+      schema_version: "1.0",
+      root_session_id: "root-session",
+      head_digest: postfreezeDigest("tombstone-head"),
+      head_sequence: 5,
+      head_digests_by_sequence: {
+        "0": postfreezeDigest("interaction-empty"),
+        "5": postfreezeDigest("tombstone-head"),
+      },
+      reaction_sequences_by_operation_id: {
+        "op-own": 1,
+        "op-peer": 2,
+        "op-peer-remove": 3,
+        "op-only-peer": 4,
+        "op-only-peer-remove": 5,
+      },
+      reactions: operations,
+      participant_intents: [],
+    };
+    expect(conversationReactionChanges(fold, "recipient")).toEqual([
+      {
+        target: messageLocator("event-own"),
+        emoji: "👀",
+        count: 0,
+        reacted_by_recipient: false,
+        actor_public_ids: [],
+        last_changed_interaction_sequence: 3,
+      },
+      {
+        target: messageLocator("event-peer"),
+        emoji: "👍",
+        count: 0,
+        reacted_by_recipient: false,
+        actor_public_ids: [],
+        last_changed_interaction_sequence: 5,
+      },
+    ]);
+  });
+
   test("enforces participant reaction transitions one operation at a time", () => {
     const add = reactionOperation("op-add", "add", "participant");
     const remove = reactionOperation("op-remove", "remove", "participant");
@@ -4207,6 +4254,7 @@ describe("post-freeze participant publication and attempt admission", () => {
         terminated += 1;
       },
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
     const lane = {} as never;

@@ -1,3 +1,4 @@
+import { NATIVE_HISTORY_CONTINUITY } from "../../dispatch/session-contract.js";
 import type { AttemptRuntimeOptions } from "./attempt-runtime-options.js";
 import type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
 import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
@@ -51,6 +52,23 @@ export async function reconcileAttemptHistory(input: {
       },
       resume.nativeSessionId,
     );
+    if (result.native_history_continuity === NATIVE_HISTORY_CONTINUITY.COMPACTED) {
+      const current = input.live.resumeBindings.get(participantId);
+      if (
+        current?.attemptId === resume.attemptId &&
+        current.engine === resume.engine &&
+        current.nativeSessionId === resume.nativeSessionId
+      ) {
+        const removed = input.options.artifactStore.removeResumeBinding(
+          input.live.manifest.conversation_id,
+          participantId,
+          resume,
+        );
+        if (!removed) throw new Error("native compaction resume authority changed");
+        input.live.resumeBindings.delete(participantId);
+        input.live.resumeOrdinals.set(participantId, ++input.live.resumeCounter.value);
+      }
+    }
     input.reconciliations.set(participantId, null);
   }
 }

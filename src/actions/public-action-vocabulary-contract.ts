@@ -40,6 +40,19 @@ export const ACTION_RISK = Object.freeze({
 } as const);
 export type ActionRisk = ValueOf<typeof ACTION_RISK>;
 export const ACTION_RISKS = values(ACTION_RISK);
+export const ACTION_RISK_RANK = Object.freeze({
+  LOW: 0,
+  MEDIUM: 1,
+  HIGH: 2,
+  CRITICAL: 3,
+  UNKNOWN: 4,
+} as const);
+export const ACTION_RISK_BY_RANK = Object.freeze([
+  ACTION_RISK.LOW,
+  ACTION_RISK.MEDIUM,
+  ACTION_RISK.HIGH,
+  ACTION_RISK.CRITICAL,
+] as const satisfies readonly ActionRisk[]);
 
 export const ACTION_AUTHORITY_BINDING_MODE = Object.freeze({
   CURRENT: "current",
@@ -60,6 +73,16 @@ export const ACTION_EFFECT_CLASS = Object.freeze({
 } as const);
 export type ActionEffectClass = ValueOf<typeof ACTION_EFFECT_CLASS>;
 export const ACTION_EFFECT_CLASSES = values(ACTION_EFFECT_CLASS);
+export const ACTION_EFFECT_RISK_RANK = Object.freeze({
+  [ACTION_EFFECT_CLASS.PURE_LOCAL_READ]: ACTION_RISK_RANK.LOW,
+  [ACTION_EFFECT_CLASS.LOCAL_READ_WITH_CACHE]: ACTION_RISK_RANK.LOW,
+  [ACTION_EFFECT_CLASS.NETWORK_READ]: ACTION_RISK_RANK.LOW,
+  [ACTION_EFFECT_CLASS.PROCESS_PROBE]: ACTION_RISK_RANK.LOW,
+  [ACTION_EFFECT_CLASS.PROJECT_WRITE]: ACTION_RISK_RANK.MEDIUM,
+  [ACTION_EFFECT_CLASS.USER_WRITE]: ACTION_RISK_RANK.HIGH,
+  [ACTION_EFFECT_CLASS.EXTERNAL_COMPENSATABLE]: ACTION_RISK_RANK.HIGH,
+  [ACTION_EFFECT_CLASS.EXTERNAL_IRREVERSIBLE]: ACTION_RISK_RANK.CRITICAL,
+} as const satisfies Readonly<Record<ActionEffectClass, number>>);
 
 export const ACTION_REVERSIBILITY_VALUE = Object.freeze({
   REVERSIBLE: "reversible",
@@ -69,6 +92,12 @@ export const ACTION_REVERSIBILITY_VALUE = Object.freeze({
 } as const);
 export type Reversibility = ValueOf<typeof ACTION_REVERSIBILITY_VALUE>;
 export const ACTION_REVERSIBILITY = values(ACTION_REVERSIBILITY_VALUE);
+export const ACTION_REVERSIBILITY_RISK_RANK = Object.freeze({
+  [ACTION_REVERSIBILITY_VALUE.REVERSIBLE]: ACTION_RISK_RANK.LOW,
+  [ACTION_REVERSIBILITY_VALUE.COMPENSATABLE]: ACTION_RISK_RANK.MEDIUM,
+  [ACTION_REVERSIBILITY_VALUE.MANUAL]: ACTION_RISK_RANK.HIGH,
+  [ACTION_REVERSIBILITY_VALUE.IRREVERSIBLE]: ACTION_RISK_RANK.CRITICAL,
+} as const satisfies Readonly<Record<Reversibility, number>>);
 
 export const ACTION_PACKAGE_PIN_SOURCE_KIND = Object.freeze({
   REGISTRY: "registry",

@@ -83,6 +83,8 @@ test("exact replay avoids live authority reads and throwing subscribers cannot b
     schema_version: "1.0" as const,
     idempotency_key: "durable-replay-after-authority-drift",
     expected_authority_digest: authority.authority_digest,
+    client_instance_id: "durable-replay-client",
+    client_order: 1,
     content: "retain the original admitted request",
     target_participants: ["participant-a"],
     quote_refs: [
@@ -193,6 +195,8 @@ test("restart isolates corrupt root markers while recovering every valid queue r
         schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
         idempotency_key: `enqueue-${authority.root_session_id}`,
         expected_authority_digest: authority.authority_digest,
+        client_instance_id: `runtime-boundary-${authority.root_session_id}`,
+        client_order: 1,
         content: `queued for ${authority.root_session_id}`,
         target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
         quote_refs: [],

@@ -1125,6 +1125,12 @@ describe("conversation final restart and policy coverage", () => {
         ({ engine, admitted }) => admitted === (engine === "claude" || engine === "codex"),
       ),
     ).toBe(true);
+    expect(
+      defaultConversationReadiness(process.cwd(), 2).every(
+        ({ engine, admitted }) =>
+          admitted === (engine === "claude" || engine === "copilot" || engine === "codex"),
+      ),
+    ).toBe(true);
     const root = await mkdtemp(join(tmpdir(), "vf-conversation-coverage-final-"));
     const libraries = {
       plan: {

@@ -8,12 +8,13 @@ import {
   canonicalJsonBytes,
   createOrVerifyPrivateFile,
   digestV1,
-  ensurePrivateDirectory,
   privateFileBytes,
   readVffrFile,
 } from "../durability/index.js";
+import { canonicalDurabilityPath } from "../durability/native.js";
 import {
   ACTION_APPROVAL_CHALLENGE_STATE,
+  ACTION_IDEMPOTENCY_BINDING_STATE,
   type ActionIdempotencyBindingState,
 } from "./persistence-contract.js";
 import {
@@ -105,16 +106,14 @@ export class ActionFilePersistence {
   private readonly lockPath: string;
 
   constructor(actionRoot: string) {
-    this.root = ensurePrivateDirectory(join(actionRoot, "actions", "v1"));
+    this.root = canonicalDurabilityPath(join(actionRoot, "actions", "v1"));
     this.actionRoot = dirname(dirname(this.root));
-    this.proposals = ensurePrivateDirectory(join(this.root, "proposals"));
-    this.operations = ensurePrivateDirectory(join(this.root, "operations"));
-    this.idempotency = ensurePrivateDirectory(join(this.root, "idempotency"));
-    this.challenges = ensurePrivateDirectory(join(this.root, "challenges"));
-    this.dispatches = ensurePrivateDirectory(join(this.root, "dispatch"));
-    this.oversizedHandoffIssuance = ensurePrivateDirectory(
-      join(this.root, "oversized-handoff-issuance"),
-    );
+    this.proposals = join(this.root, "proposals");
+    this.operations = join(this.root, "operations");
+    this.idempotency = join(this.root, "idempotency");
+    this.challenges = join(this.root, "challenges");
+    this.dispatches = join(this.root, "dispatch");
+    this.oversizedHandoffIssuance = join(this.root, "oversized-handoff-issuance");
     this.lockPath = join(this.root, "writer.lock");
   }
 
@@ -257,10 +256,7 @@ export class ActionFilePersistence {
   }
 
   proposalIds(): string[] {
-    return boundedActionNamespaceNames(
-      readdirSync(this.proposals),
-      /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}\.json$/,
-    )
+    return this.namespaceFiles(this.proposals, /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}\.json$/)
       .map((name) => name.slice(0, -5))
       .sort();
   }
@@ -274,6 +270,15 @@ export class ActionFilePersistence {
         return [];
       }
     });
+  }
+
+  hasVisibleIdempotencyForProposal(proposalId: string): boolean {
+    const chains = this.idempotencyChainsForProposal(proposalId);
+    return (
+      chains.length === 1 &&
+      chains[0]?.length === 2 &&
+      chains[0]?.at(-1)?.state === ACTION_IDEMPOTENCY_BINDING_STATE.VISIBLE
+    );
   }
 
   consumedChallengesByDigest(frameDigest: string): ApprovalChallengeFrameV1[] {
@@ -326,6 +331,11 @@ export class ActionFilePersistence {
   }
 
   private namespaceFiles(directory: string, grammar: RegExp): string[] {
-    return boundedActionNamespaceNames(readdirSync(directory), grammar);
+    try {
+      return boundedActionNamespaceNames(readdirSync(directory), grammar);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
   }
 }

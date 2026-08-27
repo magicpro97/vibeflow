@@ -450,6 +450,10 @@ button:disabled {
 .home-status-dot[data-state="COMPLETED"] {
   background: var(--home-blue);
 }
+.home-status-dot[data-state="NEEDS_INPUT"] {
+  background: var(--home-amber);
+  box-shadow: 0 0 0 3px rgb(181 126 54 / 0.12);
+}
 .home-degraded {
   margin-left: auto;
   color: var(--home-amber);
@@ -688,6 +692,9 @@ button:disabled {
   background: currentColor;
 }
 .home-header-state[data-health="degraded"] {
+  color: var(--home-amber);
+}
+.home-header-state[data-lifecycle="NEEDS_INPUT"] {
   color: var(--home-amber);
 }
 .home-header-stream {
@@ -1351,6 +1358,13 @@ button:disabled {
   border-color: #d8b39b;
   color: var(--home-red);
 }
+.home-message-queue li[data-state="needs-action"] {
+  background: color-mix(in srgb, var(--home-amber-soft) 48%, transparent);
+}
+.home-message-queue li[data-state="needs-action"] .home-message-queue__sequence {
+  border-color: #d8b39b;
+  color: var(--home-red);
+}
 .home-message-queue__content {
   display: grid;
   min-width: 0;
@@ -1374,6 +1388,26 @@ button:disabled {
 .home-message-queue__content .home-message-queue__failure {
   color: var(--home-red);
 }
+.home-message-queue li[data-state="needs-action"] .home-message-queue__content small {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+.home-message-queue__repair-guidance code {
+  overflow-wrap: anywhere;
+  color: var(--home-ink);
+}
+.home-message-queue__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.home-message-queue__actions button {
+  flex: 1 1 7.5rem;
+  white-space: normal;
+}
 .home-message-queue__edit,
 .home-message-queue__retry,
 .home-queue-edit button {
@@ -1392,7 +1426,12 @@ button:disabled {
 .home-queue-edit button:hover:not(:disabled) {
   background: var(--home-amber-soft);
 }
+.home-message-queue__edit:disabled,
 .home-message-queue__retry:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.home-message-queue__edit:disabled {
   cursor: wait;
   opacity: 0.55;
 }
@@ -3002,6 +3041,15 @@ button:disabled {
   }
   .home-message-queue li {
     grid-template-columns: 1.65rem minmax(0, 1fr) 44px;
+  }
+  .home-message-queue li[data-state="needs-action"] {
+    grid-template-columns: 1.65rem minmax(0, 1fr);
+    align-items: start;
+  }
+  .home-message-queue li[data-state="needs-action"] .home-message-queue__actions {
+    grid-column: 2;
+    width: 100%;
+    justify-content: stretch;
   }
   .home-queue-edit {
     align-items: flex-start;

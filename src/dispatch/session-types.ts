@@ -10,6 +10,7 @@ import type { OwnedProcessPlatform } from "./owned-process-platform.js";
 import type { OwnedProcessController, OwnedProcessReleaseProof } from "./owned-process-runtime.js";
 import type { OwnedSupervisorExitOutcome } from "./owned-process-status.js";
 import {
+  type ENGINE_COORDINATION_WORKSPACE_ACCESS,
   type ENGINE_SESSION_SCHEMA_VERSION,
   type EngineAttemptStartOutcome,
   type EngineEvidenceStatus,
@@ -19,6 +20,7 @@ import {
   type EngineRoleSource,
   type EngineSessionMode,
   type EngineSessionProtocol,
+  type NativeHistoryContinuity,
   isEngineRoleSource,
 } from "./session-contract.js";
 import type { EngineTerminalObservation } from "./session-terminal.js";
@@ -148,6 +150,17 @@ export interface InternalResumeBinding {
   nativeSessionId: string;
 }
 
+/**
+ * Private model-authored output released only after a native terminal record is authenticated.
+ * This binding must never be copied into public session results, evidence, traces, or DTOs.
+ */
+export interface InternalAuthenticatedModelOutputBinding {
+  attemptId: string;
+  engine: Engine;
+  nativeSessionId: string | null;
+  output: string;
+}
+
 export interface EngineSessionResult {
   attemptId: string;
   engine: Engine;
@@ -169,6 +182,8 @@ export interface AttemptHandle<T = EngineSessionResult> {
   terminate(reason?: string): Promise<void>;
   /** Internal-only resume channel. Public DTO/evidence must never serialize this binding. */
   readResumeBinding(): InternalResumeBinding | undefined;
+  /** Internal-only model output. Public DTO/evidence must never serialize this binding. */
+  readModelOutputBinding(): InternalAuthenticatedModelOutputBinding | undefined;
   /** Internal-only durable evidence channel. Public result never contains this path/ref. */
   readEvidenceBinding(): { attemptId: string; internalRef: string } | undefined;
 }
@@ -186,6 +201,27 @@ export interface AttemptStartAuthorityRecordV1 {
   record_digest: string;
 }
 
+export interface EngineCoordinationWorkspaceTaskV1 {
+  task_id: string;
+  contract_digest: string;
+  scope: readonly string[];
+  forbidden: readonly string[];
+  verify_oracles: readonly string[];
+}
+
+export type EngineCoordinationWorkspaceBindingV1 =
+  | {
+      workflow_id: string;
+      workspace_key: string;
+      access: typeof ENGINE_COORDINATION_WORKSPACE_ACCESS.EXECUTOR;
+      task: EngineCoordinationWorkspaceTaskV1;
+    }
+  | {
+      workflow_id: string;
+      workspace_key: string;
+      access: typeof ENGINE_COORDINATION_WORKSPACE_ACCESS.REVIEW;
+    };
+
 /** Branded reader minted only from the concrete adapter-owned durable evidence store. */
 export interface DurableAttemptStartAuthorityReaderV1 {
   read(attemptId: string): AttemptStartAuthorityRecordV1 | null;
@@ -194,6 +230,8 @@ export interface DurableAttemptStartAuthorityReaderV1 {
 export interface EngineSessionRequest {
   attemptId: string;
   spawn: SpawnOptionsProjection;
+  /** Internal-only durable workspace routing for coordinated executor attempts. */
+  coordinationWorkspace?: EngineCoordinationWorkspaceBindingV1;
   nativeSessionId?: string;
   signal: AbortSignal;
   /** Receives only public-safe EngineChunk values; raw process chunks remain adapter-internal. */
@@ -211,6 +249,8 @@ export interface HistoryReconcileResult {
   status: ConversationReconciliationStatusV1;
   imported_turn_count: number;
   imported_tool_count: number;
+  /** Optional for adapter compatibility; only an explicit compacted signal revokes exact resume. */
+  native_history_continuity?: NativeHistoryContinuity;
   completeness_reason: string;
 }
 

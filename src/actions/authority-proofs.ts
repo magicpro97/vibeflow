@@ -8,7 +8,6 @@ import {
   isActionOperationDomainTerminalState,
 } from "./protocol-contract.js";
 import {
-  ACTION_AUTHORITY_BINDING_MODE,
   ACTION_CHALLENGE_CLASS,
   CREDENTIAL_CLASS,
   PUBLIC_ACTION_SCHEMA_VERSION,
@@ -155,10 +154,7 @@ export function requiredChallengeClass(
   authority: ActionRequestAuthorityV1,
 ): ChallengeClass {
   if (proposal.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR)
-    return proposal.base.authority_binding_mode ===
-      ACTION_AUTHORITY_BINDING_MODE.RECOVERY_CHECKPOINT
-      ? ACTION_CHALLENGE_CLASS.RECOVERY_TTY
-      : ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
+    return ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
   if (proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL)
     return ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL;
   if (authority.actor.credential_class === CREDENTIAL_CLASS.AUTOMATION_GRANT)

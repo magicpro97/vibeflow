@@ -11,8 +11,8 @@ import {
 import type { ConversationMessageQueueAuthorityV1 } from "./conversation-message-queue-records.js";
 import { foldOrdinaryConversationOperation } from "./conversation-operation-fold.js";
 import {
-  CONVERSATION_TERMINAL_LIFECYCLES,
   CONVERSATION_TRACE_EVENT_KIND,
+  isConversationTerminalLifecycle,
 } from "./conversation-public-wire-contract.js";
 import type {
   ConversationLineageService,
@@ -20,8 +20,6 @@ import type {
 } from "./lineage-service.js";
 import { projectConversationEvents } from "./policy-registry.js";
 import type { ValidatedConversationSourceV1 } from "./source-inventory.js";
-
-const TERMINAL = new Set<string>(CONVERSATION_TERMINAL_LIFECYCLES);
 
 export class ConversationMessageTargetConflictError extends Error {
   readonly code = PUBLIC_ERROR_CODE.NOT_LINEAGE_HEAD;
@@ -137,7 +135,7 @@ export class ConversationUserMessageAuthorityV1 {
       authority,
       revision_operation_id: resolved.active_revision_operation_id,
       active_operation_id: operationId,
-      stable: TERMINAL.has(source.journal_head.lifecycle),
+      stable: isConversationTerminalLifecycle(source.journal_head.lifecycle),
     };
   }
 

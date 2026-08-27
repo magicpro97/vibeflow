@@ -71,11 +71,14 @@ function request(
   content: string,
   current: ConversationMessageQueueAuthorityV1,
   privateContextPresent = false,
+  client: { id: string; order: number } = { id: `client-${idempotencyKey}`, order: 1 },
 ): EnqueueConversationUserMessageRequestV1 {
   return {
     schema_version: "1.0",
     idempotency_key: idempotencyKey,
     expected_authority_digest: current.authority_digest,
+    client_instance_id: client.id,
+    client_order: client.order,
     content,
     target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
     quote_refs: [],
@@ -138,6 +141,52 @@ function waitForExit(child: ChildProcess): Promise<void> {
 }
 
 describe("durable conversation message queue core", () => {
+  test("persists one client's click order across inverted admission and restart", async () => {
+    const root = await artifactRoot();
+    const current = authority("A");
+    const store = new ConversationMessageQueueStoreV1({
+      privateConversationRoot: root,
+      rootSessionId,
+    });
+    const enqueue = (
+      target: ConversationMessageQueueStoreV1,
+      key: string,
+      content: string,
+      order: number,
+    ) =>
+      target.enqueue({
+        principal_digest: principal,
+        request: request(key, content, current, false, { id: "browser-client-a", order }),
+        recorded_at: stamp(order),
+        resolve_private_context_binding: noPrivateContext,
+        resolve_authority: () => current,
+      });
+
+    expect(() => enqueue(store, "ordered-b", "B", 2)).toThrow(
+      ConversationMessageQueueConflictError,
+    );
+    const first = enqueue(store, "ordered-a", "A", 1);
+    expect(enqueue(store, "ordered-a", "A", 1)).toEqual({ ...first, replayed: true });
+    expect(() => enqueue(store, "ordered-duplicate", "duplicate", 1)).toThrow(
+      ConversationMessageQueueConflictError,
+    );
+    enqueue(store, "ordered-b", "B", 2);
+
+    const restarted = new ConversationMessageQueueStoreV1({
+      privateConversationRoot: root,
+      rootSessionId,
+    });
+    enqueue(restarted, "ordered-c", "C", 3);
+    expect(restarted.snapshot(current).items.map((item) => item.content)).toEqual(["A", "B", "C"]);
+    expect(
+      restarted.readAuthorityFold().items.map((row) => [row.client_instance_id, row.client_order]),
+    ).toEqual([
+      ["browser-client-a", 1],
+      ["browser-client-a", 2],
+      ["browser-client-a", 3],
+    ]);
+  });
+
   test("admits idempotent messages and drains the oldest durable FIFO item across restart", async () => {
     const root = await artifactRoot();
     const current = authority("A");

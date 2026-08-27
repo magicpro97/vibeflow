@@ -6,7 +6,6 @@ import { validateAdoptProposalClosure } from "./proposal-adopt-validation.js";
 import { validateProposalDraftShape, validateProposalRecord } from "./proposal-validation.js";
 import { ACTION_AUTHORITY_EVENT_KIND, ACTION_ROOT_LOCATOR_KIND } from "./protocol-contract.js";
 import {
-  ACTION_AUTHORITY_BINDING_MODE,
   ACTION_CHALLENGE_CLASS,
   ACTION_DECISION,
   ACTION_EFFECT_CLASS,
@@ -27,7 +26,7 @@ import type {
   PublicActor,
 } from "./types.js";
 
-const EFFECT_ORDER = [
+const EFFECT_ORDER = Object.freeze([
   ACTION_EFFECT_CLASS.PURE_LOCAL_READ,
   ACTION_EFFECT_CLASS.LOCAL_READ_WITH_CACHE,
   ACTION_EFFECT_CLASS.NETWORK_READ,
@@ -36,7 +35,7 @@ const EFFECT_ORDER = [
   ACTION_EFFECT_CLASS.USER_WRITE,
   ACTION_EFFECT_CLASS.EXTERNAL_COMPENSATABLE,
   ACTION_EFFECT_CLASS.EXTERNAL_IRREVERSIBLE,
-] as const;
+] as const);
 
 function fail(message: string): never {
   throw new Error(`invalid action authority record: ${message}`);
@@ -89,7 +88,7 @@ export function assertProposal(proposal: ActionProposalV1): void {
     fail("proposal identity or digest mismatch");
 }
 
-function assertProposalDraft(draft: ActionProposalDraftV1): void {
+export function assertProposalDraft(draft: ActionProposalDraftV1): void {
   validateProposalDraftShape(draft);
   validateIdempotencyKey(draft.idempotency_key);
   validateInternalHostAction(draft.action);
@@ -185,18 +184,11 @@ function assertApprovalActor(proposal: ActionProposalV1, input: ApprovalDecision
     input.challenge_class === ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL;
   if (needsDigest !== (input.challenge_digest !== null))
     fail("challenge class and digest disagree");
+  if (input.challenge_class === ACTION_CHALLENGE_CLASS.RECOVERY_TTY)
+    fail("recovery approval requires the dedicated durable bootstrap resolver");
   const expected = expectedApprovalClass(proposal, input.decided_by.credential_class);
   if (input.challenge_class !== expected) fail(`approval requires ${expected}`);
-  if (input.challenge_class === ACTION_CHALLENGE_CLASS.RECOVERY_TTY) {
-    if (
-      proposal.action.type !== HOST_ACTION_KIND.AUTHORITY_REPAIR ||
-      proposal.action_root_locator.kind !== ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP ||
-      proposal.base.authority_binding_mode !== ACTION_AUTHORITY_BINDING_MODE.RECOVERY_CHECKPOINT ||
-      input.decided_by.kind !== ACTOR_KIND.HUMAN_CLI ||
-      input.decided_by.credential_class !== CREDENTIAL_CLASS.RECOVERY
-    )
-      fail("recovery approval is outside bootstrap repair");
-  } else if (input.decided_by.credential_class === CREDENTIAL_CLASS.RECOVERY)
+  if (input.decided_by.credential_class === CREDENTIAL_CLASS.RECOVERY)
     fail("recovery credential is forbidden");
 }
 
@@ -205,9 +197,7 @@ function expectedApprovalClass(
   credential: PublicActor["credential_class"],
 ): ChallengeClass {
   if (proposal.action.type === HOST_ACTION_KIND.AUTHORITY_REPAIR)
-    return proposal.action_root_locator.kind === ACTION_ROOT_LOCATOR_KIND.RECOVERY_BOOTSTRAP
-      ? ACTION_CHALLENGE_CLASS.RECOVERY_TTY
-      : ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
+    return ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM;
   if (proposal.action.type === HOST_ACTION_KIND.CONVERSATION_PUBLISH_SUSPECTED_LITERAL)
     return ACTION_CHALLENGE_CLASS.PUBLIC_LITERAL;
   if (credential === CREDENTIAL_CLASS.AUTOMATION_GRANT)

@@ -4,7 +4,7 @@
       You’re offline. This draft stays in memory and will not send itself when the connection returns.
     </div>
     <HomeQueuedMessages :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
-    <HomeQuoteSelectionList :chips="quoteChips" />
+    <HomeQuoteSelectionList v-if="!store.queuedMessageEdit" :chips="quoteChips" />
     <HomePrivateRangeSummary @change="openPrivateRangePanel(true)" />
     <form class="home-composer" aria-label="Message VibeFlow" @submit.prevent="submit">
       <HomeQueueEditStatus
@@ -96,15 +96,15 @@
         <button
           class="home-send"
           :class="{
-            'home-send--labeled': store.queueSendAsNew || composerBusy.active,
-            'home-send--busy': composerBusy.active,
+            'home-send--labeled': store.queueSendAsNew || composerBusy.blocksSubmit,
+            'home-send--busy': composerBusy.blocksSubmit,
           }"
           type="submit"
-          :disabled="!store.draft.trim() || store.queuedMessageEditSaving || !store.online"
+          :disabled="!store.draft.trim() || composerBusy.blocksSubmit || !store.online"
           :aria-label="sendLabel"
-          :aria-busy="composerBusy.active ? 'true' : 'false'"
+          :aria-busy="composerBusy.blocksSubmit ? 'true' : 'false'"
         >
-          <template v-if="composerBusy.active">
+          <template v-if="composerBusy.blocksSubmit">
             <span class="home-send__label">{{ composerBusy.label }}</span>
             <span class="home-send__busy" aria-hidden="true"><i /><i /><i /></span>
           </template>
@@ -138,8 +138,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
 import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
 import { describeHomeComposerBusy } from "../conversation-home-loading.js";
+import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-message-queue-types.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
@@ -167,9 +169,11 @@ const privateRangePanel = ref<{ open(reset?: boolean): void } | null>(null);
 const openPrivateRangePanel = (reset = false) => privateRangePanel.value?.open(reset);
 
 const placeholder = computed(() =>
-  store.activeSession
-    ? "Ask, steer, add an agent, or extend the CLI…"
-    : "What do you want the AI team to build?",
+  store.activeRevision?.lifecycle === CONVERSATION_LIFECYCLE.NEEDS_INPUT
+    ? "Reply with the missing detail to continue…"
+    : store.activeSession
+      ? "Ask, steer, add an agent, or extend the CLI…"
+      : "What do you want the AI team to build?",
 );
 const suggestions = computed(() =>
   matchHomeComposerSuggestions(store.draft, store.activeRevision?.participants ?? []),
@@ -180,6 +184,8 @@ const visibleSuggestions = computed(() =>
 const queueEditAvailable = computed(
   () =>
     store.draft === "" &&
+    quoteChips.value.length === 0 &&
+    !store.privateContextPresent &&
     !privateRangeOpen.value &&
     store.capabilityTargetRequest?.selection_mode !== "explicit" &&
     !props.transientUiOpen &&
@@ -206,6 +212,10 @@ const composerBusy = computed(() =>
     hasActiveSession: Boolean(store.activeSession),
     submitting: store.submitting,
     savingQueuedEdit: store.queuedMessageEditSaving,
+    queueAdmissionPending: store.queuedMessages.some(
+      (message) => message.kind === HOME_QUEUED_MESSAGE_PROJECTION_KIND.OPTIMISTIC,
+    ),
+    lifecycle: store.activeRevision?.lifecycle ?? null,
   }),
 );
 const suggestionSignature = computed(() =>
@@ -240,9 +250,19 @@ function resize() {
 }
 
 function insert(value: string) {
-  store.draft = value;
+  if (store.queuedMessageEdit) return;
+  const element = textarea.value;
+  const start = element?.selectionStart ?? store.draft.length;
+  const end = element?.selectionEnd ?? start;
+  const before = store.draft.slice(0, start);
+  const after = store.draft.slice(end);
+  const leading = before && !/\s$/u.test(before) ? " " : "";
+  const trailing = after && !/^\s/u.test(after) ? " " : "";
+  store.draft = `${before}${leading}${value}${trailing}${after}`;
+  const caret = before.length + leading.length + value.length + trailing.length;
   nextTick(() => {
     textarea.value?.focus();
+    textarea.value?.setSelectionRange(caret, caret);
     resize();
   });
 }

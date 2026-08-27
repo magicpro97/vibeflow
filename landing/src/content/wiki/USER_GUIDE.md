@@ -79,6 +79,22 @@ intake + scan  →  resolve skill NEEDS  →  plan work units  →  dispatch (pa
 - **Orchestrator** — the main agent. Plans, splits, judges. Never writes code itself.
 - **Work unit** — a scoped slice of the task (`.vibeflow/workunits/<name>/`) with its own
   gates, evidence, and resource counters. Scopes must not overlap so units run in parallel.
+- **Coordinator route** — when a task needs more than one participant, typed add-participant
+  actions promote a direct route into coordinate through proposal/review/commit. The
+  coordinator is the only authority; the executor is a different admitted engine that only
+  carries out the committed work. Executor clarifications go to the coordinator first. The
+  coordinator resolves ambiguity by checking the task spec, then the live conversation
+  context, then repo evidence, then a safe default, and asks the user only as a last resort.
+  Bare coordinate topology currently admits Claude and Codex because both prove the role
+  sandbox and authenticated structured coordination output; other workflow engines fail
+  closed until their adapters prove both contracts.
+  VibeFlow keeps each CLI's native session history separate; when supported native history
+  reconciliation detects compaction or exact proof is unavailable, it revokes exact authority
+  and falls back to bounded replay. Removing the last executor collapses the route back to direct.
+- **Worktree isolation** — with `vf orchestrate --isolate`, each unit runs in its own linked
+  git worktree, which keeps clarification and recovery scoped to that unit's filesystem state.
+  Executors must commit there, and the host only fast-forwards a clean, quiescent HEAD after
+  verification. Divergence and failure stay preserved for recovery.
 - **Skill** — an Anthropic skill-creator folder (`SKILL.md` + optional `scripts/`,
   `references/`). VibeFlow **discovers, validates, and matches** skills; the engine runs
   them. Nothing is pre-installed — skills are acquired on demand and start `unverified`.
@@ -125,14 +141,21 @@ The composer keeps collaboration inside the conversation:
 
 1. Send another message while agents are working; it joins the durable FIFO queue instead of
    interrupting or replacing an earlier send.
-   If admission fails before acknowledgement, Home keeps an explicit retryable row. Retry is
-   user-triggered, reuses the exact request and idempotency key, and does not clear or replace a
-   newer composer draft. The rejected row belongs to the current Home UI state; it is not
-   stored in `localStorage` and does not promise browser-restart recovery.
+   Only a transport-ambiguous request, or a typed failure with `retryable: true` and
+   `recovery_action: retry`, creates a Retry action that reuses the exact request and
+   idempotency key. Typed failures wait for that explicit action. If browser offline interrupts
+   an in-flight admission, the row stays **Reconciling** and Home automatically replays the
+   exact request only after refreshing authoritative queue state. If a non-retryable failure arrives
+   after you have started a newer draft, Home keeps the rejected payload as **Needs action**.
+   Choose its typed recovery or confirm Dismiss; Home never auto-resends or overwrites the newer
+   composer state. The rejected row belongs to current Home UI state; it is not stored in
+   `localStorage` and does not promise browser-restart recovery.
 2. Press ArrowUp with an empty composer to edit the latest queued human message. Press Escape
    to cancel. If dispatch wins the race before the edit commits, the draft is preserved and
    the UI offers an explicit send-as-new action.
-3. Select **Agent** to add a participant. Select **Remove** or the `−` action beside a
+3. Select **Agent** or type `+@participant` to start a participant-add proposal. Review and
+   commit the proposal to promote a direct route into coordinate; if you remove the last
+   executor, the route collapses back to direct. Select **Remove** or the `−` action beside a
    participant in **Details** to prepare `-@participant`; submit it in chat so the removal is
    visible and auditable. `@` mentions target participants without leaving the composer.
 4. Quote one through eight visible messages, including messages from different sources.
@@ -293,18 +316,7 @@ by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode's conve
 adapter invokes `opencode run --session <validated-ses-id> --format json`; Copilot and
 Antigravity fail closed instead of silently starting fresh under an exact claim.
 
-For an exact proved native resume, the CLI retains its own history and VibeFlow supplies only
-new applicable user messages plus peer-agent responses and reactions. The recipient's own
-prior output is not repeated. Without valid exact authority, the canonical turn includes
-applicable user/peer context plus a bounded structured replay of the recipient's last eight
-public responses. Each replay summary is capped at 2 KiB UTF-8 and carries its source digest,
-provenance, source/replayed counts, and truncation counts, so the recipient's own context is
-never silently omitted. Claude, Codex, and OpenCode receive prompts on stdin; Copilot and Antigravity
-receive native prompt argv. A large Copilot work-unit prompt may be written to
-`.vibeflow/dispatch/<unit>.md` and replaced on argv by a short absolute read pointer. That
-prompt file is a transport fallback, not a resumable session or memory store. Antigravity
-rejects prompts at or above 30 KiB because its print mode has no supported file/stdin
-replacement.
+For an exact proved native resume, the CLI retains its own history and VibeFlow supplies only new applicable user messages plus peer-agent responses and reactions. The recipient's own prior output is not repeated. When supported native history reconciliation detects compaction or valid exact authority is missing, VibeFlow revokes exact authority and the canonical turn includes applicable user/peer context plus a bounded structured replay of the recipient's last eight public responses. Each replay summary is capped at 2 KiB UTF-8 and carries its source digest, provenance, source/replayed counts, and truncation counts, so the recipient's own context is never silently omitted. Claude, Codex, and OpenCode receive prompts on stdin; Copilot and Antigravity receive native prompt argv. A large Copilot work-unit prompt may be written to `.vibeflow/dispatch/<unit>.md` and replaced on argv by a short absolute read pointer. That prompt file is a transport fallback, not a resumable session or memory store. Antigravity rejects prompts at or above 30 KiB because its print mode has no supported file/stdin replacement.
 
 `chat` accepts `--policy`, repeated `--participant <role@engine[:model]>`,
 `--max-rounds`, `--resume`, `--no-baseline`, and `--json`. `brainstorm` accepts repeated
@@ -405,6 +417,14 @@ vf orchestrate --yes          # real dispatch through the engine CLI
 `orchestrate` dispatches every work unit through a bounded parallel pool, runs an
 independent reviewer (a unit only passes at confidence `1.0` with evidence), then the
 orchestrator-only goal-eval prints `met | partial | blocked`.
+
+For explicit multi-participant routes, VibeFlow uses the coordinator/executor policy above: the coordinator is the sole authority, the executor is a different admitted engine that writes only in its assigned worktree, clarifications route back to the coordinator first, and incremental context stays limited to the user and the other agents in the route. The coordinator resolves ambiguity by checking the task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort. Pure brainstorm/debate routes stay on the debate path instead of this coordinator path. `vf orchestrate --isolate` keeps the unit in its own linked git worktree, so follow-up clarification and recovery keep the same filesystem context. `vf ask --conversation <id> --resume` uses the same conversation turn authority: an exact resume sends only the new follow-up, while detected compaction or missing proof revokes exact authority and triggers bounded public replay.
+
+Bare coordinate routing requires two distinct engines with enforceable native role authority
+and authenticated structured coordination output. Claude and Codex currently qualify. Copilot,
+OpenCode, and Antigravity remain available to the workflow transport, but conversation
+coordination rejects them until their adapters prove both contracts instead of silently
+weakening either one.
 
 Before `run` or `orchestrate` launches an agent, an exact verified match in a configured
 pinned registry cache appears as an approval card with security scan status. Card creation

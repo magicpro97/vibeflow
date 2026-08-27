@@ -13,8 +13,8 @@ const capabilities = [
   },
   {
     title: "Send now, queue safely",
-    body: "Keep typing while an agent works. VibeFlow preserves the order, keeps a rejected send retryable, and lets ArrowUp edit only the latest queued message.",
-    detail: "FIFO by default, editable before dispatch",
+    body: "Keep typing while an agent works. Your messages stay ordered, failures stay attached to their payload, and exact retry appears only when safe. ArrowUp edits only your latest queued message before dispatch claims it.",
+    detail: "FIFO for your messages, editable before dispatch",
     className: "capability-card capability-card-queue",
   },
   {
@@ -57,7 +57,7 @@ const steps = [
   {
     cmd: "vf orchestrate --yes",
     title: "Let the right agent take the turn",
-    text: "Plan and dispatch work while one durable queue keeps handoffs, actions, and evidence in order.",
+    text: "Plan and dispatch work while a durable user-message queue keeps sends in order. Typed actions travel on their own audited authority path.",
   },
   {
     cmd: "vf verify",
@@ -802,7 +802,7 @@ const reliabilityNotes = [
 
   .reliability-notes {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
   }
 
@@ -931,7 +931,7 @@ const reliabilityNotes = [
     }
 
     .reliability-notes {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
@@ -965,6 +965,10 @@ const reliabilityNotes = [
     .capability-card-recovery {
       grid-column: span 1;
       min-height: 0;
+    }
+
+    .reliability-notes {
+      grid-template-columns: 1fr;
     }
 
     .footer {

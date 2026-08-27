@@ -2,6 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AGENT_ENGINE, AGENT_HOST_TOOL } from "../../src/core/agent-contract.js";
+import { CONVERSATION_ROLE_NAME } from "../../src/core/role-name-contract.js";
+import { ENGINE_SESSION_MODE } from "../../src/dispatch/session-contract.js";
 import { digestV1 } from "../../src/durability/index.js";
 import { sameCapabilityDispatchBlockAuthority } from "../../src/orchestrator/conversation/conversation-capability-dispatch-block.js";
 import {
@@ -23,6 +26,7 @@ import { assertQueueClaimLockMayAdvanceV1 } from "../../src/orchestrator/convers
 import { CONVERSATION_MESSAGE_QUEUE_STALE_REASON } from "../../src/orchestrator/conversation/conversation-message-queue-contract.js";
 import { ConversationMessageQueueRuntimeV1 } from "../../src/orchestrator/conversation/conversation-message-queue-runtime.js";
 import { ConversationMessageQueueStoreV1 } from "../../src/orchestrator/conversation/conversation-message-queue-store.js";
+import { CONVERSATION_POLICY } from "../../src/orchestrator/conversation/conversation-policy-contract.js";
 import { ConversationPrivateContextBrokerV1 } from "../../src/orchestrator/conversation/conversation-private-context-broker-store.js";
 import {
   assertDiscardConversationMessagePrivateContextRequestV1,
@@ -36,6 +40,7 @@ import {
 import { activeRevisionOperationIdForHead } from "../../src/orchestrator/conversation/lineage-active-revision.js";
 import { applyConversationRevisionMutation } from "../../src/orchestrator/conversation/revision-action-manifest.js";
 import { ConversationRevisionNotStableTerminalError } from "../../src/orchestrator/conversation/revision-errors.js";
+import type { ConversationManifest } from "../../src/orchestrator/conversation/types.js";
 import {
   type CapturedTraceAppendV1,
   TraceRequestedEventConflictError,
@@ -686,6 +691,8 @@ describe("final conversation and trace uncovered behavior", () => {
         schema_version: "1.0",
         idempotency_key: "coverage-runtime-enqueue",
         expected_authority_digest: authority.authority_digest,
+        client_instance_id: "coverage-runtime-enqueue-client",
+        client_order: 1,
         content: "before edit",
         target_participants: "all",
         quote_refs: [],
@@ -730,6 +737,8 @@ describe("final conversation and trace uncovered behavior", () => {
         schema_version: "1.0",
         idempotency_key: "coverage-stale-enqueue",
         expected_authority_digest: authority.authority_digest,
+        client_instance_id: "coverage-stale-enqueue-client",
+        client_order: 1,
         content: "claim then stale",
         target_participants: "all",
         quote_refs: [],
@@ -981,16 +990,40 @@ describe("final conversation and trace uncovered behavior", () => {
       ),
     ).toThrow("active revision has no exact published operation authority");
 
-    const parent = {
+    const parent: ConversationManifest = {
+      version: "1.0",
       conversation_id: "conversation-parent",
+      workflow_id: "workflow-parent",
       revision_id: "revision-parent",
-      bindings: [],
-    } as never;
+      run_id: "run-parent",
+      parent_conversation_id: null,
+      parent_revision_id: null,
+      topic: "Exercise revision identity boundaries",
+      policy: CONVERSATION_POLICY.DIRECT,
+      max_rounds: 1,
+      baseline_enabled: false,
+      evaluator_auto_added: false,
+      repo_root: "/repo",
+      phase: 1,
+      task_text: "Exercise revision identity boundaries",
+      bindings: [
+        {
+          participant_id: "participant-direct",
+          host_tools: [AGENT_HOST_TOOL.PROPOSE_ACTION],
+          input: {
+            roleRef: CONVERSATION_ROLE_NAME.DIRECT,
+            engine: AGENT_ENGINE.CLAUDE,
+            sessionMode: ENGINE_SESSION_MODE.FRESH,
+          },
+        },
+      ],
+      created_at: NOW,
+    };
     const add = {
       type: "conversation.add_participant",
       participant: {
-        role_ref: "direct",
-        engine: "codex",
+        role_ref: CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+        engine: AGENT_ENGINE.CODEX,
         model: null,
         skill_refs: [],
       },
@@ -1009,10 +1042,10 @@ describe("final conversation and trace uncovered behavior", () => {
     ).toThrow("derived participant identity already exists");
     expect(() =>
       applyConversationRevisionMutation({
-        parent: added,
+        parent,
         action: {
           type: "conversation.remove_participant",
-          participant_id: added.bindings[0]?.participant_id,
+          participant_id: parent.bindings[0]?.participant_id,
         } as never,
         idempotencyKey: "coverage-remove-final-participant",
       }),

@@ -3,6 +3,11 @@ export const CONVERSATION_TURN_DELIVERY_SCHEMA_VERSION = "1.0" as const;
 export const CONVERSATION_TURN_INSTRUCTION_KIND = Object.freeze({
   DIRECT: "direct",
   DEBATE_PARTICIPANT: "debate-participant",
+  COORDINATOR_PLAN: "coordinator-plan",
+  EXECUTOR_TASK: "executor-task",
+  COORDINATOR_CLARIFICATION: "coordinator-clarification",
+  EXECUTOR_RESOLUTION: "executor-resolution",
+  COORDINATOR_REVIEW: "coordinator-review",
 } as const);
 export type ConversationTurnInstructionKind =
   (typeof CONVERSATION_TURN_INSTRUCTION_KIND)[keyof typeof CONVERSATION_TURN_INSTRUCTION_KIND];

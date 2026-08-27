@@ -326,7 +326,9 @@ export function conversationControls(
       lifecycle === CONVERSATION_LIFECYCLE.ACTIVE ||
       lifecycle === CONVERSATION_LIFECYCLE.PAUSED,
     canInject: lifecycle === CONVERSATION_LIFECYCLE.ACTIVE,
-    canRevise: lifecycle === CONVERSATION_LIFECYCLE.COMPLETED,
+    canRevise:
+      lifecycle === CONVERSATION_LIFECYCLE.COMPLETED ||
+      lifecycle === CONVERSATION_LIFECYCLE.NEEDS_INPUT,
     canCancel:
       !isTerminalLifecycle(lifecycle) &&
       operations.some(

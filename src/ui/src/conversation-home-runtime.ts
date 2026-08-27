@@ -6,7 +6,11 @@ import {
 } from "../../actions/protocol-contract.js";
 import { ConversationHomeApiError } from "./conversation-home-api.js";
 import type { ActivationEpoch } from "./conversation-home-state.js";
-import type { HomeActionOperationState, HomePendingChallenge } from "./conversation-home-types.js";
+import type {
+  HomeActionOperationState,
+  HomePendingChallenge,
+  HomeRevisionSummary,
+} from "./conversation-home-types.js";
 
 export const HOME_ACTION_OPERATION_STATES = ACTION_OPERATION_STATES;
 
@@ -28,6 +32,32 @@ export function readableHomeError(error: unknown): string {
 export function createHomeActionKey(): string {
   const suffix = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2);
   return `home-${Date.now()}-${suffix}`.slice(0, 128);
+}
+
+export function isHomeBrowserOnline(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !("navigator" in value)) return true;
+  const navigator = value.navigator;
+  return typeof navigator === "object" && navigator !== null && "onLine" in navigator
+    ? navigator.onLine !== false
+    : true;
+}
+
+export function homeCapabilityAuthoritySignature(
+  rootSessionId: string | null,
+  revision: HomeRevisionSummary | null,
+): string {
+  if (!revision) return `${rootSessionId ?? ""}\0unavailable`;
+  const participants = revision.participants
+    .map((participant) => `${participant.engine}\0${participant.participant_id}`)
+    .join("\0");
+  return [
+    rootSessionId ?? "",
+    revision.conversation_id,
+    revision.revision_id,
+    revision.last_seq,
+    revision.lock_digest,
+    participants,
+  ].join("\0");
 }
 
 export function isHomePendingChallengeExpired(

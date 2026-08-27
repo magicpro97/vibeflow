@@ -19,5 +19,8 @@ export * from "./runtime-authority.js";
 export * from "./runtime-action-authority.js";
 export * from "./runtime-source-authority.js";
 export * from "./action-domain/index.js";
+export * from "./authority-mutation/index.js";
+export * from "./authority-repair/index.js";
 export * from "./runtime-discovery.js";
 export * from "./runtime-factory.js";
+export * from "./ordinary-authority-runtime.js";

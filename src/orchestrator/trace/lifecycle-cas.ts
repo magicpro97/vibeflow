@@ -2,8 +2,9 @@ import {
   CONVERSATION_ARTIFACT_TYPE,
   CONVERSATION_HEALTH,
   CONVERSATION_LIFECYCLE,
-  CONVERSATION_TERMINAL_LIFECYCLE,
   CONVERSATION_TRACE_EVENT_KIND,
+  isConversationLifecycleTransition,
+  isConversationTerminalLifecycle,
 } from "../conversation/conversation-public-wire-contract.js";
 import type {
   ConversationHealth,
@@ -12,30 +13,6 @@ import type {
   StoredTraceEvent,
 } from "./types.js";
 
-const LEGAL: Readonly<Record<ConversationLifecycle, readonly ConversationLifecycle[]>> =
-  Object.freeze({
-    [CONVERSATION_LIFECYCLE.INIT]: Object.freeze([
-      CONVERSATION_LIFECYCLE.ACTIVE,
-      CONVERSATION_LIFECYCLE.STOPPED,
-    ]),
-    [CONVERSATION_LIFECYCLE.ACTIVE]: Object.freeze([
-      CONVERSATION_LIFECYCLE.PAUSED,
-      CONVERSATION_LIFECYCLE.COMPLETED,
-      CONVERSATION_LIFECYCLE.STOPPED,
-      CONVERSATION_LIFECYCLE.FAILED,
-      CONVERSATION_LIFECYCLE.ABORTED,
-    ]),
-    [CONVERSATION_LIFECYCLE.PAUSED]: Object.freeze([
-      CONVERSATION_LIFECYCLE.ACTIVE,
-      CONVERSATION_LIFECYCLE.STOPPED,
-      CONVERSATION_LIFECYCLE.FAILED,
-      CONVERSATION_LIFECYCLE.ABORTED,
-    ]),
-    [CONVERSATION_LIFECYCLE.COMPLETED]: Object.freeze([]),
-    [CONVERSATION_LIFECYCLE.STOPPED]: Object.freeze([]),
-    [CONVERSATION_LIFECYCLE.FAILED]: Object.freeze([]),
-    [CONVERSATION_LIFECYCLE.ABORTED]: Object.freeze([]),
-  });
 const canonicalLifecycleKey = (key: string): boolean =>
   key === "conversation:active" ||
   key.startsWith("conversation:transition:") ||
@@ -102,11 +79,7 @@ function apply(cursor: LifecycleCursor, stored: StoredTraceEvent, enforce: boole
   if (event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE) {
     const next = event.payload.lifecycle;
     const nextHealth = event.payload.health;
-    const terminal =
-      next === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED ||
-      next === CONVERSATION_TERMINAL_LIFECYCLE.STOPPED ||
-      next === CONVERSATION_TERMINAL_LIFECYCLE.FAILED ||
-      next === CONVERSATION_TERMINAL_LIFECYCLE.ABORTED;
+    const terminal = isConversationTerminalLifecycle(next);
     if (enforce && event.payload.terminal !== terminal) {
       throw new TraceLifecycleConflictError(cursor.lifecycle, next);
     }
@@ -116,7 +89,11 @@ function apply(cursor: LifecycleCursor, stored: StoredTraceEvent, enforce: boole
     if (enforce && cursor.awaitingTerminal) {
       throw new TraceLifecycleConflictError(cursor.lifecycle, next);
     }
-    if (enforce && next !== cursor.lifecycle && !LEGAL[cursor.lifecycle].includes(next)) {
+    if (
+      enforce &&
+      next !== cursor.lifecycle &&
+      !isConversationLifecycleTransition(cursor.lifecycle, next)
+    ) {
       throw new TraceLifecycleConflictError(cursor.lifecycle, next);
     }
     if (

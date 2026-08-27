@@ -19,6 +19,7 @@ import {
   OWNED_PROCESS_STRATEGY,
   OWNED_PROCESS_TIMING_MS,
   type OwnedCliIdentityState,
+  type OwnedProcessQuiescenceScope,
   type OwnedProcessTerminalKind,
   isOwnedCliIdentityClaim,
 } from "./owned-process-contract.js";
@@ -127,6 +128,14 @@ export class OwnedProcessController {
     reserved: OwnedAttemptProcessRecordV1,
   ) {
     this.record = reserved;
+  }
+
+  assertSupervisorContainment(containment: OwnedProcessQuiescenceScope): void {
+    if (
+      this.record[OWNED_PROCESS_RECORD_FIELD.STATE] !== OWNED_PROCESS_STATE.RESERVED ||
+      containment !== this.record[OWNED_PROCESS_RECORD_FIELD.QUIESCENCE_SCOPE]
+    )
+      throw new Error("owned supervisor containment receipt changed");
   }
 
   bindSupervisor(supervisorPid: number): OwnedAttemptProcessRecordV1 {

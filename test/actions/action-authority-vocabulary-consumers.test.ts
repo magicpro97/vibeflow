@@ -6,10 +6,11 @@ import { HOST_ACTION_KIND_VALUES } from "../../src/actions/host-action-contract.
 import {
   ACTION_AUTHORITY_BINDING_MODES,
   ACTION_CHALLENGE_CLASSES,
-  ACTION_CONFIG_DIFF_MODE,
   ACTION_CONFIG_DIFF_MODES,
   ACTION_DECISIONS,
+  ACTION_DEPENDENCY_CHANGES,
   ACTION_EFFECT_CLASSES,
+  ACTION_EFFECT_RISK_RANK,
   ACTION_EXPECTED_SOURCE_MODES,
   ACTION_HEALTH_PLAN_KINDS,
   ACTION_PACKAGE_PIN_SOURCE_KINDS,
@@ -18,7 +19,11 @@ import {
   ACTION_PERMISSION_ENFORCEMENT,
   ACTION_PLANNING_MODES,
   ACTION_PLANNING_NETWORK_READ,
+  ACTION_REVERSIBILITY,
+  ACTION_REVERSIBILITY_RISK_RANK,
   ACTION_RISKS,
+  ACTION_RISK_BY_RANK,
+  ACTION_RISK_RANK,
   ACTION_SCOPES,
   ACTOR_KINDS,
   CREDENTIAL_CLASSES,
@@ -132,7 +137,9 @@ const planningConsumers = Object.freeze([
   "src/actions/idempotency.ts",
 ] as const);
 
-const bindingModeConsumers = Object.freeze(["src/actions/authority-proofs.ts"] as const);
+const bindingModeConsumers = Object.freeze([
+  "src/actions/proposal-ownership-validation.ts",
+] as const);
 
 const packagePinConsumers = Object.freeze([
   "src/actions/internal-candidate-validation.ts",
@@ -153,6 +160,8 @@ const expectedModeConsumers = Object.freeze([
 
 const proposalContentConsumers = Object.freeze([
   "src/actions/proposal-content-validation.ts",
+  "src/capabilities/action-domain/preview.ts",
+  "src/orchestrator/conversation/conversation-receipt-planner.ts",
 ] as const);
 
 const repairConsumers = Object.freeze(["src/actions/internal-repair-validation.ts"] as const);
@@ -200,6 +209,21 @@ function requireAuthority(paths: readonly string[], symbol: string): void {
 }
 
 describe("durable action authority vocabulary consumers", () => {
+  test("shared risk ranks are frozen executable authorities", () => {
+    for (const authority of [
+      ACTION_RISK_RANK,
+      ACTION_RISK_BY_RANK,
+      ACTION_EFFECT_RISK_RANK,
+      ACTION_REVERSIBILITY_RISK_RANK,
+    ])
+      expect(Object.isFrozen(authority)).toBeTrue();
+    expect([...ACTION_RISK_BY_RANK]).toEqual([...ACTION_RISKS]);
+    expect(Math.max(...Object.values(ACTION_EFFECT_RISK_RANK))).toBe(ACTION_RISK_RANK.CRITICAL);
+    expect(Math.max(...Object.values(ACTION_REVERSIBILITY_RISK_RANK))).toBe(
+      ACTION_RISK_RANK.CRITICAL,
+    );
+  });
+
   test("actor, credential, challenge, and decision consumers do not redeclare wire values", () => {
     const authorityValues = [
       ...ACTOR_KINDS,
@@ -238,9 +262,11 @@ describe("durable action authority vocabulary consumers", () => {
       rawLiterals(proposalContentConsumers, [
         ...ACTION_EFFECT_CLASSES,
         ...ACTION_RISKS,
+        ...ACTION_REVERSIBILITY,
         ...ACTION_PACKAGE_PIN_TRUST,
         ...ACTION_PERMISSION_CHANGES,
-        ...ACTION_CONFIG_DIFF_MODES.filter((mode) => mode !== ACTION_CONFIG_DIFF_MODE.MANUAL),
+        ...ACTION_DEPENDENCY_CHANGES,
+        ...ACTION_CONFIG_DIFF_MODES,
       ]),
     ).toEqual([]);
     expect(rawLiterals(repairConsumers, [...ACTION_RISKS, ...ACTION_SCOPES])).toEqual([]);
@@ -258,9 +284,7 @@ describe("durable action authority vocabulary consumers", () => {
     requireAuthority(expectedModeConsumers, "ACTION_EXPECTED_SOURCE_MODE");
     requireAuthority(repairConsumers, "ACTION_SCOPE");
     requireAuthority(targetFailureConsumers, "PUBLIC_ACTION_TARGET_");
-    expect(readFileSync(resolve(proposalContentConsumers[0]), "utf8")).toContain(
-      "ACTION_CONFIG_DIFF_MODE.MANUAL",
-    );
+    requireAuthority(proposalContentConsumers, "ACTION_");
   });
 
   test("durable action schema consumers use the public action version authority", () => {

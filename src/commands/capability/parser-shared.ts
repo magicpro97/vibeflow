@@ -11,6 +11,7 @@ import { CapabilityCliUsageError as UsageError } from "./parser-types.js";
 
 export type RepeatableValueFlag = "for" | "input" | "private" | "set" | "source";
 export type SingletonValueFlag =
+  | "automation-grant-file"
   | "candidate-digest"
   | "candidate-id"
   | "conversation"
@@ -55,6 +56,7 @@ const BOOLEAN_FLAGS = new Set<KnownFlag>([
 ]);
 const REPEATABLE_VALUE_FLAGS = new Set<KnownFlag>(["for", "input", "private", "set", "source"]);
 const SINGLETON_VALUE_FLAGS = new Set<KnownFlag>([
+  "automation-grant-file",
   "candidate-digest",
   "candidate-id",
   "conversation",

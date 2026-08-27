@@ -1,4 +1,7 @@
-import { CONVERSATION_TERMINAL_LIFECYCLE } from "./conversation-public-wire-contract.js";
+import {
+  CONVERSATION_TERMINAL_LIFECYCLE,
+  isConversationGracefulTerminalLifecycle,
+} from "./conversation-public-wire-contract.js";
 import {
   ConversationAuthorityClosedError,
   type EmissionGateEntry,
@@ -68,12 +71,12 @@ export class ConversationTerminalEmissionGate {
     }
     let effective =
       entry.terminal === CONVERSATION_TERMINAL_LIFECYCLE.ABORTED &&
-      lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED
+      isConversationGracefulTerminalLifecycle(lifecycle)
         ? CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
         : (entry.state === "cancelled" || this.cancellationClaimed(conversationId, operationId)) &&
             lifecycle !== CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
           ? CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
-          : lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED &&
+          : isConversationGracefulTerminalLifecycle(lifecycle) &&
               (entry.state === "paused" || entry.state === "pausing" || entry.state === "resuming")
             ? CONVERSATION_TERMINAL_LIFECYCLE.ABORTED
             : lifecycle;

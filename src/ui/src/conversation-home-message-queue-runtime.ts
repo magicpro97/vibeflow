@@ -2,13 +2,13 @@ import type { Ref, ShallowRef } from "vue";
 import {
   CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
   CONVERSATION_MESSAGE_QUEUE_STATE,
-  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
-  type ConversationMessageQueueTargetParticipantsV1,
 } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
 import { conversationHomeApi } from "./conversation-home-api.js";
 import { createHomeMessageQueueAdmissionRuntime } from "./conversation-home-message-queue-admission-runtime.js";
 import {
+  type HomeQueueActivationAuthority,
   assertHomeMessageQueueSnapshot,
+  cloneHomeQueueTargets,
   isHomeQueuedMessage,
   latestHomeEditableQueueItem,
   mergeHomeQueuedMessage,
@@ -20,6 +20,7 @@ import {
 } from "./conversation-home-message-queue-edit-authority.js";
 import type {
   HomeMessageQueueSnapshot,
+  HomeNeedsActionQueuedMessage,
   HomeOptimisticQueuedMessage,
   HomeQueuedMessageEditBinding,
   HomeRetryableQueuedMessage,
@@ -27,13 +28,8 @@ import type {
 import { createHomeActionKey, readableHomeError } from "./conversation-home-runtime.js";
 export type { HomeQueueAdmissionSnapshot } from "./conversation-home-message-queue-admission-runtime.js";
 
-interface QueueActivationAuthority {
-  captureGeneration(): number;
-  isGenerationCurrent(generation: number): boolean;
-}
-
 interface HomeMessageQueueRuntimeInput {
-  activation: QueueActivationAuthority;
+  activation: HomeQueueActivationAuthority;
   activeRootId: Ref<string | null>;
   online: Ref<boolean>;
   draft: Ref<string>;
@@ -41,6 +37,7 @@ interface HomeMessageQueueRuntimeInput {
   snapshot: ShallowRef<HomeMessageQueueSnapshot | null>;
   optimistic: Ref<HomeOptimisticQueuedMessage[]>;
   retryable: Ref<HomeRetryableQueuedMessage[]>;
+  needsAction: Ref<HomeNeedsActionQueuedMessage[]>;
   edit: ShallowRef<HomeQueuedMessageEditBinding | null>;
   editSaving: Ref<boolean>;
   sendAsNew: Ref<boolean>;
@@ -59,13 +56,6 @@ interface QueueCommand {
   generation: number;
   root_session_id: string;
 }
-
-const cloneTargets = (
-  targets: ConversationMessageQueueTargetParticipantsV1,
-): ConversationMessageQueueTargetParticipantsV1 =>
-  targets === CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
-    ? CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
-    : [...targets];
 
 export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInput) {
   const savedDrafts = new Map<string, SavedRootDraft>();
@@ -90,10 +80,14 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
     snapshot: input.snapshot,
     optimistic: input.optimistic,
     retryable: input.retryable,
+    needsAction: input.needsAction,
     announcement: input.announcement,
     refreshQueue: input.refreshQueue,
-    clearSendAsNew() {
-      input.sendAsNew.value = false;
+    setSendAsNew(value) {
+      input.sendAsNew.value = value;
+    },
+    focusComposer() {
+      input.composerFocusEpoch.value += 1;
     },
   });
 
@@ -182,7 +176,7 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
       queue_item_id: latest.queue_item_id,
       item_digest: latest.item_digest,
       queue_sequence: latest.queue_sequence,
-      target_participants: cloneTargets(latest.target_participants),
+      target_participants: cloneHomeQueueTargets(latest.target_participants),
       quote_refs: structuredClone(latest.quote_refs),
       private_context_present: latest.private_context_present,
     };
@@ -298,7 +292,7 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
     }
     announce(
       retainedForRetry
-        ? "Connection lost. Unacknowledged text remains in Message queue for an explicit retry."
+        ? "Connection lost. Unacknowledged text remains in Message queue and will reconcile after refresh."
         : "Connection lost. Unacknowledged text remains an inert draft.",
     );
   }
@@ -315,6 +309,8 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
     switchRoot,
     enqueue: admissions.enqueue,
     retry: admissions.retry,
+    restoreNeedsAction: admissions.restoreNeedsAction,
+    dismissNeedsAction: admissions.dismissNeedsAction,
     beginEdit,
     cancelEdit,
     saveEdit,

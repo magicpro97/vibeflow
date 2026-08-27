@@ -16,6 +16,7 @@ import { supportsOwnedRuntime } from "./owned-process-launch.js";
 import { createOwnedProcessPlatform } from "./owned-process-platform.js";
 import { type OwnedProcessController, OwnedProcessRecordStore } from "./owned-process-runtime.js";
 import { reconcileSessionHistory } from "./session-argv.js";
+import { finalizeSessionCompletionAuthority } from "./session-completion-authority.js";
 import {
   ENGINE_ATTEMPT_START_OUTCOME,
   ENGINE_IDENTITY,
@@ -25,19 +26,22 @@ import {
 } from "./session-contract.js";
 import { type SessionLaunchPreparation, prepareSessionLaunch } from "./session-launch-prep.js";
 import { SessionStdoutState } from "./session-output.js";
-import { noteOwnedOutputDrainFailure, reapOwnedSessionRootExit } from "./session-owned-runtime.js";
-import { projectSessionCompletion } from "./session-result.js";
 import {
-  persistSynchronousStartFailure,
-  recordCompletedStartOutcome,
-} from "./session-start-recording.js";
+  OWNED_SESSION_TERMINATION_REASON,
+  noteOwnedOutputDrainFailure,
+  reapOwnedSessionRootExit,
+} from "./session-owned-runtime.js";
+import { projectSessionCompletion } from "./session-result.js";
+import { persistSynchronousStartFailure } from "./session-start-recording.js";
 import { createSessionStreamObserver } from "./session-stream-observer.js";
+import { createSessionTimeoutController } from "./session-timeouts.js";
 import type {
+  EngineSessionAdapterOptions as AdapterOptions,
   AttemptHandle,
   EngineProcess,
   EngineSessionAdapter,
-  EngineSessionAdapterOptions,
   EngineSessionResult,
+  InternalAuthenticatedModelOutputBinding,
   InternalResumeBinding,
   OperationLifecycleState,
 } from "./session-types.js";
@@ -47,9 +51,7 @@ import {
   createDurableAttemptStartAuthorityReaderV1,
 } from "./start-authority.js";
 
-export function createEngineSessionAdapter(
-  options: EngineSessionAdapterOptions = {},
-): EngineSessionAdapter {
+export function createEngineSessionAdapter(options: AdapterOptions = {}): EngineSessionAdapter {
   const config = snapshotSessionAdapterOptions(options);
   const spawnProcess = config.spawn ?? defaultEngineProcessSpawner;
   const sourceEnv = config.sourceEnv as NodeJS.ProcessEnv;
@@ -192,6 +194,7 @@ export function createEngineSessionAdapter(
       const requestedResumeId =
         spawn.sessionMode === ENGINE_SESSION_MODE.EXACT ? nativeSessionId : undefined;
       let resumeBinding: InternalResumeBinding | undefined;
+      let modelOutputBinding: InternalAuthenticatedModelOutputBinding | undefined;
       const stdout = new SessionStdoutState(config.protocol, spawn.engine, requestedResumeId);
       const privateValues = [
         ...initialPrivate,
@@ -204,8 +207,6 @@ export function createEngineSessionAdapter(
       let terminationRequested = false;
       let authenticatedTerminal: OwnedProcessTerminalKind | null = null;
       let terminalError: Error | undefined;
-      let hardTimer: ReturnType<typeof setTimeout> | undefined;
-      let idleTimer: ReturnType<typeof setTimeout> | undefined;
       const { terminate: fallbackTerminate } = createProcessTerminator({
         process: processHandle,
         killProcessGroup:
@@ -228,6 +229,7 @@ export function createEngineSessionAdapter(
       };
       const callbackReason = () =>
         callbackError ? `callback failed: ${callbackError.message}` : undefined;
+      const timeouts = createSessionTimeoutController(config, terminateProcess);
       transition(OPERATION_STATE.DISPATCHED, true);
       if (callbackError) void terminateProcess(callbackReason());
       const acknowledge = () => {
@@ -236,16 +238,7 @@ export function createEngineSessionAdapter(
         acknowledged = transition(OPERATION_STATE.ACKNOWLEDGED, true);
         if (!acknowledged) void terminateProcess(callbackReason());
       };
-      const resetIdle = () => {
-        if (idleTimer) clearTimeout(idleTimer);
-        if (config.idleTimeoutMs !== undefined) {
-          idleTimer = setTimeout(() => void terminateProcess("idle timeout"), config.idleTimeoutMs);
-        }
-      };
-      if (config.timeoutMs !== undefined) {
-        hardTimer = setTimeout(() => void terminateProcess("timeout"), config.timeoutMs);
-      }
-      resetIdle();
+      timeouts.start();
       if (processHandle.startupError) {
         void terminateProcess(`startup I/O failed: ${processHandle.startupError.message}`);
       }
@@ -256,7 +249,7 @@ export function createEngineSessionAdapter(
         },
         engine: spawn.engine,
         onAcknowledged: acknowledge,
-        onActivity: resetIdle,
+        onActivity: timeouts.activity,
         onChunk,
         onError: (error) => {
           callbackError ??= error;
@@ -266,7 +259,8 @@ export function createEngineSessionAdapter(
           if (authenticatedTerminal) return;
           authenticatedTerminal = kind;
           ownedRuntime?.noteTerminal(kind);
-          if (ownedRuntime) void terminateProcess("authenticated terminal record");
+          if (ownedRuntime)
+            void terminateProcess(OWNED_SESSION_TERMINATION_REASON.AUTHENTICATED_TERMINAL);
         },
         privateValues,
         ...(requestedResumeId ? { requestedResumeId } : {}),
@@ -304,7 +298,12 @@ export function createEngineSessionAdapter(
           ]);
           invocation.cleanup?.();
           const exitCode = rootOutcome?.exitCode ?? processExitCode;
-          terminationReason ??= noteOwnedOutputDrainFailure(rootOutcome, ownedRuntime);
+          const outputDrainFailure = noteOwnedOutputDrainFailure(
+            rootOutcome,
+            ownedRuntime,
+            authenticatedTerminal,
+          );
+          if (outputDrainFailure) terminationReason = outputDrainFailure;
           if (
             config.protocol === ENGINE_SESSION_PROTOCOL.BRIDGE &&
             exitCode === 0 &&
@@ -313,15 +312,17 @@ export function createEngineSessionAdapter(
             acknowledge();
           const processRelease = ownedRuntime?.finalize(
             exitCode,
-            authenticatedTerminal
-              ? "authenticated terminal release"
-              : (terminationReason ?? "engine exit"),
+            outputDrainFailure ??
+              (authenticatedTerminal
+                ? OWNED_SESSION_TERMINATION_REASON.AUTHENTICATED_TERMINAL_RELEASE
+                : (terminationReason ?? OWNED_SESSION_TERMINATION_REASON.ENGINE_EXIT)),
           );
           let state: EngineSessionResult["state"] =
             acknowledged &&
             !callbackError &&
             !terminalError &&
-            (!terminationRequested || terminationReason === "authenticated terminal record") &&
+            (!terminationRequested ||
+              terminationReason === OWNED_SESSION_TERMINATION_REASON.AUTHENTICATED_TERMINAL) &&
             (!ownedRuntime || Boolean(processRelease)) &&
             (authenticatedTerminal !== null || exitCode === 0)
               ? OPERATION_STATE.COMPLETED
@@ -331,6 +332,7 @@ export function createEngineSessionAdapter(
             state = OPERATION_STATE.AMBIGUOUS;
             transition(OPERATION_STATE.AMBIGUOUS, true);
           }
+          const internalModelOutput = stdout.internalModelOutput(authenticatedTerminal);
           const rawReason =
             state === OPERATION_STATE.COMPLETED
               ? undefined
@@ -357,25 +359,27 @@ export function createEngineSessionAdapter(
             authenticatedTerminal,
             exitCode,
           });
-          if (reservation) reservation.finalize(evidence);
-          else if (config.writeEvidence) {
-            const internalRef = await config.writeEvidence(attemptId, evidence);
-            evidenceBinding = { attemptId, internalRef };
-          }
-          if (!ownedRuntime || processRelease) {
-            recordCompletedStartOutcome({
-              store: startAuthorityStore,
-              result,
-              lifecycle,
-              resume: resumeBinding,
-              evidence: evidenceBinding,
-            });
-          }
+          ({ evidenceBinding, modelOutputBinding } = await finalizeSessionCompletionAuthority({
+            attemptId,
+            engine: spawn.engine,
+            state,
+            protocol: config.protocol,
+            requestedResumeId,
+            resume: resumeBinding,
+            internalModelOutput,
+            evidence,
+            evidenceBinding,
+            reservation,
+            writeEvidence: config.writeEvidence,
+            recordStartOutcome: !ownedRuntime || Boolean(processRelease),
+            startAuthorityStore,
+            result,
+            lifecycle,
+          }));
           return result;
         } finally {
           invocation.cleanup?.();
-          if (hardTimer) clearTimeout(hardTimer);
-          if (idleTimer) clearTimeout(idleTimer);
+          timeouts.clear();
           if (claimedProjection) {
             await releaseIsolationLease(claimedProjection).catch(() => {});
           }
@@ -387,6 +391,7 @@ export function createEngineSessionAdapter(
         signal,
         terminate: terminateProcess,
         readResumeBinding: () => resumeBinding,
+        readModelOutputBinding: () => modelOutputBinding,
         readEvidenceBinding: () => evidenceBinding,
       });
     },

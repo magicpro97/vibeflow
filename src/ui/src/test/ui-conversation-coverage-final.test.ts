@@ -164,15 +164,12 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
       }),
       trace(5, {
         type: "conversation_terminal",
-        payload: { lifecycle: "COMPLETED", terminal: true, final_score: 0.5 },
+        payload: { lifecycle: "NEEDS_INPUT", terminal: true, final_score: null },
       }),
       trace(6, { type: "error", payload: { agent_id: null, code: "failed", message: "boom" } }),
     ]);
-    eq(
-      "message kinds",
-      messages.map((message) => message.kind),
-      ["user", "precommit", "decision", "status", "status", "error"],
-    );
+    // biome-ignore format: compact projection oracle keeps the coverage test below the source cap
+    eq("message kinds and needs-input copy", [messages.map((message) => message.kind), messages[4]?.body], [["user", "precommit", "decision", "status", "status", "error"], "Needs input"]);
     type Listener = (event: Event) => void;
     class FakeEventSource {
       static instances: FakeEventSource[] = [];

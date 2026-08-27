@@ -6,6 +6,10 @@ import type {
   PublicStoredTraceEvent,
 } from "../trace/types.js";
 import {
+  CONVERSATION_COORDINATION_POLICY,
+  isConversationCoordinationResponseRoundId,
+} from "./conversation-coordination-contract.js";
+import {
   CONVERSATION_ARTIFACT_TYPE,
   CONVERSATION_CONTINUING_DECISION_OUTCOMES,
   CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
@@ -14,38 +18,17 @@ import {
   CONVERSATION_INVALID_ASSESSMENT_REASON,
   CONVERSATION_LIFECYCLE,
   CONVERSATION_SANDBOXES,
-  CONVERSATION_TERMINAL_LIFECYCLES,
   CONVERSATION_TOOL_INTENTS,
   CONVERSATION_TRACE_EVENT_KIND,
+  isConversationGracefulTerminalLifecycle,
+  isConversationLifecycle,
+  isConversationLifecycleTransition,
+  isConversationTerminalLifecycle,
 } from "./conversation-public-wire-contract.js";
 import type { ConversationParticipantSnapshot } from "./types.js";
 
 const TOOLS = new Set<string>(CONVERSATION_TOOL_INTENTS);
 const SANDBOXES = new Set<string>(CONVERSATION_SANDBOXES);
-const TERMINAL = new Set<ConversationLifecycle>(CONVERSATION_TERMINAL_LIFECYCLES);
-const LEGAL = Object.freeze({
-  [CONVERSATION_LIFECYCLE.INIT]: Object.freeze([
-    CONVERSATION_LIFECYCLE.ACTIVE,
-    CONVERSATION_LIFECYCLE.STOPPED,
-  ]),
-  [CONVERSATION_LIFECYCLE.ACTIVE]: Object.freeze([
-    CONVERSATION_LIFECYCLE.PAUSED,
-    CONVERSATION_LIFECYCLE.COMPLETED,
-    CONVERSATION_LIFECYCLE.STOPPED,
-    CONVERSATION_LIFECYCLE.FAILED,
-    CONVERSATION_LIFECYCLE.ABORTED,
-  ]),
-  [CONVERSATION_LIFECYCLE.PAUSED]: Object.freeze([
-    CONVERSATION_LIFECYCLE.ACTIVE,
-    CONVERSATION_LIFECYCLE.STOPPED,
-    CONVERSATION_LIFECYCLE.FAILED,
-    CONVERSATION_LIFECYCLE.ABORTED,
-  ]),
-  [CONVERSATION_LIFECYCLE.COMPLETED]: Object.freeze([]),
-  [CONVERSATION_LIFECYCLE.STOPPED]: Object.freeze([]),
-  [CONVERSATION_LIFECYCLE.FAILED]: Object.freeze([]),
-  [CONVERSATION_LIFECYCLE.ABORTED]: Object.freeze([]),
-} satisfies Readonly<Record<ConversationLifecycle, readonly ConversationLifecycle[]>>);
 
 export class ConversationFoldError extends Error {}
 export const fail = (message: string): never => {
@@ -59,6 +42,26 @@ export const stringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 export const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => key in value);
+
+/** Validate and consume coordination summaries without projecting them as debate rounds. */
+export function isCoordinationResponseSummary(
+  policy: string,
+  payload: Record<string, unknown>,
+): boolean {
+  if (
+    policy !== CONVERSATION_COORDINATION_POLICY ||
+    typeof payload.round_id !== "string" ||
+    !isConversationCoordinationResponseRoundId(payload.round_id)
+  )
+    return false;
+  if (
+    payload.completes_response !== true ||
+    typeof payload.final_claim !== "string" ||
+    payload.content_delta !== payload.final_claim
+  )
+    fail("invalid coordination response summary");
+  return true;
+}
 
 export function validateTerminalAppend(
   lifecycle: ConversationLifecycle,
@@ -79,7 +82,7 @@ export function validateTerminalAppend(
   )
     fail("terminal lifecycle is immutable until its terminal record");
 }
-export const terminal = (value: ConversationLifecycle) => TERMINAL.has(value);
+export const terminal = isConversationTerminalLifecycle;
 
 export type ParticipantState = ConversationParticipantSnapshot & { bound: boolean };
 export interface ConfiguredConversation {
@@ -227,8 +230,7 @@ export function applyState(
   if (
     !object(payload) ||
     !exact(payload, ["lifecycle", "health", "terminal", "reason"]) ||
-    typeof payload.lifecycle !== "string" ||
-    !Object.hasOwn(LEGAL, payload.lifecycle) ||
+    !isConversationLifecycle(payload.lifecycle) ||
     !CONVERSATION_HEALTH_VALUES.some((value) => value === payload.health) ||
     (payload.reason !== null && typeof payload.reason !== "string")
   )
@@ -244,11 +246,11 @@ export function applyState(
       return fail("invalid state change");
     return { lifecycle: current, health: nextHealth };
   }
-  if (!LEGAL[current].some((candidate) => candidate === next))
+  if (!isConversationLifecycleTransition(current, next))
     return fail(`illegal lifecycle transition ${current} -> ${next}`);
   if (nextHealth !== health) return fail("health must change independently of lifecycle");
-  if (next === CONVERSATION_LIFECYCLE.COMPLETED && hasActiveRound)
-    return fail("cannot complete with an active response");
+  if (isConversationGracefulTerminalLifecycle(next) && hasActiveRound)
+    return fail("cannot settle with an active response");
   return { lifecycle: next, health };
 }
 

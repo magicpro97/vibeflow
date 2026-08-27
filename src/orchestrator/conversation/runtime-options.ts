@@ -5,6 +5,7 @@ import type { TraceStore } from "../trace/store.js";
 import type { PublicStoredTraceEvent } from "../trace/types.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import type { ConversationAgentActionCandidateAuthorityV1 } from "./conversation-agent-action-candidate-authority.js";
+import type { ConversationDelegationWorkspaceAuthorityV1 } from "./conversation-delegation-workspace.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import type { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
 import type { ConversationSocialAuthorityV1 } from "./conversation-social-authority.js";
@@ -36,6 +37,7 @@ export interface ConversationRuntimeOptions {
   homeAuthorities?: ConversationHomeAuthorities;
   socialAuthority?: ConversationSocialAuthorityV1;
   agentActionCandidates?: ConversationAgentActionCandidateAuthorityV1;
+  coordinationWorkspaces?: ConversationDelegationWorkspaceAuthorityV1;
   privateContextBroker?: ConversationPrivateContextBrokerV1;
   messageQueueUserAuthority?: ConversationUserMessageAuthorityV1;
   /** Test/process-crash seam; throwing leaves durable authority for restart recovery. */

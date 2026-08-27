@@ -1,5 +1,8 @@
 import type { Engine } from "../core.js";
-import { OWNED_PROCESS_TERMINAL_KIND } from "./owned-process-contract.js";
+import {
+  OWNED_PROCESS_TERMINAL_KIND,
+  type OwnedProcessTerminalKind,
+} from "./owned-process-contract.js";
 import {
   assertOwnedProcessHealthClear,
   inspectOwnedAttemptProcesses,
@@ -11,6 +14,13 @@ import {
   type OwnedSupervisorExitOutcome,
 } from "./owned-process-status.js";
 import type { EngineProcess } from "./session-types.js";
+
+export const OWNED_SESSION_TERMINATION_REASON = Object.freeze({
+  AUTHENTICATED_TERMINAL: "authenticated terminal record",
+  AUTHENTICATED_TERMINAL_RELEASE: "authenticated terminal release",
+  ENGINE_EXIT: "engine exit",
+  OUTPUT_DRAIN_UNPROVEN: "owned CLI output drain proof failed",
+} as const);
 
 export function reserveOwnedSessionRuntime(
   store: OwnedProcessRecordStore | undefined,
@@ -39,9 +49,11 @@ export function reapOwnedSessionRootExit(
 export function noteOwnedOutputDrainFailure(
   rootOutcome: OwnedSupervisorExitOutcome | undefined,
   ownedRuntime: OwnedProcessController | undefined,
+  authenticatedTerminal: OwnedProcessTerminalKind | null = null,
 ): string | undefined {
   if (rootOutcome?.phase !== OWNED_SUPERVISOR_TERMINAL_PHASE.STREAMS_DRAIN_UNPROVEN)
     return undefined;
-  ownedRuntime?.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.OUTPUT_DRAIN_UNPROVEN);
-  return "owned CLI output drain proof failed";
+  if (authenticatedTerminal === null)
+    ownedRuntime?.noteTerminal(OWNED_PROCESS_TERMINAL_KIND.OUTPUT_DRAIN_UNPROVEN);
+  return OWNED_SESSION_TERMINATION_REASON.OUTPUT_DRAIN_UNPROVEN;
 }

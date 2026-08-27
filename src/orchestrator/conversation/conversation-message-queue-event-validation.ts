@@ -37,6 +37,9 @@ function assertPayload(
     if (
       !queueExactKeys(value, CONVERSATION_MESSAGE_QUEUE_RECORD_FIELDS.EVENT_ADMITTED_PAYLOAD) ||
       !isQueueDigest(value.owner_principal_digest) ||
+      !isQueueReference(value.client_instance_id, 128) ||
+      !Number.isSafeInteger(value.client_order) ||
+      (value.client_order as number) < 1 ||
       (value.private_context_binding_digest !== null &&
         !isQueueDigest(value.private_context_binding_digest)) ||
       !isQueueDigest(value.idempotency_key_digest) ||
@@ -54,6 +57,8 @@ function assertPayload(
         request: {
           schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
           expected_authority_digest: value.admitted_authority.authority_digest,
+          client_instance_id: value.client_instance_id,
+          client_order: value.client_order as number,
           content: value.item.content,
           target_participants: value.item.target_participants,
           quote_refs: value.item.quote_refs,

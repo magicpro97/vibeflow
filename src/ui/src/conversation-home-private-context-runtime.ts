@@ -31,6 +31,7 @@ interface PrivateContextDiscardTask {
   selection: PrivateContextSelection;
   idempotency_key: string;
   running: Promise<boolean> | null;
+  settled: boolean;
 }
 
 interface HomePrivateContextRuntimeInput {
@@ -84,6 +85,7 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
   };
 
   async function transportDiscard(task: PrivateContextDiscardTask): Promise<boolean> {
+    if (task.settled) return true;
     if (task.running) return task.running;
     const operation = async () => {
       const selection = task.selection;
@@ -105,6 +107,7 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
       assertHomePrivateContextPresence(response, false);
       const key = scopeKey(selection.scope);
       if (sameSelection(selections.get(key), selection)) selections.delete(key);
+      task.settled = true;
       pendingDiscards.delete(`${key}\0${selection.command_key}`);
       syncProjection();
       return true;
@@ -123,6 +126,7 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
       selection,
       idempotency_key: discardKey(),
       running: null,
+      settled: false,
     };
     pendingDiscards.set(key, task);
     return task;
@@ -227,6 +231,7 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
   function capture(scope: PrivateContextScope): HomePrivateContextCapture | null {
     const selected = selections.get(scopeKey(scope));
     if (!selected) return null;
+    let retainedDiscardTask: PrivateContextDiscardTask | null = null;
     return Object.freeze({
       idempotency_key: selected.command_key,
       private_context_present: CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT,
@@ -241,6 +246,10 @@ export function createHomePrivateContextRuntime(input: HomePrivateContextRuntime
         selections.set(key, selected);
         syncProjection();
         return true;
+      },
+      discardRetained() {
+        retainedDiscardTask ??= discardTask(selected);
+        return transportDiscard(retainedDiscardTask);
       },
     });
   }

@@ -640,6 +640,13 @@ describe("canonical conversation turn delivery", () => {
       interaction_head_digest: null,
       prior_delivery_digest: null,
     });
+    expect(prepared.envelope.user_messages.map(({ message_id }) => message_id)).toEqual([
+      "event-1",
+      "event-2",
+      "event-8",
+    ]);
+    expect(prepared.applicable_user_message_count).toBe(1);
+    expect(prepared.applicable_user_message_ids).toEqual(["event-8"]);
   });
 
   test("binds quote occurrences and independently advances peer interaction deltas", () => {
@@ -696,6 +703,14 @@ describe("canonical conversation turn delivery", () => {
             actor_public_ids: ["p1", "p2"],
             last_changed_interaction_sequence: 2,
           },
+          {
+            target: messageLocator("event-2"),
+            emoji: "👀",
+            count: 0,
+            reacted_by_recipient: false,
+            actor_public_ids: [],
+            last_changed_interaction_sequence: 2,
+          },
         ],
         message_locators_by_event_id: {},
         quote_projections_by_response_event_id: { "event-8": [quote] },
@@ -714,6 +729,13 @@ describe("canonical conversation turn delivery", () => {
         count: 1,
         reacted_by_recipient: false,
         actor_public_ids: ["p2"],
+      },
+      {
+        target: messageLocator("event-2"),
+        emoji: "👀",
+        count: 0,
+        reacted_by_recipient: false,
+        actor_public_ids: [],
       },
     ]);
     expect(prepared.receipt).toMatchObject({

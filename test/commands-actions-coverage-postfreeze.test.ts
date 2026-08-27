@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { validateCompactionInput } from "../src/actions/candidate-nested-validation.js";
 import { ApprovalChallengeAuthority } from "../src/actions/challenge.js";
 import { validatePublicErrorDetails } from "../src/actions/error-details.js";
@@ -75,7 +75,11 @@ import {
   parseActionApprovalChallengeRequestJson,
   parseActionApprovalRequestJson,
 } from "../src/actions/wire-validation.js";
-import type { CapabilityCliMutationInputV1 } from "../src/capabilities/cli/ports.js";
+import type {
+  AuthorityRepairCliInteractionV1,
+  CapabilityCliAuthorityRepairRuntimeV1,
+  CapabilityCliMutationInputV1,
+} from "../src/capabilities/cli/ports.js";
 import {
   activateProjectCapabilityAuthorityForVfInit,
   activateUserCapabilityAuthorityForTrustedInstall,
@@ -229,7 +233,155 @@ describe("post-freeze capability mutation port behavior", () => {
     });
     expect(result.kind).toBe("plan");
     expect(result.status).toBe("failed");
-    expect(result.error?.code).toBe("service_unavailable");
+    expect(result.error?.code).toBe("invalid_request");
+  });
+
+  test("delegates authority repair to the injected runtime only with an authenticated local TTY interaction", () => {
+    const fx = capabilityFixture();
+    const events: string[] = [];
+    const interaction: AuthorityRepairCliInteractionV1 = {
+      authenticated_local_tty: true,
+      selectCandidate(input) {
+        events.push(`select:${input.scope}:${input.candidates.length}`);
+        return input.candidates[0]?.candidate_id ?? null;
+      },
+      confirmCriticalReview(input) {
+        events.push(`critical:${input.candidate.candidate_id}:${input.bootstrap_required}`);
+        return true;
+      },
+      confirmRecoveryReview(input) {
+        events.push(
+          `recovery:${input.candidate.candidate_id}:${String(input.observed_authority_digest)}`,
+        );
+        return false;
+      },
+    };
+    const authorityRepairRuntime: CapabilityCliAuthorityRepairRuntimeV1 = {
+      execute(input, interactive) {
+        const candidate = {
+          candidate_id: "candidate-z",
+          action_domain: "capability" as const,
+          authority_scope: input.scope,
+          scope_id: "scope-z",
+          control_state: "current-valid" as const,
+          strategy: "replace-json-head",
+          created_at: "2026-08-27T00:00:00.000Z",
+          expires_at: "2026-08-27T00:05:00.000Z",
+        };
+        expect(
+          interactive.selectCandidate({
+            scope: input.scope,
+            conversation_id: input.conversation_id,
+            candidates: [candidate],
+          }),
+        ).toBe("candidate-z");
+        expect(
+          interactive.confirmCriticalReview({
+            scope: input.scope,
+            conversation_id: input.conversation_id,
+            candidate,
+            plan_digest: `sha256:${"4".repeat(64)}`,
+            repair_id: "vf-repair-z",
+            bootstrap_required: false,
+          }),
+        ).toBe(true);
+        expect(
+          interactive.confirmRecoveryReview({
+            scope: input.scope,
+            conversation_id: input.conversation_id,
+            candidate,
+            operation_id: "vf-repair-op-z",
+            observed_authority_digest: null,
+          }),
+        ).toBe(false);
+        return {
+          schema_version: "1.0" as const,
+          kind: "mutation" as const,
+          command: "authority.repair" as const,
+          status: "succeeded" as const,
+          changed: true as const,
+          operation_id: "vf-op-z",
+          proposal_id: "vf-proposal-z",
+          plan_digest: `sha256:${"5".repeat(64)}`,
+          generation_id: null,
+          targets: [],
+          recovery_actions: [],
+          error: null,
+        };
+      },
+    };
+    const port = createCapabilityCliMutationPort({
+      base: fx.projectRoot,
+      userHomeRoot: fx.homeRoot,
+      userVibeflowRoot: fx.userVibeflowRoot,
+      now: fx.now,
+      authorityStdinIsTTY: true,
+      authorityRepairInteraction: interaction,
+      authorityRepairRuntime,
+      runtimeFactory: () => fx.runtime,
+    });
+    const result = port.execute({
+      schema_version: "1.0",
+      command: "authority.repair",
+      scope: "project",
+      conversation_id: "conversation-1",
+      context: {
+        actor: {
+          kind: "human-cli",
+          public_actor_id: "vf-postfreeze-test",
+          credential_class: "recovery",
+        },
+        stdin_is_tty: true,
+      },
+    });
+    expect(result.kind).toBe("mutation");
+    expect(result.status).toBe("succeeded");
+    expect(events).toEqual([
+      "select:project:1",
+      "critical:candidate-z:false",
+      "recovery:candidate-z:null",
+    ]);
+  });
+
+  test("authority repair default runtime fails closed when no validated checkpoint exists", () => {
+    const fx = capabilityFixture();
+    const port = createCapabilityCliMutationPort({
+      base: fx.projectRoot,
+      userHomeRoot: fx.homeRoot,
+      userVibeflowRoot: fx.userVibeflowRoot,
+      now: fx.now,
+      authorityStdinIsTTY: true,
+      authorityRepairInteraction: {
+        authenticated_local_tty: true,
+        selectCandidate() {
+          return null;
+        },
+        confirmCriticalReview() {
+          return false;
+        },
+        confirmRecoveryReview() {
+          return false;
+        },
+      },
+      runtimeFactory: () => fx.runtime,
+    });
+    const result = port.execute({
+      schema_version: "1.0",
+      command: "authority.repair",
+      scope: "project",
+      conversation_id: null,
+      context: {
+        actor: {
+          kind: "human-cli",
+          public_actor_id: "vf-postfreeze-test",
+          credential_class: "recovery",
+        },
+        stdin_is_tty: true,
+      },
+    });
+    expect(result.kind).toBe("plan");
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("authority_corrupt");
   });
 
   test("durable mutation port rethrows unclassified runtime faults", () => {
@@ -4332,7 +4484,9 @@ describe("post-freeze residual validation branches", () => {
     roots.push(root);
     const files = new ActionFilePersistence(root);
     const challengeId = Buffer.alloc(32, 8).toString("base64url");
-    writeFileSync(files.challengePath(challengeId), "corrupt challenge journal");
+    const challengePath = files.challengePath(challengeId);
+    mkdirSync(dirname(challengePath), { recursive: true });
+    writeFileSync(challengePath, "corrupt challenge journal");
     expect(files.consumedChallengesByDigest(testDigest("missing-challenge"))).toEqual([]);
 
     const proposal = materializeProposal(proposalDraft());

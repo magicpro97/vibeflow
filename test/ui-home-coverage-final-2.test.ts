@@ -32,6 +32,7 @@ import { matchesHomeQueueEditConflict } from "../src/ui/src/conversation-home-me
 import { createHomeMessageQueueRuntime } from "../src/ui/src/conversation-home-message-queue-runtime.js";
 import type {
   HomeMessageQueueSnapshot,
+  HomeNeedsActionQueuedMessage,
   HomeOptimisticQueuedMessage,
   HomeQueuedMessage,
   HomeQueuedMessageEditBinding,
@@ -306,7 +307,7 @@ describe("final Home loading and composer suggestion coverage", () => {
         submitting: false,
         savingQueuedEdit: false,
       }),
-    ).toEqual({ active: false, label: "", detail: "" });
+    ).toEqual({ active: false, blocksSubmit: false, label: "", detail: "" });
     expect(describeHomeCapabilityLoading({ query: "git", scope: "user" })).toMatchObject({
       eyebrow: "Shared capability index",
       title: 'Scanning "git"',
@@ -315,6 +316,10 @@ describe("final Home loading and composer suggestion coverage", () => {
 
   test("mention and slash suggestions expose real participant and command targets", () => {
     const participants = [participant("builder", "claude", "opus"), participant("reviewer")];
+    expect(matchHomeComposerSuggestions("+coord", participants)[0]).toMatchObject({
+      label: "Implementation agent",
+      value: "+coordination-executor@codex",
+    });
     expect(matchHomeComposerSuggestions("  @b", participants)).toEqual([
       {
         glyph: "@",
@@ -610,6 +615,7 @@ function queueHarness() {
   const snapshot = shallowRef<HomeMessageQueueSnapshot | null>(null);
   const optimistic = ref<HomeOptimisticQueuedMessage[]>([]);
   const retryable = ref<HomeRetryableQueuedMessage[]>([]);
+  const needsAction = ref<HomeNeedsActionQueuedMessage[]>([]);
   const edit = shallowRef<HomeQueuedMessageEditBinding | null>(null);
   const editSaving = ref(false);
   const sendAsNew = ref(false);
@@ -625,6 +631,7 @@ function queueHarness() {
     snapshot,
     optimistic,
     retryable,
+    needsAction,
     edit,
     editSaving,
     sendAsNew,
@@ -645,6 +652,7 @@ function queueHarness() {
     snapshot,
     optimistic,
     retryable,
+    needsAction,
     edit,
     editSaving,
     sendAsNew,
@@ -768,6 +776,7 @@ describe("final Home queue authority and runtime coverage", () => {
     const snapshot = shallowRef<HomeMessageQueueSnapshot | null>(null);
     const optimistic = ref<HomeOptimisticQueuedMessage[]>([]);
     const retryable = ref<HomeRetryableQueuedMessage[]>([]);
+    const needsAction = ref<HomeNeedsActionQueuedMessage[]>([]);
     const announcement = ref("");
     let refreshes = 0;
     const runtime = createHomeMessageQueueAdmissionRuntime({
@@ -778,12 +787,14 @@ describe("final Home queue authority and runtime coverage", () => {
       snapshot,
       optimistic,
       retryable,
+      needsAction,
       announcement,
       refreshQueue: async () => {
         refreshes += 1;
         return true;
       },
-      clearSendAsNew() {},
+      setSendAsNew() {},
+      focusComposer() {},
     });
     const restored: string[] = [];
     const admission = (content: string, idempotencyKey: string, restores = true) => ({
@@ -797,6 +808,9 @@ describe("final Home queue authority and runtime coverage", () => {
         if (restores) restored.push(content);
         return restores;
       },
+      async discardRetained() {
+        return true;
+      },
     });
     try {
       expect(await runtime.enqueue(admission("unbound", "admission-unbound"))).toBeFalse();
@@ -805,15 +819,14 @@ describe("final Home queue authority and runtime coverage", () => {
       activeRootId.value = "root-a";
       snapshot.value = queueSnapshot();
       const initialA = deferred<HomeQueuedMessage>();
-      const initialB = deferred<HomeQueuedMessage>();
-      const replayA = deferred<HomeQueuedMessage>();
+      const replayB = deferred<HomeQueuedMessage>();
       const disconnected = deferred<HomeQueuedMessage>();
       let calls = 0;
       conversationHomeApi.enqueueMessage = (() => {
         calls += 1;
         if (calls === 1) return initialA.promise;
-        if (calls === 2) return initialB.promise;
-        if (calls === 3) return replayA.promise;
+        if (calls === 2) return Promise.resolve(queuedItem(1, "A"));
+        if (calls === 3) return replayB.promise;
         if (calls === 5) return disconnected.promise;
         return Promise.resolve(queuedItem(2, "B"));
       }) as typeof conversationHomeApi.enqueueMessage;
@@ -822,14 +835,13 @@ describe("final Home queue authority and runtime coverage", () => {
       await flush();
       runtime.interruptRoot("root-a");
       initialA.resolve(queuedItem(1, "A"));
-      initialB.resolve(queuedItem(2, "B"));
       expect(await Promise.all([first, second])).toEqual([false, false]);
 
       runtime.resumeRoot("root-a");
       await flush();
       expect(calls).toBe(3);
       online.value = false;
-      replayA.resolve(queuedItem(1, "A"));
+      replayB.resolve(queuedItem(2, "B"));
       await flush();
       expect(calls).toBe(3);
       online.value = true;
@@ -1173,6 +1185,11 @@ describe("final Home command runtime coverage", () => {
       await fx.runtime.submitDraft();
       expect(saves).toBe(1);
       expect(fx.submitting.value).toBeFalse();
+      const quoted = quoteReference();
+      fx.runtime.toggleQuoteReference(quoted);
+      fx.runtime.moveQuoteReference(0, 1);
+      fx.runtime.removeQuoteReference(quoted);
+      expect(fx.quoteRefs.value).toEqual([]);
     } finally {
       fx.activation.close();
     }
@@ -1192,6 +1209,9 @@ describe("final Home command runtime coverage", () => {
         restoreCalls += 1;
         if (!allowRestore) return false;
         privatePresent = true;
+        return true;
+      },
+      async discardRetained() {
         return true;
       },
     });

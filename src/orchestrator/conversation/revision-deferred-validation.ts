@@ -1,3 +1,4 @@
+import { HOST_ACTION_KIND } from "../../actions/host-action-contract.js";
 import {
   type ActionAuthoritySnapshotV1,
   type ActionRequestAuthorityV1,
@@ -38,6 +39,7 @@ import type {
   DeferredRevisionProposalStore,
   DeferredRevisionProposalV1,
 } from "./revision-proposal-store.js";
+import { isAuthorityBoundDeferredRevisionProposal } from "./revision-proposal-store.js";
 import { validatePublishedRevisionReservation } from "./revision-reservation-reconciliation.js";
 import { revisionManifestRecord } from "./revision-source.js";
 import { readConversationSourceInventory } from "./source-inventory.js";
@@ -66,6 +68,11 @@ export interface ValidatedPublishedRevisionReplayV1 {
   reservation: RevisionReservationRecordV1;
   publicationVisible: boolean;
 }
+
+/** Legacy proposals may replay only a topology-neutral continuation message. */
+export const deferredRevisionRequiresPolicyAuthority = (
+  action: ConversationRevisionMutationV1,
+): boolean => action.type !== HOST_ACTION_KIND.CONVERSATION_CONTINUE_MESSAGE;
 
 function same(left: unknown, right: unknown): boolean {
   return canonicalJsonBytes(left).equals(canonicalJsonBytes(right));
@@ -112,6 +119,17 @@ export function validateDeferredRevisionCommit(input: {
       !isAgentProposalBrowserController(actionState.proposal, input.commit.authority))
   )
     throw new Error("deferred revision approval authority mismatch");
+  if (
+    deferredRevisionRequiresPolicyAuthority(action) &&
+    !isAuthorityBoundDeferredRevisionProposal(deferred)
+  )
+    throw new Error("legacy deferred revision lacks topology authority");
+  if (
+    isAuthorityBoundDeferredRevisionProposal(deferred) &&
+    (deferred.policy_authority_digest !== actionState.proposal.policy_digest ||
+      deferred.policy_authority_digest !== approval.policy_digest)
+  )
+    throw new Error("deferred revision topology approval authority mismatch");
   const rootSessionId = actionState.proposal.base.root_session_id;
   if (!rootSessionId) throw new Error("deferred revision action root is absent");
   const actionPlan = materializeConversationRevisionActionPlan(

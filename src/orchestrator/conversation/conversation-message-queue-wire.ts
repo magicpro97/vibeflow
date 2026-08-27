@@ -27,6 +27,8 @@ export interface EnqueueConversationUserMessageRequestV1 {
   schema_version: ConversationMessageQueueSchemaVersionV1;
   idempotency_key: string;
   expected_authority_digest: string;
+  client_instance_id: string;
+  client_order: number;
   content: string;
   target_participants: ConversationMessageQueueTargetParticipantsV1;
   quote_refs: PublicQuoteReferenceV1[];

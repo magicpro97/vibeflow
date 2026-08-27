@@ -118,6 +118,11 @@ export function prepareConversationTurn(input: {
   const through = input.events.at(-1)?.seq ?? 0;
   if (after > through) throw new Error("turn delivery cursor is in the future");
   const userMessages = publicTurnMessages(input.events, input.request.participant_id, after);
+  const applicableUserMessages = publicTurnMessages(
+    input.events,
+    input.request.participant_id,
+    input.observed_after_public_seq,
+  );
   const publicResponses = publicTurnResponses(
     input.events,
     input.request.participant_id,
@@ -182,7 +187,7 @@ export function prepareConversationTurn(input: {
               actor_public_ids: actorIds,
             };
           })
-          .filter((reaction) => reaction.count > 0)
+          .filter((reaction) => exact || reaction.count > 0)
       : [];
   const privateContextPrompt = privateFileRangeTurnContextPrompt(
     (input.private_contexts ?? [])
@@ -265,11 +270,10 @@ export function prepareConversationTurn(input: {
       prior_interaction_head_digest: envelope.prior_interaction_head_digest,
       interaction_head_digest: interactionHeadDigest,
     }),
-    applicable_user_message_count: publicTurnMessages(
-      input.events,
-      input.request.participant_id,
-      input.observed_after_public_seq,
-    ).length,
+    applicable_user_message_count: applicableUserMessages.length,
+    applicable_user_message_ids: Object.freeze(
+      applicableUserMessages.map((message) => message.message_id),
+    ),
   });
   preparedTurns.add(turn);
   return turn;

@@ -136,6 +136,7 @@ class QueueAdapter implements EngineSessionAdapter {
       completion: Promise.resolve(completed),
       terminate: async () => undefined,
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
   }

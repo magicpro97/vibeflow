@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -343,7 +343,9 @@ describe("canonical request to immutable action mapping", () => {
     expect(() =>
       store.createProposal({ authority, canonical_request: request, proposal: stagedProposal }),
     ).toThrow(/disagree/i);
-    for (const directory of ["proposals", "operations", "idempotency"])
-      expect(readdirSync(join(path, "actions", "v1", directory))).toEqual([]);
+    for (const directory of ["proposals", "operations", "idempotency"]) {
+      const namespace = join(path, "actions", "v1", directory);
+      expect(existsSync(namespace) ? readdirSync(namespace) : []).toEqual([]);
+    }
   });
 });

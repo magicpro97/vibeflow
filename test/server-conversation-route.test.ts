@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConversationRoutingError } from "../src/orchestrator/conversation/router.js";
+import {
+  CONVERSATION_ROUTING_ERROR_CODE,
+  ConversationRoutingError,
+} from "../src/orchestrator/conversation/router.js";
 import {
   ConversationControlConflictError,
   ConversationInvalidTargetParticipantError,
@@ -573,6 +576,13 @@ describe("conversation DTO and status mapping", () => {
         "invalid_request",
       ],
       [new ConversationRoutingError("unknown_explicit_policy"), 400, "invalid_request"],
+      [
+        new ConversationRoutingError(
+          CONVERSATION_ROUTING_ERROR_CODE.COORDINATE_EXECUTOR_UNAVAILABLE,
+        ),
+        400,
+        "invalid_request",
+      ],
       [new Error("conversation not found"), 500, "conversation_failed"],
       [new Error("unknown target participant"), 500, "conversation_failed"],
       [new Error("trace journal: invalid hash chain"), 500, "conversation_failed"],

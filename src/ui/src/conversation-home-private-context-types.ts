@@ -23,4 +23,5 @@ export interface HomePrivateContextCapture {
   readonly private_context_present: typeof CONVERSATION_PRIVATE_CONTEXT_EXPECTED_PRESENT;
   clearIfCurrent(): void;
   restoreIfVacant(): boolean;
+  discardRetained(): Promise<boolean>;
 }

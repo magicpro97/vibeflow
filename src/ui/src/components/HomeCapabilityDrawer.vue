@@ -1,6 +1,6 @@
 <template>
   <Transition name="home-drawer">
-    <aside v-if="open" class="home-capability-drawer" aria-label="CLI capabilities">
+    <aside v-if="open && !store.queuedMessageEdit" class="home-capability-drawer" aria-label="CLI capabilities">
       <header>
         <span>
           <small>Extend your AI CLIs</small>
@@ -130,6 +130,14 @@ function setScope(scope: CapabilityScope) {
 }
 
 async function useCapability(item: HomeCapabilityItem) {
+  if (store.queuedMessageEdit) return;
+  if (store.draft.trim()) {
+    store.composerError =
+      "Your draft was preserved. Send or clear it before preparing a capability change.";
+    emit("close");
+    nextTick(() => document.querySelector<HTMLTextAreaElement>("#home-composer")?.focus());
+    return;
+  }
   if (item.status === CAPABILITY_STATUS.NEEDS_RECOVERY) {
     if (await store.proposeCapabilityRepair(item)) emit("close");
     return;
@@ -149,6 +157,12 @@ watch(
     await nextTick();
     searchInput.value?.focus();
     void store.searchCapabilities();
+  },
+);
+watch(
+  () => store.queuedMessageEdit,
+  (edit) => {
+    if (edit && props.open) emit("close");
   },
 );
 </script>

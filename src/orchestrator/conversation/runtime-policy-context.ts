@@ -1,4 +1,5 @@
 import type { TraceCorrelation } from "../trace/types.js";
+import { validateConversationCoordinationRepoEvidence } from "./conversation-coordination-evidence.js";
 import {
   assertCoordinatorEmission,
   policyContextView,
@@ -6,6 +7,7 @@ import {
 } from "./emission-authority.js";
 import type { LiveConversation } from "./lifecycle-gate.js";
 import { conversationMessages } from "./policy-registry.js";
+import { readRuntimeConversationCoordinationState } from "./runtime-coordination-state.js";
 import { bindSharedHandoffToAttempt } from "./runtime-handoff.js";
 import type { ConversationRuntimeOptions } from "./runtime-options.js";
 import { prepareRuntimeConversationTurn } from "./runtime-turn-delivery.js";
@@ -52,6 +54,56 @@ export function createRuntimePolicyContext({
       options.traceStore.readConversation(live.manifest.conversation_id).then(conversationMessages),
     prepareTurn: (request: Parameters<ConversationContext["prepareTurn"]>[0]) =>
       prepareRuntimeConversationTurn(options, live, request),
+    coordinationState: () =>
+      readRuntimeConversationCoordinationState({
+        artifactStore: options.artifactStore,
+        traceStore: options.traceStore,
+        conversationId: live.manifest.conversation_id,
+        revisionId: live.manifest.revision_id,
+      }),
+    validateCoordinationRepoEvidence: (references: readonly string[]) =>
+      validateConversationCoordinationRepoEvidence(live.manifest.repo_root, references),
+    observeWorkspace: (workspaceKey: string) => {
+      if (!options.coordinationWorkspaces)
+        throw new Error("coordination workspace authority is unavailable");
+      return options.coordinationWorkspaces.observe({
+        repoRoot: live.manifest.repo_root,
+        workflowId: live.manifest.workflow_id,
+        workspaceKey,
+      });
+    },
+    verifyWorkspace: (
+      workspaceKey: Parameters<ConversationContext["verifyWorkspace"]>[0],
+      completion: Parameters<ConversationContext["verifyWorkspace"]>[1],
+    ) => {
+      if (!options.coordinationWorkspaces)
+        throw new Error("coordination workspace authority is unavailable");
+      return options.coordinationWorkspaces.verify({
+        repoRoot: live.manifest.repo_root,
+        workflowId: live.manifest.workflow_id,
+        workspaceKey,
+        completion: {
+          task_id: completion.task_id,
+          changed_paths: completion.changed_paths,
+          commands: completion.verification.commands,
+        },
+      });
+    },
+    settleWorkspace: async (
+      workspaceKey: Parameters<ConversationContext["settleWorkspace"]>[0],
+      outcome: Parameters<ConversationContext["settleWorkspace"]>[1],
+    ) => {
+      if (!options.coordinationWorkspaces)
+        throw new Error("coordination workspace authority is unavailable");
+      options.coordinationWorkspaces.settle(
+        {
+          repoRoot: live.manifest.repo_root,
+          workflowId: live.manifest.workflow_id,
+          workspaceKey,
+        },
+        outcome,
+      );
+    },
     publishSocialIntent: (input: Parameters<ConversationContext["publishSocialIntent"]>[0]) =>
       options.socialAuthority?.participantIntent({
         conversation_id: live.manifest.conversation_id,

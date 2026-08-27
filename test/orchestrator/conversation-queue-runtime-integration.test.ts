@@ -14,6 +14,7 @@ import {
   type ConversationBootstrapOptions,
   createConversationBootstrap,
 } from "../../src/orchestrator/conversation/bootstrap.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "../../src/orchestrator/conversation/conversation-command-result-contract.js";
 import { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
 import { materializeConversationMessageQueueAuthorityV1 } from "../../src/orchestrator/conversation/conversation-message-queue-authority.js";
 import {
@@ -23,6 +24,7 @@ import {
 import type { ConversationMessageQueueRuntimeV1 } from "../../src/orchestrator/conversation/conversation-message-queue-runtime.js";
 import { ConversationMessageQueueStoreV1 } from "../../src/orchestrator/conversation/conversation-message-queue-store.js";
 import { ConversationMessageQueueTraceAuthorityV1 } from "../../src/orchestrator/conversation/conversation-message-queue-trace-authority.js";
+import { CONVERSATION_LIFECYCLE } from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
 import { DirectConversationPolicy } from "../../src/orchestrator/conversation/direct-policy.js";
 import { validatePublishedRevisionTransition } from "../../src/orchestrator/conversation/lineage-published-transition.js";
 import { lineageStorageKey } from "../../src/orchestrator/conversation/lineage-storage-key.js";
@@ -31,6 +33,7 @@ import {
   type RuntimeCreateRequest,
 } from "../../src/orchestrator/conversation/policy-registry.js";
 import { ConversationOrchestrator } from "../../src/orchestrator/conversation/service.js";
+import { policyDryRun } from "../../src/orchestrator/conversation/services.js";
 import { DurableArtifactRegistry } from "../../src/orchestrator/trace/artifacts.js";
 import { TraceStore } from "../../src/orchestrator/trace/store.js";
 
@@ -313,6 +316,8 @@ test("requested queue event replays across restart and is revoked after terminal
       schema_version: "1.0",
       idempotency_key: "enqueue-one",
       expected_authority_digest: authority.authority_digest,
+      client_instance_id: "enqueue-one-client",
+      client_order: 1,
       content: "deliver exactly once",
       target_participants: "all",
       quote_refs: [],
@@ -376,7 +381,7 @@ test("requested queue event replays across restart and is revoked after terminal
   ).rejects.toThrow("queued trace append authority is absent");
 });
 
-test("two rapid admitted messages execute as one causal FIFO child chain", async () => {
+test("FIFO delivery and needs-input replies publish each durable child exactly once", async () => {
   const root = await mkdtemp(join(tmpdir(), "vf-queue-dispatcher-"));
   roots.push(root);
   let identity = 0;
@@ -431,6 +436,15 @@ test("two rapid admitted messages execute as one causal FIFO child chain", async
     schedule: (task) => task(),
     libraries,
   });
+  bootstrap.authorities.policies.register({
+    name: "needs-input-test",
+    dryRun: async (context) => policyDryRun(context),
+    execute: async (context) => ({
+      operation_id: context.correlation.operation_id,
+      status: CONVERSATION_COMMAND_RESULT_STATUS.NEEDS_INPUT,
+      artifact_refs: [],
+    }),
+  });
   const started = await bootstrap.service.start({
     topic: "Queue two messages",
     policy: "direct",
@@ -457,6 +471,8 @@ test("two rapid admitted messages execute as one causal FIFO child chain", async
         schema_version: "1.0",
         idempotency_key: "pre-admission-crash-barrier",
         expected_authority_digest: marker("stale-authority"),
+        client_instance_id: "pre-admission-crash-client",
+        client_order: 1,
         content: "must not commit",
         target_participants: "all",
         quote_refs: [],
@@ -502,6 +518,8 @@ test("two rapid admitted messages execute as one causal FIFO child chain", async
         schema_version: "1.0",
         idempotency_key: key,
         expected_authority_digest: current.authority_digest,
+        client_instance_id: `runtime-integration-${key}`,
+        client_order: 1,
         content,
         target_participants: "all",
         quote_refs: [],
@@ -550,4 +568,65 @@ test("two rapid admitted messages execute as one causal FIFO child chain", async
   expect(privateRows[0]?.delivery_proof?.successor_authority.conversation_id).not.toBe(
     privateRows[1]?.delivery_proof?.successor_authority.conversation_id,
   );
+
+  const needsInput = await bootstrap.service.start({
+    topic: "Clarification queue",
+    policy: "needs-input-test",
+    maxRounds: 1,
+    baselineEnabled: false,
+    evaluatorAutoAdded: false,
+    repoRoot: root,
+    phase: 3,
+    bindings: [
+      {
+        participantId: "participant-a",
+        input: { roleRef: "direct", engine: "codex", sessionMode: "fresh" },
+        materialized,
+      },
+    ],
+  });
+  await expect(needsInput.completion).resolves.toMatchObject({
+    result: { status: CONVERSATION_COMMAND_RESULT_STATUS.NEEDS_INPUT },
+  });
+  const needsInputAuthority = bootstrap.authorities.messageQueue.resolveAuthority(
+    needsInput.conversation_id,
+  );
+  const beforeClarification = bootstrap.authorities.homeAuthorities
+    .publishedRevisionTransitions()
+    .map(validatePublishedRevisionTransition)
+    .filter(({ root_session_id }) => root_session_id === needsInput.conversation_id).length;
+  bootstrap.authorities.messageQueue.enqueue({
+    root_session_id: needsInput.conversation_id,
+    principal_digest: marker("clarification-principal"),
+    request: {
+      schema_version: "1.0",
+      idempotency_key: "clarification-one",
+      expected_authority_digest: needsInputAuthority.authority_digest,
+      client_instance_id: "clarification-one-client",
+      client_order: 1,
+      content: "the missing detail",
+      target_participants: "all",
+      quote_refs: [],
+      private_context_present: false,
+    },
+  });
+  await waitForQueueState(
+    bootstrap.authorities.messageQueue,
+    needsInput.conversation_id,
+    "needs-input clarification delivery",
+    (items) => items.length === 1 && items[0]?.state === "delivered",
+  );
+  bootstrap.authorities.messageQueue.kick(needsInput.conversation_id);
+  bootstrap.authorities.messageQueue.kick(needsInput.conversation_id);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const clarificationTransitions = bootstrap.authorities.homeAuthorities
+    .publishedRevisionTransitions()
+    .map(validatePublishedRevisionTransition)
+    .filter(({ root_session_id }) => root_session_id === needsInput.conversation_id);
+  expect(beforeClarification).toBe(0);
+  expect(clarificationTransitions).toHaveLength(1);
+  expect(clarificationTransitions[0]?.parent.conversation_id).toBe(needsInput.conversation_id);
+  await expect(
+    bootstrap.service.snapshot(clarificationTransitions[0]?.child.conversation_id ?? ""),
+  ).resolves.toMatchObject({ lifecycle: CONVERSATION_LIFECYCLE.NEEDS_INPUT });
 }, 30_000);

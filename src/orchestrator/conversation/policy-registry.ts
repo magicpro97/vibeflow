@@ -8,13 +8,16 @@ import type {
   TraceEvent,
 } from "../trace/types.js";
 import type { BindingAuthoritySnapshot, ConversationArtifactStore } from "./artifact-store.js";
-import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
+import {
+  CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE,
+  CONVERSATION_TERMINAL_LIFECYCLE_BY_COMMAND_STATUS,
+} from "./conversation-command-result-contract.js";
 import {
   CONVERSATION_HEALTH,
   CONVERSATION_LIFECYCLE,
   CONVERSATION_SANDBOX,
-  CONVERSATION_TERMINAL_LIFECYCLES,
   CONVERSATION_TRACE_EVENT_KIND,
+  isConversationTerminalLifecycle,
 } from "./conversation-public-wire-contract.js";
 // biome-ignore format: production file ceiling
 import type {
@@ -81,25 +84,19 @@ export const conversationTransitionEpoch = (records: readonly InternalTraceStore
     ).length - 1,
   );
 export const isTerminalLifecycle = (value: string): value is TerminalLifecycle =>
-  CONVERSATION_TERMINAL_LIFECYCLES.some((lifecycle) => lifecycle === value);
+  isConversationTerminalLifecycle(value);
 export const terminalResultStatus = (
   lifecycle: TerminalLifecycle,
-): ConversationOrchestrationResult["status"] => {
-  if (lifecycle === CONVERSATION_LIFECYCLE.COMPLETED)
-    return CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED;
-  if (lifecycle === CONVERSATION_LIFECYCLE.STOPPED)
-    return CONVERSATION_COMMAND_RESULT_STATUS.STOPPED;
-  if (lifecycle === CONVERSATION_LIFECYCLE.FAILED) return CONVERSATION_COMMAND_RESULT_STATUS.FAILED;
-  return CONVERSATION_COMMAND_RESULT_STATUS.ABORTED;
-};
+): ConversationOrchestrationResult["status"] =>
+  CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE[lifecycle];
 export const conversationTerminal = (
   status: ConversationOrchestrationResult["status"],
 ): TerminalLifecycle | null => {
-  if (status === CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED)
-    return CONVERSATION_LIFECYCLE.COMPLETED;
-  if (status === CONVERSATION_COMMAND_RESULT_STATUS.ABORTED) return CONVERSATION_LIFECYCLE.ABORTED;
-  if (status === CONVERSATION_COMMAND_RESULT_STATUS.FAILED) return CONVERSATION_LIFECYCLE.FAILED;
-  return null;
+  return Object.hasOwn(CONVERSATION_TERMINAL_LIFECYCLE_BY_COMMAND_STATUS, status)
+    ? CONVERSATION_TERMINAL_LIFECYCLE_BY_COMMAND_STATUS[
+        status as keyof typeof CONVERSATION_TERMINAL_LIFECYCLE_BY_COMMAND_STATUS
+      ]
+    : null;
 };
 export { projectOrchestrationResult } from "./boundary-projection.js";
 const bindingAuthority = (

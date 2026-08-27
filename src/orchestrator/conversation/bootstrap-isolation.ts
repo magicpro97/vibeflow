@@ -6,11 +6,14 @@ import { join } from "node:path";
 import type { MaterializeAgentBindingOptions } from "../../agents/binding.js";
 import { createIsolationLease, releaseIsolationLease } from "../../dispatch/isolation.js";
 import { ENGINE_ISOLATION_KIND } from "../../dispatch/session-contract.js";
+import { ENGINE_COORDINATION_WORKSPACE_ACCESS } from "../../dispatch/session-contract.js";
 import {
   type EngineSessionAdapter,
   type IsolationLeaseProjection,
   createSpawnOptionsProjection,
 } from "../../dispatch/session-types.js";
+import { sanitizedGitEnvironment } from "../../git-environment.js";
+import type { ConversationDelegationWorkspaceAuthorityV1 } from "./conversation-delegation-workspace.js";
 
 export interface ConversationIsolationAuthority {
   acquire(repoRoot: string): IsolationLeaseProjection;
@@ -25,7 +28,11 @@ interface ConversationIsolationAuthorityDeps {
 }
 
 const runGit: GitRunner = (repoRoot, args, timeout) => {
-  execFileSync("git", ["-C", repoRoot, ...args], { timeout, stdio: "ignore" });
+  execFileSync("git", ["-C", repoRoot, ...args], {
+    timeout,
+    stdio: "ignore",
+    env: sanitizedGitEnvironment(),
+  });
 };
 
 function cleanupWorktree(
@@ -111,15 +118,33 @@ export function withAttemptIsolation(
   delegate: EngineSessionAdapter,
   authority: ConversationIsolationAuthority,
   repoRoot: string,
+  coordinationWorkspaces?: ConversationDelegationWorkspaceAuthorityV1,
 ): EngineSessionAdapter {
   return Object.freeze({
     ...(delegate.startAuthority ? { startAuthority: delegate.startAuthority } : {}),
     start(request: Parameters<EngineSessionAdapter["start"]>[0]) {
-      if (!request.spawn.isolation) return delegate.start(request);
-      const isolation = authority.acquire(repoRoot);
+      if (!request.spawn.isolation && !request.coordinationWorkspace)
+        return delegate.start(request);
+      if (request.coordinationWorkspace && !coordinationWorkspaces)
+        throw new Error("coordination workspace authority is unavailable");
+      const isolation = request.coordinationWorkspace
+        ? request.coordinationWorkspace.access === ENGINE_COORDINATION_WORKSPACE_ACCESS.EXECUTOR
+          ? (coordinationWorkspaces as ConversationDelegationWorkspaceAuthorityV1).lease({
+              repoRoot,
+              workflowId: request.coordinationWorkspace.workflow_id,
+              workspaceKey: request.coordinationWorkspace.workspace_key,
+              task: request.coordinationWorkspace.task,
+            })
+          : (coordinationWorkspaces as ConversationDelegationWorkspaceAuthorityV1).reviewLease({
+              repoRoot,
+              workflowId: request.coordinationWorkspace.workflow_id,
+              workspaceKey: request.coordinationWorkspace.workspace_key,
+            })
+        : authority.acquire(repoRoot);
       try {
+        const { coordinationWorkspace: _workspace, ...delegatedRequest } = request;
         const handle = delegate.start({
-          ...request,
+          ...delegatedRequest,
           spawn: createSpawnOptionsProjection({ ...request.spawn, isolation }),
         });
         return Object.freeze({
@@ -127,6 +152,7 @@ export function withAttemptIsolation(
           completion: handle.completion.finally(() => releaseIsolationLease(isolation)),
           terminate: (reason?: string) => handle.terminate(reason),
           readResumeBinding: () => handle.readResumeBinding(),
+          readModelOutputBinding: () => handle.readModelOutputBinding(),
           readEvidenceBinding: () => handle.readEvidenceBinding(),
         });
       } catch (error) {

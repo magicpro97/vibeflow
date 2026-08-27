@@ -12,6 +12,14 @@ import {
   PUBLIC_OPERATION_PARTICIPANT_START_PHASE,
 } from "../../src/actions/index.js";
 import type { AgentBinding, MaterializedAgentBinding } from "../../src/agents/binding.js";
+import { AGENT_ENGINE } from "../../src/core/agent-contract.js";
+import {
+  ROLE_MODEL,
+  ROLE_SANDBOX,
+  ROLE_TOOL_INTENT,
+  ROLE_WORKFLOW_TOOL_INTENTS,
+} from "../../src/core/role-contract.js";
+import { CONVERSATION_ROLE_NAME } from "../../src/core/role-name-contract.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
 import {
   type AttemptHandle,
@@ -32,7 +40,10 @@ import { conversationLockDigest } from "../../src/orchestrator/conversation/cata
 import { ConversationRevisionActionDomainV1 } from "../../src/orchestrator/conversation/conversation-action-domain.js";
 import { CONVERSATION_BASELINE_SKIP_REASON } from "../../src/orchestrator/conversation/conversation-baseline-contract.js";
 import { createConversationBrowserAuthorities } from "../../src/orchestrator/conversation/conversation-browser-authorities.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "../../src/orchestrator/conversation/conversation-command-result-contract.js";
 import { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
+import { CONVERSATION_POLICY } from "../../src/orchestrator/conversation/conversation-policy-contract.js";
+import { isConversationTerminalLifecycle } from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
 import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
 import { DirectConversationPolicy } from "../../src/orchestrator/conversation/direct-policy.js";
 import { OperationTransitionReservedError } from "../../src/orchestrator/conversation/operation-registry.js";
@@ -73,8 +84,8 @@ import type {
 } from "../../src/orchestrator/trace/types.js";
 
 const input: AgentBinding = {
-  roleRef: "direct",
-  engine: "codex",
+  roleRef: CONVERSATION_ROLE_NAME.DIRECT,
+  engine: AGENT_ENGINE.CODEX,
   sessionMode: "fresh",
 };
 const ROLE_HASH = "a".repeat(64);
@@ -98,11 +109,21 @@ function treeBytes(root: string): Record<string, string> {
 
 function materialized(
   withSkill = false,
-  options: { roleName?: string; sessionMode?: "exact" | "replay" | "fresh" } = {},
+  options: {
+    roleName?: string;
+    sessionMode?: "exact" | "replay" | "fresh";
+    engine?: AgentBinding["engine"];
+    model?: string;
+  } = {},
 ): MaterializedAgentBinding {
-  const roleName = options.roleName ?? "direct";
+  const roleName = options.roleName ?? CONVERSATION_ROLE_NAME.DIRECT;
   const sessionMode = options.sessionMode ?? "fresh";
-  const env_policy = conversationEnvPolicy("codex");
+  const engine = options.engine ?? AGENT_ENGINE.CODEX;
+  const model = options.model ?? ROLE_MODEL.GPT_5_4;
+  const executor = roleName === CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR;
+  const sandbox = executor ? ROLE_SANDBOX.WORKSPACE_WRITE : ROLE_SANDBOX.READ_ONLY;
+  const toolIntents = executor ? [...ROLE_WORKFLOW_TOOL_INTENTS] : [ROLE_TOOL_INTENT.READ];
+  const env_policy = conversationEnvPolicy(engine);
   const skills = withSkill
     ? [
         {
@@ -128,29 +149,29 @@ function materialized(
           name: roleName,
           description: "Direct",
           body: "Canonical role prompt",
-          tools: ["read"],
-          model: "gpt-5.4",
-          sandbox: "read-only",
+          tools: toolIntents,
+          model: ROLE_MODEL.GPT_5_4,
+          sandbox,
         },
       },
       skills,
-      engine: "codex",
-      model: "gpt-5.4",
+      engine,
+      model,
       sessionMode,
-      tool_intents: ["read"],
-      sandbox: "read-only",
+      tool_intents: toolIntents,
+      sandbox,
       env_policy,
       isolation: null,
       provenance,
       trace_metadata,
     },
     spawn: createSpawnOptionsProjection({
-      engine: "codex",
-      model: "gpt-5.4",
+      engine,
+      model,
       sessionMode,
       rendered_prompt: "Canonical role prompt\n\n## Assigned Topic\n\nTopic\n",
-      rendered_tools: ["read"],
-      sandbox: "read-only",
+      rendered_tools: toolIntents,
+      sandbox,
       env_policy,
       isolation: null,
       provenance,
@@ -181,6 +202,7 @@ class FakeAdapter implements EngineSessionAdapter {
   ambiguous = false;
   evidenceRef: string | undefined;
   nativeSessionId: string | undefined;
+  nativeHistoryContinuity: "intact" | "compacted" | "unproved" = "unproved";
   chunks = ["delta:attempt"];
   output = "answer";
 
@@ -197,6 +219,7 @@ class FakeAdapter implements EngineSessionAdapter {
       attemptId: request.attemptId,
       completion: Promise.resolve({
         ...completed(request.attemptId),
+        engine: request.spawn.engine,
         output: this.output,
         state: this.ambiguous ? ("ambiguous" as const) : ("completed" as const),
         ok: !this.ambiguous,
@@ -208,10 +231,11 @@ class FakeAdapter implements EngineSessionAdapter {
         nativeSessionId
           ? {
               attemptId: request.attemptId,
-              engine: "codex" as const,
+              engine: request.spawn.engine,
               nativeSessionId,
             }
           : undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () =>
         evidenceRef ? { attemptId: request.attemptId, internalRef: evidenceRef } : undefined,
     };
@@ -220,9 +244,13 @@ class FakeAdapter implements EngineSessionAdapter {
   async reconcileHistory(request: HistoryReconcileRequest) {
     this.reconciliations.push(request);
     return {
-      status: "unavailable" as const,
+      status:
+        this.nativeHistoryContinuity === "compacted"
+          ? ("partial" as const)
+          : ("unavailable" as const),
       imported_turn_count: 0,
       imported_tool_count: 0,
+      native_history_continuity: this.nativeHistoryContinuity,
       completeness_reason: "fake",
     };
   }
@@ -259,7 +287,7 @@ class DurableRevisionFakeAdapter extends FakeAdapter {
     const handle = super.start(request);
     const recorded = this.store.record({
       attempt_id: request.attemptId,
-      engine: "codex",
+      engine: request.spawn.engine,
       outcome: "accepted",
       native_session_id: this.nativeSessionId,
       evidence_ref: evidenceRef,
@@ -367,6 +395,7 @@ class TerminateLifecycleAdapter implements EngineSessionAdapter {
         });
       },
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
   }
@@ -397,6 +426,7 @@ class ManualChunkAdapter implements EngineSessionAdapter {
       completion,
       terminate: async () => complete({ ...completed(request.attemptId), ok: false }),
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
   }
@@ -472,6 +502,7 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
         engine: "codex" as const,
         nativeSessionId,
       }),
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () =>
         evidenceRef ? { attemptId: request.attemptId, internalRef: evidenceRef } : undefined,
     };
@@ -943,9 +974,7 @@ async function approveAndCommitRevision(input: {
   }
   try {
     await waitFor(async () =>
-      ["COMPLETED", "FAILED", "ABORTED", "STOPPED"].includes(
-        (await input.runtime.snapshot(childId))?.lifecycle ?? "",
-      ),
+      isConversationTerminalLifecycle((await input.runtime.snapshot(childId))?.lifecycle),
     );
   } catch (error) {
     throw new Error(
@@ -958,14 +987,42 @@ async function approveAndCommitRevision(input: {
 }
 
 test("deferred participant and settings actions plan without effects then commit idempotent revisions", async () => {
+  const coordinatePolicy: ConversationPolicy = {
+    name: CONVERSATION_POLICY.COORDINATE,
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(context) {
+      return {
+        operation_id: context.correlation.operation_id,
+        status: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
+        artifact_refs: [],
+      };
+    },
+  };
+  const directPolicy = new DirectConversationPolicy();
   const fixture = await harness(
-    new DirectConversationPolicy(),
+    directPolicy,
     new DurableRevisionFakeAdapter(),
     (store) => store,
-    async (binding) => materialized(Boolean(binding.input.additionalSkillRefs?.length)),
+    async (binding) =>
+      materialized(Boolean(binding.input.additionalSkillRefs?.length), {
+        roleName: binding.input.roleRef,
+        sessionMode: binding.input.sessionMode,
+        engine: binding.input.engine,
+        model: binding.input.modelOverride,
+      }),
+    {
+      policies: new ConversationPolicyRegistry([directPolicy, coordinatePolicy]),
+    },
   );
   try {
-    const root = await fixture.runtime.create(createInput("direct", 2));
+    const root = await fixture.runtime.create(createInput(CONVERSATION_POLICY.DIRECT));
     let current = root.conversation_id;
     current = await approveAndCommitRevision({
       ...fixture,
@@ -974,20 +1031,54 @@ test("deferred participant and settings actions plan without effects then commit
       key: "deferred-add",
       candidate: {
         type: "conversation.add_participant",
-        participant: { role_ref: "direct", engine: "codex", model: "gpt-5.4", skill_refs: [] },
+        participant: {
+          role_ref: CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+          engine: AGENT_ENGINE.CLAUDE,
+          model: null,
+          skill_refs: [],
+        },
       },
     });
-    expect(fixture.artifactStore.read(current)?.bindings).toHaveLength(3);
+    const coordinate = fixture.artifactStore.read(current);
+    expect(coordinate).toMatchObject({ policy: CONVERSATION_POLICY.COORDINATE });
+    expect(
+      coordinate?.bindings.map(({ input: binding }) => ({
+        role: binding.roleRef,
+        engine: binding.engine,
+      })),
+    ).toEqual([
+      {
+        role: CONVERSATION_ROLE_NAME.COORDINATION_COORDINATOR,
+        engine: AGENT_ENGINE.CODEX,
+      },
+      {
+        role: CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+        engine: AGENT_ENGINE.CLAUDE,
+      },
+    ]);
+    const executorId = coordinate?.bindings.find(
+      ({ input: binding }) => binding.roleRef === CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+    )?.participant_id;
+    if (!executorId) throw new Error("coordinate executor binding was not published");
     current = await approveAndCommitRevision({
       ...fixture,
       home: fixture.homeAuthorities,
       conversationId: current,
       key: "deferred-remove",
-      candidate: { type: "conversation.remove_participant", participant_id: "participant-2" },
+      candidate: { type: "conversation.remove_participant", participant_id: executorId },
     });
-    expect(
-      fixture.artifactStore.read(current)?.bindings.map((row) => row.participant_id),
-    ).not.toContain("participant-2");
+    expect(fixture.artifactStore.read(current)).toMatchObject({
+      policy: CONVERSATION_POLICY.DIRECT,
+      bindings: [
+        {
+          participant_id: "participant-1",
+          input: {
+            roleRef: CONVERSATION_ROLE_NAME.DIRECT,
+            engine: AGENT_ENGINE.CODEX,
+          },
+        },
+      ],
+    });
     current = await approveAndCommitRevision({
       ...fixture,
       home: fixture.homeAuthorities,
@@ -1125,9 +1216,7 @@ test("a deferred commit resumes the same active reservation after a process cras
     )?.operation?.child?.conversation_id;
     if (!childId) throw new Error("restarted action did not publish its child revision");
     await waitFor(async () =>
-      ["COMPLETED", "FAILED", "ABORTED", "STOPPED"].includes(
-        (await restarted.snapshot(childId))?.lifecycle ?? "",
-      ),
+      isConversationTerminalLifecycle((await restarted.snapshot(childId))?.lifecycle),
     );
     await waitForPublishedRevisionQuiescence({
       runtime: restarted,
@@ -1244,9 +1333,7 @@ test("an approved conversation action remains actionable after process restart",
     )?.operation?.child?.conversation_id;
     if (!childId) throw new Error("restarted action did not publish its child revision");
     await waitFor(async () =>
-      ["COMPLETED", "FAILED", "ABORTED", "STOPPED"].includes(
-        (await restarted.snapshot(childId))?.lifecycle ?? "",
-      ),
+      isConversationTerminalLifecycle((await restarted.snapshot(childId))?.lifecycle),
     );
     await waitForPublishedRevisionQuiescence({
       runtime: restarted,
@@ -2315,6 +2402,7 @@ test("a real generation-zero start failure is retried with fresh durable adapter
       completion: new Promise(() => undefined),
       terminate: async () => undefined,
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
     const hiddenToken = {
@@ -6396,8 +6484,8 @@ test("repeat durable approval does not require provider rehydration", async () =
     releaseContinuation();
     if (conversationId) {
       await waitFor(async () =>
-        ["COMPLETED", "FAILED", "ABORTED"].includes(
-          (await runtime.snapshot(conversationId as string))?.lifecycle ?? "",
+        isConversationTerminalLifecycle(
+          (await runtime.snapshot(conversationId as string))?.lifecycle,
         ),
       ).catch(() => undefined);
     }
@@ -7946,6 +8034,125 @@ test("explicit resume reconciles one persisted native binding and exact attempts
   }
 });
 
+test("native compaction revokes exact resume and replays bounded own history on a fresh turn", async () => {
+  const nativeSessionId = "00000000-0000-4000-8000-000000000124";
+  let context!: ConversationContext;
+  const policy: ConversationPolicy = {
+    name: "compacted-resume",
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(value) {
+      context = value;
+      value.launchAttempt({
+        participantId: "participant-1",
+        bindingIndex: 0,
+        purpose: "direct",
+        promptInput: "capture before compaction",
+      });
+      await new Promise<void>((resolve) =>
+        value.signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      return { operation_id: value.correlation.operation_id, status: "aborted", artifact_refs: [] };
+    },
+  };
+  const adapter = new FakeAdapter();
+  adapter.nativeSessionId = nativeSessionId;
+  const { root, runtime, traceStore } = await harness(policy, adapter);
+  const creating = runtime.create(createInput(policy.name));
+  let restarted: ConversationOrchestrator | undefined;
+  try {
+    await waitFor(() => context !== undefined);
+    expect(context).toBeDefined();
+    const store = new ConversationArtifactStore({ dir: join(root, "manifests") });
+    await waitFor(() => store.readRecord("conversation-1")?.resume_bindings.length === 1);
+    expect(store.readRecord("conversation-1")?.resume_bindings).toHaveLength(1);
+    await runtime.pause("conversation-1");
+    expect((await runtime.snapshot("conversation-1"))?.lifecycle).toBe("PAUSED");
+
+    const restartAdapter = new FakeAdapter();
+    restartAdapter.nativeHistoryContinuity = "compacted";
+    const restartCounters = new Map<string, number>();
+    let failReconcileAppend = true;
+    restarted = new ConversationOrchestrator({
+      traceStore: {
+        readConversation: (id) => traceStore.readConversation(id),
+        append: async (correlation, emission, native) => {
+          if (failReconcileAppend && emission.event.type === "native_history_reconciled") {
+            failReconcileAppend = false;
+            throw new Error("injected compaction reconciliation append failure");
+          }
+          return traceStore.append(correlation, emission, native);
+        },
+      },
+      artifactRegistry: new DurableArtifactRegistry({ dir: join(root, "opaque") }),
+      artifactStore: store,
+      sessionAdapter: restartAdapter,
+      policies: new ConversationPolicyRegistry([policy]),
+      id: (kind) => {
+        const next = (restartCounters.get(kind) ?? 0) + 1;
+        restartCounters.set(kind, next);
+        return `compacted-${kind}-${next}`;
+      },
+      now: () => "2026-08-22T00:00:00.000Z",
+      rehydrateBinding: async () => materialized(),
+    });
+
+    await expect(restarted.resume("conversation-1")).rejects.toThrow(
+      "injected compaction reconciliation append failure",
+    );
+    expect(store.readRecord("conversation-1")?.resume_bindings).toHaveLength(1);
+    await restarted.resume("conversation-1");
+    expect(store.readRecord("conversation-1")?.resume_bindings).toEqual([]);
+    const restoredAuthority = (
+      restarted as unknown as { runtime: { context(id: string): Promise<ConversationContext> } }
+    ).runtime;
+    const restoredContext = await restoredAuthority.context("conversation-1");
+    const delivery = await restoredContext.prepareTurn({
+      participant_id: "participant-1",
+      instruction: { kind: "direct", topic: "continue after compaction" },
+    });
+    expect(delivery.envelope).toMatchObject({
+      delivery_mode: "full-history",
+      native_session_use: "not-used",
+      recipient_history: {
+        source: "bounded-public-replay",
+        source_response_count: 0,
+        replayed_response_count: 0,
+      },
+    });
+
+    const resumedAttempt = restoredContext.launchAttempt({
+      participantId: "participant-1",
+      bindingIndex: 0,
+      purpose: "direct",
+      promptInput: delivery.prompt_input,
+      delivery,
+    });
+    await resumedAttempt.completion;
+    expect(restartAdapter.starts[0]).toMatchObject({ spawn: { sessionMode: "fresh" } });
+    expect(restartAdapter.starts[0]?.nativeSessionId).toBeUndefined();
+    const history = (await restarted.events("conversation-1", 0))?.find(
+      (event) => event.event.type === "native_history_reconciled",
+    );
+    expect(history?.event).toMatchObject({
+      type: "native_history_reconciled",
+      payload: { status: "partial", completeness_reason: "fake" },
+    });
+    expect(JSON.stringify(history)).not.toContain(nativeSessionId);
+  } finally {
+    await restarted?.stop("conversation-1").catch(() => undefined);
+    await runtime.stop("conversation-1").catch(() => undefined);
+    await creating.catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reconcile retry skips durable participants and reuses the failed participant attempt", async () => {
   const nativeIds = [
     "00000000-0000-4000-8000-000000000111",
@@ -8635,9 +8842,7 @@ test("racing child revisions keep one durable operation chain and cancellable ow
     for (const started of winningAdapter.starts) winningAdapter.complete(started.attemptId);
     if (childId) {
       await waitFor(async () =>
-        ["COMPLETED", "FAILED", "ABORTED"].includes(
-          (await second.snapshot(childId as string))?.lifecycle ?? "",
-        ),
+        isConversationTerminalLifecycle((await second.snapshot(childId as string))?.lifecycle),
       ).catch(() => undefined);
     }
     await rm(root, { recursive: true, force: true });
@@ -9244,6 +9449,7 @@ test("a deferred start failure cannot authorize a child attempt parent", async (
         completion: Promise.resolve(completed(request.attemptId)),
         terminate: async () => {},
         readResumeBinding: () => undefined,
+        readModelOutputBinding: () => undefined,
         readEvidenceBinding: () => undefined,
       };
     },

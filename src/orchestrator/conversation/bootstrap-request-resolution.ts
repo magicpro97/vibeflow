@@ -3,10 +3,14 @@ import type {
   MaterializeAgentBindingOptions,
   MaterializedAgentBinding,
   PreviewAgentBinding,
+  ResolvedAgentBinding,
 } from "../../agents/binding.js";
-import { conversationRoleSpecs } from "../../agents/role.js";
-import { ENGINES } from "../../core.js";
-import { AGENT_ENGINE } from "../../core/agent-contract.js";
+import { ALL_ROLE_NAMES } from "../../agents/role-templates.js";
+import { ENGINES } from "../../core/agent-contract.js";
+import {
+  supportsConversationRoleAuthority,
+  supportsPhaseOneConversationAuthority,
+} from "../../dispatch/session-contract.js";
 import { preflightAll } from "../../preflight.js";
 import { type ConversationIsolationAuthority, bindWithIsolation } from "./bootstrap-isolation.js";
 import {
@@ -16,7 +20,10 @@ import {
 } from "./bootstrap-request.js";
 import { AGENT_ACTION_CANDIDATE_ROLE } from "./conversation-agent-action-candidate-contract.js";
 import { materializeConversationHostTools } from "./conversation-host-tool-policy.js";
+import { CONVERSATION_POLICIES } from "./conversation-policy-contract.js";
+import { CONVERSATION_POLICY } from "./conversation-policy-contract.js";
 import type { RuntimeCreateRequest, RuntimePreviewRequest } from "./policy-registry.js";
+import { coordinateTopologyDiagnostic } from "./router-helpers.js";
 import {
   type ConversationDomainRole,
   type ConversationEngineReadiness,
@@ -80,7 +87,8 @@ export function defaultConversationReadiness(
     engine: status.engine,
     ready: status.level === "ready",
     admitted:
-      phase > 1 || status.engine === AGENT_ENGINE.CLAUDE || status.engine === AGENT_ENGINE.CODEX,
+      supportsConversationRoleAuthority(status.engine) &&
+      (phase > 1 || supportsPhaseOneConversationAuthority(status.engine)),
   }));
 }
 
@@ -89,12 +97,9 @@ function routingAuthority(
   repoRoot: string,
   phase: number,
 ): ConversationRoutingAuthority {
-  const roles = [
-    ...conversationRoleSpecs().map((role) => role.name),
-    ...(options.registeredRoles ?? []),
-  ];
+  const roles = [...ALL_ROLE_NAMES, ...(options.registeredRoles ?? [])];
   return {
-    registeredPolicies: ["direct", "debate", "plan", "review", "verify", "orchestrate"],
+    registeredPolicies: [...CONVERSATION_POLICIES],
     registeredRoles: [...new Set(roles)],
     engines: [...(options.readiness?.() ?? defaultConversationReadiness(repoRoot, phase))],
     domainRoles: [...(options.domainRoles ?? [])],
@@ -122,12 +127,16 @@ async function selectedRoute(
     const requested = request.participants?.[index];
     return {
       ...participant,
-      ...(requested?.host_tools !== undefined ? { hostTools: [...requested.host_tools] } : {}),
+      ...(route.policy === CONVERSATION_POLICY.COORDINATE
+        ? { hostTools: [] }
+        : requested?.host_tools !== undefined
+          ? { hostTools: [...requested.host_tools] }
+          : {}),
     };
   });
   let evaluatorAutoAdded = false;
   if (
-    route.policy === "debate" &&
+    route.policy === CONVERSATION_POLICY.DEBATE &&
     !participants.some((item) => item.roleRef === AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR)
   ) {
     const engine =
@@ -145,6 +154,36 @@ async function selectedRoute(
   return { route, participants, evaluatorAutoAdded };
 }
 
+interface ResolvedBootstrapBinding {
+  readonly participantId: string;
+  readonly input: AgentBinding;
+  readonly hostTools?: readonly ConversationHostToolV1[];
+  readonly resolved: ResolvedAgentBinding;
+  readonly readiness?: Readonly<{ engine_available: boolean; model_valid: boolean }>;
+}
+
+function assertCoordinateBindings(policy: string, bindings: readonly ResolvedBootstrapBinding[]) {
+  if (policy !== CONVERSATION_POLICY.COORDINATE) return;
+  const diagnostic = coordinateTopologyDiagnostic({
+    policy,
+    bindings: bindings.map(({ resolved }) => resolved),
+    expectedBindings: bindings.map(({ input }) => ({
+      roleRef: input.roleRef,
+      engine: input.engine,
+    })),
+    participantIds: bindings.map(({ participantId }) => participantId),
+    hostTools: bindings.map(({ hostTools }) => hostTools),
+    ...(bindings.every(({ readiness }) => readiness !== undefined)
+      ? {
+          bindingReadiness: bindings.map(
+            ({ readiness }) => readiness as NonNullable<typeof readiness>,
+          ),
+        }
+      : {}),
+  });
+  if (diagnostic) fail(diagnostic);
+}
+
 export function createConversationRequestResolvers({
   options,
   repoRoot,
@@ -160,6 +199,27 @@ export function createConversationRequestResolvers({
   ): Promise<RuntimeCreateRequest> => {
     const maxRounds = requestedConversationMaxRounds(request);
     const selection = await selectedRoute(request, options, repoRoot, phase);
+    const bindings = await Promise.all(
+      selection.participants.map(async (participant, index) => {
+        const input = conversationBindingInput(participant);
+        return {
+          participantId: `participant-${index + 1}`,
+          input,
+          hostTools: resolvedHostTools(participant),
+          materialized: await bindWithIsolation(
+            isolationAuthority,
+            repoRoot,
+            phase,
+            request.topic,
+            (bindingOptions) => binder.materialize(input, bindingOptions),
+          ),
+        };
+      }),
+    );
+    assertCoordinateBindings(
+      selection.route.policy,
+      bindings.map((binding) => ({ ...binding, resolved: binding.materialized.resolved })),
+    );
     return {
       topic: request.topic,
       policy: selection.route.policy,
@@ -170,23 +230,7 @@ export function createConversationRequestResolvers({
       ...(request.private_file_range
         ? { private_file_range: structuredClone(request.private_file_range) }
         : {}),
-      bindings: await Promise.all(
-        selection.participants.map(async (participant, index) => {
-          const input = conversationBindingInput(participant);
-          return {
-            participantId: `participant-${index + 1}`,
-            input,
-            hostTools: resolvedHostTools(participant),
-            materialized: await bindWithIsolation(
-              isolationAuthority,
-              repoRoot,
-              phase,
-              request.topic,
-              (bindingOptions) => binder.materialize(input, bindingOptions),
-            ),
-          };
-        }),
-      ),
+      bindings,
     };
   };
   const resolveDryRunRequest = async (
@@ -194,6 +238,35 @@ export function createConversationRequestResolvers({
   ): Promise<RuntimePreviewRequest> => {
     const maxRounds = requestedConversationMaxRounds(request);
     const selection = await selectedRoute(request, options, repoRoot, phase);
+    const bindings = await Promise.all(
+      selection.participants.map(async (participant, index) => {
+        const input = conversationBindingInput(participant);
+        const preview = await bindWithIsolation(
+          isolationAuthority,
+          repoRoot,
+          phase,
+          request.topic,
+          (bindingOptions) => binder.preview(input, bindingOptions),
+        );
+        return {
+          participantId: `participant-${index + 1}`,
+          input,
+          hostTools: resolvedHostTools(participant),
+          preview,
+        };
+      }),
+    );
+    assertCoordinateBindings(
+      selection.route.policy,
+      bindings.map((binding) => ({
+        ...binding,
+        resolved: binding.preview.resolved,
+        readiness: {
+          engine_available: binding.preview.engineAvailable,
+          model_valid: binding.preview.modelValid,
+        },
+      })),
+    );
     return {
       topic: request.topic,
       policy: selection.route.policy,
@@ -204,23 +277,7 @@ export function createConversationRequestResolvers({
       ...(request.private_file_range
         ? { private_file_range: structuredClone(request.private_file_range) }
         : {}),
-      bindings: await Promise.all(
-        selection.participants.map(async (participant, index) => {
-          const input = conversationBindingInput(participant);
-          return {
-            participantId: `participant-${index + 1}`,
-            input,
-            hostTools: resolvedHostTools(participant),
-            preview: await bindWithIsolation(
-              isolationAuthority,
-              repoRoot,
-              phase,
-              request.topic,
-              (bindingOptions) => binder.preview(input, bindingOptions),
-            ),
-          };
-        }),
-      ),
+      bindings,
     };
   };
   return Object.freeze({ resolveCreateRequest, resolveDryRunRequest });

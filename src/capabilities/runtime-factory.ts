@@ -1,6 +1,5 @@
-import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import type {
   DurableActionAuthorityReaderV1,
   PrivateActionRootLocatorV1,
@@ -17,9 +16,21 @@ import {
 } from "./action-domain/domain-handler.js";
 import { CapabilityActionObjectStoreV1 } from "./action-domain/object-store.js";
 import { FilesystemCapabilityEffectBrokerV1 } from "./adapters/filesystem-broker.js";
+import {
+  type AuthorityRepairDomainBackendSetV1,
+  AuthorityRepairDurableTransitionVerifierV1,
+  type AuthorityRepairProductionRegistryV1,
+  createProductionAuthorityRepairRegistryV1,
+} from "./authority-repair/index.js";
 import { FilesystemLegacyMarkerReaderV1 } from "./legacy/filesystem-reader.js";
 import { LegacyAdoptInspectionIssuerV1 } from "./legacy/issuance.js";
 import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./operations/errors.js";
+import {
+  type CapabilityOrdinaryAuthorityCoreV1,
+  type CapabilityOrdinaryAuthorityRuntimeV1,
+  composeCapabilityOrdinaryAuthorityCoreV1,
+  resumeCapabilityOrdinaryAuthorityCoreV1,
+} from "./ordinary-authority-runtime.js";
 import { DefaultCapabilityIntentMaterializerV1 } from "./planning/intent-materializer.js";
 import { CliCapabilityPrivateInputAuthorityV1 } from "./private-input/authority.js";
 import type { CapabilityDetailRequestV1, CapabilityQueryRequestV1 } from "./query/types.js";
@@ -32,54 +43,26 @@ import {
   readActivatedCapabilityIdentityV1,
 } from "./runtime-authority.js";
 import { FilesystemCapabilityDiscoveryReaderV1 } from "./runtime-discovery.js";
+import type {
+  CapabilityRuntimeFactoryOptionsV1,
+  CapabilityRuntimeScopeRouterV1,
+} from "./runtime-factory-contract.js";
+import {
+  canonicalFutureRuntimeDirectory,
+  canonicalRuntimeDirectory,
+  runtimeCapabilityPaths,
+} from "./runtime-factory-paths.js";
 import { FilesystemCapabilitySourceAuthorityReaderV1 } from "./runtime-source-authority.js";
 import { CapabilityFabricServiceV1 } from "./service.js";
 import { createDurableAuthorityTransitionResolver } from "./source/durable-authority-transition-resolver.js";
-import {
-  type FilesystemCapabilityPackageCacheOptionsV1,
-  FilesystemCapabilityPackageCacheV1,
-} from "./source/package-cache-reader.js";
+import { FilesystemCapabilityPackageCacheV1 } from "./source/package-cache-reader.js";
 import { projectCapabilityPaths, userCapabilityPaths } from "./storage/paths.js";
 import { CapabilityStorageV1 } from "./storage/store.js";
 import type { CapabilityBrowserDetailResponseV1, CapabilityQueryResponseV1 } from "./wire/query.js";
 
-export interface CapabilityRuntimeFactoryOptionsV1 {
-  projectRoot: string;
-  userHomeRoot?: string;
-  userVibeflowRoot?: string;
-  now?: () => string;
-  vfVersion?: string;
-  engineVersions?: FilesystemCapabilityPackageCacheOptionsV1["engineVersions"];
-}
+export type { CapabilityRuntimeFactoryOptionsV1 } from "./runtime-factory-contract.js";
 
-export interface CapabilityRuntimeScopeRouterV1 {
-  query(request: CapabilityQueryRequestV1): CapabilityQueryResponseV1;
-  detail(request: CapabilityDetailRequestV1): CapabilityBrowserDetailResponseV1;
-}
-
-function canonicalDirectory(path: string, label: string): string {
-  try {
-    return realpathSync(resolve(path));
-  } catch {
-    throw new CapabilityRuntimeError(
-      `${label} is unavailable`,
-      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
-    );
-  }
-}
-
-function canonicalFutureDirectory(path: string, label: string): string {
-  const absolute = resolve(path);
-  if (existsSync(absolute)) return canonicalDirectory(absolute, label);
-  try {
-    return join(realpathSync(dirname(absolute)), basename(absolute));
-  } catch {
-    throw new CapabilityRuntimeError(
-      `${label} parent is unavailable`,
-      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
-    );
-  }
-}
+export type { CapabilityOrdinaryAuthorityRuntimeV1 } from "./ordinary-authority-runtime.js";
 
 /** One concrete production runtime for one canonical project and user authority pair. */
 export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV1 {
@@ -88,7 +71,9 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
   readonly userVibeflowRoot: string;
   readonly actionRoots: CapabilityRuntimeActionRootsV1;
   readonly actionObjects: CapabilityActionObjectStoreV1;
+  readonly authorityRepairRegistry: AuthorityRepairProductionRegistryV1;
   readonly #services = new Map<CapabilityScope, CapabilityFabricServiceV1>();
+  readonly #ordinaryAuthority = new Map<CapabilityScope, CapabilityOrdinaryAuthorityCoreV1>();
   readonly #packages = new Map<CapabilityScope, FilesystemCapabilityPackageCacheV1>();
   readonly #now: () => string;
   readonly #broker: FilesystemCapabilityEffectBrokerV1;
@@ -96,9 +81,12 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
   readonly #options: CapabilityRuntimeFactoryOptionsV1;
 
   constructor(options: CapabilityRuntimeFactoryOptionsV1) {
-    this.projectRoot = canonicalDirectory(options.projectRoot, "project root");
-    this.userHomeRoot = canonicalDirectory(options.userHomeRoot ?? homedir(), "user home root");
-    this.userVibeflowRoot = canonicalFutureDirectory(
+    this.projectRoot = canonicalRuntimeDirectory(options.projectRoot, "project root");
+    this.userHomeRoot = canonicalRuntimeDirectory(
+      options.userHomeRoot ?? homedir(),
+      "user home root",
+    );
+    this.userVibeflowRoot = canonicalFutureRuntimeDirectory(
       options.userVibeflowRoot ?? join(this.userHomeRoot, ".vibeflow"),
       "user VibeFlow root",
     );
@@ -110,11 +98,39 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
       project: projectPaths.privateRoot,
       user: userPaths.privateRoot,
     });
-    this.actionObjects = new CapabilityActionObjectStoreV1(this.actionRoots, (scope) =>
-      this.packageCache(scope),
-    );
+    let repairVerifier: AuthorityRepairDurableTransitionVerifierV1 | null = null;
     this.#transitionResolver = createDurableAuthorityTransitionResolver(
       this.actionRoots.durableHost(),
+      {
+        repair: {
+          verify: (input) => {
+            if (!repairVerifier)
+              throw new Error("authority repair transition verifier is not composed");
+            repairVerifier.verify(input);
+          },
+        },
+      },
+    );
+    this.authorityRepairRegistry = createProductionAuthorityRepairRegistryV1({
+      owner_roots: {
+        conversation: join(this.projectRoot, ".vibeflow", "conversation", "artifacts"),
+        project: projectPaths.privateRoot,
+        user: userPaths.privateRoot,
+      },
+      capability_lock: {
+        project: projectPaths,
+        user: userPaths,
+        transition_resolver: this.#transitionResolver,
+        now: this.#now,
+      },
+      ...(options.authorityRepairBackends ? { backends: options.authorityRepairBackends } : {}),
+    });
+    repairVerifier = new AuthorityRepairDurableTransitionVerifierV1(
+      this.authorityRepairRegistry,
+      this.userVibeflowRoot,
+    );
+    this.actionObjects = new CapabilityActionObjectStoreV1(this.actionRoots, (scope) =>
+      this.packageCache(scope),
     );
     this.#broker = new FilesystemCapabilityEffectBrokerV1({
       projectRoot: this.projectRoot,
@@ -154,15 +170,47 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
     return packages;
   }
 
-  service(scope: CapabilityScope): CapabilityFabricServiceV1 {
-    const prior = this.#services.get(scope);
-    if (prior) return prior;
-    const paths =
-      scope === CAPABILITY_SCOPE.PROJECT
-        ? projectCapabilityPaths(this.projectRoot)
-        : userCapabilityPaths(this.userVibeflowRoot);
+  ordinaryAuthority(scope: CapabilityScope): CapabilityOrdinaryAuthorityRuntimeV1 {
+    const service = this.service(scope);
+    const runtime = this.#ordinaryAuthority.get(scope);
+    if (!runtime)
+      throw new CapabilityRuntimeError(
+        "ordinary authority runtime composition is unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
+    return { service, ...runtime };
+  }
+
+  ordinaryAuthorityPreview(scope: CapabilityScope): CapabilityOrdinaryAuthorityRuntimeV1 {
+    const paths = runtimeCapabilityPaths(scope, this.projectRoot, this.userVibeflowRoot);
     const identity = readActivatedCapabilityIdentityV1(paths);
     this.actionRoots.bindScope(scope, identity.content_digest);
+    const runtime = this.#composeOrdinaryAuthority(scope, paths, identity.content_digest);
+    const storage = new CapabilityStorageV1(paths, identity.content_digest, {
+      now: this.#now,
+      authorityTransitionResolver: this.#transitionResolver,
+    });
+    return {
+      service: { options: { storage }, clockNow: this.#now },
+      ...runtime,
+    };
+  }
+
+  service(scope: CapabilityScope): CapabilityFabricServiceV1 {
+    return this.#service(scope);
+  }
+
+  #service(scope: CapabilityScope): CapabilityFabricServiceV1 {
+    const prior = this.#services.get(scope);
+    if (prior) {
+      this.#resumeOrdinaryAuthority(scope);
+      return prior;
+    }
+    const paths = runtimeCapabilityPaths(scope, this.projectRoot, this.userVibeflowRoot);
+    const identity = readActivatedCapabilityIdentityV1(paths);
+    this.actionRoots.bindScope(scope, identity.content_digest);
+    this.#composeOrdinaryAuthority(scope, paths, identity.content_digest);
+    this.#resumeOrdinaryAuthority(scope);
     const authority = new FilesystemCapabilityRuntimeAuthorityReaderV1(
       paths,
       this.#transitionResolver,
@@ -243,6 +291,43 @@ export class CapabilityRuntimeFactoryV1 implements CapabilityRuntimeScopeRouterV
     return service;
   }
 
+  #resumeOrdinaryAuthority(scope: CapabilityScope): void {
+    const runtime = this.#ordinaryAuthority.get(scope);
+    if (!runtime)
+      throw new CapabilityRuntimeError(
+        "ordinary authority recovery composition is unavailable",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
+    resumeCapabilityOrdinaryAuthorityCoreV1(runtime);
+  }
+
+  #composeOrdinaryAuthority(
+    scope: CapabilityScope,
+    paths: ReturnType<typeof projectCapabilityPaths>,
+    scopeIdentityDigest: string,
+  ): CapabilityOrdinaryAuthorityCoreV1 {
+    const prior = this.#ordinaryAuthority.get(scope);
+    if (prior) return prior;
+    const runtime = composeCapabilityOrdinaryAuthorityCoreV1({
+      scope,
+      paths,
+      scopeIdentityDigest,
+      transitionResolver: this.#transitionResolver,
+      actionRoots: this.actionRoots,
+      now: this.#now,
+      ...(this.#options.ordinaryAuthorityFault
+        ? { fault: (point) => this.#options.ordinaryAuthorityFault?.(scope, point) }
+        : {}),
+      ...(this.#options.ordinaryAuthorityActionFault
+        ? {
+            action_fault: (point) => this.#options.ordinaryAuthorityActionFault?.(scope, point),
+          }
+        : {}),
+    });
+    this.#ordinaryAuthority.set(scope, runtime);
+    return runtime;
+  }
+
   query(request: CapabilityQueryRequestV1): CapabilityQueryResponseV1 {
     return this.service(request.scope).query(request);
   }
@@ -256,6 +341,11 @@ interface CachedCapabilityRuntimeFactoryV1 {
   factory: CapabilityRuntimeFactoryV1;
   optionFingerprint: string;
   clock: (() => string) | null;
+  authorityRepairBackends: AuthorityRepairDomainBackendSetV1 | null;
+  ordinaryAuthorityFault: CapabilityRuntimeFactoryOptionsV1["ordinaryAuthorityFault"] | null;
+  ordinaryAuthorityActionFault:
+    | CapabilityRuntimeFactoryOptionsV1["ordinaryAuthorityActionFault"]
+    | null;
 }
 
 const FACTORIES = new Map<string, CachedCapabilityRuntimeFactoryV1>();
@@ -263,9 +353,12 @@ const FACTORIES = new Map<string, CachedCapabilityRuntimeFactoryV1>();
 export function productionCapabilityRuntimeV1(
   options: CapabilityRuntimeFactoryOptionsV1,
 ): CapabilityRuntimeFactoryV1 {
-  const projectRoot = canonicalDirectory(options.projectRoot, "project root");
-  const userHomeRoot = canonicalDirectory(options.userHomeRoot ?? homedir(), "user home root");
-  const userVibeflowRoot = canonicalFutureDirectory(
+  const projectRoot = canonicalRuntimeDirectory(options.projectRoot, "project root");
+  const userHomeRoot = canonicalRuntimeDirectory(
+    options.userHomeRoot ?? homedir(),
+    "user home root",
+  );
+  const userVibeflowRoot = canonicalFutureRuntimeDirectory(
     options.userVibeflowRoot ?? join(userHomeRoot, ".vibeflow"),
     "user VibeFlow root",
   );
@@ -276,7 +369,13 @@ export function productionCapabilityRuntimeV1(
   });
   const prior = FACTORIES.get(key);
   if (prior) {
-    if (prior.optionFingerprint !== optionFingerprint || prior.clock !== (options.now ?? null))
+    if (
+      prior.optionFingerprint !== optionFingerprint ||
+      prior.clock !== (options.now ?? null) ||
+      prior.authorityRepairBackends !== (options.authorityRepairBackends ?? null) ||
+      prior.ordinaryAuthorityFault !== (options.ordinaryAuthorityFault ?? null) ||
+      prior.ordinaryAuthorityActionFault !== (options.ordinaryAuthorityActionFault ?? null)
+    )
       throw new CapabilityRuntimeError(
         "capability runtime root already has different production options",
         CAPABILITY_RUNTIME_ERROR_CODE.AUTHORIZATION_MISMATCH,
@@ -293,6 +392,9 @@ export function productionCapabilityRuntimeV1(
     factory: created,
     optionFingerprint,
     clock: options.now ?? null,
+    authorityRepairBackends: options.authorityRepairBackends ?? null,
+    ordinaryAuthorityFault: options.ordinaryAuthorityFault ?? null,
+    ordinaryAuthorityActionFault: options.ordinaryAuthorityActionFault ?? null,
   });
   return created;
 }

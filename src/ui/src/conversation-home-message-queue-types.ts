@@ -1,5 +1,6 @@
 import type {
   CONVERSATION_MESSAGE_QUEUE_FIELD,
+  ConversationMessageQueueRecoveryActionV1,
   ConversationMessageQueueStaleReasonV1,
   ConversationMessageQueueStateV1,
 } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
@@ -21,12 +22,21 @@ export type HomeMessageQueueInvalidation = PublicConversationMessageQueueInvalid
 
 export const HOME_QUEUED_MESSAGE_PROJECTION_KIND = Object.freeze({
   AUTHORITATIVE: "authoritative",
+  NEEDS_ACTION: "needs-action",
   OPTIMISTIC: "optimistic",
   RETRYABLE: "retryable",
 } as const);
 
 export type HomeQueuedMessageProjectionKind =
   (typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND)[keyof typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND];
+
+export const HOME_QUEUE_RECOVERY_BUSY_KIND = Object.freeze({
+  DISMISS: "dismiss",
+  RESTORE: "restore",
+} as const);
+
+export type HomeQueueRecoveryBusyKind =
+  (typeof HOME_QUEUE_RECOVERY_BUSY_KIND)[keyof typeof HOME_QUEUE_RECOVERY_BUSY_KIND];
 
 type OptimisticQueueRequestFields =
   | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.CONTENT
@@ -47,13 +57,20 @@ export type HomeRetryableQueuedMessage = Omit<HomeOptimisticQueuedMessage, "kind
   retrying: boolean;
 };
 
+export type HomeNeedsActionQueuedMessage = Omit<HomeOptimisticQueuedMessage, "kind"> & {
+  kind: typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND.NEEDS_ACTION;
+  failure_message: string;
+  recovery_action: ConversationMessageQueueRecoveryActionV1 | null;
+};
+
 export type HomeQueuedMessageProjection =
   | {
       kind: typeof HOME_QUEUED_MESSAGE_PROJECTION_KIND.AUTHORITATIVE;
       item: HomeQueuedMessage;
     }
   | HomeOptimisticQueuedMessage
-  | HomeRetryableQueuedMessage;
+  | HomeRetryableQueuedMessage
+  | HomeNeedsActionQueuedMessage;
 
 type QueueEditBindingFields =
   | typeof CONVERSATION_MESSAGE_QUEUE_FIELD.ROOT_SESSION_ID

@@ -1,6 +1,9 @@
 import { ConversationMessageReferenceUnavailableError } from "../orchestrator/conversation/conversation-social-authority.js";
 import { ConversationHandoffTooLargeError } from "../orchestrator/conversation/revision-errors.js";
-import { ConversationRoutingError } from "../orchestrator/conversation/router.js";
+import {
+  CONVERSATION_ROUTING_ERROR_CODE,
+  ConversationRoutingError,
+} from "../orchestrator/conversation/router.js";
 import {
   ConversationControlConflictError,
   ConversationInvalidTargetParticipantError,
@@ -8,12 +11,13 @@ import {
 } from "../orchestrator/conversation/service.js";
 
 const CLIENT_ROUTING_ERRORS = new Set<ConversationRoutingError["code"]>([
-  "invalid_routing_input",
-  "unknown_explicit_policy",
-  "unknown_explicit_role",
-  "explicit_engine_unavailable",
-  "policy_unavailable",
-  "role_unavailable",
+  CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_INPUT,
+  CONVERSATION_ROUTING_ERROR_CODE.UNKNOWN_EXPLICIT_POLICY,
+  CONVERSATION_ROUTING_ERROR_CODE.UNKNOWN_EXPLICIT_ROLE,
+  CONVERSATION_ROUTING_ERROR_CODE.EXPLICIT_ENGINE_UNAVAILABLE,
+  CONVERSATION_ROUTING_ERROR_CODE.COORDINATE_EXECUTOR_UNAVAILABLE,
+  CONVERSATION_ROUTING_ERROR_CODE.POLICY_UNAVAILABLE,
+  CONVERSATION_ROUTING_ERROR_CODE.ROLE_UNAVAILABLE,
 ]);
 
 const response = (status: number, code: string): Response =>

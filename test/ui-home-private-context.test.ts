@@ -138,6 +138,42 @@ describe("Home private-context broker UI", () => {
     }
   });
 
+  test("a retained capture settles through the authoritative discard endpoint", async () => {
+    const originalStage = conversationHomeApi.stageMessagePrivateContext;
+    const originalDiscard = conversationHomeApi.discardMessagePrivateContext;
+    const discardRequests: HomeDiscardMessagePrivateContextRequest[] = [];
+    conversationHomeApi.stageMessagePrivateContext = (async () =>
+      presence(true)) as typeof conversationHomeApi.stageMessagePrivateContext;
+    conversationHomeApi.discardMessagePrivateContext = (async (_root, request) => {
+      discardRequests.push(structuredClone(request));
+      return presence(false);
+    }) as typeof conversationHomeApi.discardMessagePrivateContext;
+    const fx = harness();
+    try {
+      expect(await fx.runtime.stage(range("src/retained.ts"))).toBeTrue();
+      const capture = fx.runtime.captureForMessage("root-a");
+      if (!capture) throw new Error("expected retained private capture");
+      capture.clearIfCurrent();
+      expect(fx.present.value).toBeFalse();
+      expect(await capture.discardRetained()).toBeTrue();
+      expect(discardRequests).toEqual([
+        {
+          schema_version: "1.0",
+          idempotency_key: expect.any(String),
+          enqueue_idempotency_key: capture.idempotency_key,
+          expected_private_context_present: true,
+        },
+      ]);
+      expect(await capture.discardRetained()).toBeTrue();
+      expect(discardRequests).toHaveLength(1);
+      expect(fx.runtime.captureForMessage("root-a")).toBeNull();
+    } finally {
+      fx.runtime.dispose();
+      conversationHomeApi.stageMessagePrivateContext = originalStage;
+      conversationHomeApi.discardMessagePrivateContext = originalDiscard;
+    }
+  });
+
   test("a late root-A stage never projects into root B and is recovered only on A", async () => {
     const original = conversationHomeApi.stageMessagePrivateContext;
     const staged = deferred<HomePrivateContextPresence>();

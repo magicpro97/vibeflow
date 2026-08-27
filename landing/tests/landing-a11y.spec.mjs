@@ -50,6 +50,19 @@ test("landing is accessible and compact at desktop size", async ({ page }) => {
   expect(ledeWords).toBeLessThanOrEqual(20);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
+  const reliabilityCards = await page.locator(".reliability-card").evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect();
+      return { left: box.left, top: box.top };
+    }),
+  );
+  expect(reliabilityCards).toHaveLength(4);
+  expect(reliabilityCards[0]?.top).toBe(reliabilityCards[1]?.top);
+  expect(reliabilityCards[2]?.top).toBe(reliabilityCards[3]?.top);
+  expect(reliabilityCards[2]?.top).toBeGreaterThan(reliabilityCards[0]?.top ?? 0);
+  expect(reliabilityCards[0]?.left).toBe(reliabilityCards[2]?.left);
+  expect(reliabilityCards[1]?.left).toBe(reliabilityCards[3]?.left);
+
   const primaryCta = page.getByRole("link", { name: "Install VibeFlow" });
   const primaryCtaBox = await primaryCta.boundingBox();
   expect(primaryCtaBox).not.toBeNull();

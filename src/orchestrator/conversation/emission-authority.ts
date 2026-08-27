@@ -1,7 +1,13 @@
 import type { MaterializedAgentBinding, PreviewAgentBinding } from "../../agents/binding.js";
 import { createSpawnOptionsProjection } from "../../dispatch/session-types.js";
 import type { TraceCorrelation, TraceEvent } from "../trace/types.js";
+import {
+  CONVERSATION_COORDINATION_DIRECTIVE_KIND,
+  CONVERSATION_COORDINATION_TOOL,
+} from "./conversation-coordination-contract.js";
+import { emptyConversationCoordinationState } from "./conversation-coordination-fold.js";
 import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
+import { CONVERSATION_TOOL_ACTION_STATUS } from "./conversation-public-wire-contract.js";
 import type {
   AttemptEmission,
   ConversationContext,
@@ -117,6 +123,28 @@ export function previewAgentPolicyContext(
     ),
     signal: new AbortController().signal,
     messages: () => Promise.resolve(Object.freeze([])),
+    coordinationState: () => Promise.resolve(emptyConversationCoordinationState()),
+    validateCoordinationRepoEvidence: () => false,
+    observeWorkspace: () => ({
+      workspace_key: "dry-run",
+      branch_ref: null,
+      head: null,
+      verified_head: null,
+      dirty: false,
+      quiescent: false,
+      evidence_refs: Object.freeze([]),
+    }),
+    verifyWorkspace: () =>
+      Promise.resolve({
+        workspace_key: "dry-run",
+        branch_ref: null,
+        head: null,
+        verified_head: null,
+        dirty: false,
+        quiescent: false,
+        evidence_refs: Object.freeze([]),
+      }),
+    settleWorkspace: () => Promise.reject(new Error("dry-run context is read-only")),
     prepareTurn: () => Promise.reject(new Error("dry-run context is read-only")),
     publishSocialIntent: () => ({
       accepted: false,
@@ -146,6 +174,28 @@ export function previewPolicyContext(
     ...policyContextView(manifest, snapshotMaterializedBindings(bindings)),
     signal: new AbortController().signal,
     messages: () => Promise.resolve(Object.freeze([])),
+    coordinationState: () => Promise.resolve(emptyConversationCoordinationState()),
+    validateCoordinationRepoEvidence: () => false,
+    observeWorkspace: () => ({
+      workspace_key: "dry-run",
+      branch_ref: null,
+      head: null,
+      verified_head: null,
+      dirty: false,
+      quiescent: false,
+      evidence_refs: Object.freeze([]),
+    }),
+    verifyWorkspace: () =>
+      Promise.resolve({
+        workspace_key: "dry-run",
+        branch_ref: null,
+        head: null,
+        verified_head: null,
+        dirty: false,
+        quiescent: false,
+        evidence_refs: Object.freeze([]),
+      }),
+    settleWorkspace: () => Promise.reject(new Error("dry-run context is read-only")),
     prepareTurn: () => Promise.reject(new Error("dry-run context is read-only")),
     publishSocialIntent: () => ({
       accepted: false,
@@ -179,6 +229,7 @@ const coordinatorTypes = new Set<CoordinatorEmission["event"]["type"]>([
   CONVERSATION_TRACE_EVENT_KIND.SYNTHESIS_COMPLETED,
   CONVERSATION_TRACE_EVENT_KIND.DRY_RUN_RESULT,
   CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED,
+  CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION,
   CONVERSATION_TRACE_EVENT_KIND.ERROR,
 ]);
 const attemptTypes = new Set<AttemptEmission["event"]["type"]>([
@@ -206,6 +257,7 @@ const purposeTypes: Record<PolicyAttemptPurpose, ReadonlySet<AttemptEmission["ev
   review: new Set(responseTypes),
   verify: new Set(responseTypes),
   orchestrate: new Set(responseTypes),
+  coordinate: new Set(responseTypes),
 };
 const reservedIdempotencyKey =
   /^(?:conversation|participant|attempt|native-history|approval|caller-cancelled|message):/;
@@ -229,6 +281,18 @@ export function assertCoordinatorEmission(
     emission.event.payload.token.operation_id !== operationId
   ) {
     throw new Error("approval operation lacks runtime authority");
+  }
+  if (emission.event.type === CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION) {
+    const payload = emission.event.payload;
+    if (
+      payload.tool !== CONVERSATION_COORDINATION_TOOL ||
+      payload.status !== CONVERSATION_TOOL_ACTION_STATUS.COMPLETED ||
+      payload.output_ref === null ||
+      !Object.values(CONVERSATION_COORDINATION_DIRECTIVE_KIND).some(
+        (kind) => kind === payload.action,
+      )
+    )
+      throw new Error("coordinator tool action lacks coordination authority");
   }
   if (
     emission.event.type === CONVERSATION_TRACE_EVENT_KIND.ERROR &&

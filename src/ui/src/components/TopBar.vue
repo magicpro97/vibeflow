@@ -23,7 +23,7 @@
 
     <div class="home-topbar__right">
       <span v-if="!store.online" class="home-network-pill" role="status"><i />Offline</span>
-      <button class="home-topbar-button" type="button" aria-label="Open CLI capabilities" @click="$emit('open-capabilities')">
+      <button class="home-topbar-button" type="button" aria-label="Open CLI capabilities" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-capabilities')">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3h8v4h3v7h-3v3H6v-3H3V7h3V3Z" /></svg>
         <span>Capabilities</span>
       </button>

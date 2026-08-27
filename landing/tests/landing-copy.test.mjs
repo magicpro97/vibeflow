@@ -48,6 +48,10 @@ test("landing preserves key anchors, assets, and current product story", () => {
     "Local-first harness, not another model",
     "carries context between them",
     "One Home, no dashboard maze",
+    "failures stay attached to their payload",
+    "exact retry appears only when safe",
+    "ArrowUp edits only your latest queued message before dispatch claims it.",
+    "Typed actions travel on their own audited authority path.",
     "Install tools from the conversation",
     "Claude, Codex, and OpenCode resume by exact ID when proved.",
     "Copilot and Antigravity receive canonical user and peer context plus bounded own-history replay.",
@@ -58,6 +62,19 @@ test("landing preserves key anchors, assets, and current product story", () => {
     "Bun 1.4 powers",
   ]) {
     assert.equal(page.includes(snippet), true, `missing expected snippet: ${snippet}`);
+  }
+  assert.equal(page.includes("keeps a rejected send retryable"), false);
+});
+
+test("landing does not widen user-message queue or edit authority", () => {
+  const page = read("src/pages/index.astro");
+
+  for (const overclaim of [
+    "ArrowUp edits only the latest queued message",
+    "one durable queue keeps handoffs, actions, and evidence in order",
+    "Typed actions join the user-message queue",
+  ]) {
+    assert.equal(page.includes(overclaim), false, `landing still overclaims: ${overclaim}`);
   }
 });
 
@@ -108,4 +125,17 @@ test("mirrored product docs preserve the current runtime proof boundaries", () =
   ]) {
     assert.equal(productDocs.includes(snippet), true, `missing product contract: ${snippet}`);
   }
+});
+
+test("master spec makes native Windows evidence a same-SHA release prerequisite", () => {
+  const masterSpec = readFileSync(resolve(repositoryRoot, "docs", "MASTER_SPEC.md"), "utf8");
+
+  for (const contract of [
+    "Release is fail-closed on that live proof",
+    "`release-please` waits for the main-push aggregate",
+    "both Windows jobs check out the exact `github.sha` they authorize",
+  ]) {
+    assert.equal(masterSpec.includes(contract), true, `missing release contract: ${contract}`);
+  }
+  assert.equal(masterSpec.includes("evidence remains pending until that job is green"), false);
 });

@@ -15,7 +15,7 @@ const ready = () => [
   { engine: "claude" as const, level: "ready" as const, detail: "ok", checkedAt: "now" },
 ];
 
-async function runInit(projectRoot: string): Promise<number> {
+async function runInit(projectRoot: string, userVibeflowRoot: string): Promise<number> {
   const prior = process.cwd();
   process.chdir(projectRoot);
   try {
@@ -28,7 +28,7 @@ async function runInit(projectRoot: string): Promise<number> {
         "no-memory": true,
         "no-tools": true,
       },
-      { preflight: ready, hookSetup: null, detectTool: () => true },
+      { preflight: ready, hookSetup: null, detectTool: () => true, userVibeflowRoot },
     );
   } finally {
     process.chdir(prior);
@@ -45,7 +45,8 @@ describe("vf init capability authority activation", () => {
     mkdirSync(projectRoot, { recursive: true });
     mkdirSync(userVibeflowRoot, { recursive: true });
 
-    expect(await runInit(projectRoot)).toBe(0);
+    expect(await runInit(projectRoot, userVibeflowRoot)).toBe(0);
+    expect(existsSync(join(userVibeflowRoot, "recovery", "BOOTSTRAP_IDENTITY.json"))).toBeTrue();
     const paths = projectCapabilityPaths(projectRoot);
     expect(existsSync(paths.identity)).toBeTrue();
     const runtime = productionCapabilityRuntimeV1({
@@ -73,7 +74,7 @@ describe("vf init capability authority activation", () => {
       mode: 0o600,
     });
 
-    await expect(runInit(projectRoot)).rejects.toThrow(/quarantined/i);
+    await expect(runInit(projectRoot, userVibeflowRoot)).rejects.toThrow(/quarantined/i);
     expect(existsSync(paths.identity)).toBeFalse();
     const runtime = productionCapabilityRuntimeV1({
       projectRoot,

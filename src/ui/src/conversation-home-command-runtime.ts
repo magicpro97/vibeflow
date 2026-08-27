@@ -180,6 +180,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
             clearSubmittedComposer(submittedDraft, submittedQuotes, privateContext),
           restoreIfVacant: () =>
             restoreSubmittedComposer(submittedDraft, submittedQuotes, privateContext),
+          discardRetained: () => privateContext?.discardRetained() ?? Promise.resolve(true),
         });
       } catch (error) {
         input.composerError.value = readableHomeError(error);
@@ -361,12 +362,14 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
   }
 
   function toggleQuoteReference(reference: HomeQuoteReference): void {
+    if (input.messageQueue.currentEdit()) return;
     const result = toggleHomeQuoteReference(input.quoteRefs.value, reference);
     input.quoteRefs.value = result.next;
     input.composerError.value = result.error;
   }
 
   function removeQuoteReference(reference: HomeQuoteReference): void {
+    if (input.messageQueue.currentEdit()) return;
     input.quoteRefs.value = input.quoteRefs.value.filter(
       (item) => !sameHomeQuoteRef(item, reference),
     );
@@ -374,6 +377,7 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
   }
 
   function moveQuoteReference(index: number, direction: -1 | 1): void {
+    if (input.messageQueue.currentEdit()) return;
     input.quoteRefs.value = moveHomeQuoteReference(input.quoteRefs.value, index, direction);
     input.composerError.value = "";
   }

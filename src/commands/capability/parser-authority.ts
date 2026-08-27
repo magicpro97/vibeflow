@@ -1,4 +1,8 @@
 import {
+  CAPABILITY_CLI_COMMAND,
+  isCapabilityCliExplicitScopeAuthorityCommand,
+} from "../../actions/capability-cli-contract.js";
+import {
   ensureRequestFileExclusive,
   parseCommonOptions,
   scanRawFlags,
@@ -12,6 +16,11 @@ import type {
   ParsedAuthorityRequestFileMutationV1,
 } from "./parser-types.js";
 
+const AUTHORITY_CLI_FILE_FLAG = Object.freeze({
+  AUTOMATION_GRANT: "automation-grant-file",
+  REQUEST: "request-file",
+} as const);
+
 export function parseAuthorityCliArgv(
   argv: string[],
   io: CapabilityParserIo,
@@ -19,18 +28,26 @@ export function parseAuthorityCliArgv(
   const raw = scanRawFlags(argv);
   const command = authorityCommand(raw.positionals);
   const common = parseCommonOptions(raw);
+  const hasRequestFile = raw.singleValueFlags.has(AUTHORITY_CLI_FILE_FLAG.REQUEST);
   if (raw.booleanFlags.has("allow-network-read"))
     usage("--allow-network-read is not supported for authority commands");
   if (common.dryRun && common.yes) usage("--dry-run and --yes are mutually exclusive");
   if (command.command === CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR) {
+    if (raw.singleValueFlags.has(AUTHORITY_CLI_FILE_FLAG.AUTOMATION_GRANT))
+      usage("vf authority repair does not accept --automation-grant-file");
     if (!io.stdinIsTTY) usage("vf authority repair requires an interactive TTY");
     if (common.yes) usage("vf authority repair does not accept --yes");
     if (common.dryRun) usage("vf authority repair does not accept --dry-run");
     if (common.idempotencyKey) usage("vf authority repair does not accept --idempotency-key");
-  } else if (!io.stdinIsTTY && !common.idempotencyKey) {
-    usage("non-interactive authority mutations require --idempotency-key");
+  } else if (!io.stdinIsTTY) {
+    if (!hasRequestFile && !common.idempotencyKey)
+      usage("non-interactive authority mutations require --idempotency-key");
+    if (!raw.singleValueFlags.has(AUTHORITY_CLI_FILE_FLAG.AUTOMATION_GRANT))
+      usage("non-interactive authority mutations require --automation-grant-file");
+  } else if (raw.singleValueFlags.has(AUTHORITY_CLI_FILE_FLAG.AUTOMATION_GRANT)) {
+    usage("--automation-grant-file is only accepted for non-interactive authority mutations");
   }
-  if (raw.singleValueFlags.has("request-file")) {
+  if (hasRequestFile) {
     if (command.command === CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR)
       usage("--request-file is forbidden for vf authority repair");
     ensureRequestFileExclusive(raw, {
@@ -41,7 +58,8 @@ export function parseAuthorityCliArgv(
       kind: "mutation",
       command: command.command as ParsedAuthorityRequestFileMutationV1["command"],
       mode: "request-file",
-      requestFile: raw.singleValueFlags.get("request-file") as string,
+      requestFile: raw.singleValueFlags.get(AUTHORITY_CLI_FILE_FLAG.REQUEST) as string,
+      automationGrantFile: raw.singleValueFlags.get(AUTHORITY_CLI_FILE_FLAG.AUTOMATION_GRANT),
       ...common,
     };
   }
@@ -64,6 +82,7 @@ export function parseAuthorityCliArgv(
     candidateId: raw.singleValueFlags.get("candidate-id"),
     candidateDigest: raw.singleValueFlags.get("candidate-digest"),
     conversationId: raw.singleValueFlags.get("conversation"),
+    automationGrantFile: raw.singleValueFlags.get(AUTHORITY_CLI_FILE_FLAG.AUTOMATION_GRANT),
     ...common,
   };
 }
@@ -134,7 +153,3 @@ const TRUST_COMMAND_BY_SUBCOMMAND: Readonly<
   deprecate: CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_DEPRECATE,
   revoke: CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_REVOKE,
 });
-import {
-  CAPABILITY_CLI_COMMAND,
-  isCapabilityCliExplicitScopeAuthorityCommand,
-} from "../../actions/capability-cli-contract.js";

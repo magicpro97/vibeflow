@@ -99,6 +99,7 @@ class ManualAdapter implements EngineSessionAdapter {
       completion,
       terminate: async () => this.complete(this.requests.indexOf(request)),
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
   }

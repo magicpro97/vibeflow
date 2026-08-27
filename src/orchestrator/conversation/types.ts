@@ -1,7 +1,11 @@
 import type { BrowserHostActionRequestV1 } from "../../actions/index.js";
 import type { AgentBinding, ResolvedAgentBinding } from "../../agents/binding.js";
 import type { AgentHostToolV1, Engine } from "../../core/agent-contract.js";
-import type { EngineChunk, EngineSessionResult } from "../../dispatch/session-types.js";
+import type {
+  EngineChunk,
+  EngineSessionResult,
+  InternalAuthenticatedModelOutputBinding,
+} from "../../dispatch/session-types.js";
 import type { EvaluatorOutput, RoundDecision } from "../consensus.js";
 import type {
   ApprovalDecision,
@@ -18,13 +22,18 @@ import type {
 } from "../trace/types.js";
 import type { ConversationOrchestrationResultStatus } from "./conversation-command-result-contract.js";
 import type {
+  ConversationCoordinationSettlementV1,
+  ConversationCoordinationWorkspaceObservationV1,
+} from "./conversation-coordination-contract.js";
+import type { ConversationCoordinationStateV1 } from "./conversation-coordination-fold.js";
+import type { ExecutorCompletionV1 } from "./conversation-coordination-records.js";
+import type { ConversationCoordinationAttemptWorkspaceV1 } from "./conversation-coordination-workspace-binding.js";
+import type {
   AgentSocialIntentRequestV1,
   PublicQuoteReferenceV1,
 } from "./conversation-interaction-types.js";
 import type { ConversationMessageQueueTargetParticipantsV1 } from "./conversation-message-queue-contract.js";
-import type { PublicConversationMessageQueueInvalidationV1 } from "./conversation-message-queue-records.js";
 import type * as ConversationWire from "./conversation-public-wire-contract.js";
-import type { ConversationSseFrameV1 } from "./conversation-sse-contract.js";
 import type { PrivateFileRangeHandoffBindingV1 } from "./private-file-range-staging-store.js";
 import type {
   ConversationTurnPreparationRequestV1,
@@ -38,6 +47,8 @@ export type {
   ConversationLifecycle,
   TerminalLifecycle,
 };
+export type { ConversationService, ConversationSseFrame } from "./conversation-service-contract.js";
+export type { ConversationSseFrameV1 } from "./conversation-sse-contract.js";
 declare const attemptRefBrand: unique symbol;
 export type AttemptRef = string & { readonly [attemptRefBrand]: "AttemptRef" };
 declare const conversationArtifactRefBrand: unique symbol;
@@ -75,7 +86,8 @@ export type PolicyAttemptPurpose =
   | "plan"
   | "review"
   | "verify"
-  | "orchestrate";
+  | "orchestrate"
+  | "coordinate";
 
 export interface PolicyAttemptRequest {
   participantId: string;
@@ -84,6 +96,8 @@ export interface PolicyAttemptRequest {
   promptInput: string;
   delivery?: PreparedConversationTurnV1;
   parent?: AttemptRef;
+  /** Host-projected executor or exact-HEAD review workspace authority. */
+  coordinationWorkspace?: ConversationCoordinationAttemptWorkspaceV1;
 }
 
 type EventOf<T extends TraceEvent["type"]> = Extract<TraceEvent, { type: T }>;
@@ -98,6 +112,7 @@ export type CoordinatorEmission = EmissionOf<
   | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.SYNTHESIS_COMPLETED
   | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.DRY_RUN_RESULT
   | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED
+  | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION
   | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.ERROR
 >;
 
@@ -112,6 +127,8 @@ export type AttemptEmission = EmissionOf<
 export interface PolicyAttempt {
   readonly ref: AttemptRef;
   readonly completion: Promise<EngineSessionResult>;
+  /** Internal authenticated model output; never serialize it into policy emissions. */
+  readModelOutputBinding(): InternalAuthenticatedModelOutputBinding | undefined;
   emit(emission: AttemptEmission): Promise<StoredTraceEvent>;
   onChunk(listener: (chunk: Readonly<EngineChunk>) => void): Unsubscribe;
 }
@@ -131,6 +148,17 @@ export interface ConversationContext {
   }>[];
   readonly signal: AbortSignal;
   messages(): Promise<readonly MessageRequest[]>;
+  coordinationState(): Promise<ConversationCoordinationStateV1>;
+  validateCoordinationRepoEvidence(references: readonly string[]): boolean;
+  observeWorkspace(workspaceKey: string): ConversationCoordinationWorkspaceObservationV1;
+  verifyWorkspace(
+    workspaceKey: string,
+    completion: ExecutorCompletionV1,
+  ): Promise<ConversationCoordinationWorkspaceObservationV1>;
+  settleWorkspace(
+    workspaceKey: string,
+    outcome: ConversationCoordinationSettlementV1,
+  ): Promise<void>;
   prepareTurn(request: ConversationTurnPreparationRequestV1): Promise<PreparedConversationTurnV1>;
   publishSocialIntent(input: {
     participant_id: string;
@@ -368,33 +396,3 @@ export interface StreamTokenRenewalResponse {
 
 export type ConversationListener = (event: PublicStoredTraceEvent) => void;
 export type Unsubscribe = () => void;
-
-export interface ConversationService {
-  create(
-    request: ConversationCreateRequest,
-    options?: ConversationInvocationOptions,
-  ): Promise<ConversationCreateResult>;
-  start(
-    request: ConversationCreateRequest,
-    options?: ConversationInvocationOptions,
-  ): Promise<ConversationStartResult>;
-  dryRun(
-    request: ConversationCreateRequest,
-    options?: ConversationInvocationOptions,
-  ): Promise<DryRunResult>;
-  message(id: string, request: MessageRequest): Promise<MessageResponse>;
-  pause(id: string): Promise<PauseResponse>;
-  resume(id: string): Promise<ResumeResponse>;
-  stop(id: string): Promise<StopResponse>;
-  resolveApproval(id: string, decision: ApprovalDecision): Promise<ApprovalResolveResult>;
-  cancelOperation(command: OperationCancelCommand): Promise<OperationCancelResult>;
-  snapshot(id: string): Promise<ConversationSnapshot | null>;
-  events(id: string, afterSeq: number): Promise<PublicStoredTraceEvent[] | null>;
-  subscribe(id: string, listener: ConversationListener, afterSeq?: number): Unsubscribe | null;
-}
-
-export type ConversationSseFrame = ConversationSseFrameV1<
-  PublicStoredTraceEvent,
-  ConversationSnapshot,
-  PublicConversationMessageQueueInvalidationV1
->;

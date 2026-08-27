@@ -18,6 +18,9 @@ import {
   productionCapabilityRuntimeV1,
 } from "../../src/capabilities/index.js";
 import { capabilityOperationPaths } from "../../src/capabilities/storage/paths.js";
+import { AGENT_ENGINE } from "../../src/core/agent-contract.js";
+import { ROLE_SANDBOX, ROLE_TOOL_INTENT } from "../../src/core/role-contract.js";
+import { CONVERSATION_ROLE_NAME } from "../../src/core/role-name-contract.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
 import {
   type EngineProcess,
@@ -100,15 +103,20 @@ function binding(input: AgentBinding): MaterializedAgentBinding {
   const traceMetadata = { role_resolved_hash: roleHash, skill_resolved_hashes: [] as string[] };
   const envPolicy = conversationEnvPolicy(input.engine);
   const model = input.modelOverride ?? (input.engine === "codex" ? "gpt-5.4" : null);
+  const executor = input.roleRef === CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR;
+  const toolIntents = executor
+    ? [ROLE_TOOL_INTENT.READ, ROLE_TOOL_INTENT.WRITE]
+    : [ROLE_TOOL_INTENT.READ];
+  const sandbox = executor ? ROLE_SANDBOX.WORKSPACE_WRITE : ROLE_SANDBOX.READ_ONLY;
   const resolved = {
     role: {
       spec: {
         name: input.roleRef,
         description: `test ${input.roleRef}`,
         body: `test ${input.roleRef}`,
-        tools: ["read" as const],
+        tools: toolIntents,
         model: "sonnet" as const,
-        sandbox: "read-only" as const,
+        sandbox,
       },
       source: "builtin" as const,
       resolved_hash: roleHash,
@@ -118,8 +126,8 @@ function binding(input: AgentBinding): MaterializedAgentBinding {
     engine: input.engine,
     model,
     sessionMode: input.sessionMode,
-    tool_intents: ["read" as const],
-    sandbox: "read-only" as const,
+    tool_intents: toolIntents,
+    sandbox,
     env_policy: envPolicy,
     isolation: null,
     provenance,
@@ -133,7 +141,7 @@ function binding(input: AgentBinding): MaterializedAgentBinding {
       sessionMode: input.sessionMode,
       rendered_prompt: `host-action-test:${input.roleRef}`,
       rendered_tools: [],
-      sandbox: "read-only",
+      sandbox,
       env_policy: envPolicy,
       isolation: null,
       provenance,
@@ -220,8 +228,8 @@ const directParticipant = (hostTools?: [] | ["propose_action"]): ConversationCre
 const addParticipant = {
   type: "conversation.add_participant" as const,
   participant: {
-    role_ref: "direct",
-    engine: "codex" as const,
+    role_ref: CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+    engine: AGENT_ENGINE.CLAUDE,
     model: null,
     skill_refs: [],
   },
@@ -1195,7 +1203,7 @@ describe("agent natural-language host action candidates", () => {
             .read(childId)
             ?.bindings.map((row) => row.host_tools)
         : null,
-    ).toEqual([["propose_action"], ["propose_action"]]);
+    ).toEqual([[], []]);
     expect(await fx.bootstrap.authorities.browser.actions.pending(created.conversation_id)).toEqual(
       [],
     );
@@ -2493,17 +2501,19 @@ describe("agent natural-language host action candidates", () => {
       ["propose_action"],
       [],
     ]);
-    if (!manifest?.bindings[0]) throw new Error("evaluator role-change fixture is absent");
-    const evaluatorRevision = applyConversationRevisionMutation({
-      parent: manifest,
-      action: {
-        type: "conversation.update_participant",
-        participant_id: manifest.bindings[0].participant_id,
-        changes: { role_ref: "brainstorm-evaluator" },
-      },
-      idempotencyKey: "evaluator-role-change",
-    });
-    expect(evaluatorRevision.bindings[0]?.host_tools).toEqual([]);
+    const participant = manifest?.bindings[0];
+    if (!manifest || !participant) throw new Error("evaluator role-change fixture is absent");
+    expect(() =>
+      applyConversationRevisionMutation({
+        parent: manifest,
+        action: {
+          type: "conversation.update_participant",
+          participant_id: participant.participant_id,
+          changes: { role_ref: CONVERSATION_ROLE_NAME.BRAINSTORM_EVALUATOR },
+        },
+        idempotencyKey: "evaluator-role-change",
+      }),
+    ).toThrow("debate conversation topology is noncanonical");
     expect(await fx.bootstrap.authorities.browser.actions.pending(created.conversation_id)).toEqual(
       [],
     );

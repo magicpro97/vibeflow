@@ -151,9 +151,11 @@ const waitForBindAck = () =>
   });
 waitForBindAck()
   .then(() => {
+    const childEnv = { ...process.env };
+    for (const key of Object.values(ENV)) delete childEnv[key];
     const child = spawn(argv[0], argv.slice(1), {
       cwd: process.env[ENV.CWD] || process.cwd(),
-      env: process.env,
+      env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
     cliStarted = true;
@@ -276,10 +278,13 @@ export function launchOwnedSupervisorProcess(
   });
   let cliPid: number | undefined;
   try {
-    waitForOwnedSupervisorReceipt(
+    const supervisorReceipt = waitForOwnedSupervisorReceipt(
       receiptPath,
       OWNED_SUPERVISOR_RECEIPT_KEY.SUPERVISOR_PID,
       runtime,
+    );
+    options.ownedRuntime.assertSupervisorContainment(
+      supervisorReceipt[OWNED_SUPERVISOR_RECEIPT_KEY.CONTAINMENT],
     );
     options.ownedRuntime.bindSupervisor(childPid);
     (runtime.writeFileSync ?? writeFileSync)(

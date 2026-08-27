@@ -182,6 +182,7 @@ export type ConversationOperationStateV1 =
 export const CONVERSATION_OPERATION_STATES = frozenValues(CONVERSATION_OPERATION_STATE);
 
 export const CONVERSATION_ARTIFACT_TYPE = Object.freeze({
+  COORDINATION: "coordination",
   DECISION_MATRIX: "decision_matrix",
   PLAN: "plan",
   DIFF: "diff",

@@ -6,19 +6,28 @@ import {
   CONVERSATION_HEAD_STATUS,
   type ConversationCatalogHealth,
 } from "../../orchestrator/conversation/conversation-catalog-contract.js";
-import { CONVERSATION_MESSAGE_QUEUE_STATE } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
 import { CONVERSATION_CLIENT_STREAM_STATE } from "../../orchestrator/conversation/conversation-sse-contract.js";
 import { createHomeActionMutationRuntime } from "./conversation-home-action-runtime.js";
 import { createHomeCommandRuntime } from "./conversation-home-command-runtime.js";
+import {
+  createHomeQueueRecoveryRuntime,
+  hasHomeLiveQueueItems,
+} from "./conversation-home-message-queue-authority.js";
 import { createHomeMessageQueueRuntime } from "./conversation-home-message-queue-runtime.js";
 import type {
   HomeMessageQueueSnapshot,
+  HomeNeedsActionQueuedMessage,
   HomeOptimisticQueuedMessage,
+  HomeQueueRecoveryBusyKind,
   HomeQueuedMessageEditBinding,
   HomeRetryableQueuedMessage,
 } from "./conversation-home-message-queue-types.js";
 import { createHomePrivateContextRuntime } from "./conversation-home-private-context-runtime.js";
 import { createHomeQueryRuntime } from "./conversation-home-query-runtime.js";
+import {
+  homeCapabilityAuthoritySignature,
+  isHomeBrowserOnline,
+} from "./conversation-home-runtime.js";
 import { ActivationEpoch } from "./conversation-home-state.js";
 import type {
   HomeActionView,
@@ -31,14 +40,6 @@ import type {
   HomeSessionSummary,
   HomeTimelineResponse,
 } from "./conversation-home-types.js";
-
-function browserOnline(value: unknown): boolean {
-  if (typeof value !== "object" || value === null || !("navigator" in value)) return true;
-  const navigator = value.navigator;
-  return typeof navigator === "object" && navigator !== null && "onLine" in navigator
-    ? navigator.onLine !== false
-    : true;
-}
 
 export const useConversationHomeStore = defineStore("conversation-home", () => {
   const sessions = ref<HomeSessionSummary[]>([]);
@@ -53,7 +54,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   const pendingActions = ref<HomeActionView[]>([]);
   const activationLoading = ref(false);
   const activationError = ref("");
-  const online = ref(browserOnline(globalThis));
+  const online = ref(isHomeBrowserOnline(globalThis));
   const railCollapsed = ref(false);
   const draft = ref("");
   const composerError = ref("");
@@ -62,11 +63,14 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
   const messageQueue = shallowRef<HomeMessageQueueSnapshot | null>(null);
   const optimisticMessages = ref<HomeOptimisticQueuedMessage[]>([]);
   const retryableMessages = ref<HomeRetryableQueuedMessage[]>([]);
+  const needsActionMessages = ref<HomeNeedsActionQueuedMessage[]>([]);
   const queuedMessageEdit = shallowRef<HomeQueuedMessageEditBinding | null>(null);
   const queuedMessageEditSaving = ref(false);
   const queueSendAsNew = ref(false);
   const queueAnnouncement = ref("");
   const queueComposerFocusEpoch = ref(0);
+  const queueRecoveryBusyKey = ref<string | null>(null);
+  const queueRecoveryBusyKind = ref<HomeQueueRecoveryBusyKind | null>(null);
   const privateContextPresent = ref(false);
   const privateContextDiscarding = ref(false);
   const capabilities = ref<HomeCapabilityItem[]>([]);
@@ -141,6 +145,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     snapshot: messageQueue,
     optimistic: optimisticMessages,
     retryable: retryableMessages,
+    needsAction: needsActionMessages,
     edit: queuedMessageEdit,
     editSaving: queuedMessageEditSaving,
     sendAsNew: queueSendAsNew,
@@ -165,14 +170,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
       optimisticMessages.value = [];
     },
     messageQueueHasLiveItems: () =>
-      optimisticMessages.value.length > 0 ||
-      Boolean(
-        messageQueue.value?.items.some(
-          (item) =>
-            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED ||
-            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED,
-        ),
-      ),
+      hasHomeLiveQueueItems(messageQueue.value, optimisticMessages.value.length),
     activationLoading,
     activationError,
     online,
@@ -223,21 +221,9 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
       saveEdit: messageQueueRuntime.saveEdit,
     },
   });
-  const capabilityAuthoritySignature = computed(() => {
-    const revision = activeRevision.value;
-    if (!revision) return `${activeRootId.value ?? ""}\0unavailable`;
-    const participants = revision.participants
-      .map((participant) => `${participant.engine}\0${participant.participant_id}`)
-      .join("\0");
-    return [
-      activeRootId.value ?? "",
-      revision.conversation_id,
-      revision.revision_id,
-      revision.last_seq,
-      revision.lock_digest,
-      participants,
-    ].join("\0");
-  });
+  const capabilityAuthoritySignature = computed(() =>
+    homeCapabilityAuthoritySignature(activeRootId.value, activeRevision.value),
+  );
   watch(capabilityAuthoritySignature, () => commandRuntime.reconcileCapabilityTargetSelection(), {
     flush: "sync",
   });
@@ -251,15 +237,7 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     { flush: "sync" },
   );
   watch(
-    () =>
-      optimisticMessages.value.length > 0 ||
-      Boolean(
-        messageQueue.value?.items.some(
-          (item) =>
-            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED ||
-            item.state === CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED,
-        ),
-      ),
+    () => hasHomeLiveQueueItems(messageQueue.value, optimisticMessages.value.length),
     () => queryRuntime.reconcileActiveStream(),
     { flush: "sync" },
   );
@@ -274,6 +252,25 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     actionBusy,
     actionBusyTokens,
     reconcileOperation: queryRuntime.reconcileActionOperation,
+  });
+  const queueRecoveryRuntime = createHomeQueueRecoveryRuntime({
+    activeRootId,
+    online,
+    activationError,
+    messageQueue,
+    needsAction: needsActionMessages,
+    announcement: queueAnnouncement,
+    busyKey: queueRecoveryBusyKey,
+    busyKind: queueRecoveryBusyKind,
+    isComposerVacant: () =>
+      draft.value === "" &&
+      quoteRefs.value.length === 0 &&
+      !privateContextPresent.value &&
+      !queuedMessageEdit.value &&
+      !submitting.value,
+    selectSession: queryRuntime.selectSession,
+    restore: messageQueueRuntime.restoreNeedsAction,
+    dismiss: messageQueueRuntime.dismissNeedsAction,
   });
 
   function newConversation(): void {
@@ -329,6 +326,9 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     queueSendAsNew,
     queueAnnouncement,
     queueComposerFocusEpoch,
+    queueRecoveryComposerVacant: queueRecoveryRuntime.composerVacant,
+    queueRecoveryBusyKey,
+    queueRecoveryBusyKind,
     capabilityTargetRequest: commandRuntime.capabilityTargetRequest,
     capabilities,
     capabilityQuery,
@@ -378,6 +378,8 @@ export const useConversationHomeStore = defineStore("conversation-home", () => {
     },
     cancelQueuedMessageEdit: messageQueueRuntime.cancelEdit,
     retryQueuedMessage: messageQueueRuntime.retry,
+    recoverFailedQueuedMessage: queueRecoveryRuntime.recover,
+    dismissFailedQueuedMessage: queueRecoveryRuntime.dismiss,
     setOnline(value: boolean) {
       online.value = value;
       if (!value) {

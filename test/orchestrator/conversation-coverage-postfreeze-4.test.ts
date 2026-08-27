@@ -665,6 +665,7 @@ describe("post-freeze pinned catalog cleanup", () => {
           terminationReasons.push(reason);
         },
         readResumeBinding: () => undefined,
+        readModelOutputBinding: () => undefined,
         readEvidenceBinding: () => undefined,
       };
       const runtime = new RevisionLaneRetryRuntime(

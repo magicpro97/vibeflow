@@ -3,6 +3,7 @@ import {
   CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
   CONVERSATION_TRACE_EVENT_KIND,
 } from "../../orchestrator/conversation/conversation-public-wire-contract.js";
+import { homeConversationLifecycleLabel } from "./conversation-lifecycle-presentation.js";
 import { collectTraceSessions } from "./conversation-session-projection.js";
 import type { ConversationSnapshot, ConversationTraceRecord } from "./conversation-types.js";
 
@@ -212,8 +213,8 @@ export function buildConversationMessages(
             title: "Lifecycle",
             body:
               event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE
-                ? `${event.payload.lifecycle} · ${event.payload.health}`
-                : event.payload.lifecycle,
+                ? `${homeConversationLifecycleLabel(event.payload.lifecycle)} · ${event.payload.health}`
+                : homeConversationLifecycleLabel(event.payload.lifecycle),
           }),
         );
         break;

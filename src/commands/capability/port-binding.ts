@@ -5,7 +5,16 @@ import type { CapabilityCommandRuntimeOptions } from "./runtime.js";
 export interface CapabilityCliMutationPortBindingOptions
   extends Pick<
     CapabilityCommandRuntimeOptions,
-    "base" | "userHomeRoot" | "userVibeflowRoot" | "now" | "runtimeFactory"
+    | "base"
+    | "userHomeRoot"
+    | "userVibeflowRoot"
+    | "now"
+    | "runtimeFactory"
+    | "authorityRepairInteraction"
+    | "authorityApprovalInteraction"
+    | "authorityStdinIsTTY"
+    | "authorityRepairRuntime"
+    | "authorityRepairBackends"
   > {
   mutationPort?: CapabilityCliMutationPortV1;
 }
@@ -20,6 +29,11 @@ export function resolveCapabilityCliMutationPort(
       userHomeRoot: options.userHomeRoot,
       userVibeflowRoot: options.userVibeflowRoot,
       now: options.now,
+      authorityRepairInteraction: options.authorityRepairInteraction,
+      authorityApprovalInteraction: options.authorityApprovalInteraction,
+      authorityStdinIsTTY: options.authorityStdinIsTTY,
+      authorityRepairRuntime: options.authorityRepairRuntime,
+      authorityRepairBackends: options.authorityRepairBackends,
       runtimeFactory: options.runtimeFactory,
     })
   );

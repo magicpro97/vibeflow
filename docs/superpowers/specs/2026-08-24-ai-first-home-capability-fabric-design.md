@@ -5197,6 +5197,16 @@ Behavior:
   revalidated before the one bounded network read. Durable/browser planning instead uses
   `{mode:"durable",network_read:"ordinary-host-policy"}` under the ordinary source-access rules;
 - non-TTY mutation does not prompt and requires `--yes` to apply;
+- every non-TTY `vf authority` mutation except `authority repair` additionally requires
+  `--automation-grant-file <path>`. The strict JSON proof has exactly
+  `{schema_version,scope,public_actor_id,grant_id,grant_frame_digest,authority_epoch,authority_head_digest}`.
+  The selected latest grant frame must be current, unrevoked, within `not_before..expires_at`, scoped to
+  the same authority root, owned by the exact human-CLI automation principal, and include the requested
+  authority action type. The proof is bound into `AuthorityChangePlanV1`, and its exact current frame,
+  epoch, head, actor, action, and expiry are revalidated for proposal publication, review, dispatch,
+  execution, and idempotent replay. The CLI never fabricates an automation credential. Interactive TTY
+  authority uses no proof file; a user-scope approval issues, displays, and consumes the durable
+  `fresh-user-scope` challenge through the production HMAC authority;
 - `--dry-run` and `--yes` are mutually exclusive; without either, non-TTY performs validation/planning
   only and writes no proposal, while `--dry-run` additionally enforces the no-effect contract above;
 - every non-TTY direct-mode mutation requires exactly one explicit outer `--idempotency-key` plus all

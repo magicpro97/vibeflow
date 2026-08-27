@@ -1,19 +1,18 @@
 import { canonicalJsonBytes } from "../../durability/index.js";
 import { conversationLockDigest } from "./catalog-lock.js";
 import { materializeConversationRevisionActionPlan } from "./conversation-action-planner.js";
+import { conversationRevisionPolicyAuthorityDigest } from "./conversation-revision-policy-authority.js";
 import { contextHandoffSharedPromptBytes } from "./handoff-selection.js";
 import { validatePublishedRevisionTransition } from "./lineage-published-transition.js";
 import type { RevisionReservationRecordV1 } from "./lineage-reservation.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
-import {
-  applyConversationRevisionMutation,
-  revisionMessageRequest,
-} from "./revision-action-manifest.js";
+import { revisionMessageRequest } from "./revision-action-manifest.js";
 import type { ConversationRevisionAuthorityOptions } from "./revision-authority.js";
 import { RevisionCrashFaultError, runRevisionCrashFault } from "./revision-crash-fault.js";
 import {
   type DeferredRevisionCommitInputV1,
   type ValidatedDeferredRevisionCommitV1,
+  deferredRevisionRequiresPolicyAuthority,
   validateDeferredRevisionCommit,
 } from "./revision-deferred-validation.js";
 import type { ConversationRevisionOperationExecutor } from "./revision-operation-executor.js";
@@ -23,7 +22,11 @@ import {
   materializeRevisionOperation,
   materializeRevisionReservation,
 } from "./revision-planner.js";
-import type { DeferredRevisionProposalStore } from "./revision-proposal-store.js";
+import {
+  type DeferredRevisionProposalStore,
+  type DeferredRevisionProposalV1,
+  isAuthorityBoundDeferredRevisionProposal,
+} from "./revision-proposal-store.js";
 import {
   materializeFreshRevisionBindings,
   materializeRevisionManifest,
@@ -31,11 +34,41 @@ import {
   revisionBindingProjection,
   revisionManifestRecord,
 } from "./revision-source.js";
+import {
+  assertConversationTopologyMaterialization,
+  projectConversationRevisionTopology,
+} from "./revision-topology-authority.js";
 
 export type { DeferredRevisionCommitInputV1 } from "./revision-deferred-validation.js";
 
 function same(left: unknown, right: unknown): boolean {
   return canonicalJsonBytes(left).equals(canonicalJsonBytes(right));
+}
+
+/** Exact proposal-to-commit topology authority check; legacy callers are handled separately. */
+export function assertDeferredRevisionPolicyAuthority(input: {
+  deferred: DeferredRevisionProposalV1;
+  proposal_policy_digest: string;
+  approval_policy_digest: string;
+  root_session_id: string;
+  conversation_lock_digest: string;
+  topology_digest: string;
+  resolved_binding_set_digest: string;
+}): void {
+  if (!isAuthorityBoundDeferredRevisionProposal(input.deferred)) return;
+  const expected = conversationRevisionPolicyAuthorityDigest({
+    root_session_id: input.root_session_id,
+    conversation_lock_digest: input.conversation_lock_digest,
+    topology_digest: input.topology_digest,
+    resolved_binding_set_digest: input.resolved_binding_set_digest,
+  });
+  if (
+    input.topology_digest !== input.deferred.topology_digest ||
+    expected !== input.deferred.policy_authority_digest ||
+    expected !== input.proposal_policy_digest ||
+    expected !== input.approval_policy_digest
+  )
+    throw new Error("deferred revision topology authority changed");
 }
 
 function validateSource(
@@ -142,6 +175,11 @@ export async function commitDeferredRevision(input: {
       return { childId: storedOperation.child.conversation_id, reconcilePublished: true };
     }
   }
+  if (
+    deferredRevisionRequiresPolicyAuthority(action) &&
+    !isAuthorityBoundDeferredRevisionProposal(deferred)
+  )
+    throw new Error("legacy deferred revision lacks topology authority");
   const base = resolveRevisionBase({
     artifactRoot: input.options.artifactRoot,
     traceRoot: input.options.traceRoot,
@@ -160,14 +198,19 @@ export async function commitDeferredRevision(input: {
   });
   const handoff = input.options.home.handoffs.read(deferred.handoff_digest);
   if (!handoff) throw new Error("deferred revision handoff is absent");
-  const target = applyConversationRevisionMutation({
+  const topology = projectConversationRevisionTopology({
     parent: base.parent.source.manifest,
     action,
     idempotencyKey: actionState.proposal.idempotency_key,
   });
+  const target = topology.target;
   const targetBindings = await materializeFreshRevisionBindings({
     manifest: target,
     rehydrate: input.options.rehydrateBinding,
+  });
+  assertConversationTopologyMaterialization({
+    manifest: target,
+    bindings: targetBindings.bindings,
   });
   const projection = revisionBindingProjection({
     manifest: target,
@@ -180,6 +223,15 @@ export async function commitDeferredRevision(input: {
     !same(handoff.bindings, projection.publicBindings)
   )
     throw new Error("deferred revision binding plan changed");
+  assertDeferredRevisionPolicyAuthority({
+    deferred,
+    proposal_policy_digest: actionState.proposal.policy_digest,
+    approval_policy_digest: actionState.approval.policy_digest,
+    root_session_id: base.lineage.root_session_id,
+    conversation_lock_digest: plan.expected_parent_lock_digest,
+    topology_digest: topology.authority.topology_digest,
+    resolved_binding_set_digest: projection.bindingSetDigest,
+  });
   const expectedOperation = materializeRevisionOperation({
     operation_id: operationId,
     proposal_id: actionState.proposal.proposal_id,

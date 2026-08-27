@@ -29,7 +29,10 @@ capabilities without forcing a mode switch.
 > `HomeComposer.vue`, `HomeCapabilityDrawer.vue`, and `HomeTraceDrawer.vue` provide the
 > rail, timeline, composer, capability, and trace surfaces. Repository intake is not a Home
 > mode: `vf init` asks its questionnaire when stdin is a TTY, and `--no-ask` skips it.
-> All write endpoints are loopback-only and CSRF-protected (see `SECURITY_MODEL.md`).
+> On a LAN bind, legacy mutations require the authorized LAN page session plus CSRF token.
+> Conversation Home uses a separate conversation session that is issued only on loopback,
+> so its JSON, artifact, and stream-token routes fail closed on LAN even after page
+> bootstrap (see `SECURITY_MODEL.md`).
 > The motion layer is a small inline count-up/entrance animation — no third-party CDN script
 > is loaded, because the page is same-origin with the write API and a compromised CDN must not
 > be able to reach it.
@@ -45,22 +48,11 @@ selecting a result opens it directly without a resume dialog.
 
 ### 2. Composer
 
-The composer is conversation-first, not form-first. It owns the durable FIFO queue,
-ArrowUp editing for the latest queued human message, private file range capture, and
-typed capability selection. Sends made while an agent is busy queue automatically. ArrowUp
-starts an edit only for the latest queued human message; Escape cancels, and a lost
-dispatch/edit race preserves the draft for explicit send-as-new. Sent messages remain
-ordered and reviewable. An admission failure that was not acknowledged stays visible as a
-retryable row. Explicit retry reuses the exact request and idempotency key while preserving
-any newer composer draft; offline retry is never implicit. The rejected row is current Home
-state and is not persisted through `localStorage` or promised across a browser restart.
+The composer is conversation-first, not form-first. It owns the durable FIFO queue, ArrowUp editing for the latest queued human message, private file range capture, and typed capability selection. Sends made while an agent is busy queue automatically. ArrowUp starts an edit only for the latest queued human message; Escape cancels, and a lost dispatch/edit race preserves the draft for explicit send-as-new. Typed add-participant actions promote a direct route into coordinate through proposal/review/commit, and removing the last executor collapses it back to direct. Sent messages remain ordered and reviewable. Only a transport-ambiguous request, or a typed admission error with `retryable: true` and `recovery_action: retry`, becomes retryable and may replay the exact request and idempotency key. Typed failures wait for an explicit retry. An in-flight admission interrupted by browser offline remains **Reconciling** and automatically replays the same idempotency key only after authoritative refresh. A non-retryable collision retains the exact rejected payload as **Needs action**, outside the waiting count. Its typed action restores an unsent edit/new draft, refreshes the active conversation before restore, or gives CLI authority-repair guidance; confirmed dismissal settles retained private context first. No typed recovery auto-resends or overwrites newer composer state. Rejected rows are current Home state and are not persisted through `localStorage` or promised across a browser restart.
 
 ### 3. Details inspector
 
-The details inspector shows the active conversation's participants, continuity,
-lineage, and health so the user can verify who is involved before adding more context.
-Participants can be mentioned or removed from this surface. The visible `−` action prepares
-`-@participant` in the composer so removal remains a chat event instead of hidden settings.
+The details inspector shows the active conversation's participants, continuity, lineage, and health so the user can verify who is involved before adding more context or changing route authority. Participants can be mentioned or removed from this surface. The visible `−` action prepares `-@participant` in the composer so removal remains a chat event instead of hidden settings.
 
 ### 4. Trace / capabilities drawers
 
@@ -233,7 +225,7 @@ Use Server-Sent Events for:
 - command logs
 - agent status
 - queued send and edit reconciliation
-- participant add/remove actions
+  - participant add/remove proposal/review/commit and collapse events
 - typed quote and reaction changes
 - inline approval/capability operation state
 - contextual reconnect/loading state

@@ -1,12 +1,10 @@
 import { canonicalJsonBytes } from "../../durability/index.js";
-import {
-  CONVERSATION_TERMINAL_LIFECYCLE,
-  type ConversationTerminalLifecycleV1,
-} from "./conversation-public-wire-contract.js";
+import type { ConversationTerminalLifecycleV1 } from "./conversation-public-wire-contract.js";
 import {
   bindingAuthorities,
   configurationEmissions,
   isTerminalLifecycle,
+  terminalResultStatus,
 } from "./policy-registry.js";
 import type { RuntimeCreateRequest } from "./policy-registry.js";
 import { preparedStartCorrelation } from "./prepared-start-correlation.js";
@@ -81,14 +79,7 @@ function terminalResult(
     revision_id: manifest.revision_id,
     result: {
       operation_id: operationId,
-      status:
-        lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED
-          ? "completed"
-          : lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.STOPPED
-            ? "stopped"
-            : lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.FAILED
-              ? "failed"
-              : "aborted",
+      status: terminalResultStatus(lifecycle),
       artifact_refs: [],
     },
   };

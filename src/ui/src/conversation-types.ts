@@ -7,8 +7,8 @@ import {
   type CONVERSATION_DECISION_OUTCOME,
   type CONVERSATION_INVALID_ASSESSMENT_REASON,
   type CONVERSATION_LIFECYCLE,
-  CONVERSATION_TERMINAL_LIFECYCLES,
   type CONVERSATION_TRACE_EVENT_KIND,
+  isConversationTerminalLifecycle,
 } from "../../orchestrator/conversation/conversation-public-wire-contract.js";
 
 export type ConversationEngine = Engine;
@@ -360,6 +360,4 @@ export {
   recoverConversationStreamAttempt,
 } from "./conversation-stream-attempt.js";
 
-export function isTerminalLifecycle(lifecycle: ConversationLifecycle): boolean {
-  return CONVERSATION_TERMINAL_LIFECYCLES.some((candidate) => candidate === lifecycle);
-}
+export const isTerminalLifecycle = isConversationTerminalLifecycle;

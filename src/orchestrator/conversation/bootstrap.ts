@@ -29,10 +29,13 @@ import type { ConversationActionDomainPlannerExecutorV1 } from "./conversation-a
 import type { ConversationActionService } from "./conversation-action-service.js";
 import { ConversationAgentActionCandidateAuthorityV1 } from "./conversation-agent-action-candidate-authority.js";
 import { createConversationBrowserAuthorities } from "./conversation-browser-authorities.js";
+import type { ConversationDelegationWorkspaceVerifierV1 } from "./conversation-delegation-workspace-verification.js";
+import { ConversationDelegationWorkspaceAuthorityV1 } from "./conversation-delegation-workspace.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import type { ConversationMessageQueueRuntimeV1 } from "./conversation-message-queue-runtime.js";
 import { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
 import { ConversationUserMessageAuthorityV1 } from "./conversation-user-message-authority.js";
+import { CoordinateConversationPolicy } from "./coordinate-policy.js";
 import { DebateConversationPolicy } from "./debate-policy.js";
 import { DirectConversationPolicy } from "./direct-policy.js";
 import { fail as rejectConversationState } from "./fold-validation.js";
@@ -88,6 +91,7 @@ export interface ConversationBootstrapOptions extends ConversationRequestResolut
     point: "after-proposal-materialized";
     conversation_id: string;
   }) => Promise<void>;
+  coordinationVerifier?: ConversationDelegationWorkspaceVerifierV1;
 }
 export interface ConversationBootstrap {
   service: ConversationOrchestrator;
@@ -104,6 +108,7 @@ export interface ConversationBootstrap {
     homeAuthorities: ConversationHomeAuthorities;
     policies: ConversationPolicyRegistry;
     agentActionCandidates: ConversationAgentActionCandidateAuthorityV1;
+    coordinationWorkspaces: ConversationDelegationWorkspaceAuthorityV1;
     messageQueue: ConversationMessageQueueRuntimeV1;
     privateContextBroker: ConversationPrivateContextBrokerV1;
     browser: ReturnType<typeof createConversationBrowserAuthorities>;
@@ -187,6 +192,11 @@ export function createConversationBootstrap(
       : {}),
   });
   const isolationAuthority = options.isolationAuthority ?? defaultConversationIsolationAuthority;
+  const coordinationWorkspaces = new ConversationDelegationWorkspaceAuthorityV1({
+    artifactRoot,
+    now,
+    ...(options.coordinationVerifier ? { verify: options.coordinationVerifier } : {}),
+  });
   const bindingIsolation =
     options.bindingFactory && !options.isolationAuthority ? undefined : isolationAuthority;
   const sessionAdapter = withAttemptIsolation(
@@ -197,6 +207,7 @@ export function createConversationBootstrap(
     }),
     isolationAuthority,
     repoRoot,
+    coordinationWorkspaces,
   );
   const locatePlan = persistedPlanLocator(artifactStore);
   const plan = new InjectedPlanService({ ...options.libraries.plan, locate: locatePlan });
@@ -222,8 +233,10 @@ export function createConversationBootstrap(
     review: reviewPolicy,
     verify: verifyPolicy,
   });
+  const coordinatePolicy = new CoordinateConversationPolicy();
   const policies = new ConversationPolicyRegistry([
     new DirectConversationPolicy(),
+    coordinatePolicy,
     new DebateConversationPolicy(),
     planPolicy,
     reviewPolicy,
@@ -252,6 +265,7 @@ export function createConversationBootstrap(
     homeAuthorities,
     socialAuthority,
     agentActionCandidates,
+    coordinationWorkspaces,
     privateContextBroker,
     messageQueueUserAuthority,
     sessionAdapter,
@@ -313,6 +327,7 @@ export function createConversationBootstrap(
       homeAuthorities,
       policies,
       agentActionCandidates,
+      coordinationWorkspaces,
       messageQueue: service.messageQueue,
       privateContextBroker,
       browser,

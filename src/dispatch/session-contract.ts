@@ -46,6 +46,16 @@ export const ENGINE_SESSION_MODE = Object.freeze({
 export type EngineSessionMode = (typeof ENGINE_SESSION_MODE)[keyof typeof ENGINE_SESSION_MODE];
 export const ENGINE_SESSION_MODES = Object.freeze(Object.values(ENGINE_SESSION_MODE));
 
+/** What native-history reconciliation proves about exact session continuity. */
+export const NATIVE_HISTORY_CONTINUITY = Object.freeze({
+  INTACT: "intact",
+  COMPACTED: "compacted",
+  UNPROVED: "unproved",
+} as const);
+
+export type NativeHistoryContinuity =
+  (typeof NATIVE_HISTORY_CONTINUITY)[keyof typeof NATIVE_HISTORY_CONTINUITY];
+
 /** Engines whose CLI can resume one caller-supplied, validated native session id. */
 export const ENGINE_EXACT_SESSION_RESUME = Object.freeze({
   CLAUDE: AGENT_ENGINE.CLAUDE,
@@ -64,6 +74,48 @@ export const supportsExactNativeSessionResume = (
 ): engine is EngineExactSessionResume =>
   ENGINE_EXACT_SESSION_RESUME_ENGINES.some((candidate) => candidate === engine);
 
+/** Engines whose native CLI can enforce a resolved conversation role sandbox. */
+export const ENGINE_CONVERSATION_ROLE_AUTHORITY = Object.freeze({
+  CLAUDE: AGENT_ENGINE.CLAUDE,
+  COPILOT: AGENT_ENGINE.COPILOT,
+  CODEX: AGENT_ENGINE.CODEX,
+} as const);
+export type EngineConversationRoleAuthority =
+  (typeof ENGINE_CONVERSATION_ROLE_AUTHORITY)[keyof typeof ENGINE_CONVERSATION_ROLE_AUTHORITY];
+export const ENGINE_CONVERSATION_ROLE_AUTHORITY_ENGINES = Object.freeze(
+  Object.values(ENGINE_CONVERSATION_ROLE_AUTHORITY),
+) as readonly EngineConversationRoleAuthority[];
+export const supportsConversationRoleAuthority = (
+  engine: Engine,
+): engine is EngineConversationRoleAuthority =>
+  ENGINE_CONVERSATION_ROLE_AUTHORITY_ENGINES.some((candidate) => candidate === engine);
+
+/** Engines whose native terminal protocol authenticates model output for coordination. */
+export const ENGINE_AUTHENTICATED_COORDINATION_OUTPUT = Object.freeze({
+  CLAUDE: AGENT_ENGINE.CLAUDE,
+  CODEX: AGENT_ENGINE.CODEX,
+} as const);
+export type EngineAuthenticatedCoordinationOutput =
+  (typeof ENGINE_AUTHENTICATED_COORDINATION_OUTPUT)[keyof typeof ENGINE_AUTHENTICATED_COORDINATION_OUTPUT];
+export const ENGINE_AUTHENTICATED_COORDINATION_OUTPUT_ENGINES = Object.freeze(
+  Object.values(ENGINE_AUTHENTICATED_COORDINATION_OUTPUT),
+) as readonly EngineAuthenticatedCoordinationOutput[];
+export const supportsAuthenticatedCoordinationOutput = (
+  engine: Engine,
+): engine is EngineAuthenticatedCoordinationOutput =>
+  ENGINE_AUTHENTICATED_COORDINATION_OUTPUT_ENGINES.some((candidate) => candidate === engine);
+
+/** Phase 1 is intentionally narrower because it requires the live-probed bootstrap route. */
+export const ENGINE_PHASE_ONE_CONVERSATION_AUTHORITY = Object.freeze({
+  CLAUDE: AGENT_ENGINE.CLAUDE,
+  CODEX: AGENT_ENGINE.CODEX,
+} as const);
+export const ENGINE_PHASE_ONE_CONVERSATION_AUTHORITY_ENGINES = Object.freeze(
+  Object.values(ENGINE_PHASE_ONE_CONVERSATION_AUTHORITY),
+);
+export const supportsPhaseOneConversationAuthority = (engine: Engine): boolean =>
+  ENGINE_PHASE_ONE_CONVERSATION_AUTHORITY_ENGINES.some((candidate) => candidate === engine);
+
 export const ENGINE_ISOLATION_KIND = Object.freeze({
   WORKTREE: "worktree",
   CONTAINER: "container",
@@ -72,6 +124,14 @@ export const ENGINE_ISOLATION_KIND = Object.freeze({
 export type EngineIsolationKind =
   (typeof ENGINE_ISOLATION_KIND)[keyof typeof ENGINE_ISOLATION_KIND];
 export const ENGINE_ISOLATION_KINDS = Object.freeze(Object.values(ENGINE_ISOLATION_KIND));
+
+export const ENGINE_COORDINATION_WORKSPACE_ACCESS = Object.freeze({
+  EXECUTOR: "executor",
+  REVIEW: "review",
+} as const);
+
+export type EngineCoordinationWorkspaceAccess =
+  (typeof ENGINE_COORDINATION_WORKSPACE_ACCESS)[keyof typeof ENGINE_COORDINATION_WORKSPACE_ACCESS];
 
 export const ENGINE_ROLE_SOURCE = AGENT_ROLE_SOURCE;
 

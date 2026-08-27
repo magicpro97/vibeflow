@@ -78,6 +78,8 @@ function enqueue(
       schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
       idempotency_key: `coverage-${admitted.conversation_id}`,
       expected_authority_digest: admitted.authority_digest,
+      client_instance_id: `coverage-client-${admitted.conversation_id}`,
+      client_order: 1,
       content: "queued coverage message",
       target_participants: "all",
       quote_refs: [],

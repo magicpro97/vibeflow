@@ -114,7 +114,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { describeHomeCatalogLoading } from "../conversation-home-loading.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import type { ConversationLifecycle } from "../conversation-home-types.js";
+import { homeConversationLifecycleLabel } from "../conversation-lifecycle-presentation.js";
 
 const store = useConversationHomeStore();
 const railRoot = ref<HTMLElement | null>(null);
@@ -127,16 +127,7 @@ const catalogLoading = computed(() =>
   }),
 );
 
-const lifecycleLabel = (value: ConversationLifecycle) =>
-  ({
-    INIT: "Starting",
-    ACTIVE: "Active",
-    PAUSED: "Paused",
-    COMPLETED: "Complete",
-    STOPPED: "Stopped",
-    FAILED: "Failed",
-    ABORTED: "Aborted",
-  })[value];
+const lifecycleLabel = homeConversationLifecycleLabel;
 
 function relativeTime(value: string): string {
   const elapsed = Date.now() - Date.parse(value);

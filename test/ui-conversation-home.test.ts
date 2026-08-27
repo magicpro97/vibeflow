@@ -16,6 +16,8 @@ import { projectHomeTrace } from "../src/ui/src/conversation-home-projection.js"
 import { createHomeQueryRuntime } from "../src/ui/src/conversation-home-query-runtime.js";
 import {
   captureHomeCommandToken,
+  homeCapabilityAuthoritySignature,
+  isHomeBrowserOnline,
   matchesHomeCommandToken,
   retainSelectedHomeSession,
 } from "../src/ui/src/conversation-home-runtime.js";
@@ -35,6 +37,7 @@ import type {
   HomeCapabilityItem,
   HomeQuoteReference,
   HomeReactionSummary,
+  HomeRevisionSummary,
   HomeSessionSummary,
   HomeTimelineItem,
   HomeTimelineResponse,
@@ -70,6 +73,35 @@ const emptyQueueHooks = () => ({
 });
 
 describe("AI-first conversation Home", () => {
+  test("store authorities project browser connectivity and capability identity deterministically", () => {
+    expect(isHomeBrowserOnline(null)).toBeTrue();
+    expect(isHomeBrowserOnline({})).toBeTrue();
+    expect(isHomeBrowserOnline({ navigator: { onLine: false } })).toBeFalse();
+    expect(isHomeBrowserOnline({ navigator: { onLine: true } })).toBeTrue();
+    expect(homeCapabilityAuthoritySignature("root-a", null)).toBe("root-a\0unavailable");
+    expect(
+      homeCapabilityAuthoritySignature("root-a", {
+        conversation_id: "conversation-a",
+        revision_id: "revision-a",
+        last_seq: 7,
+        lock_digest: "sha256:lock",
+        participants: [
+          { participant_id: "participant-a", engine: "codex" },
+          { participant_id: "participant-b", engine: "claude" },
+        ],
+      } as HomeRevisionSummary),
+    ).toBe(
+      [
+        "root-a",
+        "conversation-a",
+        "revision-a",
+        7,
+        "sha256:lock",
+        "codex\0participant-a\0claude\0participant-b",
+      ].join("\0"),
+    );
+  });
+
   test("switching sessions invalidates stale callbacks and resources", () => {
     const activation = new ActivationEpoch();
     const cleaned: string[] = [];
@@ -1409,6 +1441,10 @@ describe("AI-first conversation Home", () => {
             restoreIfVacant() {
               if (privateContextPresent) return false;
               privateContextPresent = true;
+              return true;
+            },
+            async discardRetained() {
+              privateContextPresent = false;
               return true;
             },
           }

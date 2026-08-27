@@ -29,6 +29,7 @@ const queryRuntime = read("../src/ui/src/conversation-home-query-runtime.ts");
 const commandRuntime = read("../src/ui/src/conversation-home-command-runtime.ts");
 const streamRuntime = read("../src/ui/src/conversation-home-stream.ts");
 const queueTypes = read("../src/ui/src/conversation-home-message-queue-types.ts");
+const queueAuthority = read("../src/ui/src/conversation-home-message-queue-authority.ts");
 const queueRuntime = read("../src/ui/src/conversation-home-message-queue-runtime.ts");
 const queueAdmissions = read("../src/ui/src/conversation-home-message-queue-admission-runtime.ts");
 const privateContextRuntime = read("../src/ui/src/conversation-home-private-context-runtime.ts");
@@ -130,7 +131,7 @@ describe("AI-first Home source contract", () => {
     expect(composer).toContain('@compositionstart="composing = true"');
     expect(composer).toContain("event.isComposing");
     expect(composer).toContain("describeHomeComposerBusy");
-    expect(composer).toContain("aria-busy=\"composerBusy.active ? 'true' : 'false'\"");
+    expect(composer).toContain("aria-busy=\"composerBusy.blocksSubmit ? 'true' : 'false'\"");
     expect(composer).toContain("Shift+Enter");
     expect(composer).toContain("will not send itself");
     expect(Object.isFrozen(HOME_COMPOSER_INTENT_KIND)).toBeTrue();
@@ -153,7 +154,33 @@ describe("AI-first Home source contract", () => {
     expect(composer).toContain('event.key === "ArrowUp"');
     expect(composer).toContain("event.isComposing");
     expect(composer).toContain("Send as new");
+    expect(composer).toContain("HOME_QUEUED_MESSAGE_PROJECTION_KIND.OPTIMISTIC");
+    expect(composer).toContain("quoteChips.value.length === 0");
+    expect(composer).toContain("!store.privateContextPresent");
+    expect(home).toContain(':disabled="Boolean(store.queuedMessageEdit)"');
+    expect(messageInteractions).toContain(':disabled="Boolean(store.queuedMessageEdit)"');
+    expect(commandRuntime).toContain("if (input.messageQueue.currentEdit()) return");
     expect(queuedMessages).toContain("row.item.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED");
+    expect(queuedMessages).toContain("store.queueRecoveryComposerVacant");
+    expect(queuedMessages).toContain("store.recoverFailedQueuedMessage");
+    expect(queuedMessages).toContain("store.dismissFailedQueuedMessage");
+    expect(queuedMessages).toContain("globalThis.confirm");
+    expect(queuedMessages).toContain('"Restore to edit"');
+    expect(queuedMessages).toContain('"Restore as new draft"');
+    expect(queuedMessages).toContain('"Refresh and restore"');
+    expect(queuedMessages).toContain('"Restoring…"');
+    expect(queuedMessages).toContain('"Discarding…"');
+    expect(queuedMessages).toContain("vf authority repair --scope project");
+    expect(queuedMessages).toContain("vf authority repair --scope user");
+    expect(queuedMessages).not.toMatch(/>\s*Restore\s*</u);
+    expect(store).toContain("queryRuntime.selectSession(rootSessionId)");
+    expect(queueAuthority).toContain("CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION.SEND_AS_NEW");
+    expect(queueAuthority).toContain("await input.selectSession(rootSessionId)");
+    expect(queueAuthority).toContain("return await input.dismiss(projectionKey)");
+    expect(queueAuthority).toContain("private context cleanup can be confirmed");
+    expect(store).toContain("restore: messageQueueRuntime.restoreNeedsAction");
+    expect(store).toContain("dismiss: messageQueueRuntime.dismissNeedsAction");
+    expect(queueAdmissions).toContain("input.setSendAsNew(sendAsNew)");
     expect(queueAdmissions).toContain("entry.request.idempotency_key");
     expect(queueAdmissions).not.toMatch(/localStorage|sessionStorage|document\.cookie/);
     expect(queueRuntime).not.toMatch(/localStorage|sessionStorage|document\.cookie/);
@@ -220,6 +247,8 @@ describe("AI-first Home source contract", () => {
     expect(capability).toContain("No honest adapter exists");
     expect(capability).toContain("describeHomeCapabilityLoading");
     expect(capability).toContain("store.proposeCapabilityRepair");
+    expect(capability).toContain("Your draft was preserved");
+    expect(capability).toContain("store.queuedMessageEdit");
     expect(capability).not.toMatch(/mock|fake installer/i);
   });
 
@@ -286,7 +315,8 @@ describe("AI-first Home source contract", () => {
   });
 
   test("loading states stay contextual instead of falling back to generic spinners", () => {
-    expect(loading).toContain("Queueing brief");
+    expect(loading).toContain("Adding message to queue");
+    expect(loading).toContain("Preparing change");
     expect(loading).toContain("Opening a fresh room");
     expect(loading).toContain("Checking route authority");
     expect(homeCss).toContain(".home-loading-panel");
@@ -309,6 +339,7 @@ describe("AI-first Home source contract", () => {
       queryRuntime,
       commandRuntime,
       operationStream,
+      queueAuthority,
     ]) {
       expect(source).not.toMatch(/\bnative_session_id\b|\bprompt_template\b|\braw_env\b/);
       expect(source).not.toContain("v-html");

@@ -8,6 +8,7 @@ import {
   CONVERSATION_TERMINAL_LIFECYCLE,
   CONVERSATION_TRANSITION_LIFECYCLE,
   type ConversationTransitionLifecycleV1,
+  isConversationGracefulTerminalLifecycle,
 } from "./conversation-public-wire-contract.js";
 import { previewBindingPolicyContext } from "./emission-authority.js";
 import type { LiveConversation } from "./lifecycle-gate.js";
@@ -342,7 +343,7 @@ export class ConversationRuntime {
         effective = this.emissions.adoptTerminal(id, live.operationId, winner);
       } else if (
         error instanceof TraceLifecycleConflictError &&
-        ((lifecycle === CONVERSATION_TERMINAL_LIFECYCLE.COMPLETED &&
+        ((isConversationGracefulTerminalLifecycle(lifecycle) &&
           error.durableLifecycle === CONVERSATION_TRANSITION_LIFECYCLE.PAUSED) ||
           (lifecycle !== CONVERSATION_TERMINAL_LIFECYCLE.ABORTED &&
             error.durableLifecycle === CONVERSATION_TERMINAL_LIFECYCLE.ABORTED))

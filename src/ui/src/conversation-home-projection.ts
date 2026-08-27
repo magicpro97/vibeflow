@@ -1,6 +1,10 @@
 import { CONVERSATION_TRACE_EVENT_KIND } from "../../orchestrator/conversation/conversation-public-wire-contract.js";
 import { homeReactionLabel } from "./conversation-home-authoring.js";
 import { homeParticipantDisplayLabel } from "./conversation-home-participant-label.js";
+import {
+  homeConversationLifecycleLabel,
+  homeConversationTerminalDetail,
+} from "./conversation-lifecycle-presentation.js";
 export type { RenderedHomeTraceEntry } from "./conversation-home-trace-projection.js";
 export { projectHomeTrace } from "./conversation-home-trace-projection.js";
 import type {
@@ -294,7 +298,7 @@ export function projectHomeTimeline(
         output.push(
           systemItem(
             event.event_id,
-            text(payload.lifecycle, "State changed"),
+            homeConversationLifecycleLabel(payload.lifecycle),
             payload.reason
               ? text(payload.reason)
               : `Conversation is ${text(payload.health, "updated")}.`,
@@ -308,10 +312,10 @@ export function projectHomeTimeline(
         output.push(
           systemItem(
             event.event_id,
-            text(payload.lifecycle, "Conversation complete"),
+            homeConversationLifecycleLabel(payload.lifecycle),
             typeof payload.final_score === "number"
               ? `Final confidence ${Math.round(payload.final_score * 100)}%.`
-              : "The conversation reached a terminal state.",
+              : homeConversationTerminalDetail(payload.lifecycle),
             item.revision_ordinal,
             event.ts,
             operations,

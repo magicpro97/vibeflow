@@ -1,19 +1,15 @@
 import { expect, test } from "bun:test";
+import { CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE } from "../../src/orchestrator/conversation/conversation-command-result-contract.js";
 import { ConversationStartAuthorityV1 } from "../../src/orchestrator/conversation/service-start-authority.js";
 import type {
   ConversationManifest,
   ConversationStartResult,
 } from "../../src/orchestrator/conversation/types.js";
 
-const TERMINAL_LIFECYCLE_STATUS = {
-  COMPLETED: "completed",
-  STOPPED: "stopped",
-  FAILED: "failed",
-  ABORTED: "aborted",
-} as const;
-
 test("allocated start replay maps every durable terminal lifecycle", async () => {
-  for (const [lifecycle, status] of Object.entries(TERMINAL_LIFECYCLE_STATUS)) {
+  for (const [lifecycle, status] of Object.entries(
+    CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE,
+  )) {
     const authority = new ConversationStartAuthorityV1(
       {
         snapshot: async () => ({ lifecycle }),

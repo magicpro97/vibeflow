@@ -12,6 +12,7 @@ import { ACTION_PLANNING_NETWORK_READ_VALUE } from "../../actions/public-action-
 import { DIGEST } from "../../actions/record-primitives.js";
 import type { HostActionRequestV1 } from "../../actions/request-types.js";
 import { validateHostActionRequest } from "../../actions/validation.js";
+import type { AuthorityAutomationGrantProofV1 } from "../../capabilities/authority-mutation/types.js";
 import type {
   CapabilityCliAuthorityRepairExecutionV1,
   CapabilityCliAuthoritySecretRevokeExecutionV1,
@@ -41,6 +42,44 @@ const TRUST_TRANSITIONS = {
   [CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_DEPRECATE]: CAPABILITY_TRUST_TRANSITION.DEPRECATED,
   [CAPABILITY_CLI_COMMAND.AUTHORITY_TRUST_REVOKE]: CAPABILITY_TRUST_TRANSITION.REVOKED,
 } as const;
+
+const AUTOMATION_GRANT_PROOF_KEYS = Object.freeze([
+  "schema_version",
+  "scope",
+  "public_actor_id",
+  "grant_id",
+  "grant_frame_digest",
+  "authority_epoch",
+  "authority_head_digest",
+] as const);
+
+export function decodeAuthorityAutomationGrantProof(
+  path: string,
+  reader: (() => Uint8Array | string) | undefined,
+): AuthorityAutomationGrantProofV1 {
+  const row = exactObject(
+    readStrictJsonSource(path, reader, "authority automation grant proof"),
+    [...AUTOMATION_GRANT_PROOF_KEYS],
+    [],
+    "$",
+  );
+  if (
+    row.schema_version !== "1.0" ||
+    !isCapabilityScope(row.scope) ||
+    typeof row.public_actor_id !== "string" ||
+    row.public_actor_id.length === 0 ||
+    typeof row.grant_id !== "string" ||
+    row.grant_id.length === 0 ||
+    typeof row.grant_frame_digest !== "string" ||
+    !DIGEST.test(row.grant_frame_digest) ||
+    !Number.isSafeInteger(row.authority_epoch) ||
+    (row.authority_epoch as number) < 0 ||
+    typeof row.authority_head_digest !== "string" ||
+    !DIGEST.test(row.authority_head_digest)
+  )
+    throw new CapabilityCliUsageError("authority automation grant proof is invalid");
+  return row as unknown as AuthorityAutomationGrantProofV1;
+}
 
 export function authorityMutationInput(
   parsed: ParsedAuthorityCliArgvV1,

@@ -13,11 +13,14 @@ import {
   classifyConversationResult,
   conversationJsonErrorCode,
 } from "../orchestrator/conversation/conversation-command-exit.js";
-import { CONVERSATION_COMMAND_RESULT_STATUS } from "../orchestrator/conversation/conversation-command-result-contract.js";
 import {
-  CONVERSATION_LIFECYCLE,
-  CONVERSATION_TERMINAL_LIFECYCLES,
+  CONVERSATION_COMMAND_RESULT_STATUS,
+  CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE,
+} from "../orchestrator/conversation/conversation-command-result-contract.js";
+import { runConversationDelegationVerificationOracles } from "../orchestrator/conversation/conversation-delegation-workspace-verification.js";
+import {
   CONVERSATION_TRACE_EVENT_KIND,
+  isConversationTerminalLifecycle,
 } from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import type {
   OrchestrateLibrary,
@@ -179,13 +182,9 @@ const readBriefRaw = (base: string): string | null => {
 const sidecarPlanPath = (base: string, revisionId: string): string =>
   join(base, ".vibeflow", "plans", `${revisionId}.md`);
 const lifecycleStatus = (lifecycle: string): ConversationExecutionRecord["status"] =>
-  lifecycle === CONVERSATION_LIFECYCLE.COMPLETED
-    ? CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED
-    : lifecycle === CONVERSATION_LIFECYCLE.STOPPED
-      ? CONVERSATION_COMMAND_RESULT_STATUS.STOPPED
-      : lifecycle === CONVERSATION_LIFECYCLE.ABORTED
-        ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
-        : CONVERSATION_COMMAND_RESULT_STATUS.FAILED;
+  isConversationTerminalLifecycle(lifecycle)
+    ? CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE[lifecycle]
+    : CONVERSATION_COMMAND_RESULT_STATUS.FAILED;
 
 const runVerifyReport = async (
   base: string,
@@ -251,6 +250,18 @@ export function conversationBootstrap(deps: ConversationCommandDeps = {}, base =
   return createConversationBootstrap({
     repoRoot: base,
     libraries: deps.bootstrap?.libraries ?? productionLibraries(base),
+    coordinationVerifier: async ({ cwd: workspace, expected_oracles: expectedOracles }) => {
+      const oracleResults = await runConversationDelegationVerificationOracles(
+        workspace,
+        expectedOracles,
+      );
+      const report = (
+        await collectVerifyReportAsync(workspace, {
+          requireReviewEvidence: false,
+        })
+      ).gates;
+      return { oracle_results: oracleResults, report };
+    },
     ...(deps.bootstrap ?? {}),
   });
 }
@@ -341,7 +352,7 @@ export async function executeConversationMessage(
     while (true) {
       const snapshot = await service.snapshot(targetConversationId);
       if (!snapshot) throw new Error("conversation not found");
-      if (CONVERSATION_TERMINAL_LIFECYCLES.some((value) => value === snapshot.lifecycle)) {
+      if (isConversationTerminalLifecycle(snapshot.lifecycle)) {
         await stream.replayReady;
         return {
           conversationId: targetConversationId,

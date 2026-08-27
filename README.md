@@ -27,6 +27,8 @@ VibeFlow is a local-first npm CLI tool that opens AI-first Home and helps users 
 
 It collects task context, reads project sources, selects skills, generates tool-specific instruction files, dispatches the canonical owned async route to the selected CLI, verifies results, and keeps the conversation and review surfaces inside VibeFlow.
 
+When a route needs more than one participant, typed add-participant actions promote a direct route into coordinate through proposal, review, and commit, and removing the last executor collapses it back to direct. The coordinator is the sole authority for the route; the executor is a different admitted engine that only carries out the committed work. Executor clarifications route back to the coordinator first, which resolves them by task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort. Exact native session resume stays engine-local; when exact proof is unavailable or supported native reconciliation detects compaction, VibeFlow revokes exact authority and falls back to bounded replay. Bare coordinate routes currently admit Claude and Codex because both can enforce the resolved role sandbox and return authenticated structured coordination output. Copilot, OpenCode, and Antigravity remain available on workflow transports and fail closed for coordinate authority until their adapters can prove the same contract.
+
 On a fresh clone, arm the guardrail before any human edit:
 
 ```bash
@@ -125,29 +127,13 @@ Run `vf init` in a TTY for the repository intake questionnaire (`--no-ask` skips
 OS-selected free port. If a requested fixed port is busy, the interactive CLI offers a
 free-port fallback and a non-interactive launch stops.
 
-Home uses the same durable runtime as `vf ask`, `vf chat`, and `vf brainstorm`. Add or
-remove an agent from the composer or participant details, send while agents are working,
-edit the latest queued human message with ArrowUp, quote one or more visible messages, and
-use restrained typed reactions. Approval and capability actions stay inline with the chat.
-An unacknowledged admission failure remains visible as an explicit retryable row. Retry
-reuses the exact request and idempotency key; it never clears a newer composer draft, and
-offline retry is explicit rather than automatic. The rejected row is current Home UI state,
-not `localStorage` or a promise that it survives a browser restart.
+Home uses the same durable runtime as `vf ask`, `vf chat`, and `vf brainstorm`. Add or remove an agent from the composer or participant details, send while agents are working, edit the latest queued human message with ArrowUp, quote one or more visible messages, and use restrained typed reactions. Typed add-participant actions promote a direct route into coordinate through proposal, review, and commit, and removing the last executor collapses it back to direct. Approval and capability actions stay inline with the chat. Only a transport-ambiguous request, or a typed admission error with `retryable: true` and `recovery_action: retry`, becomes an explicit retryable row. Typed failure retries are user-triggered and reuse the exact request and idempotency key. If the browser goes offline during an in-flight admission, Home retains that exact request as **Reconciling**; after an authoritative refresh it automatically replays the same idempotency key to learn whether the server already won. A non-retryable failure that collides with newer composer state retains its exact payload as **Needs action** for typed recovery or confirmed dismissal; it never auto-resends or overwrites the newer draft. Rejected rows are current Home UI state, not `localStorage` or a promise that they survive a browser restart.
 Public result ids remain distinct from the opaque fetch references carried by artifact
 trace events.
 See the [conversation guide](./docs/USER_GUIDE.md#conversation-workspace) and
 [exact CLI/API contract](./docs/COMMAND_REFERENCE.md#conversations).
 
-Exact by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode uses
-`opencode run --session <validated-ses-id> --format json`; Copilot and Antigravity never
-silently claim exact resume. With valid exact proof, the CLI keeps its own history and
-VibeFlow sends only new applicable user messages and peer-agent deltas, without echoing the
-recipient's prior output. Without valid exact authority, turn delivery includes canonical
-user/peer context plus a bounded structured replay of the recipient's last eight public
-responses (at most 2 KiB UTF-8 each) with provenance, digest, and count fields. Own history
-is therefore never silently omitted. Private file ranges use a separate one-shot structured
-payload and never become public trace data. A large Copilot prompt may use a short pointer
-to `.vibeflow/dispatch/<unit>.md`; that file is transport, not memory.
+Exact by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode uses `opencode run --session <validated-ses-id> --format json`; Copilot and Antigravity never silently claim exact resume. With valid exact proof, the CLI keeps its own history and VibeFlow sends only new applicable user messages and peer-agent deltas, without echoing the recipient's prior output. When supported native reconciliation detects compacted context or exact proof is unavailable, turn delivery falls back to canonical user/peer context plus a bounded structured replay of the recipient's last eight public responses (at most 2 KiB UTF-8 each) with provenance, digest, and count fields. Own history is therefore never silently omitted. Private file ranges use a separate one-shot structured payload and never become public trace data. A large Copilot prompt may use a short pointer to `.vibeflow/dispatch/<unit>.md`; that file is transport, not memory.
 
 VibeFlow remains the harness, not another coding engine. Its dynamic capability fabric
 extends the selected CLI with reviewed skills, MCP servers, tools, hooks, roles, and engine
@@ -239,6 +225,7 @@ Skill evolution proposal
 - Read project documents from sources such as GitHub, Jira, Google Drive, Confluence, Notion, local folders, and others.
 - Process files such as Markdown, DOCX, XLSX, PPTX, PDF, OpenAPI, Postman, Mermaid, and Draw.io.
 - Use hooks as guardrails across all supported engines.
+- Keep coordinator/executor routes bounded: only fresh user and peer-agent context enters the turn, clarifications route to the coordinator first, and clarification/recovery stays in the linked worktree that produced it.
 - Avoid hallucination through evidence, verification, confidence thresholds, and reviewer agents.
 - Generate the fewest files possible, all produced by AI from canonical context rather than static templates.
 - Continuously improve internal skills from real execution lessons.

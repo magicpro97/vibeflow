@@ -38,6 +38,7 @@ import {
   conversationRevisionActionPlanDigest,
   materializeConversationRevisionActionPlan,
 } from "./conversation-revision-action-plan.js";
+import { conversationRevisionPolicyAuthorityDigest } from "./conversation-revision-policy-authority.js";
 import type { LineageActionPlanBindingV1 } from "./lineage-action-authority.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
 import type { LineageHeadRecordV1 } from "./lineage-types.js";
@@ -71,7 +72,16 @@ export interface ConversationRevisionActionPlanInputV1 {
   message_key: string;
   authority: ActionRequestAuthorityV1;
   revision_plan: RevisionPreparationPlanV1;
+  topology_authority?: ConversationRevisionTopologyProposalAuthorityV1;
   created_at: string;
+}
+
+export interface ConversationRevisionTopologyProposalAuthorityV1 {
+  before: JsonValue;
+  after: JsonValue;
+  before_topology_digest: string;
+  topology_digest: string;
+  resolved_binding_set_digest: string;
 }
 
 export type ContinueMessageActionPlanInputV1 = Omit<
@@ -197,10 +207,46 @@ export function materializeConversationRevisionProposal(
   );
   const authorityHead = conversationActionAuthorityHead(input);
   const expiresAt = plusMilliseconds(input.created_at, 60 * 60_000);
+  const policyDigest = input.topology_authority
+    ? conversationRevisionPolicyAuthorityDigest({
+        root_session_id: input.root_session_id,
+        conversation_lock_digest: input.conversation_lock_digest,
+        topology_digest: input.topology_authority.topology_digest,
+        resolved_binding_set_digest: input.topology_authority.resolved_binding_set_digest,
+      })
+    : digestV1("VF-CONVERSATION-ACTION-POLICY\0v1\0", {
+        schema_version: "1.0",
+        root_session_id: input.root_session_id,
+        conversation_lock_digest: input.conversation_lock_digest,
+      });
   const previewRules = digestV1("VF-CONVERSATION-ACTION-PREVIEW-RULES\0v1\0", {
     schema_version: "1.0",
     action_type: action.type,
+    before_topology_digest: input.topology_authority?.before_topology_digest ?? null,
+    topology_digest: input.topology_authority?.topology_digest ?? null,
   });
+  const reviewFields = [
+    {
+      json_pointer: preview.pointer,
+      label: preview.label,
+      before: null,
+      after: preview.after,
+      private_binding_digest: null,
+    },
+    ...(input.topology_authority
+      ? [
+          {
+            json_pointer: "/derived_topology",
+            label: "Derived policy, roles, sandbox, and tools",
+            before: input.topology_authority.before,
+            after: input.topology_authority.after,
+            private_binding_digest: policyDigest,
+          },
+        ]
+      : []),
+  ].sort((left, right) =>
+    Buffer.compare(Buffer.from(left.json_pointer), Buffer.from(right.json_pointer)),
+  );
   const draft: ActionProposalDraftV1 = {
     schema_version: "1.0",
     idempotency_key: input.message_key,
@@ -244,11 +290,7 @@ export function materializeConversationRevisionProposal(
     adapter_set_digest: EMPTY_ADAPTER_SET_DIGEST,
     plan_digest: actionPlanDigest,
     handoff_selection_digest: input.revision_plan.handoff_selection_plan_digest,
-    policy_digest: digestV1("VF-CONVERSATION-ACTION-POLICY\0v1\0", {
-      schema_version: "1.0",
-      root_session_id: input.root_session_id,
-      conversation_lock_digest: input.conversation_lock_digest,
-    }),
+    policy_digest: policyDigest,
     grant_digest: digestV1("VF-CONVERSATION-ACTION-GRANT\0v1\0", {
       schema_version: "1.0",
       credential_class: input.authority.actor.credential_class,
@@ -263,15 +305,7 @@ export function materializeConversationRevisionProposal(
         mode: ACTION_PLANNING_MODE.DURABLE,
         network_read: ACTION_PLANNING_NETWORK_READ_VALUE.ORDINARY_HOST_POLICY,
       },
-      review_fields: [
-        {
-          json_pointer: preview.pointer,
-          label: preview.label,
-          before: null,
-          after: preview.after,
-          private_binding_digest: null,
-        },
-      ],
+      review_fields: reviewFields,
       targets: [],
       target_dispositions: [],
       package_pins: [],
@@ -289,6 +323,8 @@ export function materializeConversationRevisionProposal(
         schema_version: "1.0",
         rules_digest: previewRules,
         action,
+        before_topology_digest: input.topology_authority?.before_topology_digest ?? null,
+        topology_digest: input.topology_authority?.topology_digest ?? null,
       }),
     },
     created_at: input.created_at,

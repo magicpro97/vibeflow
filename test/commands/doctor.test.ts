@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectRepo, doctor, resolveRepo } from "../../src/commands.js";
 import { gitGuardrailArmed, guardrailOffNote } from "../../src/commands.js";
+import { inspectDoctorOwnedProcesses } from "../../src/dispatch/doctor-owned-process-health.js";
+import { createOwnedProcessPlatform } from "../../src/dispatch/owned-process-platform.js";
+import { OwnedProcessRecordStore } from "../../src/dispatch/owned-process-runtime.js";
 import type { EngineReadiness } from "../../src/preflight.js";
 
 function r(
@@ -210,6 +213,37 @@ describe("doctor", () => {
       },
     );
     expect(code).toBe(0);
+  });
+
+  test("conversation-owned CLI records are detected and repaired from their canonical root", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-doctor-conversation-owned-"));
+    try {
+      const store = new OwnedProcessRecordStore(
+        join(root, ".vibeflow", "conversation", "attempts"),
+      );
+      const livePlatform = createOwnedProcessPlatform();
+      const attemptId = "conversation-owned-orphan";
+      store.reserve(attemptId, "codex", livePlatform);
+      const absentPlatform = {
+        ...livePlatform,
+        probe: () => ({ kind: "absent" as const }),
+        observe: () => null,
+      };
+
+      const observed = inspectDoctorOwnedProcesses(root, false, {
+        ownedProcessPlatform: absentPlatform,
+      });
+      expect(observed.uncertain.map((entry) => entry.attempt_id)).toEqual([attemptId]);
+      expect(observed.uncertain[0]?.reason).toBe("dead owner pending release");
+
+      const repaired = inspectDoctorOwnedProcesses(root, true, {
+        ownedProcessPlatform: absentPlatform,
+      });
+      expect(repaired.recovered.map((entry) => entry.attempt_id)).toEqual([attemptId]);
+      expect(store.read(attemptId)?.state).toBe("released");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

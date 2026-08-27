@@ -112,6 +112,7 @@ export interface ParsedAuthorityDirectMutationV1 extends ParsedCliCommonOptionsV
   candidateId?: string;
   candidateDigest?: string;
   conversationId?: string;
+  automationGrantFile?: string;
 }
 
 export interface ParsedAuthorityRequestFileMutationV1 extends ParsedCliCommonOptionsV1 {
@@ -122,6 +123,7 @@ export interface ParsedAuthorityRequestFileMutationV1 extends ParsedCliCommonOpt
   >;
   mode: "request-file";
   requestFile: string;
+  automationGrantFile?: string;
 }
 
 export type ParsedAuthorityCliArgvV1 =

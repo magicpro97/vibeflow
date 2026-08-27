@@ -211,6 +211,11 @@ function commandHarness(initialRoot = "root-a", active = true) {
         syncPrivateContext();
         return true;
       },
+      async discardRetained() {
+        privateContextKeys.delete(scope);
+        syncPrivateContext();
+        return true;
+      },
     };
   };
   const composerError = ref("");

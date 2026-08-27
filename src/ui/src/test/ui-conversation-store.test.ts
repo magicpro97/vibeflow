@@ -1,4 +1,5 @@
 // biome-ignore format: entire-file — tight formatting keeps file ≤400 lines
+import { CONVERSATION_LIFECYCLE, CONVERSATION_TERMINAL_LIFECYCLES } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
 import {
   applyConversationSnapshot,
   applyConversationTrace,
@@ -290,6 +291,8 @@ function record(
     canCancel: false,
     hasPendingApproval: false,
   });
+  // biome-ignore format: compact lifecycle assertion keeps this test below the source cap
+  assert("needs-input conversations expose revision controls", conversationControls(snapshot({ lifecycle: CONVERSATION_LIFECYCLE.NEEDS_INPUT }), operations, approvals).canRevise);
 }
 
 {
@@ -313,7 +316,7 @@ function record(
   assertDeep("row-specific approval eligibility", [canResolve("ACTIVE", "approval-live", "operation-live"), canResolve("PAUSED", "approval-live", "operation-live"), canResolve("ACTIVE", "approval-completed", "operation-completed"), canResolve("ACTIVE", "approval-cancelled", "operation-cancelled"), canResolve("ACTIVE", "approval-live", "operation-missing")], [true, false, true, false, false]);
   assert(
     "terminal conversations cannot resolve unresolved approvals",
-    (["STOPPED", "FAILED", "ABORTED", "COMPLETED"] as const).every(
+    CONVERSATION_TERMINAL_LIFECYCLES.every(
       (lifecycle) => !canResolve(lifecycle, "approval-live", "operation-live"),
     ),
   );

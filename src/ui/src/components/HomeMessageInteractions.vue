@@ -4,6 +4,7 @@
       type="button"
       class="home-button"
       :aria-pressed="quoteSelected"
+      :disabled="Boolean(store.queuedMessageEdit)"
       @click="$emit('toggle-quote')"
     >{{ quoteSelected ? "Remove quote" : "Quote" }}</button>
     <ul v-if="item.reactions.length" class="home-reaction-counts" aria-label="Reactions">
@@ -45,6 +46,7 @@
 <script setup lang="ts">
 import { HOME_REACTION_OPTIONS, homeReactionSummaryTitle } from "../conversation-home-authoring.js";
 import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
+import { useConversationHomeStore } from "../conversation-home-store.js";
 import type { HomeReactionSummary } from "../conversation-home-types.js";
 
 const props = defineProps<{
@@ -53,6 +55,7 @@ const props = defineProps<{
   online: boolean;
   quoteSelected: boolean;
 }>();
+const store = useConversationHomeStore();
 defineEmits<{
   "toggle-quote": [];
   "toggle-reaction": [emoji: HomeReactionSummary["emoji"]];

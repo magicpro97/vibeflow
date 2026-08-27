@@ -204,6 +204,37 @@ export class CapabilityStorageV1 {
     }
   }
 
+  /** Fully validates one immutable generation and its complete bounded ancestry. */
+  readHistory(contentDigest: string): CapabilityLockV1 {
+    const history = validatedHistoryGraph(this.paths, [contentDigest]);
+    const selected = history.get(contentDigest);
+    if (!selected)
+      throw new CapabilityValidationError(
+        "selected capability history generation is absent",
+        "history.current",
+        "integrity_failure",
+      );
+    return structuredClone(selected);
+  }
+
+  isHistoryDescendant(current: CapabilityLockV1, ancestorDigest: string): boolean {
+    const validated = validateCapabilityLock(current, { expected_scope: this.paths.scope });
+    if (validated.content_digest === ancestorDigest) return true;
+    const history = validatedHistoryGraph(this.paths, validated.parent_generation_digests);
+    const pending = [...validated.parent_generation_digests];
+    const seen = new Set<string>();
+    while (pending.length > 0) {
+      const digest = pending.pop() as string;
+      if (digest === ancestorDigest) return true;
+      if (seen.has(digest)) continue;
+      seen.add(digest);
+      const row = history.get(digest);
+      if (!row) return false;
+      pending.push(...row.parent_generation_digests);
+    }
+    return false;
+  }
+
   putHistory(lockValue: CapabilityLockV1, lock: CapabilityScopeLockV1): string {
     const value = validateCapabilityLock(lockValue, { expected_scope: this.paths.scope });
     const bytes = canonicalJsonBytes(value);

@@ -6,6 +6,7 @@ import { makeAsyncSpawner } from "../src/dispatch.js";
 import {
   OWNED_PROCESS_EXIT_CODE,
   OWNED_PROCESS_STATE,
+  OWNED_PROCESS_TERMINAL_KIND,
   OWNED_PROCESS_TIMING_MS,
 } from "../src/dispatch/owned-process-contract.js";
 import { inspectOwnedAttemptProcesses } from "../src/dispatch/owned-process-health.js";
@@ -18,7 +19,10 @@ import {
   OWNED_SUPERVISOR_TERMINAL_PHASE,
   watchOwnedSupervisorExit,
 } from "../src/dispatch/owned-process-status.js";
-import { noteOwnedOutputDrainFailure } from "../src/dispatch/session-owned-runtime.js";
+import {
+  OWNED_SESSION_TERMINATION_REASON,
+  noteOwnedOutputDrainFailure,
+} from "../src/dispatch/session-owned-runtime.js";
 
 function tempRoot(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -73,6 +77,24 @@ describe("owned CLI output and orphan recovery", () => {
       "owned CLI output drain proof failed",
     );
     expect(now).toBe(OWNED_PROCESS_TIMING_MS.OUTPUT_DRAIN_PROOF_TIMEOUT);
+  });
+
+  test("preserves an authenticated terminal while reporting a later drain failure", () => {
+    const observed: string[] = [];
+    const outcome = {
+      phase: OWNED_SUPERVISOR_TERMINAL_PHASE.STREAMS_DRAIN_UNPROVEN,
+      exitCode: OWNED_PROCESS_EXIT_CODE.OUTPUT_DRAIN_UNPROVEN,
+    };
+    const reason = noteOwnedOutputDrainFailure(
+      outcome,
+      {
+        noteTerminal: (kind: string) => observed.push(kind),
+      } as never,
+      OWNED_PROCESS_TERMINAL_KIND.CODEX_TURN_COMPLETED,
+    );
+
+    expect(reason).toBe(OWNED_SESSION_TERMINATION_REASON.OUTPUT_DRAIN_UNPROVEN);
+    expect(observed).toEqual([]);
   });
 
   test("root watcher rejects missing or extra supervisor status fields", async () => {

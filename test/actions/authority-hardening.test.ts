@@ -118,8 +118,10 @@ describe("action idempotency durability", () => {
         proposal,
       }),
     ).toThrow(/scope digest/i);
-    for (const directory of ["proposals", "operations", "idempotency"])
-      expect(readdirSync(join(substitutedPath, "actions", "v1", directory))).toEqual([]);
+    for (const directory of ["proposals", "operations", "idempotency"]) {
+      const path = join(substitutedPath, "actions", "v1", directory);
+      expect(existsSync(path) ? readdirSync(path) : []).toEqual([]);
+    }
 
     expect(() => materializeProposal(repairProposalDraft("recovery-checkpoint"))).toThrow(
       /durable bootstrap resolver/i,
@@ -870,8 +872,8 @@ describe("proposal closure validation", () => {
     expect(riskFor("unchanged", "manual")).toBe("high");
   });
 
-  test("permits recovery-tty approvals only after the proposal crosses into bootstrap repair mode", () => {
-    const baseProposal = materializeProposal(repairProposalDraft("current"));
+  test("keeps recovery approval behind the dedicated durable bootstrap resolver", () => {
+    const ordinaryProposal = materializeProposal(repairProposalDraft("current"));
     const approvalInput = {
       decision: "approved" as const,
       decided_by: {
@@ -885,78 +887,18 @@ describe("proposal closure validation", () => {
       expires_at: "2026-08-25T00:10:00.000Z",
     };
 
-    const toggledProposal = (switchAfterReads: number) => {
-      let reads = 0;
-      const locator = new Proxy(
-        { ...baseProposal.action_root_locator },
-        {
-          get: (target, key, receiver) => {
-            if (key === "kind") {
-              reads += 1;
-              return reads <= switchAfterReads ? "capability" : "recovery-bootstrap";
-            }
-            return Reflect.get(target, key, receiver);
-          },
-        },
-      );
-      const proposalBase = new Proxy(
-        { ...baseProposal.base },
-        {
-          get: (target, key, receiver) => {
-            if (key === "authority_binding_mode") {
-              reads += 1;
-              return reads <= switchAfterReads ? "current" : "recovery-checkpoint";
-            }
-            return Reflect.get(target, key, receiver);
-          },
-        },
-      );
-      return {
-        proposal: {
-          ...baseProposal,
-          action_root_locator: locator,
-          base: proposalBase,
-        },
-        reads: () => reads,
-      };
-    };
-
-    const measured = toggledProposal(Number.MAX_SAFE_INTEGER);
-    assertProposal(measured.proposal);
-    const baselineReads = measured.reads();
-
-    let approval: ReturnType<typeof materializeApproval> | null = null;
-    let switchAfterReads: number | null = null;
-    let lastError: unknown = null;
-    for (
-      let candidate = Math.max(1, baselineReads - 2);
-      candidate <= baselineReads + 2;
-      candidate++
-    ) {
-      try {
-        const toggled = toggledProposal(candidate);
-        approval = materializeApproval(toggled.proposal, approvalInput);
-        switchAfterReads = candidate;
-        break;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    if (!approval || switchAfterReads === null) throw lastError;
-    expect(approval.challenge_class).toBe("recovery-tty");
-    expect(approval.credential_class).toBe("recovery");
-
-    const hostile = toggledProposal(switchAfterReads).proposal;
+    expect(() => materializeApproval(ordinaryProposal, approvalInput)).toThrow(
+      /dedicated durable bootstrap resolver/i,
+    );
     expect(() =>
-      materializeApproval(hostile, {
+      materializeApproval(ordinaryProposal, {
         ...approvalInput,
-        decided_by: {
-          kind: "human-browser",
-          public_actor_id: "loopback-actor-1",
-          credential_class: "loopback-session",
-        },
+        challenge_class: "normal-confirm",
       }),
-    ).toThrow(/outside bootstrap repair/i);
+    ).toThrow(/recovery credential is forbidden/i);
+    expect(() => materializeProposal(repairProposalDraft("recovery-checkpoint"))).toThrow(
+      /dedicated durable bootstrap resolver|durable bootstrap resolver/i,
+    );
   });
 });
 

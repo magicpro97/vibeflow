@@ -55,7 +55,7 @@ export class ApprovalChallengeAuthority {
     private readonly files: ActionFilePersistence,
     private readonly now: () => number,
     private readonly random: (size: number) => Uint8Array,
-    private readonly hmacKey: Buffer,
+    private readonly hmacKey: Buffer | (() => Buffer),
     private readonly resolveBound: ResolveBound,
     private readonly fault?: (point: "after-challenge-consume") => void,
   ) {}
@@ -280,10 +280,12 @@ export class ApprovalChallengeAuthority {
   }
 
   private responseHmac(response: string): string {
+    const hmacKey = typeof this.hmacKey === "function" ? Buffer.from(this.hmacKey()) : this.hmacKey;
+    if (hmacKey.length !== 32) throw new Error("approval challenge HMAC key must be 256 bits");
     const bytes = Buffer.from(response, "utf8");
     const length = Buffer.allocUnsafe(8);
     length.writeBigUInt64BE(BigInt(bytes.length));
-    return createHmac("sha256", this.hmacKey)
+    return createHmac("sha256", hmacKey)
       .update("VF-APPROVAL-CHALLENGE-RESPONSE\0v1\0")
       .update(length)
       .update(bytes)

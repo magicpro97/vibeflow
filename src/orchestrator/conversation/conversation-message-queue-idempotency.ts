@@ -36,6 +36,8 @@ export function assertQueueIdempotencyWinnerV1(
       request: {
         schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
         expected_authority_digest: payload.admitted_authority.authority_digest,
+        client_instance_id: payload.client_instance_id,
+        client_order: payload.client_order,
         content: payload.item.content,
         target_participants: payload.item.target_participants,
         quote_refs: payload.item.quote_refs,

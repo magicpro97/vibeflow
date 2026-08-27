@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -54,8 +54,10 @@ describe("publication authority and domain projection", () => {
     expect(() =>
       store.createProposal({ authority, canonical_request: canonicalRequest(), proposal }),
     ).toThrow(/closure is stale/i);
-    for (const directory of ["proposals", "operations", "idempotency"])
-      expect(readdirSync(join(path, "actions", "v1", directory))).toEqual([]);
+    for (const directory of ["proposals", "operations", "idempotency"]) {
+      const namespace = join(path, "actions", "v1", directory);
+      expect(existsSync(namespace) ? readdirSync(namespace) : []).toEqual([]);
+    }
   });
 
   test("samples the proposal clock once and persists the exact 512 KiB proposal boundary", () => {

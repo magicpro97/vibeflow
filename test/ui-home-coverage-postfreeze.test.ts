@@ -382,6 +382,10 @@ function commandHarness(active = true) {
             privateContextKey = this.idempotency_key;
             return true;
           },
+          async discardRetained() {
+            clearPrivateContext();
+            return true;
+          },
         }
       : null;
   const composerError = ref("");
@@ -1049,6 +1053,8 @@ describe("post-freeze UI Home HTTP contracts", () => {
               schema_version: "1.0",
               idempotency_key: "message-key",
               expected_authority_digest: digest("a"),
+              client_instance_id: "message-client",
+              client_order: 1,
               content: "Reply",
               target_participants: ["agent-a"],
               quote_refs: [{ ...mutation.message_ref, author_public_id: "agent-a" }],
@@ -1062,6 +1068,8 @@ describe("post-freeze UI Home HTTP contracts", () => {
           schema_version: "1.0",
           idempotency_key: "message-key",
           expected_authority_digest: digest("a"),
+          client_instance_id: "message-client",
+          client_order: 1,
           content: "Reply",
           target_participants: ["agent-a"],
           quote_refs: [{ ...mutation.message_ref, author_public_id: "agent-a" }],
@@ -2382,6 +2390,10 @@ describe("post-freeze UI Home durable streams", () => {
     expect(applyHomeReactionFold(null, messageRef, [])).toBeNull();
     expect(applyHomeReactionFold(source, messageRef, [])).toBe(source);
     expect(shouldStreamHomeRevision(revision("root-a", { lifecycle: "ACTIVE" }))).toBeTrue();
+    expect(shouldStreamHomeRevision(revision("root-a", { lifecycle: "NEEDS_INPUT" }))).toBeFalse();
+    expect(
+      shouldStreamHomeRevision(revision("root-a", { lifecycle: "NEEDS_INPUT" }), true),
+    ).toBeTrue();
     expect(shouldStreamHomeRevision(revision())).toBeFalse();
     expect(shouldStreamHomeRevision(null)).toBeFalse();
   });

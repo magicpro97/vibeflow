@@ -218,6 +218,8 @@ export class ConversationMessageQueueRuntimeV1 {
         schema_version: CONVERSATION_MESSAGE_QUEUE_SCHEMA_VERSION,
         idempotency_key: idempotencyKey,
         expected_authority_digest: resolved.authority.authority_digest,
+        client_instance_id: `compatibility-${digestHex(queueIdempotencyKeyDigest(idempotencyKey))}`,
+        client_order: 1,
         content: request.content,
         target_participants:
           request.target_participants ?? CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
