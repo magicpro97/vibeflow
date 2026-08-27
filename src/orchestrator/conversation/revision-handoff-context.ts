@@ -110,6 +110,7 @@ export function revisionPublicTranscript(
       const content = `${partial.get(responseKey) ?? ""}${payload.content_delta}`;
       partial.set(responseKey, content);
       if (!payload.completes_response) continue;
+      partial.delete(responseKey);
       const role = revision.source.manifest.bindings.find(
         (binding) => binding.participant_id === payload.participant_id,
       )?.input.roleRef;

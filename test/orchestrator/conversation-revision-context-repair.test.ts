@@ -41,6 +41,7 @@ import {
   type RevisionPublicTranscriptV1,
   buildRevisionHandoff,
   buildRevisionQuoteGraphArtifact,
+  revisionPublicTranscript,
 } from "../../src/orchestrator/conversation/revision-source.js";
 import {
   bindFullHandoffToTurn,
@@ -385,6 +386,63 @@ function captureAcceptedBarrier(
 }
 
 describe("revision context continuity repairs", () => {
+  test("reused completed coordination rounds remain independent in child handoff history", () => {
+    const parent = {
+      node: { conversation_id: ROOT_ID, revision_id: "revision-root", revision_ordinal: 0 },
+      parent: null,
+      source: {
+        journal_records: [
+          {
+            stored_event: {
+              event_id: "event-delegate",
+              seq: 1,
+              ts: NOW,
+              event: {
+                type: "agent_response_delta",
+                payload: {
+                  round_id: "coordination:task-1",
+                  participant_id: PARTICIPANT_ID,
+                  content_delta: "delegate",
+                  completes_response: true,
+                },
+              },
+            },
+          },
+          {
+            stored_event: {
+              event_id: "event-resolve",
+              seq: 3,
+              ts: NOW,
+              event: {
+                type: "agent_response_delta",
+                payload: {
+                  round_id: "coordination:task-1",
+                  participant_id: PARTICIPANT_ID,
+                  content_delta: "resolve",
+                  completes_response: true,
+                },
+              },
+            },
+          },
+        ],
+        journal_head: { last_seq: 3, lifecycle: "COMPLETED" },
+        manifest: {
+          bindings: [{ participant_id: PARTICIPANT_ID, input: { roleRef: "builder" } }],
+        },
+      },
+    };
+
+    expect(
+      revisionPublicTranscript(
+        { root_session_id: ROOT_ID, nodes: [parent] } as never,
+        parent as never,
+      ).responses.map(({ event_id: eventId, text }) => ({ eventId, text })),
+    ).toEqual([
+      { eventId: "event-delegate", text: "delegate" },
+      { eventId: "event-resolve", text: "resolve" },
+    ]);
+  });
+
   test("canonical quote graph remains inline, ordered, and mandatory across compaction", () => {
     const rootUser = message("root-user", ROOT_ID, "revision-root", 0, 1, "Root question");
     const rootPeer = response("root-peer", ROOT_ID, "revision-root", 0, 2, PEER_ID, "Peer answer");

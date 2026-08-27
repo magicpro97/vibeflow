@@ -22,6 +22,7 @@ import type {
   HomeMessageQueueSnapshot,
   HomeNeedsActionQueuedMessage,
   HomeOptimisticQueuedMessage,
+  HomeQueuedMessage,
   HomeQueuedMessageEditBinding,
   HomeRetryableQueuedMessage,
 } from "./conversation-home-message-queue-types.js";
@@ -49,6 +50,7 @@ interface HomeMessageQueueRuntimeInput {
 interface SavedRootDraft {
   content: string;
   edit: HomeQueuedMessageEditBinding | null;
+  editBaseline: HomeQueuedMessage | null;
   sendAsNew: boolean;
 }
 
@@ -56,6 +58,21 @@ interface QueueCommand {
   generation: number;
   root_session_id: string;
 }
+
+const snapshotConfirmsCommittedEdit = (
+  before: HomeQueuedMessage | null | undefined,
+  after: HomeQueuedMessage | undefined,
+  binding: HomeQueuedMessageEditBinding,
+  desiredContent: string,
+): boolean =>
+  Boolean(
+    before &&
+      before.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED &&
+      before.item_digest === binding.item_digest &&
+      after &&
+      after.item_digest !== binding.item_digest &&
+      preservesHomeQueueEditAuthority(before, after, desiredContent),
+  );
 
 export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInput) {
   const savedDrafts = new Map<string, SavedRootDraft>();
@@ -95,15 +112,37 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
     assertHomeMessageQueueSnapshot(value, rootSessionId);
     if (input.activeRootId.value !== rootSessionId) return;
     if (admissions.deferRefresh(rootSessionId)) return;
+    const previousSnapshot = input.snapshot.value;
     input.snapshot.value = structuredClone(value);
     input.optimistic.value = [];
 
     const activeEdit = input.edit.value;
     if (activeEdit) {
+      const previousItem = previousSnapshot?.items.find(
+        (candidate) => candidate.queue_item_id === activeEdit.queue_item_id,
+      );
       const item = value.items.find(
         (candidate) => candidate.queue_item_id === activeEdit.queue_item_id,
       );
-      if (
+      const desiredContent = input.draft.value.normalize("NFC");
+      const committedEditIsAuthoritative = snapshotConfirmsCommittedEdit(
+        previousItem,
+        item,
+        activeEdit,
+        desiredContent,
+      );
+      if (committedEditIsAuthoritative) {
+        editController?.controller.abort();
+        editController = null;
+        input.edit.value = null;
+        input.editSaving.value = false;
+        editToken = null;
+        input.sendAsNew.value = false;
+        input.draft.value = "";
+        input.composerError.value = "";
+        announce(`Updated queued message ${activeEdit.queue_sequence}.`);
+        input.composerFocusEpoch.value += 1;
+      } else if (
         !item ||
         item.state !== CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED ||
         item.item_digest !== activeEdit.item_digest
@@ -134,6 +173,18 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
         ) {
           input.edit.value = structuredClone(saved.edit);
           announce(`Editing queued message ${saved.edit.queue_sequence}.`);
+        } else if (
+          snapshotConfirmsCommittedEdit(
+            saved.editBaseline,
+            item,
+            saved.edit,
+            saved.content.normalize("NFC"),
+          )
+        ) {
+          input.draft.value = "";
+          input.sendAsNew.value = false;
+          input.composerError.value = "";
+          announce(`Updated queued message ${saved.edit.queue_sequence}.`);
         } else {
           input.sendAsNew.value = true;
           input.composerError.value =
@@ -148,9 +199,18 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
 
   function switchRoot(previousRootId: string | null, nextRootId: string | null): void {
     if (previousRootId && previousRootId !== nextRootId) {
+      const currentEdit = input.edit.value;
+      const editBaseline = currentEdit
+        ? (input.snapshot.value?.items.find(
+            (candidate) =>
+              candidate.queue_item_id === currentEdit.queue_item_id &&
+              candidate.item_digest === currentEdit.item_digest,
+          ) ?? null)
+        : null;
       savedDrafts.set(previousRootId, {
         content: input.draft.value,
-        edit: input.edit.value ? structuredClone(input.edit.value) : null,
+        edit: currentEdit ? structuredClone(currentEdit) : null,
+        editBaseline: editBaseline ? structuredClone(editBaseline) : null,
         sendAsNew: input.sendAsNew.value,
       });
       admissions.interruptRoot(previousRootId);

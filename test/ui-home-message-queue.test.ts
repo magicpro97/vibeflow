@@ -833,21 +833,7 @@ describe("Home durable message queue", () => {
     conversationHomeApi.editQueuedMessage = ((_root, _itemId, request, signal) => {
       requests.push(structuredClone(request));
       signals.push(signal);
-      if (requests.length === 1) return firstResponse.promise;
-      return Promise.reject(
-        new ConversationHomeApiError(409, {
-          code: "queued_message_not_editable",
-          message: "That queued message changed before the edit could commit.",
-          retryable: false,
-          recovery_action: "send-as-new",
-          details: {
-            root_session_id: "root-a",
-            queue_item_id: queued.queue_item_id,
-            state: "queued",
-            item_digest: committed.item_digest,
-          },
-        }),
-      );
+      return firstResponse.promise;
     }) as typeof conversationHomeApi.editQueuedMessage;
     conversationHomeApi.enqueueMessage = (async () => {
       enqueueCalls += 1;
@@ -877,21 +863,95 @@ describe("Home durable message queue", () => {
       expect(await saving).toBeFalse();
       expect(fx.edit.value?.item_digest).toBe(queued.item_digest);
 
-      expect(await fx.runtime.saveEdit()).toBeFalse();
-      expect(requests).toHaveLength(2);
-      expect(requests[1]).toMatchObject({
-        expected_item_digest: queued.item_digest,
-        content: "after",
-      });
+      fx.runtime.adoptSnapshot(snapshot("root-a", [committed]), "root-a");
+      expect(requests).toHaveLength(1);
       expect(enqueueCalls).toBe(0);
       expect(fx.edit.value).toBeNull();
-      expect(fx.sendAsNew.value).toBeTrue();
-      expect(fx.refreshes()).toBe(1);
+      expect(fx.sendAsNew.value).toBeFalse();
+      expect(fx.draft.value).toBe("");
+      expect(fx.composerError.value).toBe("");
+      expect(fx.announcement.value).toContain("Updated queued message");
     } finally {
       fx.runtime.dispose();
       fx.activation.close();
       conversationHomeApi.editQueuedMessage = originalEdit;
       conversationHomeApi.enqueueMessage = originalEnqueue;
+    }
+  });
+
+  test("reconnect requires matching content and immutable authority before acknowledging an edit", () => {
+    for (const authoritative of [
+      item(1, "another replacement", {
+        content_digest: digest("e"),
+        item_digest: digest("d"),
+      }),
+      item(1, "after", {
+        content_digest: digest("c"),
+        item_digest: digest("b"),
+        target_participants: ["participant-other"],
+      }),
+    ]) {
+      const queued = item(1, "before");
+      const fx = harness();
+      try {
+        fx.runtime.adoptSnapshot(snapshot("root-a", [queued]), "root-a");
+        expect(fx.runtime.beginEdit()).toBeTrue();
+        fx.draft.value = "after";
+
+        fx.runtime.adoptSnapshot(snapshot("root-a", [authoritative]), "root-a");
+        expect(fx.edit.value).toBeNull();
+        expect(fx.sendAsNew.value).toBeTrue();
+        expect(fx.draft.value).toBe("after");
+        expect(fx.composerError.value).toContain("unsent draft");
+      } finally {
+        fx.runtime.dispose();
+        fx.activation.close();
+      }
+    }
+  });
+
+  test("returning to a root reconciles an ambiguously committed edit without sending it again", async () => {
+    const original = conversationHomeApi.editQueuedMessage;
+    const response = deferred<HomeQueuedMessage>();
+    const queued = item(1, "before");
+    const committed = item(1, "after", {
+      content_digest: digest("e"),
+      item_digest: digest("d"),
+      updated_at: "2026-08-26T00:00:01.000Z",
+    });
+    let signal: AbortSignal | undefined;
+    conversationHomeApi.editQueuedMessage = ((_root, _itemId, _request, requestSignal) => {
+      signal = requestSignal;
+      return response.promise;
+    }) as typeof conversationHomeApi.editQueuedMessage;
+    const fx = harness();
+    try {
+      fx.runtime.adoptSnapshot(snapshot("root-a", [queued]), "root-a");
+      expect(fx.runtime.beginEdit()).toBeTrue();
+      fx.draft.value = "after";
+      const saving = fx.runtime.saveEdit();
+
+      fx.activation.begin("root-b");
+      fx.activeRootId.value = "root-b";
+      fx.runtime.switchRoot("root-a", "root-b");
+      fx.runtime.adoptSnapshot(snapshot("root-b"), "root-b");
+      expect(signal?.aborted).toBeTrue();
+
+      response.resolve(committed);
+      expect(await saving).toBeFalse();
+      fx.activation.begin("root-a");
+      fx.activeRootId.value = "root-a";
+      fx.runtime.switchRoot("root-b", "root-a");
+      fx.runtime.adoptSnapshot(snapshot("root-a", [committed]), "root-a");
+
+      expect(fx.edit.value).toBeNull();
+      expect(fx.sendAsNew.value).toBeFalse();
+      expect(fx.draft.value).toBe("");
+      expect(fx.announcement.value).toContain("Updated queued message");
+    } finally {
+      fx.runtime.dispose();
+      fx.activation.close();
+      conversationHomeApi.editQueuedMessage = original;
     }
   });
 
