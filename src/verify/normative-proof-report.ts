@@ -10,19 +10,23 @@ function portablePath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
+function absolutePortablePath(base: string, value: string): string {
+  if (win32.isAbsolute(value)) return portablePath(win32.normalize(value));
+  if (isAbsolute(value)) return portablePath(resolve(value));
+  return portablePath(win32.isAbsolute(base) ? win32.resolve(base, value) : resolve(base, value));
+}
+
 export function observedCasesFor(
   cases: readonly ObservedCase[],
+  base: string,
   path: string,
   title: string,
 ): ObservedCase[] {
-  const expectedPath = portablePath(path);
-  return cases.filter((candidate) => {
-    const candidatePath = portablePath(candidate.path);
-    return (
-      candidate.title === title &&
-      (candidatePath === expectedPath || candidatePath.endsWith(`/${expectedPath}`))
-    );
-  });
+  const expectedPath = absolutePortablePath(base, path);
+  return cases.filter(
+    (candidate) =>
+      candidate.title === title && absolutePortablePath(base, candidate.path) === expectedPath,
+  );
 }
 
 function decodeXml(value: string): string {

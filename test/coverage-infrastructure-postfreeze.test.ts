@@ -536,10 +536,25 @@ describe("post-freeze normative proof infrastructure coverage", () => {
             status: "passed",
           },
         ],
+        "C:\\repo",
         "e2e/conversation-home.spec.ts",
         "exact nested proof",
       ),
     ).toHaveLength(1);
+    expect(
+      observedCasesFor(
+        [
+          {
+            path: "/attacker/e2e/conversation-home.spec.ts",
+            title: "exact nested proof",
+            status: "passed",
+          },
+        ],
+        "/repo",
+        "e2e/conversation-home.spec.ts",
+        "exact nested proof",
+      ),
+    ).toHaveLength(0);
   });
 
   test("bounds the real async spawner across normal, ignored, overflow, timeout, and spawn errors", async () => {

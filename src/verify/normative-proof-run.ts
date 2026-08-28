@@ -293,7 +293,7 @@ export function runNormativeProofs(
         }
       }
       const observed = selected.map((proof) => {
-        const matches = observedCasesFor(cases, proof.path, proof.title);
+        const matches = observedCasesFor(cases, base, proof.path, proof.title);
         if (matches.length > 1)
           report.errors.push(`${runner} proof matched ${matches.length} cases ${proof.id}`);
         return { proof, testcase: matches.length === 1 ? matches[0] : undefined };
