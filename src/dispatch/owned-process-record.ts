@@ -10,6 +10,7 @@ import {
   ensurePrivateDirectory,
   privateFileBytes,
 } from "../durability/index.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import {
   OWNED_PROCESS_AUTHORITY_ERROR,
   assertOwnedProcessWriteTransition,
@@ -80,7 +81,7 @@ export class OwnedProcessRecordStore {
   private readonly windowsBackend: WindowsOwnedProcessRecordBackend | null;
 
   constructor(root: string) {
-    if (process.platform === "win32") {
+    if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
       const backend = new WindowsOwnedProcessRecordBackend(root);
       this.windowsBackend = backend;
       this.root = backend.root;
