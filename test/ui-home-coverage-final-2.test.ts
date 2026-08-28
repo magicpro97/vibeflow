@@ -973,8 +973,17 @@ describe("final Home queue authority and runtime coverage", () => {
       await flush();
       expect(inFlight.editSaving.value).toBeTrue();
       inFlight.runtime.goOffline();
-      expect(inFlight.edit.value).toBeNull();
+      expect(inFlight.edit.value).toEqual({
+        root_session_id: before.root_session_id,
+        queue_item_id: before.queue_item_id,
+        item_digest: before.item_digest,
+        queue_sequence: before.queue_sequence,
+        target_participants: before.target_participants,
+        quote_refs: before.quote_refs,
+        private_context_present: before.private_context_present,
+      });
       expect(inFlight.editSaving.value).toBeFalse();
+      expect(inFlight.sendAsNew.value).toBeFalse();
       response.resolve({
         ...before,
         content: "after",
@@ -982,7 +991,7 @@ describe("final Home queue authority and runtime coverage", () => {
         item_digest: digest("d"),
       });
       expect(await saving).toBeFalse();
-      expect(inFlight.announcement.value).toContain("inert draft");
+      expect(inFlight.announcement.value).toContain("remains bound");
     } finally {
       inFlight.runtime.dispose();
       inFlight.activation.close();
