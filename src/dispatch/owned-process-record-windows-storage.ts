@@ -110,16 +110,6 @@ export function windowsDirectoryIdentity(
   return { value: identity.value };
 }
 
-export function assertWindowsDirectory(
-  path: string,
-  expected: WindowsDirectoryIdentity,
-  runtime: WindowsRecordRuntime,
-): void {
-  const actual = windowsDirectoryIdentity(path, runtime);
-  if (actual.value !== expected.value)
-    durabilityError("unsafe_path", `storage directory changed: ${path}`);
-}
-
 export function isWindowsDriveQualifiedPath(input: string): boolean {
   return /^[A-Za-z]:[\\/]/u.test(input);
 }
