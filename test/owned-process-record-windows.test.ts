@@ -29,6 +29,7 @@ import {
   trustedWindowsSystemRoot,
 } from "../src/dispatch/owned-process-record-windows-native.js";
 import {
+  assertWindowsDirectory,
   createWindowsRecordRuntime,
   isWindowsDriveQualifiedPath,
   resolveWindowsRecordPath,
@@ -43,6 +44,7 @@ import {
   type WindowsPrivateAuthority,
 } from "../src/dispatch/windows-private-authority.js";
 import { canonicalJsonBytes } from "../src/durability/canonical.js";
+import { DurabilityError } from "../src/durability/errors.js";
 import type { ProcessLockOwnerV1 } from "../src/durability/lock-owner.js";
 
 const roots: string[] = [];
@@ -442,6 +444,29 @@ describe("Windows owned-process transactional backend", () => {
     const { backend } = harness({ root, runtime: { files } });
     identity += 1n;
     expect(() => backend.entries()).toThrow("storage directory changed");
+  });
+
+  test("accepts an exact directory identity and rejects a typed mismatch", () => {
+    const root = temporaryRoot();
+    const runtime = createWindowsRecordRuntime({
+      kernelLocks: new SimulatedKernel(),
+      rename: () => {},
+      identity: () => IDENTITY,
+      ownerAlive: () => false,
+      enforceLocalWindowsPath: false,
+    });
+    const identity = runtime.pathAuthority.directoryIdentity(root, true);
+    if (!identity) throw new Error("test directory identity unavailable");
+
+    expect(() => assertWindowsDirectory(root, { value: identity.value }, runtime)).not.toThrow();
+    try {
+      assertWindowsDirectory(root, { value: `${identity.value}-replacement` }, runtime);
+      throw new Error("expected directory identity mismatch");
+    } catch (error) {
+      expect(error).toBeInstanceOf(DurabilityError);
+      expect((error as DurabilityError).code).toBe("unsafe_path");
+      expect((error as Error).message).toContain("storage directory changed");
+    }
   });
 
   test("uses monotonic elapsed time and caps the final lock wait", () => {
