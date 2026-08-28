@@ -134,8 +134,8 @@ exit/quiescence plus `streams-drained`.
 
 `vf doctor` reports active, recovered, or uncertain records. `vf doctor --fix` acts only on
 an exact proved orphan; live or identity-unprovable owners stay fail-closed. Injected platform
-tests cover the Windows contract and a real `windows-latest` CI smoke job is configured.
-Live Windows evidence remains pending until that job is green.
+tests cover the Windows contract. Live Windows evidence is accepted only from a green, exact-SHA
+`windows-latest` CI smoke job.
 
 ## Output report
 

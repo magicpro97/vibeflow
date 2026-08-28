@@ -37,6 +37,7 @@ import {
   normalizeStoredOwnedProcessRecord,
   ownedProcessTimestamp,
 } from "./owned-process-record-validation.js";
+import { WindowsOwnedProcessRecordBackend } from "./owned-process-record-windows.js";
 
 export type { OwnedProcessState } from "./owned-process-contract.js";
 export {
@@ -76,8 +77,18 @@ export class OwnedProcessRecordStore {
   readonly root: string;
   private readonly recordsRoot: string;
   private readonly lockPath: string;
+  private readonly windowsBackend: WindowsOwnedProcessRecordBackend | null;
 
   constructor(root: string) {
+    if (process.platform === "win32") {
+      const backend = new WindowsOwnedProcessRecordBackend(root);
+      this.windowsBackend = backend;
+      this.root = backend.root;
+      this.recordsRoot = backend.recordsRoot;
+      this.lockPath = backend.lockPath;
+      return;
+    }
+    this.windowsBackend = null;
     this.root = ensurePrivateDirectory(resolve(root));
     this.recordsRoot = ensurePrivateDirectory(
       join(this.root, OWNED_PROCESS_STORAGE_NAME.RECORD_DIRECTORY),
@@ -134,6 +145,7 @@ export class OwnedProcessRecordStore {
   }
 
   entries(): string[] {
+    if (this.windowsBackend) return this.windowsBackend.entries();
     return readdirSync(this.recordsRoot).filter((entry) =>
       entry.endsWith(OWNED_PROCESS_STORAGE_NAME.RECORD_FILE_EXTENSION),
     );
@@ -143,10 +155,9 @@ export class OwnedProcessRecordStore {
     if (!isOwnedProcessRecordFileName(entry)) {
       throw new Error(OWNED_PROCESS_AUTHORITY_ERROR.STORAGE_BINDING);
     }
-    const bytes = privateFileBytes(
-      join(this.recordsRoot, entry),
-      OWNED_PROCESS_LIMIT.MAX_RECORD_BYTES,
-    );
+    const bytes = this.windowsBackend
+      ? this.windowsBackend.read(entry, OWNED_PROCESS_LIMIT.MAX_RECORD_BYTES)
+      : privateFileBytes(join(this.recordsRoot, entry), OWNED_PROCESS_LIMIT.MAX_RECORD_BYTES);
     if (!bytes) return null;
     const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     assertOwnedProcessRecord(value);
@@ -188,6 +199,13 @@ export class OwnedProcessRecordStore {
       current && canonicalJsonBytes(current).equals(canonicalJsonBytes(next))
         ? expectedOwnedProcessCurrentBytes(current)
         : canonicalJsonBytes(next);
+    if (this.windowsBackend) {
+      this.windowsBackend.compareAndSwap(entryForAttempt(attemptId), currentBytes, nextBytes, {
+        operation: `${OWNED_PROCESS_STORAGE_NAME.LOCK_OPERATION_PREFIX}${attemptId}`,
+        maxBytes: OWNED_PROCESS_LIMIT.MAX_RECORD_BYTES,
+      });
+      return;
+    }
     const lock = acquireProcessLock(this.lockPath, {
       operation: `${OWNED_PROCESS_STORAGE_NAME.LOCK_OPERATION_PREFIX}${attemptId}`,
     });

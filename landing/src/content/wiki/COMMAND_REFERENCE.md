@@ -117,9 +117,9 @@ Owned launches release their terminal record only after process exit/quiescence 
 | Linux | `posix-process-group` | `cooperative-lineage` | Isolated process group plus boot id and `/proc` start ticks; a descendant can escape the group. |
 | macOS | `posix-process-group` | `cooperative-lineage` | Isolated process group plus exact `libproc` seconds/microseconds identity; a descendant can escape the group. |
 
-The Windows contract is covered by injected platform regression tests. A real
-`windows-latest` smoke job is configured in CI, but live Windows evidence remains pending
-until that job is green; a local macOS/Linux run is not a Windows canary.
+The Windows contract is covered by injected platform regression tests. Live Windows evidence is
+accepted only from a green, exact-SHA `windows-latest` smoke job; a local macOS/Linux run is not a
+Windows canary.
 
 ## Conversations
 

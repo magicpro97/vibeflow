@@ -541,9 +541,8 @@ canonical context. Work units and skills appear only when a task actually needs 
   start identity, and terminal release waits for exit/quiescence plus `streams-drained`.
   Windows uses a kill-on-close Job Object (`kernel-contained`); Linux and macOS use an
   isolated process group (`cooperative-lineage`, because descendants can escape it). The
-  injected suite covers the Windows contract, and a real `windows-latest` CI smoke job is
-  configured. Treat live Windows evidence as pending until that job is green; a local
-  macOS/Linux run is not a Windows canary.
+  injected suite covers the Windows contract. Accept live Windows evidence only from a green,
+  exact-SHA `windows-latest` CI smoke job; a local macOS/Linux run is not a Windows canary.
 - **An artifact preview is unavailable** — only opaque ids emitted by that conversation's
   public trace can be fetched. Raw paths and ids from a different conversation are rejected.
 - **`vf verify` fails on confidence** — raise the unit to `1.0` with evidence, or keep

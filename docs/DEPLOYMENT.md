@@ -76,8 +76,8 @@ Cross-platform support is enforced in three layers:
 ```
 
 The workflow also defines a real `windows-latest` PID, Job Object, release, and orphan smoke
-job. Treat live Windows evidence as pending until that job passes for the release commit; a
-local macOS/Linux result does not prove the Windows path.
+job. Accept live Windows evidence only when that exact-SHA job passes for the release commit;
+a local macOS/Linux result does not prove the Windows path.
 
 The `.gitattributes` file pins line endings so Windows checkouts + autocrlf
 cannot rewrite `*.ts` / `*.js` / `*.json` source. Biome's `lineEnding: "lf"`

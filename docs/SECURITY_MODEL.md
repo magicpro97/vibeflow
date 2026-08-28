@@ -469,10 +469,9 @@ stderr. Recovery follows the same fail-closed identity contract:
 
 The POSIX boundary is cooperative because a descendant can deliberately leave its process
 group. `vf doctor --fix` may recover only an exact proved dead or identity-mismatched owner;
-live and identity-unprovable owners remain quarantined for manual inspection. The Windows
-contract has injected platform regression coverage and a real `windows-latest` CI smoke job.
-Live Windows evidence remains pending until that job is green; a local macOS/Linux run is
-not a Windows canary.
+live and identity-unprovable owners remain quarantined for manual inspection. The Windows contract
+has injected platform regression coverage. Live Windows evidence is accepted only from a green,
+exact-SHA `windows-latest` CI smoke job; a local macOS/Linux run is not a Windows canary.
 
 ## Audit log
 

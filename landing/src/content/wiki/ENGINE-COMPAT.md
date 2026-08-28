@@ -2,7 +2,7 @@
 title: Engine CLI Compatibility
 description: Which engine CLI versions the current code was verified against, and the invocation/output contract each integration assumes.
 category: reference
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # Engine CLI Compatibility
@@ -124,9 +124,15 @@ exact process-start identity. Terminal release waits for exit/quiescence plus th
 
 The POSIX proof is intentionally weaker because descendants can leave the process group.
 `vf doctor --fix` repairs only exact proved orphans; live or identity-unprovable owners fail
-closed. Injected platform tests cover the Windows Job Object and identity contracts. A real
-`windows-latest` smoke job is configured in CI, but live Windows evidence remains pending
-until it is green; local macOS/Linux evidence is not a Windows canary.
+closed. Injected platform tests cover the Windows Job Object and identity contracts. Live Windows
+evidence is accepted only from a green, exact-SHA `windows-latest` smoke job; local macOS/Linux
+evidence is not a Windows canary.
+
+Windows portability is intentionally narrow at the persistence boundary. Owned-process records
+use a stable deny-delete `CreateFileW` handle with `LockFileEx`, exact owner metadata, local-drive
+path authority, and write-through atomic replacement through `MoveFileExW`. General POSIX
+durability primitives remain unsupported on Win32 and continue to fail closed; this port does not
+claim that the rest of the durability layer has native Windows semantics.
 
 ## Crash-resume (`vf orchestrate --resume`)
 

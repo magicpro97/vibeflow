@@ -135,9 +135,9 @@ the process is quiescent and stdout/stderr have crossed the `streams-drained` ba
 
 Linux uses boot id plus `/proc` start ticks; macOS uses exact Darwin `libproc`
 seconds/microseconds. `vf doctor --fix` takes over only after exact proof that an owner is no
-longer the recorded process. Live or unprovable owners fail closed. Windows behavior has
-injected regression coverage and a real `windows-latest` CI smoke job. Treat live Windows
-evidence as pending until that job is green; a local macOS/Linux run is not a Windows canary.
+longer the recorded process. Live or unprovable owners fail closed. Windows behavior has injected
+regression coverage. Live Windows evidence is accepted only from a green, exact-SHA
+`windows-latest` CI smoke job; a local macOS/Linux run is not a Windows canary.
 See `docs/ENGINE-COMPAT.md` for adapter-specific resume contracts.
 
 ## Conversation Turn Delivery
