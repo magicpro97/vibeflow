@@ -37,7 +37,7 @@ const capabilities = [
   },
   {
     title: "No mystery processes",
-    body: "Every CLI run carries its PID, exact start identity, host, and operation. VibeFlow only reclaims proved orphans. Native Windows Job Object validation is wired into CI, with live evidence pending a green run.",
+    body: "Every CLI run carries its PID, exact start identity, host, and operation. VibeFlow only reclaims proved orphans, and live Windows Job Object validation runs in CI.",
     detail: "Owned launch, drain, release, recovery",
     className: "capability-card capability-card-recovery",
   },
@@ -363,8 +363,9 @@ const reliabilityNotes = [
   }
 
   .hero h1 {
-    font-size: clamp(3rem, 4.15vw, 3.75rem);
+    font-size: clamp(2.9rem, 3.7vw, 3.45rem);
     font-weight: 800;
+    letter-spacing: -0.045em;
   }
 
   .hero h1 span {

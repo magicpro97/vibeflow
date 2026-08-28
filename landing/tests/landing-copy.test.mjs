@@ -55,7 +55,7 @@ test("landing preserves key anchors, assets, and current product story", () => {
     "Install tools from the conversation",
     "Claude, Codex, and OpenCode resume by exact ID when proved.",
     "Copilot and Antigravity receive canonical user and peer context plus bounded own-history replay.",
-    "live evidence pending a green run",
+    "live Windows Job Object validation runs in CI",
     "frozen typed protocol authority",
     "--port 0",
     "vf verify",
@@ -121,7 +121,7 @@ test("mirrored product docs preserve the current runtime proof boundaries", () =
     "kernel-contained",
     "cooperative-lineage",
     "streams-drained",
-    "live Windows evidence remains pending",
+    "Live Windows evidence is accepted only from a green, exact-SHA",
   ]) {
     assert.equal(productDocs.includes(snippet), true, `missing product contract: ${snippet}`);
   }
