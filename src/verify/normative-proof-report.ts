@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve, win32 } from "node:path";
 
 export interface ObservedCase {
   path: string;
@@ -6,15 +6,23 @@ export interface ObservedCase {
   status: "passed" | "failed" | "skipped";
 }
 
+function portablePath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
 export function observedCasesFor(
   cases: readonly ObservedCase[],
   path: string,
   title: string,
 ): ObservedCase[] {
-  return cases.filter(
-    (candidate) =>
-      candidate.title === title && (candidate.path === path || candidate.path.endsWith(`/${path}`)),
-  );
+  const expectedPath = portablePath(path);
+  return cases.filter((candidate) => {
+    const candidatePath = portablePath(candidate.path);
+    return (
+      candidate.title === title &&
+      (candidatePath === expectedPath || candidatePath.endsWith(`/${expectedPath}`))
+    );
+  });
 }
 
 function decodeXml(value: string): string {
@@ -78,7 +86,11 @@ export function parsePlaywrightJson(source: string): ObservedCase[] {
   const rootDirectory = typeof configuration?.rootDir === "string" ? configuration.rootDir : "";
   const reportPath = (value: unknown): string => {
     if (typeof value !== "string") return "";
-    return rootDirectory && !isAbsolute(value) ? resolve(rootDirectory, value) : value;
+    if (!rootDirectory || isAbsolute(value) || win32.isAbsolute(value)) return portablePath(value);
+    const absolute = win32.isAbsolute(rootDirectory)
+      ? win32.resolve(rootDirectory, value)
+      : resolve(rootDirectory, value);
+    return portablePath(absolute);
   };
   const visit = (value: unknown): void => {
     if (!value || typeof value !== "object") return;

@@ -59,6 +59,7 @@ import {
   buildNormativeMatrix,
 } from "../src/verify/normative-matrix-source.js";
 import { checkNormativeMatrix } from "../src/verify/normative-matrix.js";
+import { observedCasesFor } from "../src/verify/normative-proof-report.js";
 import {
   defaultNormativeAsyncSpawner,
   runNormativeProofsAsync,
@@ -509,6 +510,36 @@ describe("post-freeze normative proof infrastructure coverage", () => {
         status: "passed",
       },
     ]);
+    const windowsCases = parsePlaywrightJson(
+      JSON.stringify({
+        config: { rootDir: "C:\\repo\\e2e" },
+        suites: [
+          {
+            specs: [
+              {
+                file: "conversation-home.spec.ts",
+                title: "exact nested proof",
+                tests: [{ results: [{ status: "passed" }] }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(windowsCases[0]?.path).toBe("C:/repo/e2e/conversation-home.spec.ts");
+    expect(
+      observedCasesFor(
+        [
+          {
+            path: "C:\\repo\\e2e\\conversation-home.spec.ts",
+            title: "exact nested proof",
+            status: "passed",
+          },
+        ],
+        "e2e/conversation-home.spec.ts",
+        "exact nested proof",
+      ),
+    ).toHaveLength(1);
   });
 
   test("bounds the real async spawner across normal, ignored, overflow, timeout, and spawn errors", async () => {
