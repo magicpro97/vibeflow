@@ -31,6 +31,8 @@
 !skills/exact-coverage-repair/**
 !skills/bun-typescript-conventions/
 !skills/bun-typescript-conventions/**
+!skills/deterministic-async-teardown/
+!skills/deterministic-async-teardown/**
 
 # Machine-specific (explicit for clarity):
 # PROJECT_CONTEXT.md, TASK_CONTEXT.md, SKILL_INDEX.md
