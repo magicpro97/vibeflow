@@ -1,4 +1,4 @@
-import { isAbsolute, resolve, win32 } from "node:path";
+import { posix, win32 } from "node:path";
 
 export interface ObservedCase {
   path: string;
@@ -6,14 +6,12 @@ export interface ObservedCase {
   status: "passed" | "failed" | "skipped";
 }
 
-function portablePath(value: string): string {
-  return value.replace(/\\/g, "/");
-}
-
-function absolutePortablePath(base: string, value: string): string {
-  if (win32.isAbsolute(value)) return portablePath(win32.normalize(value));
-  if (isAbsolute(value)) return portablePath(resolve(value));
-  return portablePath(win32.isAbsolute(base) ? win32.resolve(base, value) : resolve(base, value));
+function absoluteAuthorityPath(base: string, value: string): string | undefined {
+  if (/^(?:[A-Za-z]:[\\/]|\\\\)/.test(base) && win32.isAbsolute(base)) {
+    return win32.resolve(base, value).replace(/\\/g, "/");
+  }
+  if (posix.isAbsolute(base)) return posix.resolve(base, value);
+  return undefined;
 }
 
 export function observedCasesFor(
@@ -22,10 +20,11 @@ export function observedCasesFor(
   path: string,
   title: string,
 ): ObservedCase[] {
-  const expectedPath = absolutePortablePath(base, path);
+  const expectedPath = absoluteAuthorityPath(base, path);
+  if (!expectedPath) return [];
   return cases.filter(
     (candidate) =>
-      candidate.title === title && absolutePortablePath(base, candidate.path) === expectedPath,
+      candidate.title === title && absoluteAuthorityPath(base, candidate.path) === expectedPath,
   );
 }
 
@@ -90,11 +89,8 @@ export function parsePlaywrightJson(source: string): ObservedCase[] {
   const rootDirectory = typeof configuration?.rootDir === "string" ? configuration.rootDir : "";
   const reportPath = (value: unknown): string => {
     if (typeof value !== "string") return "";
-    if (!rootDirectory || isAbsolute(value) || win32.isAbsolute(value)) return portablePath(value);
-    const absolute = win32.isAbsolute(rootDirectory)
-      ? win32.resolve(rootDirectory, value)
-      : resolve(rootDirectory, value);
-    return portablePath(absolute);
+    if (!rootDirectory) return value;
+    return absoluteAuthorityPath(rootDirectory, value) ?? "";
   };
   const visit = (value: unknown): void => {
     if (!value || typeof value !== "object") return;

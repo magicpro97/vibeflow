@@ -555,6 +555,44 @@ describe("post-freeze normative proof infrastructure coverage", () => {
         "exact nested proof",
       ),
     ).toHaveLength(0);
+    expect(
+      observedCasesFor(
+        [
+          {
+            path: "\\repo\\e2e\\conversation-home.spec.ts",
+            title: "exact nested proof",
+            status: "passed",
+          },
+        ],
+        "/repo",
+        "e2e/conversation-home.spec.ts",
+        "exact nested proof",
+      ),
+    ).toHaveLength(0);
+    const posixAliasCases = parsePlaywrightJson(
+      JSON.stringify({
+        config: { rootDir: "/repo/e2e" },
+        suites: [
+          {
+            specs: [
+              {
+                file: "\\repo\\e2e\\conversation-home.spec.ts",
+                title: "exact nested proof",
+                tests: [{ results: [{ status: "passed" }] }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(
+      observedCasesFor(
+        posixAliasCases,
+        "/repo",
+        "e2e/conversation-home.spec.ts",
+        "exact nested proof",
+      ),
+    ).toHaveLength(0);
   });
 
   test("bounds the real async spawner across normal, ignored, overflow, timeout, and spawn errors", async () => {
