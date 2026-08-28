@@ -66,6 +66,7 @@ import {
 import {
   emptyNormativeProofRun,
   normativeRunnerCommand,
+  normativeRunnerEnvironment,
   parsePlaywrightJson,
   prepareNormativeProofRun,
   runNormativeProofs,
@@ -169,11 +170,29 @@ describe("post-freeze normative proof infrastructure coverage", () => {
       const bun = normativeRunnerCommand("bun", [fixture.proof, fixture.proof], "/tmp/report.xml");
       expect(bun.command).toBe("bun");
       expect(bun.args.filter((value) => value === fixture.proof.path)).toHaveLength(1);
-      expect(bun.args.join(" ")).toContain("literal \\[a\\]\\+\\? \\(safe\\)");
-      const playwright = normativeRunnerCommand("playwright", [fixture.proof], "/tmp/unused");
+      expect(bun.args[bun.args.indexOf("--test-name-pattern") + 1]).toBe(
+        "(?:literal \\[a\\]\\+\\? \\(safe\\))",
+      );
+      const playwright = normativeRunnerCommand(
+        "playwright",
+        [fixture.proof],
+        "/tmp/playwright.json",
+      );
       expect(playwright).toMatchObject({
         command: "bunx",
         versionArgs: ["playwright", "--version"],
+        reportEnvironment: { PLAYWRIGHT_JSON_OUTPUT_FILE: "/tmp/playwright.json" },
+      });
+      expect(
+        normativeRunnerEnvironment(playwright, {
+          PATH: "/bin",
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "core.hooksPath",
+          GIT_CONFIG_VALUE_0: "/untrusted",
+        }),
+      ).toEqual({
+        PATH: "/bin",
+        PLAYWRIGHT_JSON_OUTPUT_FILE: "/tmp/playwright.json",
       });
       expect(emptyNormativeProofRun(["closed"])).toEqual({
         schema_version: "2.0",
@@ -225,7 +244,11 @@ describe("post-freeze normative proof infrastructure coverage", () => {
       const playwright = addProof(fixture, "playwright");
       const manual = addProof(fixture, "manual");
       persistFixture(fixture);
-      const spawner = ((command: string, args: readonly string[]) => {
+      const spawner = ((
+        command: string,
+        args: readonly string[],
+        options: { env?: NodeJS.ProcessEnv },
+      ) => {
         if (args.includes("--version")) {
           return { status: 0, stdout: Buffer.from("1.4.0\n"), stderr: null };
         }
@@ -237,25 +260,25 @@ describe("post-freeze normative proof infrastructure coverage", () => {
           );
           return { status: 0, stdout: Buffer.from("bun-out"), stderr: Buffer.from("bun-err") };
         }
-        return {
-          status: 0,
-          stdout: Buffer.from(
-            JSON.stringify({
-              suites: [
-                {
-                  specs: [
-                    {
-                      title: playwright.title,
-                      file: playwright.path,
-                      tests: [{ results: [{ status: "passed" }] }],
-                    },
-                  ],
-                },
-              ],
-            }),
-          ),
-          stderr: 7,
-        };
+        const playwrightReport = options.env?.PLAYWRIGHT_JSON_OUTPUT_FILE;
+        expect(playwrightReport).toBeTruthy();
+        writeFileSync(
+          String(playwrightReport),
+          JSON.stringify({
+            suites: [
+              {
+                specs: [
+                  {
+                    title: playwright.title,
+                    file: playwright.path,
+                    tests: [{ results: [{ status: "passed" }] }],
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+        return { status: 0, stdout: Buffer.from("playwright-log"), stderr: 7 };
       }) as unknown as typeof spawnSync;
       const run = runNormativeProofs(fixture.base, { spawner });
       expect(run.errors).toEqual([]);
@@ -459,6 +482,32 @@ describe("post-freeze normative proof infrastructure coverage", () => {
     expect(cases).toEqual([
       { path: "e2e/a.spec.ts", title: "invalid-results", status: "skipped" },
       { path: "e2e/b.spec.ts", title: "invalid-status", status: "skipped" },
+    ]);
+  });
+
+  test("binds Playwright testDir-relative report paths to their exact repository proof", () => {
+    const cases = parsePlaywrightJson(
+      JSON.stringify({
+        config: { rootDir: "/repo/e2e" },
+        suites: [
+          {
+            specs: [
+              {
+                file: "conversation-home.spec.ts",
+                title: "exact nested proof",
+                tests: [{ results: [{ status: "passed" }] }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(cases).toEqual([
+      {
+        path: "/repo/e2e/conversation-home.spec.ts",
+        title: "exact nested proof",
+        status: "passed",
+      },
     ]);
   });
 

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sanitizedGitEnvironment } from "../git-environment.js";
 import {
   type NormativeCatalogDigests,
   type NormativeProofDefinitionV2,
@@ -92,6 +93,7 @@ export interface NormativeRunnerCommandV2 {
   command: string;
   args: string[];
   versionArgs: string[];
+  reportEnvironment?: Readonly<Record<string, string>>;
 }
 
 export function normativeRunnerCommand(
@@ -100,7 +102,11 @@ export function normativeRunnerCommand(
   reportPath: string,
 ): NormativeRunnerCommandV2 {
   const paths = [...new Set(proofs.map((proof) => proof.path))].sort();
-  const pattern = `^(?:${proofs.map((proof) => escapePattern(proof.title)).join("|")})$`;
+  const titles = [...new Set(proofs.map((proof) => proof.title))];
+  // Both Bun and Playwright apply their filters to the full hierarchical test
+  // name (suite + leaf title). Keep selection hierarchy-aware here; the
+  // structured report remains fail-closed on the exact leaf title and path.
+  const pattern = `(?:${titles.map(escapePattern).join("|")})`;
   if (runner === "bun") {
     return {
       command: "bun",
@@ -121,6 +127,17 @@ export function normativeRunnerCommand(
     command: "bunx",
     versionArgs: ["playwright", "--version"],
     args: ["playwright", "test", ...paths, "--grep", pattern, "--reporter=json"],
+    reportEnvironment: { PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath },
+  };
+}
+
+export function normativeRunnerEnvironment(
+  command: NormativeRunnerCommandV2,
+  source: Readonly<NodeJS.ProcessEnv> = process.env,
+): NodeJS.ProcessEnv {
+  return {
+    ...sanitizedGitEnvironment(source),
+    ...command.reportEnvironment,
   };
 }
 
@@ -241,7 +258,7 @@ export function runNormativeProofs(
         }
         continue;
       }
-      const reportPath = join(temporary, `${runner}.xml`);
+      const reportPath = join(temporary, runner === "bun" ? "bun.xml" : "playwright.json");
       const command = normativeRunnerCommand(runner, selected, reportPath);
       const version = spawner(command.command, command.versionArgs, {
         cwd: base,
@@ -260,6 +277,7 @@ export function runNormativeProofs(
           encoding: "utf8",
           timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
           maxBuffer: 64 * 1024 * 1024,
+          env: normativeRunnerEnvironment(command),
         });
         stdout = outputText(result.stdout);
         stderr = outputText(result.stderr);
@@ -267,7 +285,7 @@ export function runNormativeProofs(
           cases =
             runner === "bun"
               ? parseBunJunit(boundedText(reportPath, 32 * 1024 * 1024))
-              : parsePlaywrightJson(stdout);
+              : parsePlaywrightJson(boundedText(reportPath, 32 * 1024 * 1024));
         } catch (error) {
           report.errors.push(
             `${runner} structured report is invalid: ${error instanceof Error ? error.message : "parse failed"}`,

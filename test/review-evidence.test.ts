@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -16,7 +15,6 @@ import {
   reviewEvidence,
   reviewerFromResult,
 } from "../src/commands/review-evidence.js";
-import { sanitizedGitEnvironment } from "../src/git-environment.js";
 import { appendReviewEvidence } from "../src/hooks/review-evidence-gate.js";
 import {
   type Changed,
@@ -137,14 +135,9 @@ describe("review evidence primitives", () => {
   test("current-HEAD evidence preserves a bounded manifest larger than the legacy 64 KiB cap", () => {
     const repo = mkdtempSync(join("/tmp", "vf-review-large-manifest-"));
     const runGit = (args: string[]): string => {
-      const result = spawnSync("git", args, {
-        cwd: repo,
-        encoding: "utf8",
-        env: sanitizedGitEnvironment(),
-        maxBuffer: 4 * 1024 * 1024,
-      });
+      const result = defaultGit(repo, args);
       expect(result.status).toBe(0);
-      return String(result.stdout ?? "");
+      return result.stdout;
     };
     try {
       runGit(["init", "--quiet"]);

@@ -1,3 +1,5 @@
+import { isAbsolute, resolve } from "node:path";
+
 export interface ObservedCase {
   path: string;
   title: string;
@@ -65,6 +67,19 @@ function playwrightStatus(results: unknown): ObservedCase["status"] {
 export function parsePlaywrightJson(source: string): ObservedCase[] {
   const root = JSON.parse(source) as unknown;
   const output: ObservedCase[] = [];
+  const rootObject =
+    root && typeof root === "object" && !Array.isArray(root)
+      ? (root as Record<string, unknown>)
+      : undefined;
+  const configuration =
+    rootObject?.config && typeof rootObject.config === "object" && !Array.isArray(rootObject.config)
+      ? (rootObject.config as Record<string, unknown>)
+      : undefined;
+  const rootDirectory = typeof configuration?.rootDir === "string" ? configuration.rootDir : "";
+  const reportPath = (value: unknown): string => {
+    if (typeof value !== "string") return "";
+    return rootDirectory && !isAbsolute(value) ? resolve(rootDirectory, value) : value;
+  };
   const visit = (value: unknown): void => {
     if (!value || typeof value !== "object") return;
     const object = value as Record<string, unknown>;
@@ -81,7 +96,7 @@ export function parsePlaywrightJson(source: string): ObservedCase[] {
           ),
         );
         output.push({
-          path: typeof item.file === "string" ? item.file : "",
+          path: reportPath(item.file),
           title: typeof item.title === "string" ? item.title : "",
           status: statuses.includes("failed")
             ? "failed"

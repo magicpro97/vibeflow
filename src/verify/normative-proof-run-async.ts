@@ -9,6 +9,7 @@ import {
   type NormativeProofStatus,
   type ObservedCase,
   normativeRunnerCommand,
+  normativeRunnerEnvironment,
   parseBunJunit,
   parsePlaywrightJson,
   prepareNormativeProofRun,
@@ -17,6 +18,7 @@ import { VERIFY_RUNTIME_AUTHORITY } from "./runtime-authority.js";
 
 export interface NormativeAsyncSpawnOptions {
   cwd: string;
+  env?: NodeJS.ProcessEnv;
   stdio?: "ignore" | "pipe";
   timeout?: number;
   maxBuffer?: number;
@@ -51,6 +53,7 @@ export const defaultNormativeAsyncSpawner: NormativeAsyncSpawner = (command, arg
     const piped = options.stdio !== "ignore";
     const child = spawn(command, args, {
       cwd: options.cwd,
+      ...(options.env ? { env: options.env } : {}),
       stdio: piped ? ["ignore", "pipe", "pipe"] : "ignore",
     });
     const stdout: Buffer[] = [];
@@ -158,7 +161,7 @@ export async function runNormativeProofsAsync(
         continue;
       }
 
-      const reportPath = join(temporary, `${runner}.xml`);
+      const reportPath = join(temporary, runner === "bun" ? "bun.xml" : "playwright.json");
       const command = normativeRunnerCommand(runner, selected, reportPath);
       const version = await safelySpawn(spawner, command.command, command.versionArgs, {
         cwd: base,
@@ -174,6 +177,7 @@ export async function runNormativeProofsAsync(
       if (version.status === 0) {
         result = await safelySpawn(spawner, command.command, command.args, {
           cwd: base,
+          env: normativeRunnerEnvironment(command),
           stdio: "pipe",
           timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
           maxBuffer: 64 * 1024 * 1024,
@@ -182,7 +186,9 @@ export async function runNormativeProofsAsync(
         stderr = outputText(result.stderr);
         try {
           cases =
-            runner === "bun" ? parseBunJunit(readReport(reportPath)) : parsePlaywrightJson(stdout);
+            runner === "bun"
+              ? parseBunJunit(readReport(reportPath))
+              : parsePlaywrightJson(readReport(reportPath));
         } catch (error) {
           report.errors.push(
             `${runner} structured report is invalid: ${error instanceof Error ? error.message : "parse failed"}`,
