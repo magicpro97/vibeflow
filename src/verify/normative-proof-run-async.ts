@@ -188,7 +188,7 @@ export async function runNormativeProofsAsync(
           cases =
             runner === "bun"
               ? parseBunJunit(readReport(reportPath))
-              : parsePlaywrightJson(readReport(reportPath));
+              : parsePlaywrightJson(readReport(reportPath), base);
         } catch (error) {
           report.errors.push(
             `${runner} structured report is invalid: ${error instanceof Error ? error.message : "parse failed"}`,

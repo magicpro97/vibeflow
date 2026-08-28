@@ -285,7 +285,7 @@ export function runNormativeProofs(
           cases =
             runner === "bun"
               ? parseBunJunit(boundedText(reportPath, 32 * 1024 * 1024))
-              : parsePlaywrightJson(boundedText(reportPath, 32 * 1024 * 1024));
+              : parsePlaywrightJson(boundedText(reportPath, 32 * 1024 * 1024), base);
         } catch (error) {
           report.errors.push(
             `${runner} structured report is invalid: ${error instanceof Error ? error.message : "parse failed"}`,

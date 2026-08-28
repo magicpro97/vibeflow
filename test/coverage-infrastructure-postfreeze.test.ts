@@ -479,6 +479,7 @@ describe("post-freeze normative proof infrastructure coverage", () => {
           },
         ],
       }),
+      "/repo",
     );
     expect(cases).toEqual([
       { path: "e2e/a.spec.ts", title: "invalid-results", status: "skipped" },
@@ -502,6 +503,7 @@ describe("post-freeze normative proof infrastructure coverage", () => {
           },
         ],
       }),
+      "/repo",
     );
     expect(cases).toEqual([
       {
@@ -525,6 +527,7 @@ describe("post-freeze normative proof infrastructure coverage", () => {
           },
         ],
       }),
+      "C:\\repo",
     );
     expect(windowsCases[0]?.path).toBe("C:/repo/e2e/conversation-home.spec.ts");
     expect(
@@ -541,6 +544,40 @@ describe("post-freeze normative proof infrastructure coverage", () => {
         "exact nested proof",
       ),
     ).toHaveLength(1);
+    const uncCases = parsePlaywrightJson(
+      JSON.stringify({
+        config: { rootDir: "//Server/Share/Repo/e2e" },
+        suites: [
+          {
+            specs: [
+              {
+                file: "conversation-home.spec.ts",
+                title: "exact nested proof",
+                tests: [{ results: [{ status: "passed" }] }],
+              },
+            ],
+          },
+        ],
+      }),
+      "\\\\Server\\Share\\Repo",
+    );
+    expect(uncCases[0]?.path).toBe("//Server/Share/Repo/e2e/conversation-home.spec.ts");
+    expect(
+      observedCasesFor(
+        uncCases,
+        "\\\\Server\\Share\\Repo",
+        "e2e/conversation-home.spec.ts",
+        "exact nested proof",
+      ),
+    ).toHaveLength(1);
+    expect(
+      observedCasesFor(
+        uncCases,
+        "\\\\Server\\OtherShare\\Repo",
+        "e2e/conversation-home.spec.ts",
+        "exact nested proof",
+      ),
+    ).toHaveLength(0);
     expect(
       observedCasesFor(
         [
@@ -584,6 +621,7 @@ describe("post-freeze normative proof infrastructure coverage", () => {
           },
         ],
       }),
+      "/repo",
     );
     expect(
       observedCasesFor(

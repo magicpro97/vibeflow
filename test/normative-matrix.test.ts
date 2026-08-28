@@ -358,6 +358,7 @@ describe("proof execution integrity", () => {
           },
         ],
       }),
+      "/repo",
     );
     expect(playwright.map((item) => item.status)).toEqual(["passed", "skipped"]);
   });

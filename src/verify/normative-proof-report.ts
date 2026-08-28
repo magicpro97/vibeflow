@@ -6,12 +6,25 @@ export interface ObservedCase {
   status: "passed" | "failed" | "skipped";
 }
 
+type AuthorityPathFlavor = "posix" | "win32";
+const WINDOWS_AUTHORITY_ROOT = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
 function absoluteAuthorityPath(base: string, value: string): string | undefined {
-  if (/^(?:[A-Za-z]:[\\/]|\\\\)/.test(base) && win32.isAbsolute(base)) {
-    return win32.resolve(base, value).replace(/\\/g, "/");
-  }
-  if (posix.isAbsolute(base)) return posix.resolve(base, value);
+  const flavor = authorityPathFlavor(base);
+  if (flavor === "win32") return win32.resolve(base, value).replace(/\\/g, "/");
+  if (flavor === "posix") return posix.resolve(base, value);
   return undefined;
+}
+
+function authorityPathFlavor(base: string): AuthorityPathFlavor | undefined {
+  if (WINDOWS_AUTHORITY_ROOT.test(base) && win32.isAbsolute(base)) return "win32";
+  return posix.isAbsolute(base) ? "posix" : undefined;
+}
+
+function resolveAuthorityPath(flavor: AuthorityPathFlavor, base: string, value: string): string {
+  return flavor === "win32"
+    ? win32.resolve(base, value).replace(/\\/g, "/")
+    : posix.resolve(base, value);
 }
 
 export function observedCasesFor(
@@ -75,7 +88,7 @@ function playwrightStatus(results: unknown): ObservedCase["status"] {
   return "skipped";
 }
 
-export function parsePlaywrightJson(source: string): ObservedCase[] {
+export function parsePlaywrightJson(source: string, authorityBase: string): ObservedCase[] {
   const root = JSON.parse(source) as unknown;
   const output: ObservedCase[] = [];
   const rootObject =
@@ -87,10 +100,17 @@ export function parsePlaywrightJson(source: string): ObservedCase[] {
       ? (rootObject.config as Record<string, unknown>)
       : undefined;
   const rootDirectory = typeof configuration?.rootDir === "string" ? configuration.rootDir : "";
+  const authorityFlavor = authorityPathFlavor(authorityBase);
+  const reportRoot =
+    rootDirectory && authorityFlavor
+      ? resolveAuthorityPath(authorityFlavor, authorityBase, rootDirectory)
+      : "";
   const reportPath = (value: unknown): string => {
     if (typeof value !== "string") return "";
     if (!rootDirectory) return value;
-    return absoluteAuthorityPath(rootDirectory, value) ?? "";
+    return authorityFlavor && reportRoot
+      ? resolveAuthorityPath(authorityFlavor, reportRoot, value)
+      : "";
   };
   const visit = (value: unknown): void => {
     if (!value || typeof value !== "object") return;
