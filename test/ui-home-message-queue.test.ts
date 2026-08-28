@@ -5,6 +5,7 @@ import {
   CONVERSATION_MESSAGE_QUEUE_ERROR_CODE,
   CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND,
   CONVERSATION_MESSAGE_QUEUE_RECOVERY_ACTION,
+  CONVERSATION_MESSAGE_QUEUE_STALE_REASON,
   CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
 } from "../src/orchestrator/conversation/conversation-message-queue-contract.js";
 import { conversationApi } from "../src/ui/src/conversation-api.js";
@@ -824,6 +825,8 @@ describe("Home durable message queue", () => {
     const queued = item(1, "before");
     const committed = item(1, "after", {
       content_digest: digest("e"),
+      effective_authority_digest: digest("c"),
+      state: "claimed",
       item_digest: digest("d"),
       updated_at: "2026-08-26T00:00:01.000Z",
     });
@@ -871,6 +874,10 @@ describe("Home durable message queue", () => {
       expect(fx.draft.value).toBe("");
       expect(fx.composerError.value).toBe("");
       expect(fx.announcement.value).toContain("Updated queued message");
+      expect(fx.queue.value?.items[0]).toMatchObject({
+        state: "claimed",
+        effective_authority_digest: digest("c"),
+      });
     } finally {
       fx.runtime.dispose();
       fx.activation.close();
@@ -889,6 +896,12 @@ describe("Home durable message queue", () => {
         content_digest: digest("c"),
         item_digest: digest("b"),
         target_participants: ["participant-other"],
+      }),
+      item(1, "after", {
+        content_digest: digest("a"),
+        item_digest: digest("9"),
+        state: "stale",
+        stale_reason: CONVERSATION_MESSAGE_QUEUE_STALE_REASON.OPERATION_CHANGED,
       }),
     ]) {
       const queued = item(1, "before");
@@ -916,6 +929,8 @@ describe("Home durable message queue", () => {
     const queued = item(1, "before");
     const committed = item(1, "after", {
       content_digest: digest("e"),
+      effective_authority_digest: digest("c"),
+      state: "delivered",
       item_digest: digest("d"),
       updated_at: "2026-08-26T00:00:01.000Z",
     });
@@ -948,6 +963,10 @@ describe("Home durable message queue", () => {
       expect(fx.sendAsNew.value).toBeFalse();
       expect(fx.draft.value).toBe("");
       expect(fx.announcement.value).toContain("Updated queued message");
+      expect(fx.queue.value?.items[0]).toMatchObject({
+        state: "delivered",
+        effective_authority_digest: digest("c"),
+      });
     } finally {
       fx.runtime.dispose();
       fx.activation.close();

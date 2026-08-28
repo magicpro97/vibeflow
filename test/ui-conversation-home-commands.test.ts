@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { computed, ref } from "vue";
+import { type Ref, computed, ref, shallowRef } from "vue";
 import { HOST_ACTION_KIND } from "../src/actions/host-action-contract.js";
 import {
   ACTION_OPERATION_SSE_EVENT,
@@ -13,10 +13,26 @@ import {
   PUBLIC_OPERATION_PREFIXED_PHASE,
   PUBLIC_OPERATION_PROGRESS_STATUS,
 } from "../src/actions/public-operation-contract.js";
+import {
+  CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID,
+  CONVERSATION_MESSAGE_QUEUE_STATE,
+  CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE,
+} from "../src/orchestrator/conversation/conversation-message-queue-contract.js";
 import { createHomeActionMutationRuntime } from "../src/ui/src/conversation-home-action-runtime.js";
 import { conversationHomeApi } from "../src/ui/src/conversation-home-api.js";
 import { createHomeCommandRuntime } from "../src/ui/src/conversation-home-command-runtime.js";
-import type { HomeQueueAdmissionSnapshot } from "../src/ui/src/conversation-home-message-queue-runtime.js";
+import {
+  type HomeQueueAdmissionSnapshot,
+  createHomeMessageQueueRuntime,
+} from "../src/ui/src/conversation-home-message-queue-runtime.js";
+import type {
+  HomeMessageQueueSnapshot,
+  HomeNeedsActionQueuedMessage,
+  HomeOptimisticQueuedMessage,
+  HomeQueuedMessage,
+  HomeQueuedMessageEditBinding,
+  HomeRetryableQueuedMessage,
+} from "../src/ui/src/conversation-home-message-queue-types.js";
 import { watchHomeOperation } from "../src/ui/src/conversation-home-operation-stream.js";
 import { terminalHomeOperation } from "../src/ui/src/conversation-home-runtime.js";
 import {
@@ -174,14 +190,25 @@ function actionView(
   };
 }
 
-function commandHarness(initialRoot = "root-a", active = true) {
-  const activation = new ActivationEpoch();
-  activation.begin(initialRoot);
-  const activeRootId = ref<string | null>(active ? initialRoot : null);
+interface CommandHarnessOptions {
+  activation?: ActivationEpoch;
+  activeRootId?: Ref<string | null>;
+  draft?: Ref<string>;
+  messageQueue?: Parameters<typeof createHomeCommandRuntime>[0]["messageQueue"];
+}
+
+function commandHarness(
+  initialRoot = "root-a",
+  active = true,
+  options: CommandHarnessOptions = {},
+) {
+  const activation = options.activation ?? new ActivationEpoch();
+  if (!options.activation) activation.begin(initialRoot);
+  const activeRootId = options.activeRootId ?? ref<string | null>(active ? initialRoot : null);
   const activeRevisionState = ref(active ? revision(initialRoot) : null);
   const activeRevision = computed(() => activeRevisionState.value);
   const selectedConversationId = computed(() => activeRevisionState.value?.conversation_id ?? null);
-  const draft = ref("");
+  const draft = options.draft ?? ref("");
   const online = ref(true);
   const submitting = ref(false);
   const submittingToken = ref<string | null>(null);
@@ -290,7 +317,7 @@ function commandHarness(initialRoot = "root-a", active = true) {
     },
     sessions,
     sessionQuery,
-    messageQueue: {
+    messageQueue: options.messageQueue ?? {
       enqueue(admission) {
         queueAdmissions.push(admission);
         return queueAdmissionHandler.value(admission);
@@ -403,6 +430,118 @@ function switchActionHarness(harness: ReturnType<typeof actionHarness>, rootSess
 }
 
 describe("conversation Home command races", () => {
+  test("claimed or delivered edit reconciliation leaves Enter with no ordinary enqueue", async () => {
+    const queueDigest = (seed: string): string => `sha256:${seed.repeat(64).slice(0, 64)}`;
+    const queueItemId = `vf-queued-message-${"1".repeat(64)}`;
+    const before: HomeQueuedMessage = {
+      schema_version: "1.0",
+      queue_item_id: queueItemId,
+      queue_sequence: 1,
+      root_session_id: "root-a",
+      author_public_id: CONVERSATION_MESSAGE_QUEUE_AUTHOR_PUBLIC_ID.HUMAN,
+      content: "before",
+      content_digest: queueDigest("b"),
+      target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
+      quote_refs: [],
+      private_context_present: false,
+      predecessor_queue_item_id: null,
+      admitted_authority_digest: queueDigest("a"),
+      effective_authority_digest: queueDigest("a"),
+      state: CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED,
+      stale_reason: null,
+      admitted_at: "2026-08-25T00:00:00.000Z",
+      updated_at: "2026-08-25T00:00:00.000Z",
+      item_digest: queueDigest("c"),
+    };
+    const snapshot = (
+      rootSessionId: string,
+      items: HomeQueuedMessage[],
+    ): HomeMessageQueueSnapshot => ({
+      schema_version: "1.0",
+      root_session_id: rootSessionId,
+      current_authority_digest: queueDigest("e"),
+      max_nonterminal_items: 32,
+      items,
+    });
+
+    for (const scenario of [
+      { mode: "active-reconnect", state: CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED },
+      { mode: "root-return", state: CONVERSATION_MESSAGE_QUEUE_STATE.DELIVERED },
+    ] as const) {
+      const activation = new ActivationEpoch();
+      activation.begin("root-a");
+      const activeRootId = ref<string | null>("root-a");
+      const draft = ref("");
+      const queue = shallowRef<HomeMessageQueueSnapshot | null>(null);
+      const edit = shallowRef<HomeQueuedMessageEditBinding | null>(null);
+      const sendAsNew = ref(false);
+      let ordinaryEnqueues = 0;
+      const messageQueue = createHomeMessageQueueRuntime({
+        activation,
+        activeRootId,
+        online: ref(true),
+        draft,
+        composerError: ref(""),
+        snapshot: queue,
+        optimistic: ref<HomeOptimisticQueuedMessage[]>([]),
+        retryable: ref<HomeRetryableQueuedMessage[]>([]),
+        needsAction: ref<HomeNeedsActionQueuedMessage[]>([]),
+        edit,
+        editSaving: ref(false),
+        sendAsNew,
+        announcement: ref(""),
+        composerFocusEpoch: ref(0),
+        refreshQueue: async () => true,
+      });
+      const commands = commandHarness("root-a", true, {
+        activation,
+        activeRootId,
+        draft,
+        messageQueue: {
+          enqueue: async () => {
+            ordinaryEnqueues += 1;
+            return true;
+          },
+          currentEdit: () => edit.value,
+          saveEdit: messageQueue.saveEdit,
+        },
+      });
+      const progressed: HomeQueuedMessage = {
+        ...before,
+        content: "after",
+        content_digest: queueDigest("d"),
+        effective_authority_digest: queueDigest("e"),
+        state: scenario.state,
+        updated_at: "2026-08-25T00:00:01.000Z",
+        item_digest: queueDigest("f"),
+      };
+      try {
+        messageQueue.adoptSnapshot(snapshot("root-a", [before]), "root-a");
+        expect(messageQueue.beginEdit()).toBeTrue();
+        draft.value = "after";
+        if (scenario.mode === "root-return") {
+          activation.begin("root-b");
+          activeRootId.value = "root-b";
+          messageQueue.switchRoot("root-a", "root-b");
+          messageQueue.adoptSnapshot(snapshot("root-b", []), "root-b");
+          activation.begin("root-a");
+          activeRootId.value = "root-a";
+          messageQueue.switchRoot("root-b", "root-a");
+        }
+
+        messageQueue.adoptSnapshot(snapshot("root-a", [progressed]), "root-a");
+        expect(edit.value).toBeNull();
+        expect(sendAsNew.value).toBeFalse();
+        expect(draft.value).toBe("");
+        await commands.runtime.submitDraft();
+        expect(ordinaryEnqueues).toBe(0);
+      } finally {
+        messageQueue.dispose();
+        activation.close();
+      }
+    }
+  });
+
   test("proposeCandidate discards stale success after a root switch and never reselects the old root", async () => {
     const originalPropose = conversationHomeApi.propose;
     const proposal = deferred<HomeActionView>();

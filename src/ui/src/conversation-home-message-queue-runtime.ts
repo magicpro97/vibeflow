@@ -16,6 +16,7 @@ import {
 import {
   matchesHomeQueueEditConflict,
   preservesHomeQueueEditAuthority,
+  reconcilesHomeQueueEditSnapshot,
   sameHomeQueueEditBinding,
 } from "./conversation-home-message-queue-edit-authority.js";
 import type {
@@ -58,21 +59,6 @@ interface QueueCommand {
   generation: number;
   root_session_id: string;
 }
-
-const snapshotConfirmsCommittedEdit = (
-  before: HomeQueuedMessage | null | undefined,
-  after: HomeQueuedMessage | undefined,
-  binding: HomeQueuedMessageEditBinding,
-  desiredContent: string,
-): boolean =>
-  Boolean(
-    before &&
-      before.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED &&
-      before.item_digest === binding.item_digest &&
-      after &&
-      after.item_digest !== binding.item_digest &&
-      preservesHomeQueueEditAuthority(before, after, desiredContent),
-  );
 
 export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInput) {
   const savedDrafts = new Map<string, SavedRootDraft>();
@@ -125,7 +111,7 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
         (candidate) => candidate.queue_item_id === activeEdit.queue_item_id,
       );
       const desiredContent = input.draft.value.normalize("NFC");
-      const committedEditIsAuthoritative = snapshotConfirmsCommittedEdit(
+      const committedEditIsAuthoritative = reconcilesHomeQueueEditSnapshot(
         previousItem,
         item,
         activeEdit,
@@ -174,7 +160,7 @@ export function createHomeMessageQueueRuntime(input: HomeMessageQueueRuntimeInpu
           input.edit.value = structuredClone(saved.edit);
           announce(`Editing queued message ${saved.edit.queue_sequence}.`);
         } else if (
-          snapshotConfirmsCommittedEdit(
+          reconcilesHomeQueueEditSnapshot(
             saved.editBaseline,
             item,
             saved.edit,

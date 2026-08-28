@@ -27,6 +27,28 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 const samePublicList = (left: unknown, right: unknown): boolean =>
   JSON.stringify(left) === JSON.stringify(right);
 
+const HOME_QUEUE_EDIT_RECONCILED_STATES = new Set<HomeQueuedMessage["state"]>([
+  CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED,
+  CONVERSATION_MESSAGE_QUEUE_STATE.CLAIMED,
+  CONVERSATION_MESSAGE_QUEUE_STATE.DELIVERED,
+]);
+
+function sameImmutableQueueAuthority(before: HomeQueuedMessage, after: HomeQueuedMessage): boolean {
+  return (
+    before.schema_version === after.schema_version &&
+    before.queue_item_id === after.queue_item_id &&
+    before.queue_sequence === after.queue_sequence &&
+    before.root_session_id === after.root_session_id &&
+    before.author_public_id === after.author_public_id &&
+    samePublicList(before.target_participants, after.target_participants) &&
+    samePublicList(before.quote_refs, after.quote_refs) &&
+    before.private_context_present === after.private_context_present &&
+    before.predecessor_queue_item_id === after.predecessor_queue_item_id &&
+    before.admitted_authority_digest === after.admitted_authority_digest &&
+    before.admitted_at === after.admitted_at
+  );
+}
+
 export function sameHomeQueueEditBinding(
   current: HomeQueuedMessageEditBinding | null,
   expected: HomeQueuedMessageEditBinding,
@@ -60,6 +82,32 @@ export function preservesHomeQueueEditAuthority(
     before.admitted_authority_digest === after.admitted_authority_digest &&
     before.effective_authority_digest === after.effective_authority_digest &&
     before.admitted_at === after.admitted_at
+  );
+}
+
+export function reconcilesHomeQueueEditSnapshot(
+  before: HomeQueuedMessage | null | undefined,
+  after: HomeQueuedMessage | undefined,
+  binding: HomeQueuedMessageEditBinding,
+  expectedContent: string,
+): boolean {
+  return Boolean(
+    before &&
+      after &&
+      before.state === CONVERSATION_MESSAGE_QUEUE_STATE.QUEUED &&
+      before.stale_reason === null &&
+      before.item_digest === binding.item_digest &&
+      before.root_session_id === binding.root_session_id &&
+      before.queue_item_id === binding.queue_item_id &&
+      before.queue_sequence === binding.queue_sequence &&
+      samePublicList(before.target_participants, binding.target_participants) &&
+      samePublicList(before.quote_refs, binding.quote_refs) &&
+      before.private_context_present === binding.private_context_present &&
+      after.item_digest !== binding.item_digest &&
+      HOME_QUEUE_EDIT_RECONCILED_STATES.has(after.state) &&
+      after.stale_reason === null &&
+      after.content === expectedContent &&
+      sameImmutableQueueAuthority(before, after),
   );
 }
 
