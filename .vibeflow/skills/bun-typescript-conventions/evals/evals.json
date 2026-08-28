@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "skill": "bun-typescript-conventions",
+  "cases": [
+    {
+      "id": "bun-convention-positive-module",
+      "type": "positive",
+      "prompt": "Add a new TypeScript module for dispatch cleanup and cover it with Bun tests."
+    },
+    {
+      "id": "bun-convention-positive-protocol-literal",
+      "type": "positive",
+      "prompt": "This hardcoded runtime vocabulary is repeated in storage and UI; centralize it without an enum."
+    },
+    {
+      "id": "bun-convention-positive-spawn",
+      "type": "positive",
+      "prompt": "Replace this raw Bun.spawn call with the portable owned-process launcher and deterministic cleanup tests."
+    },
+    {
+      "id": "bun-convention-positive-tests",
+      "type": "positive",
+      "prompt": "Review the Bun test style for this cross-platform failure and teardown suite."
+    },
+    {
+      "id": "bun-convention-negative-explain",
+      "type": "negative",
+      "prompt": "Explain what Bun and TypeScript are; make no repository changes."
+    },
+    {
+      "id": "bun-convention-negative-copy",
+      "type": "negative",
+      "prompt": "Rewrite the landing-page headline and supporting marketing copy."
+    },
+    {
+      "id": "bun-convention-negative-local-literal",
+      "type": "negative",
+      "prompt": "Change one local test description string that is used only once."
+    },
+    {
+      "id": "bun-convention-negative-status",
+      "type": "negative",
+      "prompt": "Report the installed Bun version and current test status without editing files."
+    }
+  ]
+}

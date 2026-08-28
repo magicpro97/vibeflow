@@ -23,6 +23,14 @@
 !skills/coordinator/**
 !skills/typed-protocol-contracts/
 !skills/typed-protocol-contracts/**
+!skills/durable-authority-crash-replay/
+!skills/durable-authority-crash-replay/**
+!skills/runtime-portable-process-fixtures/
+!skills/runtime-portable-process-fixtures/**
+!skills/exact-coverage-repair/
+!skills/exact-coverage-repair/**
+!skills/bun-typescript-conventions/
+!skills/bun-typescript-conventions/**
 
 # Machine-specific (explicit for clarity):
 # PROJECT_CONTEXT.md, TASK_CONTEXT.md, SKILL_INDEX.md
