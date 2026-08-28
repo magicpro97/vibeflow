@@ -10,6 +10,7 @@ import {
   acceptConversationSnapshotFrame,
   acceptConversationTraceFrame,
 } from "../conversation-stream-boundary.js";
+import { CONVERSATION_STREAM_ERROR_MESSAGE } from "../conversation-stream-error-contract.js";
 import {
   type ConversationSnapshot,
   type ConversationTraceRecord,
@@ -17,7 +18,6 @@ import {
   recoverConversationStreamAttempt,
 } from "../conversation-types.js";
 export { buildConversationMessages } from "../conversation-message-projection.js";
-const INVALID_TRACE_MESSAGE = "conversation trace event was invalid";
 
 interface ConversationStreamBindings {
   state: ConversationWorkspaceState;
@@ -60,7 +60,10 @@ export function useConversationStream(bindings: ConversationStreamBindings) {
   const scheduleReconnect = (delay = 1_000) => {
     clearRetry();
     if (destroyed || !bindings.state.activeConversationId || !bindings.state.streamToken) return;
-    setStatus(CONVERSATION_CLIENT_STREAM_STATE.RECONNECTING, "conversation stream disconnected");
+    setStatus(
+      CONVERSATION_CLIENT_STREAM_STATE.RECONNECTING,
+      CONVERSATION_STREAM_ERROR_MESSAGE.DISCONNECTED,
+    );
     retryTimer = startTimer(() => {
       retryTimer = null;
       void connect();
@@ -95,7 +98,9 @@ export function useConversationStream(bindings: ConversationStreamBindings) {
       if (attemptGuard && !attemptGuard.canRecover()) return false;
       setStatus(
         CONVERSATION_CLIENT_STREAM_STATE.ERROR,
-        error instanceof Error ? error.message : "conversation stream token renewal failed",
+        error instanceof Error
+          ? error.message
+          : CONVERSATION_STREAM_ERROR_MESSAGE.TOKEN_RENEWAL_FAILED,
       );
       return false;
     }
@@ -147,7 +152,7 @@ export function useConversationStream(bindings: ConversationStreamBindings) {
       );
       setStatus(
         accepted ? CONVERSATION_CLIENT_STREAM_STATE.LIVE : CONVERSATION_CLIENT_STREAM_STATE.ERROR,
-        accepted ? null : "conversation snapshot was invalid",
+        accepted ? null : CONVERSATION_STREAM_ERROR_MESSAGE.SNAPSHOT_INVALID,
       );
     });
 
@@ -160,7 +165,7 @@ export function useConversationStream(bindings: ConversationStreamBindings) {
       );
       setStatus(
         accepted ? CONVERSATION_CLIENT_STREAM_STATE.LIVE : CONVERSATION_CLIENT_STREAM_STATE.ERROR,
-        accepted ? null : INVALID_TRACE_MESSAGE,
+        accepted ? null : CONVERSATION_STREAM_ERROR_MESSAGE.TRACE_INVALID,
       );
     });
 

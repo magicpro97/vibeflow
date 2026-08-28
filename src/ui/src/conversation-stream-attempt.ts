@@ -4,8 +4,7 @@ import {
   CONVERSATION_STREAM_RECOVERY_OUTCOME,
   isConversationSseErrorCode,
 } from "../../orchestrator/conversation/conversation-sse-contract.js";
-
-export const INVALID_CONVERSATION_STREAM_ERROR_MESSAGE = "conversation stream failed";
+import { CONVERSATION_STREAM_ERROR_MESSAGE } from "./conversation-stream-error-contract.js";
 
 export function createConversationStreamAttemptGuard() {
   let recoverable = true;
@@ -13,12 +12,13 @@ export function createConversationStreamAttemptGuard() {
     acceptTypedError(raw: string) {
       try {
         const payload = parsePublicApiErrorBody(JSON.parse(raw));
-        if (!isConversationSseErrorCode(payload.code)) throw new Error("invalid stream error code");
+        if (!isConversationSseErrorCode(payload.code))
+          throw new Error(CONVERSATION_STREAM_ERROR_MESSAGE.ERROR_CODE_INVALID);
         const fatal = payload.code === PUBLIC_ERROR_CODE.NOT_FOUND;
         if (fatal) recoverable = false;
         return { fatal, message: payload.message };
       } catch {
-        return { fatal: false, message: INVALID_CONVERSATION_STREAM_ERROR_MESSAGE };
+        return { fatal: false, message: CONVERSATION_STREAM_ERROR_MESSAGE.FAILED };
       }
     },
     canRecover: () => recoverable,

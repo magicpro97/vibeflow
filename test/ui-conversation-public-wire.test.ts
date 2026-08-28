@@ -394,9 +394,9 @@ describe("browser-safe conversation public wire", () => {
     expect(adopted).toBe(0);
     expect(
       acceptConversationSnapshotFrame(JSON.stringify(snapshot()), "conversation-a", () => false),
-    ).toBeTrue();
+    ).toBeFalse();
     expect(
       acceptConversationTraceFrame(JSON.stringify(trace()), "conversation-a", () => false),
-    ).toBeTrue();
+    ).toBeFalse();
   });
 });

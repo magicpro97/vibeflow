@@ -24,6 +24,7 @@ import type {
   HomeTimelineItem,
   HomeTimelineResponse,
 } from "./conversation-home-types.js";
+import { CONVERSATION_STREAM_ERROR_MESSAGE } from "./conversation-stream-error-contract.js";
 import type { ConversationSnapshot, ConversationTraceRecord } from "./conversation-types.js";
 import {
   createConversationStreamAttemptGuard,
@@ -238,7 +239,9 @@ export function watchHomeConversationStream(
       if (attemptGuard && !attemptGuard.canRecover()) return false;
       input.setStatus(
         CONVERSATION_CLIENT_STREAM_STATE.ERROR,
-        error instanceof Error ? error.message : "conversation stream token renewal failed",
+        error instanceof Error
+          ? error.message
+          : CONVERSATION_STREAM_ERROR_MESSAGE.TOKEN_RENEWAL_FAILED,
       );
       return false;
     }
@@ -255,7 +258,7 @@ export function watchHomeConversationStream(
     if (closed || !input.isCurrent() || !streamToken) return;
     input.setStatus(
       CONVERSATION_CLIENT_STREAM_STATE.RECONNECTING,
-      "conversation stream disconnected",
+      CONVERSATION_STREAM_ERROR_MESSAGE.DISCONNECTED,
     );
     retryTimer = authority.startTimer(() => {
       retryTimer = null;
@@ -290,7 +293,7 @@ export function watchHomeConversationStream(
       } catch {
         input.setStatus(
           CONVERSATION_CLIENT_STREAM_STATE.ERROR,
-          "conversation snapshot was invalid",
+          CONVERSATION_STREAM_ERROR_MESSAGE.SNAPSHOT_INVALID,
         );
       }
     });
@@ -299,13 +302,16 @@ export function watchHomeConversationStream(
       if (closed || attemptId !== generation || !input.isCurrent()) return;
       try {
         if (!input.rootSessionId || !input.onQueueInvalidation)
-          throw new Error("message queue stream binding is unavailable");
+          throw new Error(CONVERSATION_STREAM_ERROR_MESSAGE.MESSAGE_QUEUE_BINDING_UNAVAILABLE);
         const invalidation: unknown = JSON.parse((event as MessageEvent<string>).data);
         assertHomeQueueInvalidation(invalidation, input.rootSessionId);
         input.onQueueInvalidation(invalidation);
         input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.LIVE, null);
       } catch {
-        input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.ERROR, "message queue update was invalid");
+        input.setStatus(
+          CONVERSATION_CLIENT_STREAM_STATE.ERROR,
+          CONVERSATION_STREAM_ERROR_MESSAGE.MESSAGE_QUEUE_UPDATE_INVALID,
+        );
         input.onQueueRefreshNeeded?.();
       }
     });
@@ -315,7 +321,7 @@ export function watchHomeConversationStream(
       try {
         const record = parseConversationSseRecord((event as MessageEvent<string>).data);
         if (record.conversation_id !== input.conversationId)
-          throw new Error("conversation trace identity did not match the stream");
+          throw new Error(CONVERSATION_STREAM_ERROR_MESSAGE.TRACE_IDENTITY_MISMATCH);
         input.onTrace(record);
         input.setStatus(CONVERSATION_CLIENT_STREAM_STATE.LIVE, null);
         if (
@@ -329,7 +335,7 @@ export function watchHomeConversationStream(
       } catch {
         input.setStatus(
           CONVERSATION_CLIENT_STREAM_STATE.ERROR,
-          "conversation trace event was invalid",
+          CONVERSATION_STREAM_ERROR_MESSAGE.TRACE_INVALID,
         );
         queueRefresh();
       }

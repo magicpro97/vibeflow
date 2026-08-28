@@ -255,8 +255,7 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
     }
     // biome-ignore format: compact fixture keeps this exhaustive coverage test below the source cap
     const connected = (token: string, expires: string | null = null) => state({ activeConversationId: "conversation-1", streamToken: token, streamTokenExpiresAt: expires });
-
-    function mountStream(current: ConversationWorkspaceState) {
+    function mountStream(current: ConversationWorkspaceState, frameAccepted = true) {
       const snapshots: ConversationSnapshot[] = [];
       const traces: ConversationTraceRecord[] = [];
       let controls!: ReturnType<typeof streamModule.useConversationStream>;
@@ -267,11 +266,11 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
             currentCursor: () => current.cursor,
             applySnapshot(value) {
               snapshots.push(value);
-              return true;
+              return frameAccepted;
             },
             applyTrace(value) {
               traces.push(value);
-              return true;
+              return frameAccepted;
             },
             setStreamCredentials(token, expiresAt) {
               current.streamToken = token;
@@ -284,30 +283,23 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
       app.mount(host());
       return { app, controls, snapshots, traces };
     }
-
-    const credentials = (token: string) => ({
-      stream_token: token,
-      stream_token_expires_at: "invalid",
-    });
+    // biome-ignore format: compact fixture keeps this exhaustive coverage test below the source cap
+    const credentials = (token: string) => ({ stream_token: token, stream_token_expires_at: "invalid" });
     let renewalCount = 0;
     response = () => new Response(JSON.stringify(credentials(`renewed-${++renewalCount}`)));
-
     const idle = mountStream(state());
     idle.controls.reconnect();
     idle.controls.disconnect();
     idle.app.unmount();
     idle.controls.reconnect();
     eq("idle", FakeEventSource.instances.length, 0);
-
     const liveState = connected("token x", "invalid");
     liveState.cursor = 7;
     const live = mountStream(liveState);
     await settle();
     const first = FakeEventSource.instances.at(-1) as FakeEventSource;
-    ok(
-      "cursor",
-      first.url.endsWith("stream_token=token+x&since=7") && liveState.streamStatus === "connecting",
-    );
+    // biome-ignore format: compact assertion keeps this exhaustive coverage test below the source cap
+    ok("cursor", first.url.endsWith("stream_token=token+x&since=7") && liveState.streamStatus === "connecting");
     first.emit("snapshot", JSON.stringify(snapshot));
     first.emit("snapshot", JSON.stringify({ ...snapshot, lifecycle: "FUTURE" }));
     first.emit("trace", JSON.stringify(trace(9, userMessage("hi"))));
@@ -320,6 +312,17 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
       [live.snapshots.length, live.traces.length, liveState.streamError, first.closed],
       [1, 1, "conversation stream failed", false],
     );
+    const rejectedState = connected("token y");
+    const rejected = mountStream(rejectedState, false);
+    await settle();
+    const rejectedSource = FakeEventSource.instances.at(-1) as FakeEventSource;
+    rejectedSource.emit("snapshot", JSON.stringify(snapshot));
+    // biome-ignore format: compact regression keeps this exhaustive coverage test below the source cap
+    eq("snapshot adoption failure", [rejected.snapshots.length, rejectedState.streamStatus, rejectedState.streamError], [1, "error", "conversation snapshot was invalid"]);
+    rejectedSource.emit("trace", JSON.stringify(trace(9, userMessage("rejected"))));
+    // biome-ignore format: compact regression keeps this exhaustive coverage test below the source cap
+    eq("trace adoption failure", [rejected.traces.length, rejectedState.streamStatus, rejectedState.streamError], [1, "error", "conversation trace event was invalid"]);
+    rejected.app.unmount();
     live.controls.reconnect();
     await settle();
     const second = FakeEventSource.instances.at(-1) as FakeEventSource;

@@ -7,8 +7,7 @@ export function acceptConversationSnapshotFrame(
   apply: (snapshot: ConversationSnapshot) => boolean,
 ): boolean {
   try {
-    apply(parseConversationSseSnapshot(raw, conversationId));
-    return true;
+    return apply(parseConversationSseSnapshot(raw, conversationId));
   } catch {
     return false;
   }
@@ -22,8 +21,7 @@ export function acceptConversationTraceFrame(
   try {
     const record = parseConversationSseRecord(raw);
     if (record.conversation_id !== conversationId) return false;
-    apply(record);
-    return true;
+    return apply(record);
   } catch {
     return false;
   }

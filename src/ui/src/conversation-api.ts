@@ -4,6 +4,7 @@ import {
   isConversationPublicTraceRecordWireV1,
   isConversationSnapshotWireV1,
 } from "./conversation-public-wire.js";
+import { CONVERSATION_STREAM_ERROR_MESSAGE } from "./conversation-stream-error-contract.js";
 import type {
   ApprovalDecision,
   ApprovalResolveResponse,
@@ -139,7 +140,7 @@ export const conversationApi = {
 export function parseConversationSseRecord(raw: string): ConversationTraceRecord {
   const value: unknown = JSON.parse(raw);
   if (!isConversationPublicTraceRecordWireV1(value))
-    throw new Error("conversation trace event was invalid");
+    throw new Error(CONVERSATION_STREAM_ERROR_MESSAGE.TRACE_INVALID);
   return value as ConversationTraceRecord;
 }
 
