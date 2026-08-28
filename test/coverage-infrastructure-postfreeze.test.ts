@@ -606,6 +606,9 @@ describe("post-freeze normative proof infrastructure coverage", () => {
         "exact nested proof",
       ),
     ).toHaveLength(0);
+    expect(
+      observedCasesFor(uncCases, "repo", "e2e/conversation-home.spec.ts", "exact nested proof"),
+    ).toHaveLength(0);
     const posixAliasCases = parsePlaywrightJson(
       JSON.stringify({
         config: { rootDir: "/repo/e2e" },
