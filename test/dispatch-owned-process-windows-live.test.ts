@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { AGENT_ENGINE } from "../src/core/agent-contract.js";
+import { conversationEnvPolicy } from "../src/dispatch/env-filter.js";
 import {
   OWNED_PROCESS_PRESENCE_KIND,
   OWNED_PROCESS_PROOF_STRENGTH,
@@ -18,13 +19,26 @@ import {
   createOwnedProcessPlatform,
   probeProcess,
 } from "../src/dispatch/owned-process-platform.js";
+import { trustedWindowsSystemRoot } from "../src/dispatch/owned-process-record-windows-native.js";
+import {
+  createWindowsRecordRuntime,
+  ensureWindowsRecordDirectory,
+  windowsDirectoryIdentity,
+} from "../src/dispatch/owned-process-record-windows-storage.js";
 import {
   OwnedProcessController,
   OwnedProcessRecordStore,
   verifyOwnedProcessReleaseProof,
 } from "../src/dispatch/owned-process-runtime.js";
 import { OWNED_SUPERVISOR_TERMINAL_PHASE } from "../src/dispatch/owned-process-status.js";
+import {
+  ENGINE_ATTEMPT_START_OUTCOME,
+  ENGINE_SESSION_MODE,
+} from "../src/dispatch/session-contract.js";
+import { createSpawnOptionsProjection } from "../src/dispatch/session-types.js";
+import { createEngineSessionAdapter } from "../src/dispatch/session.js";
 import { RUNTIME_PLATFORM } from "../src/durability/process-identity-contract.js";
+import { CONVERSATION_OPERATION_STATE } from "../src/orchestrator/conversation/conversation-public-wire-contract.js";
 
 const LIVE_WINDOWS_ENV = "VF_REQUIRE_LIVE_WINDOWS";
 const LIVE_WINDOWS_TIMEOUT_MS = 30_000;
@@ -63,10 +77,130 @@ function cleanupOwnedTree(root: string, attemptId: string): void {
 }
 
 describe("live Windows owned CLI process lifecycle", () => {
+  liveWindowsTest("pins the records directory and every ancestor for the full lease", () => {
+    const parent = mkdtempSync(join(tmpdir(), "vf-authority-lease-win-live-"));
+    const authorityPath = join(parent, "authority");
+    const recordsPath = join(authorityPath, "records");
+    const movedAuthority = `${authorityPath}-moved`;
+    const movedRecords = `${recordsPath}-moved`;
+    try {
+      const runtime = createWindowsRecordRuntime({});
+      ensureWindowsRecordDirectory(recordsPath, runtime);
+      const identity = windowsDirectoryIdentity(recordsPath, runtime);
+      runtime.pathAuthority.withVerifiedDirectory(recordsPath, identity.value, () => {
+        expect(() => renameSync(recordsPath, movedRecords)).toThrow();
+        expect(() => renameSync(authorityPath, movedAuthority)).toThrow();
+      });
+      renameSync(recordsPath, movedRecords);
+      renameSync(movedRecords, recordsPath);
+      renameSync(authorityPath, movedAuthority);
+      renameSync(movedAuthority, authorityPath);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  liveWindowsTest("rejects a permissive pre-existing authority root", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-permissive-win-live-"));
+    try {
+      const acl = spawnSync(
+        join(trustedWindowsSystemRoot(), "System32", "icacls.exe"),
+        [root, "/grant", "*S-1-1-0:(OI)(CI)F"],
+        { encoding: "utf8", timeout: LIVE_WINDOWS_TIMEOUT_MS, windowsHide: true },
+      );
+      expect(acl.status).toBe(0);
+      expect(() => createEngineSessionAdapter({ evidenceRoot: root })).toThrow(
+        "permissive Windows authority DACL rejected",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  liveWindowsTest(
+    "persists canonical adapter PIDs, terminal release, and start authority",
+    async () => {
+      const parent = mkdtempSync(join(tmpdir(), "vf-adapter-win-live-"));
+      const root = join(parent, "authority");
+      const bin = join(parent, "bin");
+      const fixtureSource = join(bin, "codex-fixture.ts");
+      const fixtureExecutable = join(bin, "codex.exe");
+      const argvEvidence = join(parent, "fixture-argv.json");
+      const attemptId = "windows-live-adapter";
+      try {
+        mkdirSync(bin, { recursive: true });
+        writeFileSync(
+          fixtureSource,
+          `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(argvEvidence)}, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "019f278f-d7ff-77d3-9c44-7459bbf08d19" }) + "\\n");
+`,
+        );
+        const compiled = await Bun.build({
+          entrypoints: [fixtureSource],
+          compile: { outfile: fixtureExecutable },
+        });
+        expect(compiled.success).toBe(true);
+        const adapter = createEngineSessionAdapter({
+          evidenceRoot: root,
+          graceMs: 1_000,
+          sourceEnv: { PATH: `${bin};${process.env.PATH ?? ""}` },
+        });
+        const spawn = createSpawnOptionsProjection({
+          engine: AGENT_ENGINE.CODEX,
+          model: null,
+          sessionMode: ENGINE_SESSION_MODE.FRESH,
+          rendered_prompt: "live Windows adapter",
+          rendered_tools: [],
+          sandbox: "read-only",
+          env_policy: conversationEnvPolicy(AGENT_ENGINE.CODEX),
+          isolation: null,
+          provenance: { roleSource: "builtin", roleHash: "live", skillHashes: [] },
+          trace_metadata: { role_resolved_hash: "live", skill_resolved_hashes: [] },
+        });
+        const handle = adapter.start({
+          attemptId,
+          spawn,
+          signal: new AbortController().signal,
+        });
+        const running = new OwnedProcessRecordStore(root).read(attemptId);
+        expect(running?.supervisor_pid).toBeGreaterThan(0);
+        expect(running?.cli_pid).toBeGreaterThan(0);
+        const result = await timeout(handle.completion, "canonical adapter completion");
+        expect(result).toMatchObject({
+          ok: true,
+          state: CONVERSATION_OPERATION_STATE.COMPLETED,
+        });
+        expect(JSON.parse(readFileSync(argvEvidence, "utf8"))).toEqual([
+          "--sandbox",
+          "read-only",
+          "exec",
+          "--json",
+          "-",
+        ]);
+        expect(new OwnedProcessRecordStore(root).read(attemptId)).toMatchObject({
+          state: OWNED_PROCESS_STATE.RELEASED,
+          process_quiescent: true,
+          exit_code: 0,
+        });
+        expect(adapter.startAuthority?.read(attemptId)).toMatchObject({
+          attempt_id: attemptId,
+          outcome: ENGINE_ATTEMPT_START_OUTCOME.ACCEPTED,
+          process_quiescent: true,
+        });
+      } finally {
+        cleanupOwnedTree(root, attemptId);
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+    LIVE_WINDOWS_TIMEOUT_MS,
+  );
+
   liveWindowsTest(
     "stores real supervisor/CLI PIDs and releases the Job Object tree",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "vf-owned-win-live-"));
+      const parent = mkdtempSync(join(tmpdir(), "vf-owned-win-live-"));
+      const root = join(parent, "authority");
       const attemptId = "windows-live-release";
       try {
         const platform = createOwnedProcessPlatform();
@@ -139,7 +273,7 @@ describe("live Windows owned CLI process lifecycle", () => {
         );
       } finally {
         cleanupOwnedTree(root, attemptId);
-        rmSync(root, { recursive: true, force: true });
+        rmSync(parent, { recursive: true, force: true });
       }
     },
     LIVE_WINDOWS_TIMEOUT_MS,
@@ -148,7 +282,8 @@ describe("live Windows owned CLI process lifecycle", () => {
   liveWindowsTest(
     "detects and reaps a real orphan after its owner process exits",
     () => {
-      const root = mkdtempSync(join(tmpdir(), "vf-owned-win-orphan-"));
+      const parent = mkdtempSync(join(tmpdir(), "vf-owned-win-orphan-"));
+      const root = join(parent, "authority");
       const attemptId = "windows-live-orphan";
       try {
         const urls = {
@@ -193,6 +328,12 @@ describe("live Windows owned CLI process lifecycle", () => {
         expect(probeProcess(platform, launched.owner_pid).kind).toBe(
           OWNED_PROCESS_PRESENCE_KIND.ABSENT,
         );
+        expect(probeProcess(platform, launched.supervisor_pid).kind).toBe(
+          OWNED_PROCESS_PRESENCE_KIND.PRESENT,
+        );
+        expect(probeProcess(platform, launched.cli_pid).kind).toBe(
+          OWNED_PROCESS_PRESENCE_KIND.PRESENT,
+        );
         const audit = inspectOwnedAttemptProcesses(store, platform, false);
         expect(audit.active).toEqual([]);
         expect(audit.uncertain).toEqual([
@@ -212,7 +353,7 @@ describe("live Windows owned CLI process lifecycle", () => {
         );
       } finally {
         cleanupOwnedTree(root, attemptId);
-        rmSync(root, { recursive: true, force: true });
+        rmSync(parent, { recursive: true, force: true });
       }
     },
     LIVE_WINDOWS_TIMEOUT_MS,

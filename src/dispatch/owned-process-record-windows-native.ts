@@ -1,40 +1,34 @@
 import { timingSafeEqual } from "node:crypto";
 import { createRequire } from "node:module";
 import { win32 as windowsPath } from "node:path";
-import { runCleanups } from "../durability/cleanup.js";
+import { cleanupThenThrow, runCleanups } from "../durability/cleanup.js";
 import { durabilityError } from "../durability/errors.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { WINDOWS_FILE_NATIVE } from "./windows-native-contract.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  type WindowsPrivateAuthority,
+  createWindowsPrivateAuthority,
+} from "./windows-private-authority.js";
+import {
+  WINDOWS_VOLUME_AUTHORITY,
+  type WindowsVolumeNativeBindings,
+  loadWindowsVolumeNativeBindings,
+} from "./windows-volume-authority.js";
+
+export {
+  assertWindowsLocalRecordPath,
+  trustedWindowsSystemRoot,
+} from "./windows-volume-authority.js";
 
 export const WINDOWS_NATIVE_RECORD = Object.freeze({
+  ...WINDOWS_VOLUME_AUTHORITY,
+  ...WINDOWS_FILE_NATIVE,
   MOVE_REPLACE_EXISTING: 0x1,
   MOVE_WRITE_THROUGH: 0x8,
-  GENERIC_READ: 0x8000_0000,
-  GENERIC_WRITE: 0x4000_0000,
-  FILE_SHARE_READ: 0x1,
-  FILE_SHARE_WRITE: 0x2,
-  OPEN_ALWAYS: 4,
-  FILE_ATTRIBUTE_NORMAL: 0x80,
-  FILE_FLAG_OPEN_REPARSE_POINT: 0x20_0000,
-  FILE_FLAG_WRITE_THROUGH: 0x8000_0000,
-  FILE_ATTRIBUTE_DIRECTORY: 0x10,
-  FILE_ATTRIBUTE_REPARSE_POINT: 0x400,
-  FILE_ATTRIBUTE_TAG_INFO_CLASS: 9,
-  FILE_STANDARD_INFO_CLASS: 1,
-  FILE_ID_INFO_CLASS: 0x12,
   LOCKFILE_FAIL_IMMEDIATELY: 0x1,
   LOCKFILE_EXCLUSIVE_LOCK: 0x2,
   LOCK_RANGE: 0xffff_ffff,
-  ERROR_FILE_NOT_FOUND: 2,
-  ERROR_PATH_NOT_FOUND: 3,
-  ERROR_SHARING_VIOLATION: 32,
-  ERROR_LOCK_VIOLATION: 33,
-  ERROR_FILE_EXISTS: 80,
-  ERROR_ALREADY_EXISTS: 183,
-  DRIVE_FIXED: 3,
-  ATTRIBUTE_INFO_BYTES: 8,
-  STANDARD_INFO_BYTES: 24,
-  STANDARD_INFO_LINKS_OFFSET: 16,
-  FILE_ID_INFO_BYTES: 24,
-  DIRECTORY_BUFFER_CHARS: 32_768,
 } as const);
 
 export interface WindowsRecordRenameOptions {
@@ -64,13 +58,13 @@ type Overlapped = {
   hEvent: null;
 };
 
-export interface WindowsRecordNativeBindings {
+export interface WindowsRecordNativeBindings extends WindowsVolumeNativeBindings {
   invalidHandle: Handle;
   createFile: (
     path: Buffer,
     access: number,
     share: number,
-    security: null,
+    security: unknown,
     creation: number,
     flags: number,
     template: null,
@@ -99,9 +93,6 @@ export interface WindowsRecordNativeBindings {
     output: Buffer,
     outputBytes: number,
   ) => number;
-  driveType: (root: Buffer) => number;
-  windowsDirectory: (output: Buffer, outputChars: number) => number;
-  lastError: () => number;
 }
 
 interface KoffiRuntime {
@@ -124,7 +115,9 @@ export function loadWindowsRecordNativeBindings(
   });
   const overlappedInOut = koffi.inout(koffi.pointer(overlapped));
   const outputBytes = koffi.out(koffi.pointer("uint8_t"));
+  const volume = loadWindowsVolumeNativeBindings(runtime);
   return {
+    ...volume,
     invalidHandle: BigInt.asUintN(koffi.sizeof(handle) * 8, -1n),
     createFile: kernel32.func("__stdcall", "CreateFileW", handle, [
       wide,
@@ -167,19 +160,6 @@ export function loadWindowsRecordNativeBindings(
       outputBytes,
       "uint32_t",
     ]) as WindowsRecordNativeBindings["fileInfo"],
-    driveType: kernel32.func("__stdcall", "GetDriveTypeW", "uint32_t", [
-      wide,
-    ]) as WindowsRecordNativeBindings["driveType"],
-    windowsDirectory: kernel32.func("__stdcall", "GetWindowsDirectoryW", "uint32_t", [
-      outputBytes,
-      "uint32_t",
-    ]) as WindowsRecordNativeBindings["windowsDirectory"],
-    lastError: kernel32.func(
-      "__stdcall",
-      "GetLastError",
-      "uint32_t",
-      [],
-    ) as WindowsRecordNativeBindings["lastError"],
   };
 }
 
@@ -189,34 +169,6 @@ function widePath(path: string): Buffer {
     ? `\\\\?\\UNC\\${absolute.slice(2)}`
     : `\\\\?\\${absolute}`;
   return Buffer.from(`${extended}\0`, "utf16le");
-}
-
-function wideString(value: string): Buffer {
-  return Buffer.from(`${value}\0`, "utf16le");
-}
-
-export function assertWindowsLocalRecordPath(
-  path: string,
-  binding: WindowsRecordNativeBindings = loadWindowsRecordNativeBindings(),
-): void {
-  const root = windowsPath.parse(windowsPath.resolve(path)).root;
-  if (
-    !/^[A-Za-z]:\\$/u.test(root) ||
-    binding.driveType(wideString(root)) !== WINDOWS_NATIVE_RECORD.DRIVE_FIXED
-  )
-    durabilityError("unsafe_path", "Windows record storage requires a fixed local drive");
-}
-
-export function trustedWindowsSystemRoot(
-  binding: WindowsRecordNativeBindings = loadWindowsRecordNativeBindings(),
-): string {
-  const output = Buffer.alloc(WINDOWS_NATIVE_RECORD.DIRECTORY_BUFFER_CHARS * 2);
-  const length = binding.windowsDirectory(output, WINDOWS_NATIVE_RECORD.DIRECTORY_BUFFER_CHARS);
-  if (length < 1 || length >= WINDOWS_NATIVE_RECORD.DIRECTORY_BUFFER_CHARS)
-    durabilityError("unsupported", "trusted Windows system directory query failed");
-  const root = windowsPath.normalize(output.subarray(0, length * 2).toString("utf16le"));
-  assertWindowsLocalRecordPath(root, binding);
-  return root;
 }
 
 function nativeError(operation: string, nativeCode: number): NodeJS.ErrnoException {
@@ -247,7 +199,7 @@ function fileIdentity(binding: WindowsRecordNativeBindings, handle: Handle): Buf
     "GetFileInformationByHandleEx(AttributeTagInfo)",
     binding.fileInfo(
       handle,
-      WINDOWS_NATIVE_RECORD.FILE_ATTRIBUTE_TAG_INFO_CLASS,
+      WINDOWS_NATIVE_RECORD.ATTRIBUTE_TAG_CLASS,
       attributes,
       attributes.length,
     ),
@@ -268,15 +220,12 @@ function fileIdentity(binding: WindowsRecordNativeBindings, handle: Handle): Buf
   checked(
     binding,
     "GetFileInformationByHandleEx(FileStandardInfo)",
-    binding.fileInfo(
-      handle,
-      WINDOWS_NATIVE_RECORD.FILE_STANDARD_INFO_CLASS,
-      standard,
-      standard.length,
-    ),
+    binding.fileInfo(handle, WINDOWS_NATIVE_RECORD.STANDARD_INFO_CLASS, standard, standard.length),
   );
-  if (standard.readUInt32LE(WINDOWS_NATIVE_RECORD.STANDARD_INFO_LINKS_OFFSET) !== 1)
+  if (standard.readUInt32LE(WINDOWS_NATIVE_RECORD.STANDARD_LINKS_OFFSET) !== 1)
     durabilityError("unsafe_path", "multiply-linked Windows kernel lock file");
+  if (standard.readUInt8(WINDOWS_NATIVE_RECORD.STANDARD_DELETE_PENDING_OFFSET) !== 0)
+    durabilityError("unsafe_path", "delete-pending Windows kernel lock file");
   if (identity.subarray(8).every((byte) => byte === 0))
     durabilityError("unsafe_path", "Windows kernel lock file identity is unavailable");
   return identity;
@@ -306,22 +255,33 @@ export function createWindowsWriteThroughRename(
 
 export function createWindowsKernelLockProvider(
   binding: WindowsRecordNativeBindings = loadWindowsRecordNativeBindings(),
+  privateAuthority: WindowsPrivateAuthority | undefined = process.platform ===
+  RUNTIME_PLATFORM.WINDOWS
+    ? createWindowsPrivateAuthority()
+    : undefined,
 ): WindowsKernelLockProvider {
   return {
     tryAcquire(path) {
-      const handle = binding.createFile(
-        widePath(path),
-        (WINDOWS_NATIVE_RECORD.GENERIC_READ | WINDOWS_NATIVE_RECORD.GENERIC_WRITE) >>> 0,
-        WINDOWS_NATIVE_RECORD.FILE_SHARE_READ | WINDOWS_NATIVE_RECORD.FILE_SHARE_WRITE,
-        null,
-        WINDOWS_NATIVE_RECORD.OPEN_ALWAYS,
-        (WINDOWS_NATIVE_RECORD.FILE_ATTRIBUTE_NORMAL |
-          WINDOWS_NATIVE_RECORD.FILE_FLAG_OPEN_REPARSE_POINT |
-          WINDOWS_NATIVE_RECORD.FILE_FLAG_WRITE_THROUGH) >>>
-          0,
-        null,
-      );
-      if (handle === binding.invalidHandle) throw nativeError("CreateFileW", binding.lastError());
+      const create = (security: unknown) => {
+        const created = binding.createFile(
+          widePath(path),
+          (WINDOWS_NATIVE_RECORD.GENERIC_READ | WINDOWS_NATIVE_RECORD.GENERIC_WRITE) >>> 0,
+          WINDOWS_NATIVE_RECORD.FILE_SHARE_READ | WINDOWS_NATIVE_RECORD.FILE_SHARE_WRITE,
+          security,
+          WINDOWS_NATIVE_RECORD.OPEN_ALWAYS,
+          (WINDOWS_NATIVE_RECORD.FILE_ATTRIBUTE_NORMAL |
+            WINDOWS_NATIVE_RECORD.FILE_FLAG_OPEN_REPARSE_POINT |
+            WINDOWS_NATIVE_RECORD.FILE_FLAG_WRITE_THROUGH) >>>
+            0,
+          null,
+        );
+        if (created === binding.invalidHandle)
+          throw nativeError("CreateFileW", binding.lastError());
+        return created;
+      };
+      const handle = privateAuthority
+        ? privateAuthority.withCreationSecurity(WINDOWS_AUTHORITY_PATH_KIND.FILE, create)
+        : create(null);
       let closed = false;
       const close = () => {
         if (closed) return;
@@ -329,6 +289,7 @@ export function createWindowsKernelLockProvider(
         checked(binding, "CloseHandle", binding.closeHandle(handle));
       };
       try {
+        privateAuthority?.verifyHandle(handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
         const identity = fileIdentity(binding, handle);
         checked(binding, "FlushFileBuffers", binding.flushFile(handle));
         const overlapped = newOverlapped();
@@ -344,9 +305,12 @@ export function createWindowsKernelLockProvider(
           ) === 0
         ) {
           const code = binding.lastError();
-          close();
-          if (code === WINDOWS_NATIVE_RECORD.ERROR_LOCK_VIOLATION) return null;
-          throw nativeError("LockFileEx", code);
+          const primary = nativeError("LockFileEx", code);
+          if (code === WINDOWS_NATIVE_RECORD.ERROR_LOCK_VIOLATION) {
+            close();
+            return null;
+          }
+          return cleanupThenThrow(primary, [close]);
         }
         let released = false;
         return {

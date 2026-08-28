@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import { hostname } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
+import { cleanupThenThrow, withCleanup } from "../durability/cleanup.js";
 import { durabilityError } from "../durability/errors.js";
 import {
   type ProcessLockOwnerV1,
@@ -17,6 +18,11 @@ import {
   createWindowsWriteThroughRename,
   trustedWindowsSystemRoot,
 } from "./owned-process-record-windows-native.js";
+import {
+  type WindowsPathAuthority,
+  createNativeWindowsPathAuthority,
+} from "./windows-path-authority.js";
+import { createWindowsPrivateAuthority } from "./windows-private-authority.js";
 
 type FileRuntime = Pick<
   typeof fs,
@@ -40,21 +46,21 @@ export interface WindowsRecordRuntime {
   identity: (pid: number) => string | null;
   ownerAlive: (owner: ProcessLockOwnerV1) => boolean | null;
   nonce: () => string;
-  realpath: (path: string) => string;
   rename: WindowsRecordRename;
   kernelLocks: WindowsKernelLockProvider;
   wait: (milliseconds: number) => void;
   now: () => number;
   enforceLocalWindowsPath: boolean;
   validateLocalPath: (path: string) => void;
+  protectPath: (path: string) => void;
+  verifyPrivatePath: (path: string) => void;
+  pathAuthority: WindowsPathAuthority;
   isAbsolutePath: (path: string) => boolean;
   resolvePath: (path: string) => string;
 }
 
 export interface WindowsDirectoryIdentity {
-  dev: number;
-  ino: number;
-  real: string;
+  value: string;
 }
 
 export function windowsErrorCode(error: unknown): string | undefined {
@@ -99,14 +105,9 @@ export function windowsDirectoryIdentity(
   path: string,
   runtime: WindowsRecordRuntime,
 ): WindowsDirectoryIdentity {
-  const link = runtime.files.lstatSync(path);
-  if (link.isSymbolicLink() || !link.isDirectory())
-    durabilityError("unsafe_path", `reparse or non-directory storage path rejected: ${path}`);
-  const real = runtime.realpath(path);
-  const target = runtime.files.statSync(real);
-  if (!target.isDirectory() || link.dev !== target.dev || link.ino !== target.ino)
-    durabilityError("unsafe_path", `storage directory identity mismatch: ${path}`);
-  return { dev: link.dev, ino: link.ino, real };
+  const identity = runtime.pathAuthority.directoryIdentity(path, true);
+  if (!identity) durabilityError("unsafe_path", `storage directory disappeared: ${path}`);
+  return { value: identity.value };
 }
 
 export function assertWindowsDirectory(
@@ -115,7 +116,7 @@ export function assertWindowsDirectory(
   runtime: WindowsRecordRuntime,
 ): void {
   const actual = windowsDirectoryIdentity(path, runtime);
-  if (actual.dev !== expected.dev || actual.ino !== expected.ino || actual.real !== expected.real)
+  if (actual.value !== expected.value)
     durabilityError("unsafe_path", `storage directory changed: ${path}`);
 }
 
@@ -137,38 +138,177 @@ export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRu
   return absolute;
 }
 
-export function ensureWindowsRecordDirectory(input: string, runtime: WindowsRecordRuntime): string {
-  const absolute = resolveWindowsRecordPath(input, runtime);
+function ensureWindowsDirectoryComponents(absolute: string, runtime: WindowsRecordRuntime): void {
   const root = parse(absolute).root;
   let cursor = root;
   for (const part of absolute.slice(root.length).split(sep).filter(Boolean)) {
     safeWindowsRecordLeaf(part);
     cursor = join(cursor, part);
-    try {
-      windowsDirectoryIdentity(cursor, runtime);
-    } catch (error) {
-      if (windowsErrorCode(error) !== "ENOENT") throw error;
+    if (!runtime.pathAuthority.directoryIdentity(cursor, false)) {
       try {
-        runtime.files.mkdirSync(cursor, { mode: 0o700 });
+        runtime.pathAuthority.createPrivateDirectory(cursor);
       } catch (race) {
         if (windowsErrorCode(race) !== "EEXIST") throw race;
       }
-      windowsDirectoryIdentity(cursor, runtime);
     }
+    if (!runtime.pathAuthority.directoryIdentity(cursor, false))
+      durabilityError("unsafe_path", `storage ancestor changed: ${cursor}`);
   }
+}
+
+export function ensureWindowsRecordParent(input: string, runtime: WindowsRecordRuntime): string {
+  const absolute = resolveWindowsRecordPath(input, runtime);
+  safeWindowsRecordLeaf(parse(absolute).base);
+  const parent = dirname(absolute);
+  ensureWindowsDirectoryComponents(parent, runtime);
+  return parent;
+}
+
+export function ensureWindowsRecordDirectory(input: string, runtime: WindowsRecordRuntime): string {
+  const absolute = resolveWindowsRecordPath(input, runtime);
+  ensureWindowsDirectoryComponents(absolute, runtime);
   windowsDirectoryIdentity(absolute, runtime);
   return absolute;
+}
+
+function createPortableWindowsPathAuthority(
+  files: FileRuntime,
+  protect: (path: string) => void,
+  verify: (path: string) => void,
+): WindowsPathAuthority {
+  const directoryIdentity = (path: string, verifyPrivate: boolean) => {
+    let link: fs.BigIntStats;
+    try {
+      link = files.lstatSync(path, { bigint: true });
+    } catch (error) {
+      if (windowsErrorCode(error) === "ENOENT") return null;
+      throw error;
+    }
+    if (link.isSymbolicLink() || !link.isDirectory())
+      durabilityError("unsafe_path", `reparse or non-directory storage path rejected: ${path}`);
+    const target = files.statSync(path, { bigint: true });
+    if (!target.isDirectory() || link.dev !== target.dev || link.ino !== target.ino)
+      durabilityError("unsafe_path", `storage directory identity mismatch: ${path}`);
+    if (verifyPrivate) verify(path);
+    return { value: `${link.dev.toString(16)}:${link.ino.toString(16)}`, size: link.size };
+  };
+  return {
+    withVerifiedDirectory(path, expectedIdentity, operation) {
+      const before = directoryIdentity(path, true);
+      if (!before || before.value !== expectedIdentity)
+        durabilityError("unsafe_path", `storage directory changed: ${path}`);
+      const result = operation();
+      const after = directoryIdentity(path, true);
+      if (!after || after.value !== expectedIdentity)
+        durabilityError("unsafe_path", `storage directory changed: ${path}`);
+      return result;
+    },
+    directoryIdentity,
+    createPrivateDirectory(path) {
+      files.mkdirSync(path, { mode: 0o700 });
+      protect(path);
+      if (!directoryIdentity(path, true))
+        durabilityError("unsafe_path", "created directory vanished");
+    },
+    readPrivateFile(path, maxBytes) {
+      let before: fs.BigIntStats;
+      try {
+        before = files.lstatSync(path, { bigint: true });
+      } catch (error) {
+        if (windowsErrorCode(error) === "ENOENT") return null;
+        throw error;
+      }
+      if (
+        before.isSymbolicLink() ||
+        !before.isFile() ||
+        before.nlink !== 1n ||
+        before.size > BigInt(maxBytes)
+      )
+        durabilityError("unsafe_path", `unsafe or oversized Windows record: ${path}`);
+      const fd = files.openSync(path, fs.constants.O_RDONLY);
+      return withCleanup(() => {
+        verify(path);
+        const opened = files.fstatSync(fd, { bigint: true });
+        if (opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size)
+          durabilityError("unsafe_path", `Windows record identity changed before read: ${path}`);
+        const output = Buffer.alloc(Number(opened.size));
+        for (let offset = 0; offset < output.length; ) {
+          const count = files.readSync(fd, output, offset, output.length - offset, offset);
+          if (count < 1) durabilityError("corrupt", `short Windows record read: ${path}`);
+          offset += count;
+        }
+        const after = files.fstatSync(fd, { bigint: true });
+        const current = files.lstatSync(path, { bigint: true });
+        if (
+          after.dev !== opened.dev ||
+          after.ino !== opened.ino ||
+          after.size !== opened.size ||
+          after.mtimeMs !== opened.mtimeMs ||
+          current.dev !== opened.dev ||
+          current.ino !== opened.ino ||
+          current.isSymbolicLink() ||
+          !current.isFile() ||
+          current.nlink !== 1n ||
+          current.size !== opened.size
+        )
+          durabilityError("unsafe_path", `Windows record changed during read: ${path}`);
+        return output;
+      }, [() => files.closeSync(fd)]);
+    },
+    writePrivateFile(path, bytes, maxBytes) {
+      if (bytes.length > maxBytes)
+        durabilityError("bounds", "Windows authority value exceeds limit");
+      const fd = files.openSync(
+        path,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+        0o600,
+      );
+      let open = true;
+      try {
+        protect(path);
+        for (let offset = 0; offset < bytes.length; ) {
+          const count = files.writeSync(fd, bytes, offset, bytes.length - offset, offset);
+          if (count < 1) durabilityError("corrupt", "Windows durable write made no progress");
+          offset += count;
+        }
+        files.fsyncSync(fd);
+        files.closeSync(fd);
+        open = false;
+        if (!this.readPrivateFile(path, maxBytes)?.equals(bytes))
+          durabilityError("corrupt", "Windows durable staging verification failed");
+      } catch (error) {
+        return cleanupThenThrow(error, [
+          () => {
+            if (open) files.closeSync(fd);
+          },
+          () => files.unlinkSync(path),
+        ]);
+      }
+    },
+  };
 }
 
 export function createWindowsRecordRuntime(
   overrides: Partial<WindowsRecordRuntime>,
 ): WindowsRecordRuntime {
+  const onWindows = process.platform === RUNTIME_PLATFORM.WINDOWS;
+  const protectPath = overrides.protectPath ?? (() => {});
+  const verifyPrivatePath = overrides.verifyPrivatePath ?? (() => {});
+  const nativePrivacy =
+    onWindows && !overrides.pathAuthority ? createWindowsPrivateAuthority() : undefined;
+  const pathAuthority =
+    overrides.pathAuthority ??
+    (onWindows
+      ? createNativeWindowsPathAuthority(undefined, nativePrivacy)
+      : createPortableWindowsPathAuthority(overrides.files ?? fs, protectPath, verifyPrivatePath));
   const rename =
     overrides.rename ??
     (process.platform === RUNTIME_PLATFORM.WINDOWS ? createWindowsWriteThroughRename() : undefined);
   const kernelLocks =
     overrides.kernelLocks ??
-    (process.platform === RUNTIME_PLATFORM.WINDOWS ? createWindowsKernelLockProvider() : undefined);
+    (process.platform === RUNTIME_PLATFORM.WINDOWS
+      ? createWindowsKernelLockProvider(undefined, nativePrivacy)
+      : undefined);
   if (!rename || !kernelLocks)
     durabilityError(
       "unsupported",
@@ -188,15 +328,17 @@ export function createWindowsRecordRuntime(
     identity: (pid) => processStartIdentity(pid, processRuntime),
     ownerAlive: (owner) => processLockOwnerIsAlive(owner, processRuntime),
     nonce: () => randomBytes(32).toString("hex"),
-    realpath: fs.realpathSync.native,
     wait: (milliseconds) => {
       if (milliseconds > 0)
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
     },
-    now: () => Date.now(),
+    now: () => performance.now(),
     enforceLocalWindowsPath: process.platform === RUNTIME_PLATFORM.WINDOWS,
     validateLocalPath:
       process.platform === RUNTIME_PLATFORM.WINDOWS ? assertWindowsLocalRecordPath : () => {},
+    protectPath,
+    verifyPrivatePath,
+    pathAuthority,
     isAbsolutePath: isAbsolute,
     resolvePath: resolve,
     ...overrides,
@@ -205,53 +347,24 @@ export function createWindowsRecordRuntime(
   };
 }
 
+export function withWindowsDirectoryAuthority<T>(
+  path: string,
+  expected: WindowsDirectoryIdentity,
+  runtime: WindowsRecordRuntime,
+  operation: () => T,
+): T {
+  return runtime.pathAuthority.withVerifiedDirectory(path, expected.value, operation);
+}
+
 export function readWindowsRecordPath(
   path: string,
   maxBytes: number,
   parent: WindowsDirectoryIdentity,
   runtime: WindowsRecordRuntime,
 ): Buffer | null {
-  assertWindowsDirectory(dirname(path), parent, runtime);
-  let before: fs.Stats;
-  try {
-    before = runtime.files.lstatSync(path);
-  } catch (error) {
-    if (windowsErrorCode(error) === "ENOENT") return null;
-    throw error;
-  }
-  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1 || before.size > maxBytes)
-    durabilityError("unsafe_path", `unsafe or oversized Windows record: ${path}`);
-  const fd = runtime.files.openSync(path, fs.constants.O_RDONLY);
-  try {
-    const opened = runtime.files.fstatSync(fd);
-    if (opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size)
-      durabilityError("unsafe_path", `Windows record identity changed before read: ${path}`);
-    const output = Buffer.alloc(opened.size);
-    for (let offset = 0; offset < output.length; ) {
-      const count = runtime.files.readSync(fd, output, offset, output.length - offset, offset);
-      if (count < 1) durabilityError("corrupt", `short Windows record read: ${path}`);
-      offset += count;
-    }
-    const after = runtime.files.fstatSync(fd);
-    const current = runtime.files.lstatSync(path);
-    if (
-      after.dev !== opened.dev ||
-      after.ino !== opened.ino ||
-      after.size !== opened.size ||
-      after.mtimeMs !== opened.mtimeMs ||
-      current.dev !== opened.dev ||
-      current.ino !== opened.ino ||
-      current.isSymbolicLink() ||
-      !current.isFile() ||
-      current.nlink !== 1 ||
-      current.size !== opened.size
-    )
-      durabilityError("unsafe_path", `Windows record changed during read: ${path}`);
-    assertWindowsDirectory(dirname(path), parent, runtime);
-    return output;
-  } finally {
-    runtime.files.closeSync(fd);
-  }
+  return withWindowsDirectoryAuthority(dirname(path), parent, runtime, () =>
+    runtime.pathAuthority.readPrivateFile(path, maxBytes),
+  );
 }
 
 export function writeWindowsRecordFile(
@@ -261,22 +374,7 @@ export function writeWindowsRecordFile(
   parent: WindowsDirectoryIdentity,
   runtime: WindowsRecordRuntime,
 ): void {
-  assertWindowsDirectory(dirname(path), parent, runtime);
-  const fd = runtime.files.openSync(
-    path,
-    fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
-    0o600,
+  withWindowsDirectoryAuthority(dirname(path), parent, runtime, () =>
+    runtime.pathAuthority.writePrivateFile(path, bytes, maxBytes),
   );
-  try {
-    for (let offset = 0; offset < bytes.length; ) {
-      const count = runtime.files.writeSync(fd, bytes, offset, bytes.length - offset, offset);
-      if (count < 1) durabilityError("corrupt", "Windows durable write made no progress");
-      offset += count;
-    }
-    runtime.files.fsyncSync(fd);
-  } finally {
-    runtime.files.closeSync(fd);
-  }
-  if (!exactWindowsBytes(readWindowsRecordPath(path, maxBytes, parent, runtime), bytes))
-    durabilityError("corrupt", "Windows durable staging verification failed");
 }

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Engine } from "../core.js";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { CONVERSATION_OPERATION_STATE as OPERATION_STATE } from "../orchestrator/conversation/conversation-public-wire-contract.js";
@@ -56,7 +56,7 @@ export function createEngineSessionAdapter(options: AdapterOptions = {}): Engine
   const spawnProcess = config.spawn ?? defaultEngineProcessSpawner;
   const sourceEnv = config.sourceEnv as NodeJS.ProcessEnv;
   const startedAttempts = new Set<string>();
-  const evidenceRoot = config.evidenceRoot ?? join(process.cwd(), ".vibeflow", "attempts");
+  const evidenceRoot = resolve(config.evidenceRoot ?? join(process.cwd(), ".vibeflow", "attempts"));
   const startAuthorityStore = new AttemptStartAuthorityStore(evidenceRoot);
   const ownedRuntimeSupported = supportsOwnedRuntime(spawnProcess);
   const ownedRuntimeStore = ownedRuntimeSupported
@@ -76,10 +76,10 @@ export function createEngineSessionAdapter(options: AdapterOptions = {}): Engine
         throw new Error(`immutable attempt evidence already exists: ${attemptId}`);
       }
       if (signal.aborted) throw new Error("cannot start an already-aborted attempt");
-      startedAttempts.add(attemptId);
       const reservation = config.writeEvidence
         ? undefined
         : reserveAttemptEvidence(evidenceRoot, attemptId);
+      startedAttempts.add(attemptId);
       let evidenceBinding = reservation
         ? { attemptId, internalRef: reservation.internalRef }
         : undefined;

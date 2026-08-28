@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import * as ts from "typescript";
 import { AGENT_ROLE_SOURCE } from "../src/core/agent-contract.js";
 import { SKILL_SOURCE } from "../src/core/skill-contract.js";
+import { ATTEMPT_EVIDENCE_STATE } from "../src/dispatch/attempt-evidence-contract.js";
 import {
   DISPATCH_MODE,
   DISPATCH_MODES,
@@ -43,6 +44,7 @@ const AUTHORITY_PATHS = new Set(
   [
     "src/core/agent-contract.ts",
     "src/core/skill-contract.ts",
+    "src/dispatch/attempt-evidence-contract.ts",
     "src/dispatch/session-contract.ts",
     "src/durability/process-identity-contract.ts",
   ].map((path) => resolve(path)),
@@ -140,6 +142,15 @@ const rawProtocolConsumers = (path: string): string[] => {
   };
   const visit = (node: ts.Node): void => {
     if (ts.isPropertyAssignment(node)) matchesField(fieldName(node.name), node.initializer);
+    if (
+      text.includes("attempt_id") &&
+      ts.isPropertyAssignment(node) &&
+      fieldName(node.name) === "state"
+    ) {
+      const value = literal(node.initializer);
+      if (value && Object.values(ATTEMPT_EVIDENCE_STATE).includes(value.text as never))
+        record(value, "AttemptEvidence.state");
+    }
     if (ts.isPropertySignature(node)) matchesField(fieldName(node.name), node.type);
     if (ts.isPropertyDeclaration(node)) matchesField(fieldName(node.name), node.initializer);
     if (ts.isParameter(node)) matchesField(fieldName(node.name), node.initializer);
@@ -233,6 +244,7 @@ describe("dispatch and session protocol authority", () => {
       ENGINE_EVIDENCE_STATUS,
       ENGINE_ATTEMPT_START_OUTCOME,
       ENGINE_ATTEMPT_START_OUTCOMES,
+      ATTEMPT_EVIDENCE_STATE,
       RUNTIME_PLATFORM,
       RUNTIME_PLATFORMS,
     ];

@@ -11,6 +11,7 @@ import {
   privateFileBytes,
   sha256Digest,
 } from "../durability/index.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import {
   ENGINE_ATTEMPT_START_OUTCOME,
   ENGINE_SESSION_SCHEMA_VERSION,
@@ -20,6 +21,10 @@ import type {
   AttemptStartAuthorityRecordV1,
   DurableAttemptStartAuthorityReaderV1,
 } from "./session-types.js";
+import {
+  NativeWindowsAttemptAuthorityStorage,
+  type WindowsAttemptAuthorityStorage,
+} from "./start-authority-windows.js";
 
 const MAX_RECORD_BYTES = 64 * 1024;
 const MAX_EVIDENCE_BYTES = 1024 * 1024;
@@ -94,10 +99,17 @@ export class AttemptStartAuthorityStore {
   private readonly evidenceRoot: string;
   private readonly recordsRoot: string;
   private readonly lockPath: string;
+  private readonly windows: WindowsAttemptAuthorityStorage | null;
 
   constructor(evidenceRoot: string) {
-    this.evidenceRoot = ensurePrivateDirectory(resolve(evidenceRoot));
-    this.recordsRoot = ensurePrivateDirectory(join(this.evidenceRoot, "start-authority"));
+    this.windows =
+      process.platform === RUNTIME_PLATFORM.WINDOWS
+        ? new NativeWindowsAttemptAuthorityStorage(resolve(evidenceRoot))
+        : null;
+    this.evidenceRoot = this.windows?.root ?? ensurePrivateDirectory(resolve(evidenceRoot));
+    this.recordsRoot = this.windows
+      ? join(this.evidenceRoot, "start-authority")
+      : ensurePrivateDirectory(join(this.evidenceRoot, "start-authority"));
     this.lockPath = join(this.recordsRoot, "writer.lock");
   }
 
@@ -112,7 +124,9 @@ export class AttemptStartAuthorityStore {
     if (!ATTEMPT_ID.test(input.attempt_id)) throw new Error("invalid attempt authority identity");
     const evidencePath = evidenceBelongsToRoot(this.evidenceRoot, input.evidence_ref, true);
     if (!evidencePath) return null;
-    const evidence = privateFileBytes(evidencePath, MAX_EVIDENCE_BYTES);
+    const evidence = this.windows
+      ? this.windows.read(evidencePath, MAX_EVIDENCE_BYTES)
+      : privateFileBytes(evidencePath, MAX_EVIDENCE_BYTES);
     if (!evidence) throw new Error("attempt authority evidence is absent");
     const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(evidence));
     if (
@@ -138,6 +152,14 @@ export class AttemptStartAuthorityStore {
       record_digest: digestV1("VF-ATTEMPT-START-AUTHORITY\0v1\0", preimage),
     };
     assertRecord(record);
+    if (this.windows) {
+      this.windows.createOrVerify(
+        join(this.recordsRoot, `${key(input.attempt_id)}.json`),
+        canonicalJsonBytes(record),
+        MAX_RECORD_BYTES,
+      );
+      return structuredClone(record);
+    }
     const lock = acquireProcessLock(this.lockPath, {
       operation: `attempt-start-authority:${input.attempt_id}`,
     });
@@ -155,10 +177,10 @@ export class AttemptStartAuthorityStore {
 
   read(attemptId: string): AttemptStartAuthorityRecordV1 | null {
     if (!ATTEMPT_ID.test(attemptId)) throw new Error("invalid attempt authority identity");
-    const bytes = privateFileBytes(
-      join(this.recordsRoot, `${key(attemptId)}.json`),
-      MAX_RECORD_BYTES,
-    );
+    const recordPath = join(this.recordsRoot, `${key(attemptId)}.json`);
+    const bytes = this.windows
+      ? this.windows.read(recordPath, MAX_RECORD_BYTES)
+      : privateFileBytes(recordPath, MAX_RECORD_BYTES);
     if (!bytes) return null;
     const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     assertRecord(value);
@@ -166,7 +188,9 @@ export class AttemptStartAuthorityStore {
       throw new Error("attempt start authority storage changed");
     const evidencePath = evidenceBelongsToRoot(this.evidenceRoot, value.evidence_ref, false);
     if (!evidencePath) throw new Error("attempt start authority evidence is absent");
-    const evidence = privateFileBytes(evidencePath, MAX_EVIDENCE_BYTES);
+    const evidence = this.windows
+      ? this.windows.read(evidencePath, MAX_EVIDENCE_BYTES)
+      : privateFileBytes(evidencePath, MAX_EVIDENCE_BYTES);
     if (!evidence || sha256Digest(evidence) !== value.evidence_sha256)
       throw new Error("attempt start authority evidence changed");
     return structuredClone(value);

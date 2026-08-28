@@ -38,6 +38,11 @@ import {
   WindowsOwnedProcessRecordBackend,
   type WindowsRecordRuntime,
 } from "../src/dispatch/owned-process-record-windows.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  type WindowsPrivateAuthority,
+} from "../src/dispatch/windows-private-authority.js";
+import { canonicalJsonBytes } from "../src/durability/canonical.js";
 import type { ProcessLockOwnerV1 } from "../src/durability/lock-owner.js";
 
 const roots: string[] = [];
@@ -60,9 +65,11 @@ class SimulatedKernel implements WindowsKernelLockProvider {
   unavailable = 0;
   lost = false;
   acquisitions = 0;
+  attempts = 0;
   releases = 0;
 
   tryAcquire(): WindowsKernelLock | null {
+    this.attempts += 1;
     if (this.unavailable > 0) {
       this.unavailable -= 1;
       return null;
@@ -168,6 +175,213 @@ describe("Windows owned-process transactional backend", () => {
     expect(existsSync(`${backend.lockPath}${WINDOWS_RECORD_STORAGE.OWNER_SUFFIX}`)).toBe(false);
   });
 
+  test("keeps backend path effects inside the verified records-directory lease", () => {
+    const root = temporaryRoot();
+    const observations: Array<{ action: string; depth: number; phase: string }> = [];
+    let depth = 0;
+    let phase = "setup";
+    const observe = (action: string) => observations.push({ action, depth, phase });
+    const files = {
+      ...nodeFs,
+      readdirSync(...args: unknown[]) {
+        observe("readdirSync");
+        return Reflect.apply(nodeFs.readdirSync, nodeFs, args);
+      },
+      unlinkSync(path: nodeFs.PathLike) {
+        observe("unlinkSync");
+        return nodeFs.unlinkSync(path);
+      },
+    } as unknown as WindowsRecordRuntime["files"];
+    const kernel = new SimulatedKernel();
+    const kernelLocks: WindowsKernelLockProvider = {
+      tryAcquire() {
+        observe("kernelLocks.tryAcquire");
+        const acquired = kernel.tryAcquire();
+        if (!acquired) return null;
+        return {
+          assertHeld() {
+            observe("kernel.assertHeld");
+            acquired.assertHeld();
+          },
+          release: () => acquired.release(),
+        };
+      },
+    };
+    const rename: WindowsRecordRuntime["rename"] = (source, target, flags) => {
+      observe("rename");
+      if (!flags.replace && existsSync(target))
+        throw Object.assign(new Error("target exists"), { code: "EEXIST" });
+      renameSync(source, target);
+    };
+    const base = createWindowsRecordRuntime({
+      files,
+      kernelLocks,
+      rename,
+      identity: () => IDENTITY,
+      ownerAlive: () => false,
+      nonce: (() => {
+        let nonce = 0;
+        return () => (++nonce).toString(16).padStart(64, "0");
+      })(),
+      enforceLocalWindowsPath: false,
+    });
+    const pathAuthority: WindowsRecordRuntime["pathAuthority"] = {
+      ...base.pathAuthority,
+      withVerifiedDirectory(path, expectedIdentity, operation) {
+        return base.pathAuthority.withVerifiedDirectory(path, expectedIdentity, () => {
+          depth += 1;
+          try {
+            return operation();
+          } finally {
+            depth -= 1;
+          }
+        });
+      },
+      readPrivateFile(path, maxBytes) {
+        observe("readPrivateFile");
+        return base.pathAuthority.readPrivateFile(path, maxBytes);
+      },
+      writePrivateFile(path, bytes, maxBytes) {
+        observe("writePrivateFile");
+        return base.pathAuthority.writePrivateFile(path, bytes, maxBytes);
+      },
+    };
+    const backend = new WindowsOwnedProcessRecordBackend(root, {
+      runtime: { ...base, pathAuthority },
+    });
+    const expectLeased = (expectedPhase: string, action: string) => {
+      const matches = observations.filter(
+        (entry) => entry.phase === expectedPhase && entry.action === action,
+      );
+      expect(matches.length).toBeGreaterThan(0);
+      expect(matches.every((entry) => entry.depth > 0)).toBe(true);
+    };
+
+    phase = "entries";
+    expect(backend.entries()).toEqual([]);
+
+    const recoveredNonce = "c".repeat(64);
+    const recoveredOwner: ProcessLockOwnerV1 = {
+      schema_version: "1.0",
+      pid: 42,
+      process_start_identity: IDENTITY,
+      host: "windows-test-host",
+      operation: "recover-under-lease",
+      nonce: recoveredNonce,
+    };
+    writeFileSync(
+      `${backend.lockPath}${WINDOWS_RECORD_STORAGE.OWNER_SUFFIX}${WINDOWS_RECORD_STORAGE.RELEASE_MARKER}${recoveredNonce}`,
+      canonicalJsonBytes(recoveredOwner),
+    );
+    phase = "acquire";
+    const lock = backend.acquire("leased-acquire");
+
+    phase = "assertHeld";
+    lock.assertHeld();
+    phase = "release";
+    lock.release();
+
+    const casStage = join(
+      backend.recordsRoot,
+      `${WINDOWS_RECORD_STORAGE.CAS_STAGE_PREFIX}${ENTRY}${WINDOWS_RECORD_STORAGE.CAS_STAGE_SUFFIX}`,
+    );
+    writeFileSync(casStage, "stale-stage");
+    phase = "compareAndSwap";
+    backend.compareAndSwap(ENTRY, null, Buffer.from("leased"), { operation: "leased-cas" });
+    phase = "done";
+
+    expectLeased("entries", "readdirSync");
+    expectLeased("acquire", "kernelLocks.tryAcquire");
+    expectLeased("acquire", "readdirSync");
+    expectLeased("acquire", "unlinkSync");
+    expectLeased("acquire", "rename");
+    expectLeased("assertHeld", "kernel.assertHeld");
+    expectLeased("assertHeld", "readPrivateFile");
+    expectLeased("release", "kernel.assertHeld");
+    expectLeased("release", "rename");
+    expectLeased("release", "unlinkSync");
+    expectLeased("compareAndSwap", "kernelLocks.tryAcquire");
+    expectLeased("compareAndSwap", "readdirSync");
+    expectLeased("compareAndSwap", "rename");
+    expectLeased("compareAndSwap", "unlinkSync");
+    expect(depth).toBe(0);
+  });
+
+  test("blocks the callback and filesystem effect when records identity mismatches", () => {
+    const root = temporaryRoot();
+    let callbacks = 0;
+    let directoryIdentity = "initial-directory-identity";
+    let readdirCalls = 0;
+    const files = {
+      ...nodeFs,
+      readdirSync(...args: unknown[]) {
+        readdirCalls += 1;
+        return Reflect.apply(nodeFs.readdirSync, nodeFs, args);
+      },
+    } as unknown as WindowsRecordRuntime["files"];
+    const base = createWindowsRecordRuntime({
+      files,
+      kernelLocks: new SimulatedKernel(),
+      rename: () => {},
+      identity: () => IDENTITY,
+      ownerAlive: () => false,
+      enforceLocalWindowsPath: false,
+    });
+    const pathAuthority: WindowsRecordRuntime["pathAuthority"] = {
+      ...base.pathAuthority,
+      directoryIdentity(path, verifyPrivate) {
+        const identity = base.pathAuthority.directoryIdentity(path, verifyPrivate);
+        return identity ? { ...identity, value: directoryIdentity } : null;
+      },
+      withVerifiedDirectory(_path, expectedIdentity, operation) {
+        if (expectedIdentity !== directoryIdentity) throw new Error("storage directory changed");
+        callbacks += 1;
+        return operation();
+      },
+    };
+    const backend = new WindowsOwnedProcessRecordBackend(root, {
+      runtime: { ...base, pathAuthority },
+    });
+
+    directoryIdentity = "replacement-directory-identity";
+    expect(() => backend.entries()).toThrow("storage directory changed");
+    expect(callbacks).toBe(0);
+    expect(readdirCalls).toBe(0);
+  });
+
+  test("releases a candidate kernel lock when lease completion fails", () => {
+    const root = temporaryRoot();
+    const kernel = new SimulatedKernel();
+    const base = createWindowsRecordRuntime({
+      kernelLocks: kernel,
+      rename: () => {},
+      identity: () => IDENTITY,
+      ownerAlive: () => false,
+      enforceLocalWindowsPath: false,
+    });
+    let failLeaseCompletion = false;
+    const pathAuthority: WindowsRecordRuntime["pathAuthority"] = {
+      ...base.pathAuthority,
+      withVerifiedDirectory(path, expectedIdentity, operation) {
+        const result = base.pathAuthority.withVerifiedDirectory(path, expectedIdentity, operation);
+        if (failLeaseCompletion && kernel.acquisitions > 0)
+          throw new Error("lease postcheck failed after kernel acquisition");
+        return result;
+      },
+    };
+    const backend = new WindowsOwnedProcessRecordBackend(root, {
+      runtime: { ...base, pathAuthority },
+    });
+
+    failLeaseCompletion = true;
+    expect(() => backend.acquire("lease-postcheck-failure")).toThrow(
+      "lease postcheck failed after kernel acquisition",
+    );
+    expect(kernel.acquisitions).toBe(1);
+    expect(kernel.releases).toBe(1);
+    expect(kernel.held).toBe(false);
+  });
+
   test("recovers a same-directory CAS stage deterministically after an injected crash", () => {
     const { backend, recordsRoot } = harness();
     const replacement = Buffer.from("durable");
@@ -204,6 +418,98 @@ describe("Windows owned-process transactional backend", () => {
     expect(recovered.owner.nonce).not.toBe(firstNonce);
     expect(() => abandoned.assertHeld()).toThrow();
     recovered.release();
+  });
+
+  test("keeps directory identity lossless above Number.MAX_SAFE_INTEGER", () => {
+    const root = temporaryRoot();
+    const base = nodeFs.lstatSync(root, { bigint: true });
+    let identity = 9_007_199_254_740_992n;
+    const files = {
+      ...nodeFs,
+      lstatSync: (path: nodeFs.PathLike, options?: nodeFs.StatOptions) => {
+        const stat = nodeFs.lstatSync(path, { bigint: true });
+        return options && "bigint" in options && options.bigint
+          ? Object.assign(stat, { ino: identity })
+          : nodeFs.lstatSync(path);
+      },
+      statSync: (path: nodeFs.PathLike, options?: nodeFs.StatOptions) => {
+        const stat = nodeFs.statSync(path, { bigint: true });
+        return options && "bigint" in options && options.bigint
+          ? Object.assign(stat, { ino: identity, dev: base.dev })
+          : nodeFs.statSync(path);
+      },
+    } as unknown as WindowsRecordRuntime["files"];
+    const { backend } = harness({ root, runtime: { files } });
+    identity += 1n;
+    expect(() => backend.entries()).toThrow("storage directory changed");
+  });
+
+  test("uses monotonic elapsed time and caps the final lock wait", () => {
+    let now = 100;
+    const waits: number[] = [];
+    const { backend, kernel } = harness({
+      timeoutMs: 5,
+      now: () => now,
+      wait: (milliseconds) => {
+        waits.push(milliseconds);
+        now += milliseconds;
+      },
+    });
+    kernel.unavailable = 99;
+    expect(() => backend.acquire("bounded-wait")).toThrow("Windows process lock busy");
+    expect(waits).toEqual([5]);
+  });
+
+  test("does not acquire when exclusion becomes available exactly at the deadline", () => {
+    let now = 0;
+    const { backend, kernel } = harness({
+      timeoutMs: 5,
+      now: () => now,
+      wait: (milliseconds) => {
+        now += milliseconds;
+      },
+    });
+    kernel.unavailable = 1;
+    expect(() => backend.acquire("deadline-exact")).toThrow("process lock busy");
+    expect(kernel.attempts).toBe(1);
+  });
+
+  test("does not extend lock timeout when wall clock rolls backward", () => {
+    const readings = [100, 90, 105];
+    const waits: number[] = [];
+    const { backend, kernel } = harness({
+      timeoutMs: 5,
+      now: () => readings.shift() ?? 105,
+      wait: (milliseconds) => waits.push(milliseconds),
+    });
+    kernel.unavailable = 99;
+    expect(() => backend.acquire("rollback")).toThrow("Windows process lock busy");
+    expect(waits).toEqual([5]);
+  });
+
+  test("keeps opened record identity lossless across colliding number projections", () => {
+    const { backend, recordsRoot } = harness();
+    writeFileSync(join(recordsRoot, ENTRY), "value");
+    const first = 9_007_199_254_740_992n;
+    let opened = first;
+    const files = {
+      ...nodeFs,
+      lstatSync: (path: nodeFs.PathLike, options?: nodeFs.StatOptions) => {
+        const stat = nodeFs.lstatSync(path, { bigint: true });
+        return options && "bigint" in options && options.bigint
+          ? Object.assign(stat, { ino: path.toString().endsWith(ENTRY) ? first : stat.ino })
+          : nodeFs.lstatSync(path);
+      },
+      fstatSync: (fd: number, options?: nodeFs.StatOptions) => {
+        const stat = nodeFs.fstatSync(fd, { bigint: true });
+        return options && "bigint" in options && options.bigint
+          ? Object.assign(stat, { ino: opened })
+          : nodeFs.fstatSync(fd);
+      },
+    } as unknown as WindowsRecordRuntime["files"];
+    const swapped = harness({ root: backend.root, runtime: { files } }).backend;
+    opened = first + 1n;
+    expect(() => swapped.read(ENTRY)).toThrow("identity changed before read");
   });
 
   test("discards unpublished owner stages and recovers proved-dead release tombs", () => {
@@ -535,8 +841,11 @@ interface NativeFixture {
   setError(code: number): void;
   setAttribute(value: number): void;
   setLinks(value: number): void;
+  setDeletePending(value: boolean): void;
   setIdentity(value: number): void;
   setDriveType(value: number): void;
+  setVolumeFlags(value: number): void;
+  setVolumeResult(value: number): void;
   setWindowsDirectory(value: string | null): void;
   setResult(
     name: "create" | "lock" | "unlock" | "move" | "flush" | "close" | "info",
@@ -556,8 +865,11 @@ function nativeFixture(): NativeFixture {
   let error = 5;
   let attribute = 0;
   let links = 1;
+  let deletePending = false;
   let identity = 1;
   let driveType: number = WINDOWS_NATIVE_RECORD.DRIVE_FIXED;
+  let volumeFlags: number = WINDOWS_NATIVE_RECORD.FILE_PERSISTENT_ACLS;
+  let volumeResult = 1;
   let windowsDirectory: string | null = "C:\\Windows";
   const results: Record<string, number | bigint> = {
     create: 41n,
@@ -596,15 +908,24 @@ function nativeFixture(): NativeFixture {
     },
     fileInfo: (_handle, informationClass, output) => {
       if (results.info === 0) return 0;
-      if (informationClass === WINDOWS_NATIVE_RECORD.FILE_ATTRIBUTE_TAG_INFO_CLASS)
+      if (informationClass === WINDOWS_NATIVE_RECORD.ATTRIBUTE_TAG_CLASS)
         output.writeUInt32LE(attribute, 0);
-      if (informationClass === WINDOWS_NATIVE_RECORD.FILE_STANDARD_INFO_CLASS)
-        output.writeUInt32LE(links, WINDOWS_NATIVE_RECORD.STANDARD_INFO_LINKS_OFFSET);
+      if (informationClass === WINDOWS_NATIVE_RECORD.STANDARD_INFO_CLASS)
+        output.writeUInt32LE(links, WINDOWS_NATIVE_RECORD.STANDARD_LINKS_OFFSET);
+      if (informationClass === WINDOWS_NATIVE_RECORD.STANDARD_INFO_CLASS)
+        output.writeUInt8(
+          Number(deletePending),
+          WINDOWS_NATIVE_RECORD.STANDARD_DELETE_PENDING_OFFSET,
+        );
       if (informationClass === WINDOWS_NATIVE_RECORD.FILE_ID_INFO_CLASS)
         output.writeUInt32LE(identity, 8);
       return results.info as number;
     },
     driveType: () => driveType,
+    volumeInformation: (_root, _volume, _volumeChars, _serial, _component, flags) => {
+      flags[0] = volumeFlags;
+      return volumeResult;
+    },
     windowsDirectory: (output) => {
       if (windowsDirectory === null) return 0;
       output.write(windowsDirectory, "utf16le");
@@ -624,11 +945,20 @@ function nativeFixture(): NativeFixture {
     setLinks: (value) => {
       links = value;
     },
+    setDeletePending: (value) => {
+      deletePending = value;
+    },
     setIdentity: (value) => {
       identity = value;
     },
     setDriveType: (value) => {
       driveType = value;
+    },
+    setVolumeFlags: (value) => {
+      volumeFlags = value;
+    },
+    setVolumeResult: (value) => {
+      volumeResult = value;
     },
     setWindowsDirectory: (value) => {
       windowsDirectory = value;
@@ -682,6 +1012,16 @@ describe("native Windows record adapters", () => {
       "fixed local drive",
     );
     fixture.setDriveType(WINDOWS_NATIVE_RECORD.DRIVE_FIXED);
+    fixture.setVolumeResult(0);
+    expect(() => assertWindowsLocalRecordPath("C:\\state", fixture.binding)).toThrow(
+      "GetVolumeInformationW failed with Windows error 5",
+    );
+    fixture.setVolumeResult(1);
+    fixture.setVolumeFlags(0);
+    expect(() => assertWindowsLocalRecordPath("C:\\state", fixture.binding)).toThrow(
+      "lacks persistent ACLs",
+    );
+    fixture.setVolumeFlags(WINDOWS_NATIVE_RECORD.FILE_PERSISTENT_ACLS);
     expect(trustedWindowsSystemRoot(fixture.binding)).toBe("C:\\Windows");
     fixture.setWindowsDirectory(null);
     expect(() => trustedWindowsSystemRoot(fixture.binding)).toThrow(
@@ -712,6 +1052,31 @@ describe("native Windows record adapters", () => {
     expect(fixture.calls.close).toBe(1);
     expect(() => lock?.assertHeld()).toThrow("ownership lost");
     expect(() => lock?.release()).toThrow("is released");
+  });
+
+  test("creates kernel metadata with token security and rejects a permissive existing handle", () => {
+    const fixture = nativeFixture();
+    const calls: unknown[] = [];
+    const privacy: WindowsPrivateAuthority = {
+      withCreationSecurity: (kind, create) => {
+        expect(kind).toBe(WINDOWS_AUTHORITY_PATH_KIND.FILE);
+        return create({ private: true });
+      },
+      verifyHandle: (handle, kind) => calls.push([handle, kind]),
+    };
+    const lock = createWindowsKernelLockProvider(fixture.binding, privacy).tryAcquire("C:\\lock");
+    expect(fixture.calls.create[0]?.[3]).toEqual({ private: true });
+    expect(calls).toEqual([[41n, WINDOWS_AUTHORITY_PATH_KIND.FILE]]);
+    lock?.release();
+    const permissive: WindowsPrivateAuthority = {
+      ...privacy,
+      verifyHandle: () => {
+        throw new Error("permissive existing lock metadata");
+      },
+    };
+    expect(() =>
+      createWindowsKernelLockProvider(nativeFixture().binding, permissive).tryAcquire("C:\\lock"),
+    ).toThrow("permissive existing lock metadata");
   });
 
   test("returns busy only for ERROR_LOCK_VIOLATION and closes the HANDLE", () => {
@@ -749,6 +1114,11 @@ describe("native Windows record adapters", () => {
       "multiply-linked",
     );
     fixture.setLinks(1);
+    fixture.setDeletePending(true);
+    expect(() => createWindowsKernelLockProvider(fixture.binding).tryAcquire("C:\\x")).toThrow(
+      "delete-pending",
+    );
+    fixture.setDeletePending(false);
     fixture.setIdentity(0);
     expect(() => createWindowsKernelLockProvider(fixture.binding).tryAcquire("C:\\x")).toThrow(
       "identity is unavailable",
@@ -809,7 +1179,7 @@ describe("native Windows record adapters", () => {
     };
     const loaded = loadWindowsRecordNativeBindings({ require: () => koffi });
     expect(loaded.invalidHandle).toBe(18_446_744_073_709_551_615n);
-    expect(declarations).toHaveLength(10);
+    expect(declarations).toHaveLength(11);
     expect(declarations.every((entry) => entry[0] === "__stdcall")).toBe(true);
   });
 });

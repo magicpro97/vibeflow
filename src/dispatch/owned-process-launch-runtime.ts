@@ -6,6 +6,12 @@ import { join } from "node:path";
 import { ensurePrivateDirectory } from "../durability/index.js";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { ownedProcessRuntimeFileNames } from "./owned-process-contract.js";
+import { assertWindowsLocalRecordPath } from "./owned-process-record-windows-native.js";
+import {
+  type WindowsRecordRuntime,
+  createWindowsRecordRuntime,
+  ensureWindowsRecordParent,
+} from "./owned-process-record-windows-storage.js";
 import type { EngineProcessSpawner } from "./session-types.js";
 
 const OWNED_RUNTIME = Symbol.for("vibeflow.dispatch.owned-runtime");
@@ -26,6 +32,20 @@ export interface OwnedSupervisorLaunchRuntime {
   platform?: NodeJS.Platform;
   tmpdir: typeof nodeTmpdir;
   writeFileSync?: typeof writeFileSync;
+  createWindowsPrivateDirectory?: (path: string) => void;
+}
+
+export function createWindowsOwnedRuntimeRoot(
+  path: string,
+  seams: {
+    validate?: (path: string) => void;
+    runtime?: Partial<WindowsRecordRuntime>;
+  } = {},
+): void {
+  (seams.validate ?? assertWindowsLocalRecordPath)(path);
+  const runtime = createWindowsRecordRuntime(seams.runtime ?? {});
+  ensureWindowsRecordParent(path, runtime);
+  runtime.pathAuthority.createPrivateDirectory(path);
 }
 
 export function defaultOwnedSupervisorLaunchRuntime(): OwnedSupervisorLaunchRuntime {
@@ -42,6 +62,7 @@ export function defaultOwnedSupervisorLaunchRuntime(): OwnedSupervisorLaunchRunt
     platform: process.platform,
     tmpdir: nodeTmpdir,
     writeFileSync,
+    createWindowsPrivateDirectory: createWindowsOwnedRuntimeRoot,
   };
 }
 
@@ -51,7 +72,10 @@ export function createOwnedRuntimeRoot(
 ): { path: string; cleanup: () => void } {
   if (!OWNED_RUNTIME_NONCE.test(nonce)) throw new Error("owned runtime nonce is invalid");
   const candidate = join(runtime.tmpdir(), `${OWNED_RUNTIME_ROOT_PREFIX}${nonce}`);
-  runtime.mkdirSync(candidate, { mode: 0o700 });
+  const platform = runtime.platform ?? process.platform;
+  if (platform === RUNTIME_PLATFORM.WINDOWS)
+    (runtime.createWindowsPrivateDirectory ?? createWindowsOwnedRuntimeRoot)(candidate);
+  else runtime.mkdirSync(candidate, { mode: 0o700 });
   let path: string;
   try {
     const observed = (runtime.lstatSync ?? lstatSync)(candidate);
@@ -59,7 +83,7 @@ export function createOwnedRuntimeRoot(
       throw new Error("owned runtime root is not a private directory");
     }
     path =
-      (runtime.platform ?? process.platform) === RUNTIME_PLATFORM.WINDOWS
+      platform === RUNTIME_PLATFORM.WINDOWS
         ? candidate
         : (runtime.ensurePrivateDirectory ?? ensurePrivateDirectory)(candidate);
   } catch (error) {

@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import type {
   AgentBinding,
   MaterializeAgentBindingOptions,
@@ -1227,6 +1227,46 @@ describe("attempt lifecycle and cleanup", () => {
     expect(evidence.lifecycle).toEqual(["requested"]);
     expect(JSON.stringify(evidence)).not.toContain("ambiguous");
     expect(() => adapter.start(req)).toThrow(/immutable attempt evidence already exists/);
+  });
+
+  test("canonicalizes an explicit relative evidence root once for every adapter authority", () => {
+    const parent = mkdtempSync(join(tmpdir(), "vf-relative-evidence-"));
+    temporaryPaths.push(parent);
+    const root = join(parent, "evidence");
+    const adapter = createEngineSessionAdapter({
+      evidenceRoot: relative(process.cwd(), root),
+      spawn: () => {
+        throw new Error("relative root proof");
+      },
+    });
+    expect(() => adapter.start(request("claude", { attemptId: "attempt-relative-root" }))).toThrow(
+      "relative root proof",
+    );
+    const record = adapter.startAuthority?.read("attempt-relative-root");
+    expect(record?.evidence_ref).toBe(join(root, "attempt-relative-root.json"));
+    expect(isAbsolute(record?.evidence_ref ?? "")).toBe(true);
+  });
+
+  test("does not consume an attempt until its evidence reservation succeeds", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-reservation-retry-"));
+    temporaryPaths.push(root);
+    const attemptId = "attempt-reservation-retry";
+    const poison = join(root, `${attemptId}.json`);
+    const adapter = createEngineSessionAdapter({
+      evidenceRoot: root,
+      spawn: () => {
+        throw new Error("retry reached spawn");
+      },
+    });
+    mkdirSync(poison);
+    expect(() => adapter.start(request("claude", { attemptId }))).toThrow(
+      "immutable attempt evidence already exists",
+    );
+    rmSync(poison, { recursive: true });
+    expect(() => adapter.start(request("claude", { attemptId }))).toThrow("retry reached spawn");
+    expect(() => adapter.start(request("claude", { attemptId }))).toThrow(
+      "immutable attempt evidence already exists",
+    );
   });
 
   test("requested observer failure releases its local lease and finalizes evidence", () => {
