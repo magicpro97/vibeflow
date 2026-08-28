@@ -15,6 +15,9 @@ const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8")) as {
 const bunConfig = parseToml(readFileSync("bunfig.toml", "utf8")) as {
   test?: { pathIgnorePatterns?: string[] };
 };
+const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as {
+  compilerOptions?: Record<string, unknown>;
+};
 
 const workflowPaths = [
   ".github/workflows/ci.yml",
@@ -57,5 +60,20 @@ describe("Bun toolchain policy", () => {
     for (const script of ["test", "test:parallel", "coverage", "coverage:check"] as const) {
       expect(packageJson.scripts?.[script]).not.toContain("--path-ignore-patterns");
     }
+  });
+
+  test("enforces portable single-module TypeScript compilation", () => {
+    expect(tsconfig.compilerOptions).toMatchObject({
+      forceConsistentCasingInFileNames: true,
+      isolatedModules: true,
+      moduleDetection: "force",
+      noFallthroughCasesInSwitch: true,
+      noImplicitOverride: true,
+      noImplicitReturns: true,
+      noUncheckedIndexedAccess: true,
+      noUncheckedSideEffectImports: true,
+      strict: true,
+      verbatimModuleSyntax: true,
+    });
   });
 });

@@ -2,7 +2,7 @@
 title: Documentation
 description: VibeFlow documentation index, organized by the Diátaxis framework.
 category: reference
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 ---
 
 # VibeFlow Documentation
@@ -17,7 +17,7 @@ VibeFlow is the harness rather than another coding engine. The dynamic capabilit
 extends installed CLIs with reviewed skills, MCP servers, tools, hooks, roles, and settings,
 using the same typed install, repair, rollback, and removal authority exposed in Home.
 
-Claude, Codex, and OpenCode support exact by-id native resume; OpenCode uses `opencode run --session <validated-ses-id> --format json`. Copilot and Antigravity fail closed instead of claiming exact resume. Exact delivery keeps the selected CLI's own history and sends only new user/peer deltas. When supported native history reconciliation detects compacted context or exact proof is unavailable, VibeFlow revokes exact authority and the structured turn adds a bounded replay of the recipient's last eight public responses, each at most 2 KiB UTF-8, with provenance, digest, and count fields. Private file ranges travel in a separate one-shot structured payload. Owned CLI launches record process identity and release only after exit plus stream drain. Windows uses a Job Object with kernel-contained proof; Linux and macOS use a process group with cooperative-lineage proof. A live `windows-latest` CI smoke job is configured but must turn green before the current change can claim live Windows evidence; local non-Windows runs do not satisfy it.
+Claude, Codex, and OpenCode support exact by-id native resume; OpenCode uses `opencode run --session <validated-ses-id> --format json`. Copilot and Antigravity fail closed instead of claiming exact resume. Exact delivery keeps the selected CLI's own history and sends only new user/peer deltas. When supported native history reconciliation detects compacted context or exact proof is unavailable, VibeFlow revokes exact authority and the structured turn adds a bounded replay of the recipient's last eight public responses, each at most 2 KiB UTF-8, with provenance, digest, and count fields. Private file ranges travel in a separate one-shot structured payload. Owned CLI launches record process identity and release only after exit plus stream drain. Windows uses a Job Object with kernel-contained proof; Linux and macOS use a process group with cooperative-lineage proof. Live Windows evidence is accepted only from a green exact-SHA `windows-latest` CI smoke job; local non-Windows runs do not satisfy it.
 
 ## 📖 Tutorials — học theo bước
 
@@ -34,6 +34,7 @@ Claude, Codex, and OpenCode support exact by-id native resume; OpenCode uses `op
 
 - [Command Reference](./COMMAND_REFERENCE.md) — Complete reference of all shipped `vf` CLI commands, conversation semantics, and flags.
 - [Engine CLI Compatibility](./ENGINE-COMPAT.md) — Which engine CLI versions the current code was verified against and the invocation/output contract per integration.
+- [Bun and TypeScript Coding Conventions](./CODING_CONVENTIONS.md) — Enforced source, protocol, process, testing, and portability rules for contributors and coding agents.
 - [npm CLI Design](./NPM_CLI_DESIGN.md) — CLI design: startup flow, commands, package layout, and dependency policy.
 - [Generated Files](./GENERATED_FILES.md) — All files the orchestrator may generate in a target repository.
 - [Coverage](./COVERAGE.md) — CLI flags reference, coverage enforcement rules, and anti-patterns suite.

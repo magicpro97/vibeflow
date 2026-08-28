@@ -6,3 +6,5 @@ declare module "*.vue" {
 }
 
 declare module "virtual:uno.css";
+
+declare module "*.css";

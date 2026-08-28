@@ -893,6 +893,7 @@ test("native syscall failures distinguish unsupported filesystem operations", as
       } catch (caught) {
         return caught;
       }
+      throw new Error("syscallFailure unexpectedly returned");
     })();
     expect(error).toBeInstanceOf(DurabilityError);
     expect((error as DurabilityError).code).toBe("unsupported");

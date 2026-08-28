@@ -161,6 +161,9 @@ full reference.
 
 ## Develop
 
+Contributor setup and commit policy live in [CONTRIBUTING.md](./CONTRIBUTING.md); the full
+source standard is [Bun and TypeScript Coding Conventions](./docs/CODING_CONVENTIONS.md).
+
 Built with **Bun 1.4** + **TypeScript** and two runtime dependencies: `proper-lockfile` for
 file locking and `koffi` for native process identity and containment boundaries. The
 published CLI otherwise uses Node-compatible APIs. The web UI applies the `taste-skill` design read
@@ -174,10 +177,9 @@ UI consumers. Do not introduce TypeScript `enum`, duplicate wire literals, mutab
 sets, or blind casts. Ordinary prose and genuinely local one-off strings are not protocol
 vocabulary.
 
-The Windows PID/Job Object live-smoke job is configured in CI but must pass on a real
-`windows-latest` runner before anyone claims live Windows evidence; a local macOS/Linux run is
-not that evidence. Coverage likewise comes only from a fresh `bun run coverage:check` result,
-not from the Bun version or an ordinary test pass.
+Live Windows evidence is accepted only from a green exact-SHA `windows-latest` job; a local
+macOS/Linux run is not that evidence. Coverage likewise comes only from a fresh
+`bun run coverage:check` result, not from the Bun version or an ordinary test pass.
 
 ```bash
 bun install       # install dev tooling and set up git hooks (core.hooksPath)
