@@ -1177,9 +1177,90 @@ describe("native Windows record adapters", () => {
       out: (value: unknown) => ({ out: value }),
       sizeof: () => 8,
     };
-    const loaded = loadWindowsRecordNativeBindings({ require: () => koffi });
+    const loaded = loadWindowsRecordNativeBindings({
+      requireModule: () => koffi,
+      isBun: false,
+    });
     expect(loaded.invalidHandle).toBe(18_446_744_073_709_551_615n);
     expect(declarations).toHaveLength(11);
     expect(declarations.every((entry) => entry[0] === "__stdcall")).toBe(true);
+  });
+
+  test("locks and renames through the builtin Bun FFI adapter with encoded OVERLAPPED", () => {
+    const calls: string[] = [];
+    const dispatch: Record<string, (...args: any[]) => unknown> = {
+      GetDriveTypeW: () => WINDOWS_NATIVE_RECORD.DRIVE_FIXED,
+      GetVolumeInformationW: (
+        _root: Buffer,
+        _volume: Buffer,
+        _chars: number,
+        _serial: { [0]: number },
+        _component: { [0]: number },
+        flags: { [0]: number },
+      ) => {
+        flags[0] = WINDOWS_NATIVE_RECORD.FILE_PERSISTENT_ACLS;
+        return 1;
+      },
+      GetWindowsDirectoryW: (output: Buffer) => {
+        output.write("C:\\Windows", "utf16le");
+        return 11;
+      },
+      GetLastError: () => 5,
+      CreateFileW: () => 41n,
+      GetFileInformationByHandleEx: (_handle: bigint, informationClass: number, output: Buffer) => {
+        calls.push("info");
+        if (informationClass === WINDOWS_NATIVE_RECORD.ATTRIBUTE_TAG_CLASS)
+          output.writeUInt32LE(0, 0);
+        if (informationClass === WINDOWS_NATIVE_RECORD.STANDARD_INFO_CLASS) {
+          output.writeUInt32LE(1, WINDOWS_NATIVE_RECORD.STANDARD_LINKS_OFFSET);
+          output.writeUInt8(0, WINDOWS_NATIVE_RECORD.STANDARD_DELETE_PENDING_OFFSET);
+        }
+        if (informationClass === WINDOWS_NATIVE_RECORD.FILE_ID_INFO_CLASS)
+          output.writeUInt32LE(1, 8);
+        return 1;
+      },
+      LockFileEx: (_handle: bigint, ...rest: unknown[]) => {
+        calls.push("lock");
+        const overlapped = rest[4] as Buffer;
+        expect(overlapped.readBigUInt64LE(0)).toBe(0n);
+        expect(overlapped.readBigUInt64LE(8)).toBe(0n);
+        expect(overlapped.readUInt32LE(16)).toBe(0);
+        expect(overlapped.readUInt32LE(20)).toBe(0);
+        expect(overlapped.readBigUInt64LE(24)).toBe(0n);
+        return 1;
+      },
+      UnlockFileEx: (_handle: bigint, ...rest: unknown[]) => {
+        calls.push("unlock");
+        expect(Buffer.isBuffer(rest[3])).toBe(true);
+        return 1;
+      },
+      MoveFileExW: () => 1,
+      FlushFileBuffers: () => 1,
+      CloseHandle: () => 1,
+    };
+    const ffi = {
+      FFIType: { ptr: 1, u32: 2, i32: 3 },
+      dlopen: () => ({
+        symbols: Object.fromEntries(
+          Object.keys(dispatch).map((name) => [
+            name,
+            (...args: unknown[]) => dispatch[name]?.(...args) ?? 1,
+          ]),
+        ),
+      }),
+    };
+    const binding = loadWindowsRecordNativeBindings({ isBun: true, requireModule: () => ffi });
+    expect(binding.invalidHandle).toBe(18_446_744_073_709_551_615n);
+    expect(() => assertWindowsLocalRecordPath("C:\\record", binding)).not.toThrow();
+    const provider = createWindowsKernelLockProvider(binding);
+    const lock = provider.tryAcquire("C:\\writer.lock");
+    expect(lock).not.toBeNull();
+    lock?.assertHeld();
+    lock?.release();
+    expect(calls).toContain("info");
+    expect(calls).toContain("lock");
+    expect(calls).toContain("unlock");
+    const rename = createWindowsWriteThroughRename(binding);
+    rename("C:\\source", "C:\\target", { replace: true, writeThrough: true });
   });
 });

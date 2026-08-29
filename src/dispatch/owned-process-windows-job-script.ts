@@ -10,22 +10,64 @@ const WINDOWS_LIMIT = ${JSON.stringify(OWNED_WINDOWS_LIMIT)};
 const QUIESCENCE_SCOPE = ${JSON.stringify(OWNED_PROCESS_QUIESCENCE_SCOPE)};
 const initializeWindowsJob = () => {
   if (process.platform !== IDENTITY.KIND.WINDOWS) return null;
-  const koffi = require("koffi");
-  const kernel32 = koffi.load("Kernel32.dll");
-  const createJobObject = kernel32.func("void * CreateJobObjectW(void *, void *)");
-  const setJobInformation = kernel32.func(
-    "int SetInformationJobObject(void *, int, void *, unsigned int)",
-  );
-  const assignProcessToJob = kernel32.func("int AssignProcessToJobObject(void *, void *)");
-  const queryJobInformation = kernel32.func(
-    "int QueryInformationJobObject(void *, int, void *, unsigned int, void *)",
-  );
-  const getCurrentProcess = kernel32.func("void * GetCurrentProcess(void)");
-  const getWindowsDirectory = kernel32.func(
-    "unsigned int GetWindowsDirectoryW(void *, unsigned int)",
-  );
+  const ffi = typeof process.versions.bun === "string" ? require("bun:ffi") : null;
+  const koffi = ffi ? null : require("koffi");
+  const bunKernel = ffi
+    ? ffi.dlopen("Kernel32.dll", {
+        CreateJobObjectW: { args: [ffi.FFIType.ptr, ffi.FFIType.ptr], returns: ffi.FFIType.ptr },
+        SetInformationJobObject: {
+          args: [ffi.FFIType.ptr, ffi.FFIType.i32, ffi.FFIType.ptr, ffi.FFIType.u32],
+          returns: ffi.FFIType.i32,
+        },
+        AssignProcessToJobObject: { args: [ffi.FFIType.ptr, ffi.FFIType.ptr], returns: ffi.FFIType.i32 },
+        QueryInformationJobObject: {
+          args: [ffi.FFIType.ptr, ffi.FFIType.i32, ffi.FFIType.ptr, ffi.FFIType.u32, ffi.FFIType.ptr],
+          returns: ffi.FFIType.i32,
+        },
+        GetCurrentProcess: { args: [], returns: ffi.FFIType.ptr },
+        GetWindowsDirectoryW: { args: [ffi.FFIType.ptr, ffi.FFIType.u32], returns: ffi.FFIType.u32 },
+      })
+    : undefined;
+  const koffiKernel = ffi ? undefined : koffi.load("Kernel32.dll");
+  const kernel = ffi ? bunKernel : koffiKernel;
+  const api = ffi
+    ? {
+        createJobObject: () => kernel.symbols.CreateJobObjectW(null, null),
+        setJobInformation: (handle, kind, limits, bytes) =>
+          kernel.symbols.SetInformationJobObject(handle, kind, limits, bytes),
+        assignProcessToJob: (job, process) =>
+          kernel.symbols.AssignProcessToJobObject(job, process),
+        queryJobInformation: (handle, kind, bytes, length) =>
+          kernel.symbols.QueryInformationJobObject(handle, kind, bytes, length, null),
+        getCurrentProcess: () => kernel.symbols.GetCurrentProcess(),
+        getWindowsDirectory: (buffer, chars) =>
+          kernel.symbols.GetWindowsDirectoryW(buffer, chars),
+      }
+    : {
+        createJobObject: () => kernel.func("void * CreateJobObjectW(void *, void *)")(null, null),
+        setJobInformation: (handle, kind, limits, bytes) =>
+          kernel.func("int SetInformationJobObject(void *, int, void *, unsigned int)")(
+            handle,
+            kind,
+            limits,
+            bytes,
+          ),
+        assignProcessToJob: (job, process) =>
+          kernel.func("int AssignProcessToJobObject(void *, void *)")(job, process),
+        queryJobInformation: (handle, kind, bytes, length) =>
+          kernel.func("int QueryInformationJobObject(void *, int, void *, unsigned int, void *)")(
+            handle,
+            kind,
+            bytes,
+            length,
+            null,
+          ),
+        getCurrentProcess: () => kernel.func("void * GetCurrentProcess(void)")(),
+        getWindowsDirectory: (buffer, chars) =>
+          kernel.func("unsigned int GetWindowsDirectoryW(void *, unsigned int)")(buffer, chars),
+      };
   const windowsDirectory = Buffer.alloc(WINDOWS_LIMIT.DIRECTORY_BUFFER_CHARS * 2);
-  const windowsDirectoryLength = getWindowsDirectory(
+  const windowsDirectoryLength = api.getWindowsDirectory(
     windowsDirectory,
     WINDOWS_LIMIT.DIRECTORY_BUFFER_CHARS,
   );
@@ -38,12 +80,12 @@ const initializeWindowsJob = () => {
   const systemRoot = windowsDirectory
     .subarray(0, windowsDirectoryLength * 2)
     .toString("utf16le");
-  const handle = createJobObject(null, null);
+  const handle = api.createJobObject();
   if (!handle) throw new Error("owned Windows Job Object creation failed");
   const limits = Buffer.alloc(WINDOWS_JOB.EXTENDED_LIMIT_BYTES);
   limits.writeUInt32LE(WINDOWS_JOB.KILL_ON_JOB_CLOSE_FLAG, WINDOWS_JOB.LIMIT_FLAGS_OFFSET);
   if (
-    setJobInformation(
+    api.setJobInformation(
       handle,
       WINDOWS_JOB.EXTENDED_LIMIT_INFORMATION_CLASS,
       limits,
@@ -52,7 +94,7 @@ const initializeWindowsJob = () => {
   ) {
     throw new Error("owned Windows Job Object policy failed");
   }
-  if (assignProcessToJob(handle, getCurrentProcess()) === 0) {
+  if (api.assignProcessToJob(handle, api.getCurrentProcess()) === 0) {
     throw new Error("owned Windows supervisor Job assignment failed");
   }
   return {
@@ -60,12 +102,11 @@ const initializeWindowsJob = () => {
     activeProcesses() {
       const accounting = Buffer.alloc(WINDOWS_JOB.BASIC_ACCOUNTING_BYTES);
       if (
-        queryJobInformation(
+        api.queryJobInformation(
           handle,
           WINDOWS_JOB.BASIC_ACCOUNTING_INFORMATION_CLASS,
           accounting,
           accounting.length,
-          null,
         ) === 0
       ) {
         throw new Error("owned Windows Job Object query failed");

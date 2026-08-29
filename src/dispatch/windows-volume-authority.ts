@@ -1,6 +1,6 @@
-import { createRequire } from "node:module";
 import { win32 as windowsPath } from "node:path";
 import { durabilityError } from "../durability/errors.js";
+import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
 
 export const WINDOWS_VOLUME_AUTHORITY = Object.freeze({
   DRIVE_FIXED: 3,
@@ -26,14 +26,65 @@ export interface WindowsVolumeNativeBindings {
   lastError(): number;
 }
 
-interface KoffiRuntime {
-  require: (specifier: string) => unknown;
-}
-
 export function loadWindowsVolumeNativeBindings(
-  runtime: KoffiRuntime = { require: createRequire(import.meta.url) },
+  runtime: WindowsFfiRuntime = DEFAULT_WINDOWS_FFI_RUNTIME,
 ): WindowsVolumeNativeBindings {
-  const koffi = runtime.require("koffi") as typeof import("koffi").default;
+  if (runtime.isBun) {
+    const ffi = runtime.requireModule("bun:ffi") as typeof import("bun:ffi");
+    const kernel = ffi.dlopen("Kernel32.dll", {
+      GetDriveTypeW: { args: [ffi.FFIType.ptr], returns: ffi.FFIType.u32 },
+      GetVolumeInformationW: {
+        args: [
+          ffi.FFIType.ptr,
+          ffi.FFIType.ptr,
+          ffi.FFIType.u32,
+          ffi.FFIType.ptr,
+          ffi.FFIType.ptr,
+          ffi.FFIType.ptr,
+          ffi.FFIType.ptr,
+          ffi.FFIType.u32,
+        ],
+        returns: ffi.FFIType.i32,
+      },
+      GetWindowsDirectoryW: { args: [ffi.FFIType.ptr, ffi.FFIType.u32], returns: ffi.FFIType.u32 },
+      GetLastError: { args: [], returns: ffi.FFIType.u32 },
+    });
+    return {
+      driveType: (root) => kernel.symbols.GetDriveTypeW(root),
+      volumeInformation: (
+        root,
+        volumeName,
+        volumeChars,
+        serial,
+        componentLength,
+        flags,
+        filesystemName,
+        filesystemChars,
+      ) => {
+        const serialOut = new Uint32Array(1);
+        const componentOut = new Uint32Array(1);
+        const flagsOut = new Uint32Array(1);
+        const result = kernel.symbols.GetVolumeInformationW(
+          root,
+          volumeName,
+          volumeChars,
+          serialOut,
+          componentOut,
+          flagsOut,
+          filesystemName,
+          filesystemChars,
+        );
+        serial[0] = serialOut[0] ?? 0;
+        componentLength[0] = componentOut[0] ?? 0;
+        flags[0] = flagsOut[0] ?? 0;
+        return result;
+      },
+      windowsDirectory: (output, outputChars) =>
+        kernel.symbols.GetWindowsDirectoryW(output, outputChars),
+      lastError: () => kernel.symbols.GetLastError(),
+    };
+  }
+  const koffi = runtime.requireModule("koffi") as typeof import("koffi").default;
   const kernel = koffi.load("Kernel32.dll");
   const wide = koffi.pointer("char16_t");
   const outputBytes = koffi.out(koffi.pointer("uint8_t"));
@@ -66,16 +117,7 @@ function volumeError(operation: string, binding: WindowsVolumeNativeBindings): E
   return new Error(`${operation} failed with Windows error ${binding.lastError()}`);
 }
 
-export function assertWindowsLocalRecordPath(
-  path: string,
-  binding: WindowsVolumeNativeBindings = loadWindowsVolumeNativeBindings(),
-): void {
-  const root = windowsPath.parse(windowsPath.resolve(path)).root;
-  if (
-    !/^[A-Za-z]:\\$/u.test(root) ||
-    binding.driveType(wideString(root)) !== WINDOWS_VOLUME_AUTHORITY.DRIVE_FIXED
-  )
-    durabilityError("unsafe_path", "Windows record storage requires a fixed local drive");
+function requirePersistentAcls(root: string, binding: WindowsVolumeNativeBindings): void {
   const flags = [0];
   if (
     !binding.volumeInformation(
@@ -92,6 +134,19 @@ export function assertWindowsLocalRecordPath(
     throw volumeError("GetVolumeInformationW", binding);
   if (((flags[0] ?? 0) & WINDOWS_VOLUME_AUTHORITY.FILE_PERSISTENT_ACLS) === 0)
     durabilityError("unsupported", "Windows authority volume lacks persistent ACLs");
+}
+
+export function assertWindowsLocalRecordPath(
+  path: string,
+  binding: WindowsVolumeNativeBindings = loadWindowsVolumeNativeBindings(),
+): void {
+  const root = windowsPath.parse(windowsPath.resolve(path)).root;
+  if (
+    !/^[A-Za-z]:\\$/u.test(root) ||
+    binding.driveType(wideString(root)) !== WINDOWS_VOLUME_AUTHORITY.DRIVE_FIXED
+  )
+    durabilityError("unsafe_path", "Windows record storage requires a fixed local drive");
+  requirePersistentAcls(root, binding);
 }
 
 export function trustedWindowsSystemRoot(

@@ -1,9 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
-import { createRequire } from "node:module";
 import { win32 as windowsPath } from "node:path";
 import { cleanupThenThrow, runCleanups } from "../durability/cleanup.js";
 import { durabilityError } from "../durability/errors.js";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { loadWindowsRecordNativeBindingsKoffi } from "./owned-process-record-windows-koffi.js";
+import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
 import { WINDOWS_FILE_NATIVE } from "./windows-native-contract.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
@@ -95,72 +96,69 @@ export interface WindowsRecordNativeBindings extends WindowsVolumeNativeBindings
   ) => number;
 }
 
-interface KoffiRuntime {
-  require: (specifier: string) => unknown;
+function encodeOverlapped(overlapped: Overlapped): Buffer {
+  const buffer = Buffer.alloc(32);
+  buffer.writeBigUInt64LE(BigInt(overlapped.Internal), 0);
+  buffer.writeBigUInt64LE(BigInt(overlapped.InternalHigh), 8);
+  buffer.writeUInt32LE(overlapped.Offset, 16);
+  buffer.writeUInt32LE(overlapped.OffsetHigh, 20);
+  buffer.writeBigUInt64LE(0n, 24);
+  return buffer;
 }
 
 export function loadWindowsRecordNativeBindings(
-  runtime: KoffiRuntime = { require: createRequire(import.meta.url) },
+  runtime: WindowsFfiRuntime = DEFAULT_WINDOWS_FFI_RUNTIME,
 ): WindowsRecordNativeBindings {
-  const koffi = runtime.require("koffi") as typeof import("koffi").default;
-  const kernel32 = koffi.load("Kernel32.dll");
-  const handle = koffi.pointer(koffi.opaque());
-  const wide = koffi.pointer("char16_t");
-  const overlapped = koffi.struct({
-    Internal: "uintptr_t",
-    InternalHigh: "uintptr_t",
-    Offset: "uint32_t",
-    OffsetHigh: "uint32_t",
-    hEvent: handle,
-  });
-  const overlappedInOut = koffi.inout(koffi.pointer(overlapped));
-  const outputBytes = koffi.out(koffi.pointer("uint8_t"));
   const volume = loadWindowsVolumeNativeBindings(runtime);
-  return {
-    ...volume,
-    invalidHandle: BigInt.asUintN(koffi.sizeof(handle) * 8, -1n),
-    createFile: kernel32.func("__stdcall", "CreateFileW", handle, [
-      wide,
-      "uint32_t",
-      "uint32_t",
-      "void *",
-      "uint32_t",
-      "uint32_t",
-      handle,
-    ]) as WindowsRecordNativeBindings["createFile"],
-    lockFile: kernel32.func("__stdcall", "LockFileEx", "int", [
-      handle,
-      "uint32_t",
-      "uint32_t",
-      "uint32_t",
-      "uint32_t",
-      overlappedInOut,
-    ]) as WindowsRecordNativeBindings["lockFile"],
-    unlockFile: kernel32.func("__stdcall", "UnlockFileEx", "int", [
-      handle,
-      "uint32_t",
-      "uint32_t",
-      "uint32_t",
-      overlappedInOut,
-    ]) as WindowsRecordNativeBindings["unlockFile"],
-    moveFileEx: kernel32.func("__stdcall", "MoveFileExW", "int", [
-      wide,
-      wide,
-      "uint32_t",
-    ]) as WindowsRecordNativeBindings["moveFileEx"],
-    flushFile: kernel32.func("__stdcall", "FlushFileBuffers", "int", [
-      handle,
-    ]) as WindowsRecordNativeBindings["flushFile"],
-    closeHandle: kernel32.func("__stdcall", "CloseHandle", "int", [
-      handle,
-    ]) as WindowsRecordNativeBindings["closeHandle"],
-    fileInfo: kernel32.func("__stdcall", "GetFileInformationByHandleEx", "int", [
-      handle,
-      "int",
-      outputBytes,
-      "uint32_t",
-    ]) as WindowsRecordNativeBindings["fileInfo"],
-  };
+  if (runtime.isBun) {
+    const ffi = runtime.requireModule("bun:ffi") as typeof import("bun:ffi");
+    const t = ffi.FFIType;
+    const kernel32 = ffi.dlopen("Kernel32.dll", {
+      CreateFileW: { args: [t.ptr, t.u32, t.u32, t.ptr, t.u32, t.u32, t.ptr], returns: t.ptr },
+      LockFileEx: { args: [t.ptr, t.u32, t.u32, t.u32, t.u32, t.ptr], returns: t.i32 },
+      UnlockFileEx: { args: [t.ptr, t.u32, t.u32, t.u32, t.ptr], returns: t.i32 },
+      MoveFileExW: { args: [t.ptr, t.ptr, t.u32], returns: t.i32 },
+      FlushFileBuffers: { args: [t.ptr], returns: t.i32 },
+      CloseHandle: { args: [t.ptr], returns: t.i32 },
+      GetFileInformationByHandleEx: { args: [t.ptr, t.i32, t.ptr, t.u32], returns: t.i32 },
+    });
+    return {
+      ...volume,
+      invalidHandle: 0xffff_ffff_ffff_ffffn,
+      createFile: (path, access, share, security, creation, flags, template) =>
+        kernel32.symbols.CreateFileW(
+          path,
+          access,
+          share,
+          security as Buffer | null,
+          creation,
+          flags,
+          template,
+        ) as bigint,
+      lockFile: (handle, flags, reserved, low, high, overlapped) =>
+        kernel32.symbols.LockFileEx(
+          handle,
+          flags,
+          reserved,
+          low,
+          high,
+          encodeOverlapped(overlapped),
+        ),
+      unlockFile: (handle, reserved, low, high, overlapped) =>
+        kernel32.symbols.UnlockFileEx(handle, reserved, low, high, encodeOverlapped(overlapped)),
+      moveFileEx: (source, target, flags) => kernel32.symbols.MoveFileExW(source, target, flags),
+      flushFile: (handle) => kernel32.symbols.FlushFileBuffers(handle),
+      closeHandle: (handle) => kernel32.symbols.CloseHandle(handle),
+      fileInfo: (handle, informationClass, output, outputBytes) =>
+        kernel32.symbols.GetFileInformationByHandleEx(
+          handle,
+          informationClass,
+          output,
+          outputBytes,
+        ),
+    };
+  }
+  return loadWindowsRecordNativeBindingsKoffi(runtime, volume);
 }
 
 function widePath(path: string): Buffer {
