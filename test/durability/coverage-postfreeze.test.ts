@@ -645,6 +645,7 @@ test("native runtime initialization exercises Node, unsupported, and Linux loade
   const bunDescriptor = Object.getOwnPropertyDescriptor(process.versions, "bun");
   const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
   if (!bunDescriptor || !platformDescriptor) throw new Error("runtime descriptors are unavailable");
+  const realHostPlatform = platformDescriptor.value;
   try {
     const nodeBindings = nativeRuntime.loadNodeBindings();
     expect(nodeBindings.openat).toBeFunction();
@@ -682,10 +683,19 @@ test("native runtime initialization exercises Node, unsupported, and Linux loade
 
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: "linux" });
-    expect(
-      nativeRuntime.initializeNativeRuntime({ disabled: false, platform: "linux", isBun: true })
-        .unavailableReason,
-    ).toMatch(/native durability load failed/);
+    const linuxLoader = nativeRuntime.initializeNativeRuntime({
+      disabled: false,
+      platform: "linux",
+      isBun: true,
+    });
+    // On a real Linux runtime the system libc loads and durability becomes
+    // available, so the loader succeeds. Everywhere else the forced non-Linux
+    // host has no Linux libc, so the loader authority fails closed.
+    if (realHostPlatform === "linux") {
+      expect(linuxLoader.unavailableReason).toBe("native durability is not initialized");
+    } else {
+      expect(linuxLoader.unavailableReason).toMatch(/native durability load failed/);
+    }
   } finally {
     Object.defineProperty(process.versions, "bun", bunDescriptor);
     Object.defineProperty(process, "platform", platformDescriptor);
