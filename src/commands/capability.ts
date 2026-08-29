@@ -10,7 +10,10 @@ import {
 } from "../actions/public-action-contract.js";
 import { materializeCapabilityPreview } from "../capabilities/action-domain/preview.js";
 import type { CapabilityCliMutationPortV1 } from "../capabilities/cli/ports.js";
-import { CapabilityRuntimeError } from "../capabilities/operations/errors.js";
+import {
+  CapabilityNotActivatedError,
+  CapabilityRuntimeError,
+} from "../capabilities/operations/errors.js";
 import type {
   CapabilityCliResultV1,
   FabricCliMutationRequestV1,
@@ -28,6 +31,7 @@ import { readStrictJsonStdin } from "./capability/io.js";
 import {
   bindValues,
   commandAction,
+  decodeMutationRequest,
   detailForBind,
   durableCapabilityRequest,
   enrichLifecycleSelectorHints,
@@ -99,6 +103,9 @@ export async function capability(
   try {
     const base = inject.base ?? cwd();
     const scope = commandScope(parsed.scope);
+    // Read request-file before composing the runtime so failures surface as usage errors.
+    if (parsed.kind === "mutation" && parsed.mode === "request-file")
+      decodeMutationRequest(parsed.requestFile, parsed.command, inject.stdin);
     const service = commandService(
       {
         base,
@@ -362,11 +369,12 @@ export async function capability(
               schema_version: "1.0",
               kind: "query",
               command: parsed.command,
-              status: CAPABILITY_OPERATION_STATUS.FAILED,
+              ...(error instanceof CapabilityNotActivatedError
+                ? { status: CAPABILITY_OPERATION_STATUS.SUCCEEDED, error: null }
+                : { status: CAPABILITY_OPERATION_STATUS.FAILED, error: resultError(error) }),
               offline: parsed.offline,
               items: [],
               next_cursor: null,
-              error: resultError(error),
             }
           : parsed.kind === "inspection"
             ? {

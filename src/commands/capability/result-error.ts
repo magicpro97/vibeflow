@@ -12,7 +12,10 @@ import {
 } from "../../actions/public-error-contract.js";
 import { isBoundedWireText } from "../../actions/public-wire-primitives.js";
 import { ActionValidationError } from "../../actions/strict-json.js";
-import { CapabilityRuntimeError } from "../../capabilities/operations/errors.js";
+import {
+  CapabilityNotActivatedError,
+  CapabilityRuntimeError,
+} from "../../capabilities/operations/errors.js";
 import {
   CAPABILITY_RUNTIME_ERROR_CODE,
   type CapabilityRuntimeErrorCodeV1,
@@ -275,5 +278,12 @@ export function resultError(error: unknown): PublicApiErrorV1["error"] {
       projection.recoveryAction,
     );
   }
+  if (error instanceof CapabilityNotActivatedError)
+    return apiError(
+      PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE,
+      "Capability service is unavailable.",
+      true,
+      PUBLIC_RECOVERY_ACTION.RETRY,
+    );
   throw error;
 }

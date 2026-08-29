@@ -85,7 +85,10 @@ import {
   activateUserCapabilityAuthorityForTrustedInstall,
   productionCapabilityRuntimeV1,
 } from "../src/capabilities/index.js";
-import { CapabilityRuntimeError } from "../src/capabilities/operations/errors.js";
+import {
+  CapabilityNotActivatedError,
+  CapabilityRuntimeError,
+} from "../src/capabilities/operations/errors.js";
 import type { CapabilityCliResultV1 } from "../src/capabilities/wire/cli.js";
 import type { CapabilityQueryItemV1 } from "../src/capabilities/wire/query.js";
 import { authority as authorityCommand } from "../src/commands/authority.js";
@@ -1057,6 +1060,9 @@ describe("post-freeze capability result rendering", () => {
       "stale_proposal",
     );
     expect(resultError(new CapabilityCliUsageError("bad flag")).code).toBe("invalid_request");
+    expect(resultError(new CapabilityNotActivatedError("project")).code).toBe(
+      "service_unavailable",
+    );
     expect(
       resultError(new ActionValidationError("bad schema", "$", "unsupported_schema_version")).code,
     ).toBe("unsupported_schema_version");

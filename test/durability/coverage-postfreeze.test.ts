@@ -49,7 +49,7 @@ import {
   writePrivateTemporaryAt,
 } from "../../src/durability/path.js";
 
-const { native, syscallFailure } = nativeRuntime;
+const { native } = nativeRuntime;
 
 const vffrOptions = {
   domain: "catalog-delta" as const,
@@ -625,12 +625,16 @@ test("native pinned-directory path failures are classified without losing cleanu
   const invalid = sandbox("vf-native-realpath-error-");
   ensurePrivateDirectory(invalid);
   const pinned = openPrivateDirectory(invalid, false);
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
   const realpath = spyOn(fs, "realpathSync").mockImplementation((() => {
     throw Object.assign(new Error("missing fd alias"), { code: "ENOENT" });
   }) as unknown as typeof fs.realpathSync);
   try {
+    // Force the non-Linux branch so the mocked realpath (not /proc/self/fd) is exercised.
+    Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
     expect(() => pinnedDirectoryPath(pinned.fd)).toThrow(/Bun cannot resolve pinned directory/);
   } finally {
+    if (platformDescriptor) Object.defineProperty(process, "platform", platformDescriptor);
     realpath.mockRestore();
     closePinnedDirectory(pinned);
     fs.rmSync(invalid, { recursive: true, force: true });
@@ -644,7 +648,11 @@ test("native runtime initialization exercises Node, unsupported, and Linux loade
   try {
     const nodeBindings = nativeRuntime.loadNodeBindings();
     expect(nodeBindings.openat).toBeFunction();
-    expect(nodeBindings.fcntl).toBeFunction();
+    if (process.platform === "darwin") {
+      expect(nodeBindings.fcntl).toBeFunction();
+    } else {
+      expect(nodeBindings.fcntl).toBeNull();
+    }
     const syntheticPath = "/private/tmp/vf-pinned-runtime";
     expect(
       pinnedDirectoryPathForRuntime(17, {
@@ -886,15 +894,20 @@ test("native syscall failures distinguish unsupported filesystem operations", as
     const fd = (server as unknown as { _handle?: { fd?: number } })._handle?.fd;
     expect(fd).toBeNumber();
     const result = api.flock(fd as number, 6);
-    expect(result).toBe(-1);
-    const error = (() => {
-      try {
-        syscallFailure("socket flock probe");
-      } catch (caught) {
-        return caught;
-      }
-      throw new Error("syscallFailure unexpectedly returned");
-    })();
+    // flock(2) on a socket fails on darwin but is a no-op success on Linux, so
+    // only the typed classification is asserted portably (via the errno portal).
+    expect(result).toBe(process.platform === "darwin" ? -1 : 0);
+    if (process.platform === "darwin") {
+      expect(
+        nativeRuntime.errnoIs("EOPNOTSUPP") ||
+          nativeRuntime.errnoIs("ENOTSUP") ||
+          nativeRuntime.errnoIs("ENOSYS"),
+      ).toBeTrue();
+    }
+    const error = nativeRuntime.classifySyscallError(
+      "socket flock probe",
+      nativeRuntime.errnoValue("EOPNOTSUPP"),
+    );
     expect(error).toBeInstanceOf(DurabilityError);
     expect((error as DurabilityError).code).toBe("unsupported");
   } finally {

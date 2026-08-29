@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import { arch, constants as osConstants } from "node:os";
-import { durabilityError } from "./errors.js";
+import { DurabilityError, durabilityError } from "./errors.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 export interface NativeBindings {
@@ -204,14 +204,23 @@ export function errnoIs(name: string): boolean {
   return errnoReader() === errnoTable[name];
 }
 
+export function errnoValue(name: string): number {
+  return errnoTable[name] ?? 0;
+}
+
+export function classifySyscallError(label: string, code: number): DurabilityError {
+  const unsupported =
+    code === errnoTable.ENOSYS || code === errnoTable.ENOTSUP || code === errnoTable.EOPNOTSUPP;
+  return new DurabilityError(
+    unsupported ? "unsupported" : "unsafe_path",
+    unsupported
+      ? `${label} is unsupported by this filesystem/runtime (errno ${code})`
+      : `${label} failed (errno ${code})`,
+  );
+}
+
 export function syscallFailure(label: string): never {
-  const code = errnoReader();
-  if (errnoIs("ENOSYS") || errnoIs("ENOTSUP") || errnoIs("EOPNOTSUPP"))
-    durabilityError(
-      "unsupported",
-      `${label} is unsupported by this filesystem/runtime (errno ${code})`,
-    );
-  durabilityError("unsafe_path", `${label} failed (errno ${code})`);
+  throw classifySyscallError(label, errnoReader());
 }
 
 export function assertNativeDurabilityAvailable(): void {

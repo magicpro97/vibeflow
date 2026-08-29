@@ -1,9 +1,14 @@
+import { existsSync } from "node:fs";
 import { EMPTY_PERMISSION_DIGEST, EMPTY_SOURCE_AUTHORITY_SET_DIGEST } from "../actions/index.js";
 import type { CapabilityScope } from "../core/capability-contract.js";
 import { canonicalJsonBytes, privateFileBytes } from "../durability/index.js";
 import { validateAuthorityHead, validateAuthorityIdentity } from "./authority/index.js";
 import type { AuthorityScopeIdentityRecordV1 } from "./authority/types.js";
-import { CAPABILITY_RUNTIME_ERROR_CODE, CapabilityRuntimeError } from "./operations/errors.js";
+import {
+  CAPABILITY_RUNTIME_ERROR_CODE,
+  CapabilityNotActivatedError,
+  CapabilityRuntimeError,
+} from "./operations/errors.js";
 import type { CapabilityRuntimeAuthorityReaderV1 } from "./operations/types.js";
 import { permissionBindingDigest } from "./permissions/index.js";
 import type {
@@ -12,6 +17,7 @@ import type {
 } from "./planning/types.js";
 import {
   activationHeadPath,
+  activationReceiptPath,
   parseCanonicalActivation,
   readActivationIdentity,
 } from "./source/authority-activation-records.js";
@@ -28,8 +34,9 @@ function unavailable(message: string): never {
 export function readActivatedCapabilityIdentityV1(
   paths: CapabilityStorePathsV1,
 ): AuthorityScopeIdentityRecordV1 {
+  if (!existsSync(activationReceiptPath(paths))) throw new CapabilityNotActivatedError(paths.scope);
   const identityBytes = readActivationIdentity(paths);
-  if (!identityBytes) unavailable("capability authority is not activated");
+  if (!identityBytes) throw new CapabilityNotActivatedError(paths.scope);
   const identity = parseCanonicalActivation<AuthorityScopeIdentityRecordV1>(
     identityBytes,
     "capability authority identity",

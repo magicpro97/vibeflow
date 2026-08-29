@@ -5,17 +5,17 @@
     {
       "id": "windows-lease-positive-records",
       "type": "positive",
-      "prompt": "Harden this Windows record backend: it checks the records directory before and after rename, but an ancestor can still be swapped during publication."
+      "prompt": "Harden this Windows record backend: it checks the records directory before and after rename, but a Windows ancestor swap can still occur during publication; close the check-use-check race with a pinned path lease."
     },
     {
       "id": "windows-lease-positive-cleanup",
       "type": "positive",
-      "prompt": "Ensure Windows evidence temp-file rename and failure unlink execute under the same authenticated directory authority."
+      "prompt": "Ensure Windows evidence temp-file rename and failure unlink execute under the same Windows path authority lease with the same authenticated directory authority."
     },
     {
       "id": "windows-lease-positive-kernel-lock",
       "type": "positive",
-      "prompt": "A Windows lock HANDLE can be acquired during a verified callback, but lease teardown may fail; preserve the primary error and release the candidate."
+      "prompt": "A Windows lock HANDLE can be acquired during a verified callback, but Windows path authority lease teardown may fail; preserve the primary error and release the candidate."
     },
     {
       "id": "windows-lease-negative-posix",

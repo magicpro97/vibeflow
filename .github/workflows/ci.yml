@@ -86,7 +86,12 @@ jobs:
           bun-version: 1.4.0
       - run: bun ci
       - name: Assert a real Windows runtime
-        run: bun -e "if (process.platform !== 'win32') throw new Error('live Windows evidence requires win32')"
+        # File-based (not an inline `bun -e`): bun 1.4.0 on Windows runners
+        # can crash in its eval path (Bun "Features:" crash banner, exit 1)
+        # even when the condition is false. The committed script uses the
+        # same module path as the `bun test` smoke step below and fails only
+        # when the live runtime is not win32.
+        run: bun run scripts/assert-win32.ts
       - name: Windows PID, Job Object, release, and orphan smoke
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
 

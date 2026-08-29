@@ -1,6 +1,7 @@
 import {
   CAPABILITY_RUNTIME_ERROR_CODE,
   type CapabilityRuntimeErrorCodeV1,
+  type CapabilityScope,
 } from "../../core/capability-contract.js";
 import {
   CAPABILITY_PRE_EFFECT_REFUSAL_REASON,
@@ -48,5 +49,21 @@ export class CapabilityRuntimeError extends Error {
   ) {
     super(`${runtime_code}: ${message}`);
     this.name = "CapabilityRuntimeError";
+  }
+}
+
+/**
+ * Thrown when a capability store has not been activated for a scope. The CLI
+ * query path treats this as a successful empty result, while lower-level
+ * runtime composition keeps failing closed so mutations cannot run without an
+ * activated authority.
+ */
+export class CapabilityNotActivatedError extends Error {
+  readonly scope: CapabilityScope;
+
+  constructor(scope: CapabilityScope) {
+    super(`capability authority is not activated for scope ${scope}`);
+    this.name = "CapabilityNotActivatedError";
+    this.scope = scope;
   }
 }
