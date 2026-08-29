@@ -86,9 +86,14 @@ export function decodeMutationRequest(
 export function commandAction(
   command: ParsedCapabilityCliArgvV1,
   reader?: () => Uint8Array | string,
+  preDecodedRequestFile?: FabricCliMutationRequestV1,
 ): HostActionRequestV1 | FabricCliMutationRequestV1 {
   if (command.kind === "mutation" && command.mode === "request-file")
-    return decodeMutationRequest(command.requestFile, command.command, reader);
+    // Reuse a pre-decoded request-file value when provided so stdin
+    // (`--request-file -`) is consumed exactly once, not read twice.
+    return (
+      preDecodedRequestFile ?? decodeMutationRequest(command.requestFile, command.command, reader)
+    );
   if (command.kind !== "mutation")
     throw new CapabilityCliUsageError("expected a capability mutation command");
   const scope: Scope = command.scope ?? CAPABILITY_SCOPE.PROJECT;

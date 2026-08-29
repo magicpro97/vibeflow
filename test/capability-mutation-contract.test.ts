@@ -158,6 +158,54 @@ describe("capability CLI mutation contract", () => {
     expect("request" in input).toBe(true);
   });
 
+  test("request-file from stdin is consumed exactly once and applied durably", async () => {
+    const fx = fixture();
+    const seen: CapabilityCliMutationInputV1[] = [];
+    const envelope = JSON.stringify({
+      schema_version: "1.0",
+      idempotency_key: "stdin-1",
+      scope: "project",
+      planning_options: { network_read: "forbid" },
+      action: {
+        type: "capability.install",
+        package: { id: fx.pkg.pin.id },
+        scope: "project",
+        requested_targets: [{ engine: "codex", participant_id: null }],
+        inputs: [],
+      },
+    });
+    // Simulate a consuming pipe: bytes are available on the first read only.
+    let reads = 0;
+    const stdin = () => {
+      reads += 1;
+      return reads === 1 ? envelope : "";
+    };
+    const code = await capability(["install", "--request-file", "-", "--yes", "--json"], {
+      base: fx.projectRoot,
+      userHomeRoot: fx.homeRoot,
+      userVibeflowRoot: fx.userVibeflowRoot,
+      runtimeFactory: () => fx.runtime,
+      stdinIsTTY: false,
+      stdinHasData: true,
+      stdin,
+      mutationPort: {
+        execute(input) {
+          seen.push(input);
+          return mutationSuccess("capability.install");
+        },
+      },
+      writer: () => undefined,
+    });
+    expect(code).toBe(0);
+    expect(reads).toBe(1);
+    expect(seen).toHaveLength(1);
+    const input = seen[0];
+    if (!input) throw new Error("expected captured input");
+    if (!("request" in input)) throw new Error("expected durable request envelope");
+    expect(input.request.idempotency_key).toBe("stdin-1");
+    expect(input.request.action.type).toBe("capability.install");
+  });
+
   test("update --from-generation-id maps only to capability.restore_package", () => {
     const parsed = parseCapabilityCliArgv(
       ["update", "acme.demo", "--scope", "project", "--from-generation-id", "vf-generation-1"],

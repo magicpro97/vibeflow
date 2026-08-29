@@ -103,9 +103,12 @@ export async function capability(
   try {
     const base = inject.base ?? cwd();
     const scope = commandScope(parsed.scope);
-    // Read request-file before composing the runtime so failures surface as usage errors.
+    // Decode the request-file once before composing the runtime so read failures
+    // surface as usage errors, and reuse the value so `--request-file -` (stdin)
+    // is consumed exactly once rather than read a second time.
+    let decodedRequestFile: FabricCliMutationRequestV1 | undefined;
     if (parsed.kind === "mutation" && parsed.mode === "request-file")
-      decodeMutationRequest(parsed.requestFile, parsed.command, inject.stdin);
+      decodedRequestFile = decodeMutationRequest(parsed.requestFile, parsed.command, inject.stdin);
     const service = commandService(
       {
         base,
@@ -250,7 +253,7 @@ export async function capability(
           ? CREDENTIAL_CLASS.INTERACTIVE_TTY
           : CREDENTIAL_CLASS.AUTOMATION_GRANT,
     };
-    const direct = commandAction(parsed, inject.stdin);
+    const direct = commandAction(parsed, inject.stdin, decodedRequestFile);
     const action =
       "action" in direct ? direct.action : enrichLifecycleSelectorHints(service, scope, direct);
     const planningNetworkRead = transientPlanningNetworkRead(parsed, direct);
