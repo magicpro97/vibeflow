@@ -26,10 +26,6 @@ import { readDurableRegistryTrustSnapshot } from "./source/durable-registry-auth
 import type { CapabilityStorePathsV1 } from "./storage/paths.js";
 import { acquireCapabilityAuthorityLock } from "./storage/scope-lock.js";
 
-function unavailable(message: string): never {
-  throw new CapabilityRuntimeError(message, CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE);
-}
-
 /** Read-only activation identity loader used before any runtime object is composed. */
 export function readActivatedCapabilityIdentityV1(
   paths: CapabilityStorePathsV1,
@@ -41,7 +37,11 @@ export function readActivatedCapabilityIdentityV1(
     identityBytes,
     "capability authority identity",
   );
-  if (!identity) unavailable("capability authority identity is absent");
+  if (!identity)
+    throw new CapabilityRuntimeError(
+      "capability authority identity is absent",
+      CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+    );
   validateAuthorityIdentity(identity);
   if (
     identity.scope !== paths.scope ||
@@ -64,7 +64,11 @@ export class FilesystemCapabilityRuntimeAuthorityReaderV1
   ) {}
 
   read(scope: CapabilityScope): CapabilityRuntimeAuthorityV1 {
-    if (scope !== this.paths.scope) unavailable("capability authority reader scope mismatch");
+    if (scope !== this.paths.scope)
+      throw new CapabilityRuntimeError(
+        "capability authority reader scope mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
     const identity = readActivatedCapabilityIdentityV1(this.paths);
 
     // This replays every retained epoch and verifies its durable shared-action authority.
@@ -76,12 +80,20 @@ export class FilesystemCapabilityRuntimeAuthorityReaderV1
       authority_transition_resolver: this.transitionResolver,
     });
     const headBytes = privateFileBytes(activationHeadPath(this.paths), 1024 * 1024);
-    if (!headBytes) unavailable("capability authority head is absent");
+    if (!headBytes)
+      throw new CapabilityRuntimeError(
+        "capability authority head is absent",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
     const head = parseCanonicalActivation<import("./authority/types.js").AuthorityEpochHeadV1>(
       headBytes,
       "capability authority head",
     );
-    if (!head) unavailable("capability authority head is absent");
+    if (!head)
+      throw new CapabilityRuntimeError(
+        "capability authority head is absent",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
     validateAuthorityHead(head);
     if (
       !Buffer.from(headBytes).equals(canonicalJsonBytes(head)) ||
@@ -136,7 +148,11 @@ export class FilesystemCapabilityRuntimeAuthorityReaderV1
     now: () => string,
     callback: (authority: CapabilityRuntimeAuthorityV1, checkedAt: string) => T,
   ): T {
-    if (scope !== this.paths.scope) unavailable("capability authority reader scope mismatch");
+    if (scope !== this.paths.scope)
+      throw new CapabilityRuntimeError(
+        "capability authority reader scope mismatch",
+        CAPABILITY_RUNTIME_ERROR_CODE.SERVICE_UNAVAILABLE,
+      );
     const held = acquireCapabilityAuthorityLock(this.paths, operation);
     try {
       held.assertHeld();

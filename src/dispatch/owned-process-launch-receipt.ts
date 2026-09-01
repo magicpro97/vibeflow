@@ -77,7 +77,11 @@ export function waitForOwnedSupervisorReceipt(
   key: OwnedSupervisorPidReceiptKey,
   runtime: OwnedSupervisorReceiptRuntime,
 ): SupervisorLaunchReceipt | CliLaunchReceipt {
-  const deadline = runtime.now() + OWNED_PROCESS_TIMING_MS.SUPERVISOR_BOOT;
+  const timeout =
+    key === OWNED_SUPERVISOR_RECEIPT_KEY.CLI_PID
+      ? OWNED_PROCESS_TIMING_MS.CLI_RECEIPT_TIMEOUT
+      : OWNED_PROCESS_TIMING_MS.SUPERVISOR_BOOT;
+  const deadline = runtime.now() + timeout;
   while (runtime.now() < deadline) {
     try {
       const parsed: unknown = JSON.parse(runtime.readFileSync(path, "utf8"));

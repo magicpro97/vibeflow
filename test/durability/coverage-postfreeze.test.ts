@@ -696,6 +696,20 @@ test("native runtime initialization exercises Node, unsupported, and Linux loade
     } else {
       expect(linuxLoader.unavailableReason).toMatch(/native durability load failed/);
     }
+
+    // Forcing a Darwin host on a non-Darwin machine exercises the daily libc
+    // candidate loop failure and the load-failure catch around initialization.
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "darwin" });
+    const darwinLoader = nativeRuntime.initializeNativeRuntime({
+      disabled: false,
+      platform: "darwin",
+      isBun: true,
+    });
+    if (realHostPlatform === "darwin") {
+      expect(darwinLoader.unavailableReason).toBe("native durability is not initialized");
+    } else {
+      expect(darwinLoader.unavailableReason).toMatch(/native durability load failed/);
+    }
   } finally {
     Object.defineProperty(process.versions, "bun", bunDescriptor);
     Object.defineProperty(process, "platform", platformDescriptor);

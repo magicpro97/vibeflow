@@ -42,7 +42,7 @@ const startIdentity = (pid) => {
           "-Command",
           "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = " + pid + "\\\"; if ($null -eq $p) { exit " + WINDOWS_QUERY_STATUS.ABSENT + " }; [Console]::WriteLine($p.CreationDate.ToUniversalTime().Ticks)",
         ],
-        { encoding: "utf8", timeout: TIMING_MS.PLATFORM_PROBE_TIMEOUT, stdio: ["ignore", "pipe", "ignore"] },
+        { encoding: "utf8", timeout: TIMING_MS.WINDOWS_COLD_START_PROBE_TIMEOUT, stdio: ["ignore", "pipe", "ignore"] },
       ).trim();
       const identity = positiveDecimal.test(creation) ? IDENTITY.PREFIX.WINDOWS + creation : null;
       return identity

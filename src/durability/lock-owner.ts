@@ -36,6 +36,7 @@ export interface ProcessLockOwnerRuntime {
   execFileSync: typeof execFileSync;
   windowsSystemRoot: string;
   observeStartIdentity?: (pid: number) => string | null;
+  darwinProcLoader?: DarwinProcLoaderRuntime;
 }
 
 const OWNER_KEYS = [
@@ -238,7 +239,11 @@ function windowsStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): st
   }
 }
 
-function loadDarwinProcPidInfo(): DarwinProcPidInfo | null {
+function loadDarwinProcPidInfo(loader?: DarwinProcLoaderRuntime): DarwinProcPidInfo | null {
+  if (loader) {
+    const binding = loadDarwinProcBinding(loader);
+    return binding?.procPidInfo ?? null;
+  }
   if (darwinProcPidInfo !== undefined) return darwinProcPidInfo;
   const binding = loadDarwinProcBinding({
     isBun: IS_BUN,
@@ -249,10 +254,11 @@ function loadDarwinProcPidInfo(): DarwinProcPidInfo | null {
   return darwinProcPidInfo;
 }
 
-function darwinStartIdentity(pid: number): string | null {
+function darwinStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): string | null {
   try {
-    const procPidInfo = loadDarwinProcPidInfo();
-    if (!procPidInfo || darwinProcLibrary === null) return null;
+    const loader = runtime.darwinProcLoader;
+    const procPidInfo = loader ? loadDarwinProcPidInfo(loader) : loadDarwinProcPidInfo();
+    if (!procPidInfo || (loader ? false : darwinProcLibrary === null)) return null;
     const output = Buffer.alloc(PROCESS_START_IDENTITY_DARWIN_PROBE.OUTPUT_BYTES);
     if (
       procPidInfo(
@@ -290,7 +296,8 @@ export function processStartIdentity(
   if (runtime.observeStartIdentity) return runtime.observeStartIdentity(pid);
   if (runtime.platform === PROCESS_START_IDENTITY_KIND.LINUX)
     return linuxStartIdentity(pid, runtime);
-  if (runtime.platform === PROCESS_START_IDENTITY_KIND.DARWIN) return darwinStartIdentity(pid);
+  if (runtime.platform === PROCESS_START_IDENTITY_KIND.DARWIN)
+    return darwinStartIdentity(pid, runtime);
   if (runtime.platform === PROCESS_START_IDENTITY_KIND.WINDOWS)
     return windowsStartIdentity(pid, runtime);
   return isProcessStartIdentityGenericPosixPlatform(runtime.platform)

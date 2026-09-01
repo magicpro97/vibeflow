@@ -531,7 +531,7 @@ describe("owned CLI lifecycle", () => {
       const record = store.read("owned-win-bind-failure");
       expect(calls[0]).toMatchObject({
         cmd: process.execPath,
-        args: ["-e", expect.any(String)],
+        args: [expect.stringMatching(/owned-supervisor-script\.ts$/)],
         windowsHide: true,
       });
       expect(calls.slice(1)).toEqual([

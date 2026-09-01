@@ -88,8 +88,29 @@ describe("live Windows owned CLI process lifecycle", () => {
       ensureWindowsRecordDirectory(recordsPath, runtime);
       const identity = windowsDirectoryIdentity(recordsPath, runtime);
       runtime.pathAuthority.withVerifiedDirectory(recordsPath, identity.value, () => {
-        expect(() => renameSync(recordsPath, movedRecords)).toThrow();
-        expect(() => renameSync(authorityPath, movedAuthority)).toThrow();
+        // Capture pin-block evidence into the assertion failure message so bun
+        // prints the actual rename errors instead of a bare toThrow failure.
+        const attempted: string[] = [];
+        const attempt = (label: string, probe: () => void) => {
+          try {
+            probe();
+            attempted.push(`${label}:NO_THROW`);
+          } catch (error) {
+            attempted.push(`${label}:${String(error)}`);
+          }
+        };
+        attempt("recordsPath", () => renameSync(recordsPath, movedRecords));
+        attempt("authorityPath", () => renameSync(authorityPath, movedAuthority));
+        // Undo any rename that succeeded so the drive stays in the pre-lease
+        // layout for the outer rename-back assertions.
+        if (attempted[0]?.endsWith(":NO_THROW"))
+          expect(renameSync(movedRecords, recordsPath)).toBe(undefined);
+        if (attempted[1]?.endsWith(":NO_THROW"))
+          expect(renameSync(movedAuthority, authorityPath)).toBe(undefined);
+        expect(
+          attempted.every((entry) => !entry.endsWith(":NO_THROW")),
+          `pin evidence: ${attempted.join(" | ")}`,
+        ).toBeTrue();
       });
       renameSync(recordsPath, movedRecords);
       renameSync(movedRecords, recordsPath);
@@ -216,15 +237,16 @@ process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "019f27
           platform,
           store.reserve(attemptId, AGENT_ENGINE.CODEX, platform),
         );
-        const handle = launchOwnedSupervisorProcess(
-          [process.execPath, "-e", 'process.stdout.write("owned-live-ok\\n")'],
-          {
-            detached: false,
-            env: { PATH: process.env.PATH ?? "" },
-            stdinText: "",
-            ownedRuntime: controller,
-          },
-        );
+        const cliFixture = join(parent, "cli-fixture.ts");
+        // File-based (not an inline `bun -e`): bun 1.4.0 on Windows runners
+        // can crash in its eval path (see `.github/workflows/ci.yml`).
+        writeFileSync(cliFixture, 'process.stdout.write("owned-live-ok\\n");\n', { mode: 0o600 });
+        const handle = launchOwnedSupervisorProcess([process.execPath, cliFixture], {
+          detached: false,
+          env: { PATH: process.env.PATH ?? "" },
+          stdinText: "",
+          ownedRuntime: controller,
+        });
         const stdout = drain(handle.stdout);
         const stderr = drain(handle.stderr);
         const running = store.read(attemptId);
@@ -292,6 +314,10 @@ process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "019f27
           platform: pathToFileURL(join(repoRoot, "src/dispatch/owned-process-platform.ts")).href,
           runtime: pathToFileURL(join(repoRoot, "src/dispatch/owned-process-runtime.ts")).href,
         };
+        const cliFixture = join(parent, "cli-fixture.ts");
+        // File-based (not an inline `bun -e`): bun 1.4.0 on Windows runners
+        // can crash in its eval path (see `.github/workflows/ci.yml`).
+        writeFileSync(cliFixture, "setInterval(() => {}, 1000);\n", { mode: 0o600 });
         const helper = `
           const { AGENT_ENGINE } = await import(${JSON.stringify(urls.agent)});
           const { launchOwnedSupervisorProcess } = await import(${JSON.stringify(urls.launch)});
@@ -300,12 +326,14 @@ process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "019f27
           const platform = createOwnedProcessPlatform();
           const store = new OwnedProcessRecordStore(${JSON.stringify(root)});
           const controller = new OwnedProcessController(store, platform, store.reserve(${JSON.stringify(attemptId)}, AGENT_ENGINE.CODEX, platform));
-          launchOwnedSupervisorProcess([process.execPath, "-e", "setInterval(() => {}, 1000)"], { detached: false, env: { PATH: process.env.PATH || "" }, stdinText: "", ownedRuntime: controller });
+          launchOwnedSupervisorProcess([process.execPath, ${JSON.stringify(cliFixture)}], { detached: false, env: { PATH: process.env.PATH || "" }, stdinText: "", ownedRuntime: controller });
           const record = store.read(${JSON.stringify(attemptId)});
           process.stdout.write(JSON.stringify({ owner_pid: record.owner_pid, supervisor_pid: record.supervisor_pid, cli_pid: record.cli_pid }));
           process.exit(0);
         `;
-        const helperResult = spawnSync(process.execPath, ["-e", helper], {
+        const helperFixture = join(parent, "helper-fixture.ts");
+        writeFileSync(helperFixture, helper, { mode: 0o600 });
+        const helperResult = spawnSync(process.execPath, [helperFixture], {
           cwd: repoRoot,
           encoding: "utf8",
           env: process.env,

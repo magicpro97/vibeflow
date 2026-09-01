@@ -79,16 +79,12 @@ async function jsonRequest<T>(
   return parseJson<T>(response);
 }
 
-const conversationRoute = (conversationId: string, suffix = "") =>
-  `/api/conversations/${encodeURIComponent(conversationId)}${suffix}`;
-const getConversationJson = <T>(conversationId: string, suffix: string, signal?: AbortSignal) =>
-  jsonRequest<T>("GET", conversationRoute(conversationId, suffix), undefined, signal);
-const postConversationJson = <T>(
-  conversationId: string,
-  suffix: string,
-  body: unknown,
-  signal?: AbortSignal,
-) => jsonRequest<T>("POST", conversationRoute(conversationId, suffix), body, signal);
+// biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
+const conversationRoute = (conversationId: string, suffix = "") => `/api/conversations/${encodeURIComponent(conversationId)}${suffix}`;
+// biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
+const getConversationJson = <T>(conversationId: string, suffix: string, signal?: AbortSignal) => jsonRequest<T>("GET", conversationRoute(conversationId, suffix), undefined, signal);
+// biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
+const postConversationJson = <T>(conversationId: string, suffix: string, body: unknown, signal?: AbortSignal) => jsonRequest<T>("POST", conversationRoute(conversationId, suffix), body, signal);
 
 const requireConversationSnapshot = (value: unknown, conversationId?: string) => {
   if (
@@ -109,32 +105,106 @@ export function conversationEventsUrl(
   return `/api/conversations/${encodeURIComponent(conversationId)}/events?${params.toString()}`;
 }
 
+// biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
 export function conversationArtifactUrl(conversationId: string, opaqueId: string): string {
   return `${conversationRoute(conversationId, "/artifacts/")}${encodeURIComponent(opaqueId)}`;
 }
 
+export function createConversation(
+  request: ConversationCreateRequest,
+  signal?: AbortSignal,
+): Promise<ConversationCreateResponse> {
+  return jsonRequest<ConversationCreateResponse>("POST", "/api/conversations", request, signal);
+}
+
+export async function snapshotConversation(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<ConversationSnapshot> {
+  return requireConversationSnapshot(
+    await getConversationJson<unknown>(conversationId, "/snapshot", signal),
+    conversationId,
+  );
+}
+
+export function renewConversationStreamToken(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<StreamTokenRenewalResponse> {
+  return postConversationJson<StreamTokenRenewalResponse>(
+    conversationId,
+    "/stream-token",
+    {},
+    signal,
+  );
+}
+
+export function sendConversationMessage(
+  conversationId: string,
+  request: MessageRequest,
+  signal?: AbortSignal,
+): Promise<MessageResponse> {
+  return postConversationJson<MessageResponse>(conversationId, "/messages", request, signal);
+}
+
+export function pauseConversation(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<PauseResponse> {
+  return postConversationJson<PauseResponse>(conversationId, "/pause", {}, signal);
+}
+
+export function resumeConversation(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<ResumeResponse> {
+  return postConversationJson<ResumeResponse>(conversationId, "/resume", {}, signal);
+}
+
+export function stopConversation(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<StopResponse> {
+  return postConversationJson<StopResponse>(conversationId, "/stop", {}, signal);
+}
+
+export function resolveConversationApproval(
+  conversationId: string,
+  approvalId: string,
+  decision: ApprovalDecision,
+  signal?: AbortSignal,
+): Promise<ApprovalResolveResponse> {
+  return postConversationJson<ApprovalResolveResponse>(
+    conversationId,
+    `/approvals/${encodeURIComponent(approvalId)}/resolve`,
+    decision,
+    signal,
+  );
+}
+
+export function cancelConversationOperation(
+  conversationId: string,
+  command: OperationCancelCommand,
+  signal?: AbortSignal,
+): Promise<{ operation_id: string; cancelled: true }> {
+  return postConversationJson<{ operation_id: string; cancelled: true }>(
+    conversationId,
+    `/operations/${encodeURIComponent(command.operation_id)}/cancel`,
+    command,
+    signal,
+  );
+}
+
 export const conversationApi = {
-  create: (request: ConversationCreateRequest, signal?: AbortSignal) =>
-    jsonRequest<ConversationCreateResponse>("POST", "/api/conversations", request, signal),
-  snapshot: async (conversationId: string, signal?: AbortSignal) =>
-    requireConversationSnapshot(
-      await getConversationJson<unknown>(conversationId, "/snapshot", signal),
-      conversationId,
-    ),
-  renewStreamToken: (conversationId: string, signal?: AbortSignal) =>
-    postConversationJson<StreamTokenRenewalResponse>(conversationId, "/stream-token", {}, signal),
-  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
-  message: (conversationId: string, request: MessageRequest, signal?: AbortSignal) => postConversationJson<MessageResponse>(conversationId, "/messages", request, signal),
-  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
-  pause: (conversationId: string, signal?: AbortSignal) => postConversationJson<PauseResponse>(conversationId, "/pause", {}, signal),
-  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
-  resume: (conversationId: string, signal?: AbortSignal) => postConversationJson<ResumeResponse>(conversationId, "/resume", {}, signal),
-  // biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
-  stop: (conversationId: string, signal?: AbortSignal) => postConversationJson<StopResponse>(conversationId, "/stop", {}, signal),
-  // biome-ignore format: keep invocation on its declaration line to avoid Bun LCOV phantom counters
-  resolveApproval: (conversationId: string, approvalId: string, decision: ApprovalDecision, signal?: AbortSignal) => postConversationJson<ApprovalResolveResponse>(conversationId, `/approvals/${encodeURIComponent(approvalId)}/resolve`, decision, signal),
-  // biome-ignore format: keep invocation on its declaration line to avoid Bun LCOV phantom counters
-  cancelOperation: (conversationId: string, command: OperationCancelCommand, signal?: AbortSignal) => postConversationJson<{ operation_id: string; cancelled: true }>(conversationId, `/operations/${encodeURIComponent(command.operation_id)}/cancel`, command, signal),
+  create: createConversation,
+  snapshot: snapshotConversation,
+  renewStreamToken: renewConversationStreamToken,
+  message: sendConversationMessage,
+  pause: pauseConversation,
+  resume: resumeConversation,
+  stop: stopConversation,
+  resolveApproval: resolveConversationApproval,
+  cancelOperation: cancelConversationOperation,
 };
 
 export function parseConversationSseRecord(raw: string): ConversationTraceRecord {
@@ -144,6 +214,7 @@ export function parseConversationSseRecord(raw: string): ConversationTraceRecord
   return value as ConversationTraceRecord;
 }
 
+// biome-ignore format: keep invocation on its declaration line to avoid a Bun LCOV phantom counter
 export function parseConversationSseSnapshot(raw: string, conversationId?: string) {
   return requireConversationSnapshot(JSON.parse(raw) as unknown, conversationId);
 }

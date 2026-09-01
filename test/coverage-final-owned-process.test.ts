@@ -475,6 +475,28 @@ describe("final owned-process launch and status coverage", () => {
     expect(cleaned).toBe(1);
   });
 
+  test("supervisor spawn with missing process handles cleans the private runtime root", () => {
+    let cleaned = 0;
+    expect(() =>
+      spawnOwnedSupervisorChild({
+        argv: ["codex"],
+        bindAckPath: "bind.json",
+        cleanupRuntimeRoot: () => {
+          cleaned++;
+        },
+        options: { detached: false, env: {}, stdinText: "prompt" },
+        receiptPath: "receipt.json",
+        runtime: {
+          ...defaultOwnedSupervisorLaunchRuntime(),
+          spawn: (() => ({})) as never,
+        },
+        script: "",
+        statusPath: "status.json",
+      }),
+    ).toThrow("owned supervisor process handles are unavailable");
+    expect(cleaned).toBe(1);
+  });
+
   test("non-Error stdin failure and ignorable close races still fail the owned launch", () => {
     const root = mkdtempSync(join(tmpdir(), "vf-final-owned-launch-"));
     const stdin = new EventEmitter() as EventEmitter & {

@@ -138,7 +138,7 @@ function windowsProbe(pid: number, runtime: OwnedProcessPlatformRuntime): OwnedP
         ],
         {
           encoding: "utf8",
-          timeout: OWNED_PROCESS_TIMING_MS.PLATFORM_PROBE_TIMEOUT,
+          timeout: OWNED_PROCESS_TIMING_MS.WINDOWS_COLD_START_PROBE_TIMEOUT,
           stdio: ["ignore", "pipe", "ignore"],
         },
       )
