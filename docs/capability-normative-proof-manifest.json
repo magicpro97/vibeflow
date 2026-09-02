@@ -176,7 +176,7 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "ed147862d8e018acf2426a8e23e8f218f789af91eaf178e9da5cbf83aa1857d8",
+      "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
       "production_sha256": "2abc9d4a02f6762ada411c00a35ddacbec9a373218392a23c1dce889d8358946"
     },
     {
@@ -191,7 +191,7 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "ed147862d8e018acf2426a8e23e8f218f789af91eaf178e9da5cbf83aa1857d8",
+      "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
       "production_sha256": "2abc9d4a02f6762ada411c00a35ddacbec9a373218392a23c1dce889d8358946"
     },
     {
@@ -206,7 +206,7 @@
         "src/actions",
         "src/durability"
       ],
-      "test_sha256": "ed147862d8e018acf2426a8e23e8f218f789af91eaf178e9da5cbf83aa1857d8",
+      "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
       "production_sha256": "2abc9d4a02f6762ada411c00a35ddacbec9a373218392a23c1dce889d8358946"
     },
     {
@@ -2517,6 +2517,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "c28d0d8d30379207825adfd7bcd0dd7318ba610bf994a4008f3d8c19a7174abb"
+    "reviewed_payload_sha256": "4270457b2cfd9fead11eb870237414964bf9a37f2363431ba6d758c7650733ab"
   }
 }
