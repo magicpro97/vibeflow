@@ -47,13 +47,14 @@ const startIdentity = (pid) => {
       const identity = positiveDecimal.test(creation) ? IDENTITY.PREFIX.WINDOWS + creation : null;
       return identity
         ? { identity, state: IDENTITY_STATE.AVAILABLE }
-        : { identity: null, state: IDENTITY_STATE.UNKNOWN };
+        : { identity: null, state: processAbsent(pid) ? IDENTITY_STATE.ABSENT_AFTER_PROBE : IDENTITY_STATE.UNKNOWN };
     } catch (error) {
       return {
         identity: null,
-        state: error && error.status === WINDOWS_QUERY_STATUS.ABSENT
-          ? IDENTITY_STATE.ABSENT_AFTER_PROBE
-          : IDENTITY_STATE.UNKNOWN,
+        state:
+          (error && error.status === WINDOWS_QUERY_STATUS.ABSENT) || processAbsent(pid)
+            ? IDENTITY_STATE.ABSENT_AFTER_PROBE
+            : IDENTITY_STATE.UNKNOWN,
       };
     }
   }
