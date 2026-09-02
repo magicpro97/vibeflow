@@ -37,6 +37,8 @@ import {
 } from "../src/dispatch/session-contract.js";
 import { createSpawnOptionsProjection } from "../src/dispatch/session-types.js";
 import { createEngineSessionAdapter } from "../src/dispatch/session.js";
+import { WINDOWS_FILE_NATIVE } from "../src/dispatch/windows-native-contract.js";
+import { loadWindowsPathNativeBindings } from "../src/dispatch/windows-path-native-bindings.js";
 import { RUNTIME_PLATFORM } from "../src/durability/process-identity-contract.js";
 import { CONVERSATION_OPERATION_STATE } from "../src/orchestrator/conversation/conversation-public-wire-contract.js";
 
@@ -99,14 +101,42 @@ describe("live Windows owned CLI process lifecycle", () => {
             attempted.push(`${label}:${String(error)}`);
           }
         };
-        attempt("recordsPath", () => renameSync(recordsPath, movedRecords));
+        // Decisive probe: while the chain holds its pin handles, try opening
+        // each directory WITH delete access. A live pin (share without
+        // FILE_SHARE_DELETE) makes this fail with ERROR_SHARING_VIOLATION.
+        const natal = loadWindowsPathNativeBindings();
+        const wide = (path: string) => Buffer.from(`\\\\?\\${path}\\0`, "utf16le");
+        for (const [label, path] of [
+          ["DELETE-records", recordsPath],
+          ["DELETE-authority", authorityPath],
+        ] as const) {
+          const handle = natal.createFile(
+            wide(path),
+            WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0,
+            WINDOWS_FILE_NATIVE.FILE_SHARE_DELETE |
+              WINDOWS_FILE_NATIVE.FILE_SHARE_READ |
+              WINDOWS_FILE_NATIVE.FILE_SHARE_WRITE,
+            null,
+            WINDOWS_FILE_NATIVE.OPEN_EXISTING,
+            WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS,
+            null,
+          );
+          if (handle === natal.invalidHandle) {
+            attempted.push(`${label}:CLOSED(${natal.lastError()})`);
+          } else {
+            attempted.push(`${label}:OPENED`);
+            natal.closeHandle(handle);
+          }
+        }
         attempt("authorityPath", () => renameSync(authorityPath, movedAuthority));
+        attempt("recordsPath-after", () => renameSync(recordsPath, movedRecords));
         // Undo any rename that succeeded so the drive stays in the pre-lease
         // layout for the outer rename-back assertions.
-        if (attempted[0]?.endsWith(":NO_THROW"))
-          expect(renameSync(movedRecords, recordsPath)).toBe(undefined);
-        if (attempted[1]?.endsWith(":NO_THROW"))
+        const renameResults = attempted.slice(-2);
+        if (renameResults[0]?.endsWith(":NO_THROW"))
           expect(renameSync(movedAuthority, authorityPath)).toBe(undefined);
+        if (renameResults[1]?.endsWith(":NO_THROW"))
+          expect(renameSync(movedRecords, recordsPath)).toBe(undefined);
         expect(
           attempted.every((entry) => !entry.endsWith(":NO_THROW")),
           `pin evidence: ${attempted.join(" | ")}`,
