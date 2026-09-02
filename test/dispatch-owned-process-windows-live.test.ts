@@ -142,45 +142,47 @@ describe("live Windows owned CLI process lifecycle", () => {
         // a time per directory, immediately followed by a DELETE open on
         // the SAME directory: real share enforcement must refuse the
         // DELETE open with ERROR_SHARING_VIOLATION.
-        const chainAccess =
-          (WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES | WINDOWS_FILE_NATIVE.READ_CONTROL) >>> 0;
+        const accessVariants = [
+          [
+            "readctl",
+            (WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES | WINDOWS_FILE_NATIVE.READ_CONTROL) >>> 0,
+          ],
+          ["plain", WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES >>> 0],
+        ] as const;
         const chainShare =
           WINDOWS_FILE_NATIVE.FILE_SHARE_READ | WINDOWS_FILE_NATIVE.FILE_SHARE_WRITE;
         for (const [label, path] of [
           ["records", recordsPath],
           ["authority", authorityPath],
         ] as const) {
-          const chainOpen = natal.createFile(
-            wide(path),
-            chainAccess,
-            chainShare,
-            null,
-            WINDOWS_FILE_NATIVE.OPEN_EXISTING,
-            WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS |
-              WINDOWS_FILE_NATIVE.FILE_FLAG_OPEN_REPARSE_POINT,
-            null,
-          );
-          if (chainOpen === natal.invalidHandle) {
-            attempted.push(`${suffix}-hold-${label}:ERR(${natal.lastError()})`);
-            continue;
-          }
-          attempted.push(
-            `${suffix}-hold-${label}-then-delete:${openOnce(path, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`,
-          );
-          // While EXACTLY holding the chain's open shape, try bun's rename:
-          // if the OS share semantics hold, MoveFileExW must refuse because
-          // the holder lacks FILE_SHARE_DELETE.
-          if (label === "records") {
+          for (const [accessLabel, chainAccess] of accessVariants) {
+            const chainOpen = natal.createFile(
+              wide(path),
+              chainAccess,
+              chainShare,
+              null,
+              WINDOWS_FILE_NATIVE.OPEN_EXISTING,
+              WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS |
+                WINDOWS_FILE_NATIVE.FILE_FLAG_OPEN_REPARSE_POINT,
+              null,
+            );
+            if (chainOpen === natal.invalidHandle) {
+              attempted.push(`${suffix}-hold-${label}-${accessLabel}:ERR(${natal.lastError()})`);
+              continue;
+            }
+            attempted.push(
+              `${suffix}-hold-${label}-${accessLabel}-then-delete:${openOnce(path, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`,
+            );
             const renameTarget = `${path}-probe`;
             try {
               renameSync(path, renameTarget);
-              attempted.push(`${suffix}-hold-records-then-rename:NO_THROW`);
+              attempted.push(`${suffix}-hold-${label}-${accessLabel}-then-rename:NO_THROW`);
               renameSync(renameTarget, path);
             } catch (error) {
-              attempted.push(`${suffix}-hold-records-then-rename:${String(error)}`);
+              attempted.push(`${suffix}-hold-${label}-${accessLabel}-then-rename:${String(error)}`);
             }
+            (natal.closeHandle as (value: unknown) => number)(chainOpen);
           }
-          (natal.closeHandle as (value: unknown) => number)(chainOpen);
         }
       };
       probes("baseline");
