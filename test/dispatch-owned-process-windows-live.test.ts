@@ -105,6 +105,8 @@ describe("live Windows owned CLI process lifecycle", () => {
           null,
         );
         if (handle === natal.invalidHandle) return `ERR(${natal.lastError()})`;
+        if (typeof handle !== "bigint" || handle === 0n)
+          return `WEIRD(${typeof handle},${String(handle)},le=${natal.lastError()})`;
         natal.closeHandle(handle);
         return "OPENED";
       };
