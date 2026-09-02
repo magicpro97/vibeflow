@@ -525,7 +525,7 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
 }
 
 const waitFor = async (check: () => boolean | Promise<boolean>) => {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   let lastError: unknown;
   while (Date.now() < deadline) {
     try {

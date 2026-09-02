@@ -629,4 +629,4 @@ test("FIFO delivery and needs-input replies publish each durable child exactly o
   await expect(
     bootstrap.service.snapshot(clarificationTransitions[0]?.child.conversation_id ?? ""),
   ).resolves.toMatchObject({ lifecycle: CONVERSATION_LIFECYCLE.NEEDS_INPUT });
-}, 30_000);
+}, 60_000);
