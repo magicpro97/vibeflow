@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { OWNED_PROCESS_ENV } from "./owned-process-contract.js";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { OWNED_PROCESS_ENV } from "./owned-process-contract.js";
 import type { OwnedSupervisorLaunchRuntime } from "./owned-process-launch-runtime.js";
 import type { EngineProcessSpawnOptions } from "./session-types.js";
 
