@@ -241,7 +241,7 @@ process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "019f27
         rmSync(parent, { recursive: true, force: true });
       }
     },
-    LIVE_WINDOWS_TIMEOUT_MS,
+    60_000,
   );
 
   liveWindowsTest(

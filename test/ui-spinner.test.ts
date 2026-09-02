@@ -113,5 +113,17 @@ describe("ui: Spinner (TTY)", () => {
     // TTY path writes to stderr (the spy above captures it). The
     // message must still appear.
     expect(outputText()).toContain("tty-msg");
+    s.deactivate();
+  });
+
+  test("start(msg) advances the frame on each interval tick in TTY mode", async () => {
+    Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+    const s = new Spinner();
+    s.start("tick");
+    const first = outputText();
+    // Wait one 80ms interval tick so the frame index advances.
+    await Bun.sleep(100);
+    expect(outputText()).not.toBe(first);
+    s.deactivate();
   });
 });
