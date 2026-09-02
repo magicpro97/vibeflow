@@ -46,6 +46,14 @@ function nativeFixture() {
   let nextHandle = 10n;
   let nextIdentity = 100n;
   let lastError = 2;
+  const renameDirectory = (fromPath: string, toPath: string) => {
+    const entry = required(entries.get(fromPath), `rename source ${fromPath}`);
+    entries.delete(fromPath);
+    entries.set(toPath, entry);
+    for (const [handle, opened] of handles) {
+      if (opened.path === fromPath) opened.path = toPath;
+    }
+  };
   let mutateAfterRead: (() => void) | undefined;
   let readZero = false;
   let writeFailure = false;
@@ -246,6 +254,7 @@ function nativeFixture() {
     setVerifyFailure: (error: Error | undefined) => {
       verifyFailure = error;
     },
+    renameDirectory,
   };
 }
 
@@ -272,6 +281,13 @@ const POST_CALLBACK_MUTATIONS: [string, DirectoryMutation, string][] = [
       entry.deletePending = true;
     },
     "link state",
+  ],
+  [
+    "rename",
+    (fixture) => {
+      fixture.renameDirectory("C:\\workspace\\records", "C:\\workspace\\records-moved");
+    },
+    "path changed",
   ],
   [
     "DACL",
@@ -397,7 +413,9 @@ describe("native Windows path authority", () => {
     const directoryOpens = fixture.calls.create.filter(
       (call) => ((call[5] as number) & WINDOWS_PATH_AUTHORITY.FILE_FLAG_BACKUP_SEMANTICS) !== 0,
     );
-    expect(directoryOpens).toHaveLength(3);
+    // Three share-pinned prefix opens plus the post-operation path
+    // re-verification that reopens every prefix by name to detect moves.
+    expect(directoryOpens).toHaveLength(6);
     expect(
       directoryOpens.every(
         (call) => ((call[2] as number) & WINDOWS_PATH_AUTHORITY.FILE_SHARE_DELETE) === 0,

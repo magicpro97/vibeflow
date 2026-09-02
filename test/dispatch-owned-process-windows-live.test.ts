@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -37,8 +45,7 @@ import {
 } from "../src/dispatch/session-contract.js";
 import { createSpawnOptionsProjection } from "../src/dispatch/session-types.js";
 import { createEngineSessionAdapter } from "../src/dispatch/session.js";
-import { WINDOWS_FILE_NATIVE } from "../src/dispatch/windows-native-contract.js";
-import { loadWindowsPathNativeBindings } from "../src/dispatch/windows-path-native-bindings.js";
+
 import { RUNTIME_PLATFORM } from "../src/durability/process-identity-contract.js";
 import { CONVERSATION_OPERATION_STATE } from "../src/orchestrator/conversation/conversation-public-wire-contract.js";
 
@@ -85,131 +92,54 @@ describe("live Windows owned CLI process lifecycle", () => {
     const recordsPath = join(authorityPath, "records");
     const movedAuthority = `${authorityPath}-moved`;
     const movedRecords = `${recordsPath}-moved`;
+    const evidence: string[] = [];
+    const attempt = (label: string, probe: () => void) => {
+      try {
+        probe();
+        evidence.push(`${label}:NO_THROW`);
+      } catch (error) {
+        evidence.push(`${label}:${String(error).split("\n")[0]}`);
+      }
+    };
+    const leafMoved = () => existsSync(movedRecords);
     try {
       const runtime = createWindowsRecordRuntime({});
       ensureWindowsRecordDirectory(recordsPath, runtime);
       const identity = windowsDirectoryIdentity(recordsPath, runtime);
-      // Capture pin-block evidence into the assertion failure message so bun
-      // prints the actual rename errors instead of a bare toThrow failure.
-      const attempted: string[] = [];
-      const natal = loadWindowsPathNativeBindings();
-      const wide = (path: string) => Buffer.from(`\\\\?\\${path}\0`, "utf16le");
-      const openOnce = (path: string, access: number, share: number) => {
-        // bun:ffi returns Win32 HANDLEs as JS numbers on this runner (e.g.
-        // 1180) and INVALID_HANDLE_VALUE (-1) as a number too; the declared
-        // bigint invalidHandle never matches, so classify failure shapes
-        // explicitly and surface the raw value for evidence.
-        const handle: unknown = natal.createFile(
-          wide(path),
-          access,
-          share,
-          null,
-          WINDOWS_FILE_NATIVE.OPEN_EXISTING,
-          WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS,
-          null,
-        );
-        const failed =
-          handle === natal.invalidHandle ||
-          handle === -1n ||
-          handle === -1 ||
-          handle === 0n ||
-          handle === 0 ||
-          handle === null ||
-          handle === undefined;
-        if (failed) return `ERR(${natal.lastError()})`;
-        if (typeof handle !== "bigint" && typeof handle !== "number")
-          return `WEIRD(${typeof handle},${String(handle)},le=${natal.lastError()})`;
-        (natal.closeHandle as (value: unknown) => number)(handle);
-        return `OPENED(${String(handle)})`;
-      };
-      // Baseline BEFORE the chain pins: nothing holds these fresh dirs, so
-      // every probe must open. Compare against the in-chain results.
-      const probes = (suffix: string) => {
-        attempted.push(
-          `${suffix}-delete-records:${openOnce(recordsPath, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`,
-        );
-        attempted.push(
-          `${suffix}-delete-authority:${openOnce(authorityPath, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`,
-        );
-        attempted.push(
-          `${suffix}-noshare-records:${openOnce(recordsPath, WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES, 0)}`,
-        );
-        attempted.push(
-          `${suffix}-noshare-authority:${openOnce(authorityPath, WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES, 0)}`,
-        );
-        // Exact replica of the chain's pin open (read attributes + read
-        // control, share read|write, backup semantics), one held handle at
-        // a time per directory, immediately followed by a DELETE open on
-        // the SAME directory: real share enforcement must refuse the
-        // DELETE open with ERROR_SHARING_VIOLATION.
-        const accessVariants = [
-          [
-            "readctl",
-            (WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES | WINDOWS_FILE_NATIVE.READ_CONTROL) >>> 0,
-          ],
-          ["plain", WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES >>> 0],
-        ] as const;
-        const chainShare =
-          WINDOWS_FILE_NATIVE.FILE_SHARE_READ | WINDOWS_FILE_NATIVE.FILE_SHARE_WRITE;
-        for (const [label, path] of [
-          ["records", recordsPath],
-          ["authority", authorityPath],
-        ] as const) {
-          for (const [accessLabel, chainAccess] of accessVariants) {
-            const chainOpen = natal.createFile(
-              wide(path),
-              chainAccess,
-              chainShare,
-              null,
-              WINDOWS_FILE_NATIVE.OPEN_EXISTING,
-              WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS |
-                WINDOWS_FILE_NATIVE.FILE_FLAG_OPEN_REPARSE_POINT,
-              null,
-            );
-            if (chainOpen === natal.invalidHandle) {
-              attempted.push(`${suffix}-hold-${label}-${accessLabel}:ERR(${natal.lastError()})`);
-              continue;
-            }
-            attempted.push(
-              `${suffix}-hold-${label}-${accessLabel}-then-delete:${openOnce(path, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`,
-            );
-            const renameTarget = `${path}-probe`;
-            try {
-              renameSync(path, renameTarget);
-              attempted.push(`${suffix}-hold-${label}-${accessLabel}-then-rename:NO_THROW`);
-              renameSync(renameTarget, path);
-            } catch (error) {
-              attempted.push(`${suffix}-hold-${label}-${accessLabel}-then-rename:${String(error)}`);
-            }
-            (natal.closeHandle as (value: unknown) => number)(chainOpen);
-          }
-        }
-      };
-      probes("baseline");
-      runtime.pathAuthority.withVerifiedDirectory(recordsPath, identity.value, () => {
-        const attempt = (label: string, probe: () => void) => {
-          try {
-            probe();
-            attempted.push(`${label}:NO_THROW`);
-          } catch (error) {
-            attempted.push(`${label}:${String(error)}`);
-          }
-        };
-        probes("inchain");
-        attempt("authorityPath", () => renameSync(authorityPath, movedAuthority));
-        attempt("recordsPath-after", () => renameSync(recordsPath, movedRecords));
-        // Undo any rename that succeeded so the drive stays in the pre-lease
-        // layout for the outer rename-back assertions.
-        const renameResults = attempted.slice(-2);
-        if (renameResults[0]?.endsWith(":NO_THROW"))
-          expect(renameSync(movedAuthority, authorityPath)).toBe(undefined);
-        if (renameResults[1]?.endsWith(":NO_THROW"))
-          expect(renameSync(movedRecords, recordsPath)).toBe(undefined);
+      let chainRejected: string | null = null;
+      try {
+        runtime.pathAuthority.withVerifiedDirectory(recordsPath, identity.value, () => {
+          // Every ancestor of the records dir is share-pinned for the whole
+          // callback: moving any of them must be rejected immediately.
+          attempt("authorityPath", () => renameSync(authorityPath, movedAuthority));
+          // The records leaf itself: Windows lets bun's MoveFileExW rename a
+          // leaf even while its share-pinned handle is open, so the chain
+          // re-verifies the recorded path AFTER the operation and fails the
+          // lease closed when the tree moved — the same post-operation path
+          // check the portable authority performs. Either the rename throws
+          // (pin held at the fs level) or the chain rejects the lease; both
+          // guarantee the move never survives silently.
+          attempt("recordsPath", () => renameSync(recordsPath, movedRecords));
+        });
+      } catch (error) {
+        chainRejected = String(error).split("\n")[0] ?? null;
+      }
+      expect(
+        !evidence.some((entry) => entry.startsWith("authorityPath:NO_THROW")),
+        `ancestor must be pinned: ${evidence.join(" | ")}`,
+      ).toBeTrue();
+      if (leafMoved()) {
+        // The fs allowed the leaf rename, so the chain MUST have failed the
+        // lease closed; a silent success would break the pin contract.
         expect(
-          attempted.every((entry) => !entry.endsWith(":NO_THROW")),
-          `pin evidence: ${attempted.join(" | ")}`,
-        ).toBeTrue();
-      });
+          chainRejected,
+          `chain must fail closed after a leaf move: ${evidence.join(" | ")}`,
+        ).toMatch(/path changed|unsafe_path/);
+        renameSync(movedRecords, recordsPath);
+      } else {
+        expect(chainRejected).toBeNull();
+      }
+      // After the lease the drive is free again.
       renameSync(recordsPath, movedRecords);
       renameSync(movedRecords, recordsPath);
       renameSync(authorityPath, movedAuthority);
@@ -218,7 +148,6 @@ describe("live Windows owned CLI process lifecycle", () => {
       rmSync(parent, { recursive: true, force: true });
     }
   });
-
   liveWindowsTest("rejects a permissive pre-existing authority root", () => {
     const root = mkdtempSync(join(tmpdir(), "vf-permissive-win-live-"));
     try {
