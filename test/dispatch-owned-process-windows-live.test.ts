@@ -89,10 +89,35 @@ describe("live Windows owned CLI process lifecycle", () => {
       const runtime = createWindowsRecordRuntime({});
       ensureWindowsRecordDirectory(recordsPath, runtime);
       const identity = windowsDirectoryIdentity(recordsPath, runtime);
+      // Capture pin-block evidence into the assertion failure message so bun
+      // prints the actual rename errors instead of a bare toThrow failure.
+      const attempted: string[] = [];
+      const natal = loadWindowsPathNativeBindings();
+      const wide = (path: string) => Buffer.from(`\\\\?\\${path}\0`, "utf16le");
+      const openOnce = (path: string, access: number, share: number) => {
+        const handle = natal.createFile(
+          wide(path),
+          access,
+          share,
+          null,
+          WINDOWS_FILE_NATIVE.OPEN_EXISTING,
+          WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS,
+          null,
+        );
+        if (handle === natal.invalidHandle) return `ERR(${natal.lastError()})`;
+        natal.closeHandle(handle);
+        return "OPENED";
+      };
+      // Baseline BEFORE the chain pins: nothing holds these fresh dirs, so
+      // every probe must open. Compare against the in-chain results.
+      const probes = (suffix: string) => {
+        attempted.push(`${suffix}-delete-records:${openOnce(recordsPath, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`);
+        attempted.push(`${suffix}-delete-authority:${openOnce(authorityPath, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`);
+        attempted.push(`${suffix}-noshare-records:${openOnce(recordsPath, WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES, 0)}`);
+        attempted.push(`${suffix}-noshare-authority:${openOnce(authorityPath, WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES, 0)}`);
+      };
+      probes("baseline");
       runtime.pathAuthority.withVerifiedDirectory(recordsPath, identity.value, () => {
-        // Capture pin-block evidence into the assertion failure message so bun
-        // prints the actual rename errors instead of a bare toThrow failure.
-        const attempted: string[] = [];
         const attempt = (label: string, probe: () => void) => {
           try {
             probe();
@@ -101,33 +126,7 @@ describe("live Windows owned CLI process lifecycle", () => {
             attempted.push(`${label}:${String(error)}`);
           }
         };
-        // Decisive probe: while the chain holds its pin handles, try opening
-        // each directory WITH delete access. A live pin (share without
-        // FILE_SHARE_DELETE) makes this fail with ERROR_SHARING_VIOLATION.
-        const natal = loadWindowsPathNativeBindings();
-        const wide = (path: string) => Buffer.from(`\\\\?\\${path}\0`, "utf16le");
-        for (const [label, path] of [
-          ["DELETE-records", recordsPath],
-          ["DELETE-authority", authorityPath],
-        ] as const) {
-          const handle = natal.createFile(
-            wide(path),
-            WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0,
-            WINDOWS_FILE_NATIVE.FILE_SHARE_DELETE |
-              WINDOWS_FILE_NATIVE.FILE_SHARE_READ |
-              WINDOWS_FILE_NATIVE.FILE_SHARE_WRITE,
-            null,
-            WINDOWS_FILE_NATIVE.OPEN_EXISTING,
-            WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS,
-            null,
-          );
-          if (handle === natal.invalidHandle) {
-            attempted.push(`${label}:CLOSED(${natal.lastError()})`);
-          } else {
-            attempted.push(`${label}:OPENED`);
-            natal.closeHandle(handle);
-          }
-        }
+        probes("inchain");
         attempt("authorityPath", () => renameSync(authorityPath, movedAuthority));
         attempt("recordsPath-after", () => renameSync(recordsPath, movedRecords));
         // Undo any rename that succeeded so the drive stays in the pre-lease
