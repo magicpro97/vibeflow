@@ -115,6 +115,36 @@ describe("live Windows owned CLI process lifecycle", () => {
         attempted.push(`${suffix}-delete-authority:${openOnce(authorityPath, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`);
         attempted.push(`${suffix}-noshare-records:${openOnce(recordsPath, WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES, 0)}`);
         attempted.push(`${suffix}-noshare-authority:${openOnce(authorityPath, WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES, 0)}`);
+        // Exact replica of the chain's pin open (read attributes + read
+        // control, share read|write, backup semantics): must stay OPENED in
+        // baseline and must REFUSE a second identical open share-wise... the
+        // second identical open is allowed (both share READ|WRITE), but a
+        // follow-up DELETE open on top of it must fail with sharing violation.
+        const chainAccess = (
+          WINDOWS_FILE_NATIVE.FILE_READ_ATTRIBUTES |
+          WINDOWS_FILE_NATIVE.READ_CONTROL
+        ) >>> 0;
+        const chainShare =
+          WINDOWS_FILE_NATIVE.FILE_SHARE_READ | WINDOWS_FILE_NATIVE.FILE_SHARE_WRITE;
+        const chainOpen = natal.createFile(
+          wide(recordsPath),
+          chainAccess,
+          chainShare,
+          null,
+          WINDOWS_FILE_NATIVE.OPEN_EXISTING,
+          WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS |
+            WINDOWS_FILE_NATIVE.FILE_FLAG_OPEN_REPARSE_POINT,
+          null,
+        );
+        if (chainOpen === natal.invalidHandle) {
+          attempted.push(`${suffix}-chainopen:ERR(${natal.lastError()})`);
+          return;
+        }
+        attempted.push(`${suffix}-chainopen:OPENED`);
+        attempted.push(
+          `${suffix}-chainopen-then-delete:${openOnce(recordsPath, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`,
+        );
+        natal.closeHandle(chainOpen);
       };
       probes("baseline");
       runtime.pathAuthority.withVerifiedDirectory(recordsPath, identity.value, () => {
