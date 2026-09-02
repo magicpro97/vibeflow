@@ -167,7 +167,20 @@ describe("live Windows owned CLI process lifecycle", () => {
           attempted.push(
             `${suffix}-hold-${label}-then-delete:${openOnce(path, WINDOWS_FILE_NATIVE.DELETE_ACCESS >>> 0, 7)}`,
           );
-          natal.closeHandle(chainOpen);
+          // While EXACTLY holding the chain's open shape, try bun's rename:
+          // if the OS share semantics hold, MoveFileExW must refuse because
+          // the holder lacks FILE_SHARE_DELETE.
+          if (label === "records") {
+            const renameTarget = `${path}-probe`;
+            try {
+              renameSync(path, renameTarget);
+              attempted.push(`${suffix}-hold-records-then-rename:NO_THROW`);
+              renameSync(renameTarget, path);
+            } catch (error) {
+              attempted.push(`${suffix}-hold-records-then-rename:${String(error)}`);
+            }
+          }
+          (natal.closeHandle as (value: unknown) => number)(chainOpen);
         }
       };
       probes("baseline");
