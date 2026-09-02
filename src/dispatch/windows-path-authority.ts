@@ -237,8 +237,7 @@ export function createNativeWindowsPathAuthority(
         }
         held.push(opened);
       }
-      const final = held.at(-1);
-      if (!final) durabilityError("unsafe_path", "Windows authority chain is empty");
+      const final = held.at(-1)!;
       if (expectedIdentity !== null && final.info.value !== expectedIdentity)
         durabilityError("unsafe_path", `storage directory changed: ${path}`);
       result = operation(final.info);
@@ -247,31 +246,18 @@ export function createNativeWindowsPathAuthority(
         if (!after.raw.equals(opened.info.raw))
           durabilityError("unsafe_path", "Windows authority ancestor identity changed");
       }
-      // Path-based re-verification: the held HANDLE identity is unchanged by
-      // a rename (same file object), so a live pin alone cannot prove the
-      // recorded path still names it — bun's MoveFileExW can rename the leaf
-      // even while a share-pinned handle is open. Re-open every prefix by
-      // path and compare the file ID, mirroring the portable authority's
-      // post-operation directoryIdentity check.
       const reopened: OpenedPath[] = [];
       try {
         for (const [index, prefix] of prefixes.entries()) {
           const opened = open(prefix, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, false);
-          if (!opened) durabilityError("unsafe_path", `Windows authority path changed: ${prefix}`);
-          const before = held[index];
-          const after = queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
-          if (!before || !after.raw.equals(before.info.raw))
+          const fresh =
+            opened && queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+          if (!fresh || !fresh.raw.equals(held[index]!.info.raw))
             durabilityError("unsafe_path", `Windows authority path changed: ${prefix}`);
-          reopened.push(opened);
+          reopened.push(opened as OpenedPath);
         }
       } finally {
-        runCleanups(
-          reopened.reverse().map(
-            ({ handle }) =>
-              () =>
-                close(handle),
-          ),
-        );
+        for (const { handle } of reopened.reverse()) close(handle);
       }
       if (verifyFinal) privacy.verifyHandle(final.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
     } catch (error) {
