@@ -13,13 +13,16 @@ export function createSessionTimeoutController(
   const activity = () => {
     if (idleTimer) clearTimeout(idleTimer);
     if (options.idleTimeoutMs !== undefined) {
-      idleTimer = setTimeout(() => void terminate("idle timeout"), options.idleTimeoutMs);
+      idleTimer = setTimeout(
+        () => void terminate("idle timeout").catch(() => {}),
+        options.idleTimeoutMs,
+      );
     }
   };
   return Object.freeze({
     start() {
       if (options.timeoutMs !== undefined) {
-        hardTimer = setTimeout(() => void terminate("timeout"), options.timeoutMs);
+        hardTimer = setTimeout(() => void terminate("timeout").catch(() => {}), options.timeoutMs);
       }
       activity();
     },
