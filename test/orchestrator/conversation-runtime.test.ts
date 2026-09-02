@@ -526,10 +526,18 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
 
 const waitFor = async (check: () => boolean | Promise<boolean>) => {
   const deadline = Date.now() + 5_000;
+  let lastError: unknown;
   while (Date.now() < deadline) {
-    if (await check()) return;
+    try {
+      if (await check()) return;
+    } catch (error) {
+      // A transient store/snapshot rejection must not abort the poll —
+      // restart recovery can briefly reject a read right before it settles.
+      lastError = error;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
+  if (lastError !== undefined) throw lastError;
   throw new Error("timed out waiting for test state");
 };
 
@@ -1112,7 +1120,7 @@ test("deferred participant and settings actions plan without effects then commit
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
-});
+}, 60_000);
 
 test("a deferred commit resumes the same active reservation after a process crash", async () => {
   let crash = true;

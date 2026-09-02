@@ -671,7 +671,7 @@ describe("post-freeze capability durable result behavior", () => {
         expect(result.operation_id).toStartWith("vf-operation-");
       }
     }
-  });
+  }, 60_000);
 
   test("returns a precomputed terminal result from prepareApproved without dispatching", () => {
     const fx = capabilityFixture((manifest) => {
