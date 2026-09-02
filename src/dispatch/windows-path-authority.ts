@@ -237,7 +237,7 @@ export function createNativeWindowsPathAuthority(
         }
         held.push(opened);
       }
-      const final = held.at(-1)!;
+      const final = held[held.length - 1] as OpenedPath;
       if (expectedIdentity !== null && final.info.value !== expectedIdentity)
         durabilityError("unsafe_path", `storage directory changed: ${path}`);
       result = operation(final.info);
@@ -252,7 +252,7 @@ export function createNativeWindowsPathAuthority(
           const opened = open(prefix, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, false);
           const fresh =
             opened && queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
-          if (!fresh || !fresh.raw.equals(held[index]!.info.raw))
+          if (!fresh || !fresh.raw.equals((held[index] as OpenedPath).info.raw))
             durabilityError("unsafe_path", `Windows authority path changed: ${prefix}`);
           reopened.push(opened as OpenedPath);
         }
