@@ -87,10 +87,11 @@ describe("conversation-api HTTP and parsing coverage", () => {
     try {
       await createConversation({ topic: "t" } as never, signal);
       expect(calls).toHaveLength(1);
-      expect(calls[0].init.method).toBe("POST");
-      expect(calls[0].init.signal).toBe(signal);
-      expect(calls[0].init.headers).toMatchObject({ "content-type": "application/json" });
-      expect(calls[0].init.body).toBe(JSON.stringify({ topic: "t" }));
+      const recorded = calls.at(0) as { init: RequestInit };
+      expect(recorded.init.method).toBe("POST");
+      expect(recorded.init.signal).toBe(signal);
+      expect(recorded.init.headers).toMatchObject({ "content-type": "application/json" });
+      expect(recorded.init.body).toBe(JSON.stringify({ topic: "t" }));
     } finally {
       restore();
     }
