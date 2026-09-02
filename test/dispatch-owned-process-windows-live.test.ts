@@ -105,7 +105,7 @@ describe("live Windows owned CLI process lifecycle", () => {
         // each directory WITH delete access. A live pin (share without
         // FILE_SHARE_DELETE) makes this fail with ERROR_SHARING_VIOLATION.
         const natal = loadWindowsPathNativeBindings();
-        const wide = (path: string) => Buffer.from(`\\\\?\\${path}\\0`, "utf16le");
+        const wide = (path: string) => Buffer.from(`\\\\?\\${path}\0`, "utf16le");
         for (const [label, path] of [
           ["DELETE-records", recordsPath],
           ["DELETE-authority", authorityPath],
