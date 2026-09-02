@@ -95,7 +95,11 @@ describe("live Windows owned CLI process lifecycle", () => {
       const natal = loadWindowsPathNativeBindings();
       const wide = (path: string) => Buffer.from(`\\\\?\\${path}\0`, "utf16le");
       const openOnce = (path: string, access: number, share: number) => {
-        const handle = natal.createFile(
+        // bun:ffi returns Win32 HANDLEs as JS numbers on this runner (e.g.
+        // 1180) and INVALID_HANDLE_VALUE (-1) as a number too; the declared
+        // bigint invalidHandle never matches, so classify failure shapes
+        // explicitly and surface the raw value for evidence.
+        const handle: unknown = natal.createFile(
           wide(path),
           access,
           share,
@@ -104,11 +108,19 @@ describe("live Windows owned CLI process lifecycle", () => {
           WINDOWS_FILE_NATIVE.FILE_FLAG_BACKUP_SEMANTICS,
           null,
         );
-        if (handle === natal.invalidHandle) return `ERR(${natal.lastError()})`;
-        if (typeof handle !== "bigint" || handle === 0n)
+        const failed =
+          handle === natal.invalidHandle ||
+          handle === -1n ||
+          handle === -1 ||
+          handle === 0n ||
+          handle === 0 ||
+          handle === null ||
+          handle === undefined;
+        if (failed) return `ERR(${natal.lastError()})`;
+        if (typeof handle !== "bigint" && typeof handle !== "number")
           return `WEIRD(${typeof handle},${String(handle)},le=${natal.lastError()})`;
-        natal.closeHandle(handle);
-        return "OPENED";
+        (natal.closeHandle as (value: unknown) => number)(handle);
+        return `OPENED(${String(handle)})`;
       };
       // Baseline BEFORE the chain pins: nothing holds these fresh dirs, so
       // every probe must open. Compare against the in-chain results.
