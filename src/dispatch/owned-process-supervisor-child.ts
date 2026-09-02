@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { OWNED_PROCESS_ENV } from "./owned-process-contract.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import type { OwnedSupervisorLaunchRuntime } from "./owned-process-launch-runtime.js";
 import type { EngineProcessSpawnOptions } from "./session-types.js";
 
@@ -41,7 +42,7 @@ export function spawnOwnedSupervisorChild(input: {
       // orphaned tree can be reaped. On Windows a non-detached child is
       // tied to the spawning process's lifetime and disappears when the
       // owner exits, so the supervisor always detaches on win32.
-      detached: input.options.detached || process.platform === "win32",
+      detached: input.options.detached || process.platform === RUNTIME_PLATFORM.WINDOWS,
       windowsHide: true,
     });
   } catch (error) {
