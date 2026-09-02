@@ -10,6 +10,9 @@ export interface HomeSettingsChanges {
   baseline_enabled?: boolean;
 }
 
+/** Server contract bound (see conversation-legacy-create-request ROUND_LIMIT). */
+const MAX_ROUNDS = 100;
+
 export function buildConversationSettingsChanges(
   form: HomeSettingsFormState,
   currentPolicy: string | null,
@@ -21,7 +24,10 @@ export function buildConversationSettingsChanges(
   const maxRounds = form.maxRounds.trim();
   if (maxRounds) {
     if (!/^[1-9][0-9]*$/u.test(maxRounds)) return "Max rounds must be a whole number above zero.";
-    changes.max_rounds = Number(maxRounds);
+    const rounds = Number(maxRounds);
+    if (!Number.isSafeInteger(rounds) || rounds > MAX_ROUNDS)
+      return `Max rounds must be at most ${MAX_ROUNDS}.`;
+    changes.max_rounds = rounds;
   }
 
   if (form.baseline === "enabled") changes.baseline_enabled = true;
