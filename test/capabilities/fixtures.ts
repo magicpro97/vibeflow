@@ -25,11 +25,7 @@ export function roleManifest(): {
         documentation_url: null,
         icon: null,
       },
-<<<<<<< Updated upstream
-      compatibility: { vf: "*", engines: { codex: ">=1.0.0 <2.0.0" } },
-=======
       compatibility: { vf: ">=0.15.0 <1.0.0", engines: { codex: ">=1.0.0 <2.0.0" } },
->>>>>>> Stashed changes
       components: [
         {
           type: "role",
