@@ -173,12 +173,23 @@ export async function orchestrate(
       : [normalizeUnit({ name: "task", status: WORK_UNIT_STATUS.PENDING, confidence: 0 })];
 
   const done = allUnits.filter(isComplete);
-  const units: WorkUnit[] = allUnits.filter((u) => !isComplete(u));
+  const blocked = allUnits.filter((u) => u.status === WORK_UNIT_STATUS.BLOCKED);
+  const units: WorkUnit[] = allUnits.filter(
+    (u) => !isComplete(u) && u.status !== WORK_UNIT_STATUS.BLOCKED,
+  );
   if (done.length) {
     out(
       "vf",
       c.dim(
         `Skipping ${done.length} already-complete unit(s): ${done.map((u) => u.name).join(", ")}`,
+      ),
+    );
+  }
+  if (blocked.length) {
+    out(
+      "vf",
+      c.yellow(
+        `Skipping ${blocked.length} blocked unit(s): ${blocked.map((u) => u.name).join(", ")}`,
       ),
     );
   }
@@ -328,9 +339,9 @@ export async function orchestrate(
   });
 
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);
-  // Merge dispatched results back with the skipped (already-complete) units so the ledger and
+  // Merge dispatched results back with the skipped (already-complete and blocked) units so the ledger and
   // goal eval see the full set — not just the ones we re-ran this pass.
-  state.work_units = done.length ? [...done, ...ran] : ran;
+  state.work_units = [...done, ...blocked, ...ran];
   // issue #90: stamp the resolved risk class onto every unit that didn't declare one, so
   // goalEval applies the spec band (0.7-0.95) instead of the legacy hardcoded 1.0.
   for (const u of state.work_units) {
