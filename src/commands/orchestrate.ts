@@ -10,12 +10,8 @@ import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import { dispatchInWaves } from "../orchestrator/waves.js";
-// Protection cluster lives in src/commands/protection.ts and is
-// re-exported through the sibling barrel (_shared.js). Both this
-// file and protection.ts import from _shared.js (sibling-via-barrel),
-// so there is no direct cross-import cycle. This is the same
-// barrel re-export pattern used by seams.ts, doctor.ts, and
-// dispatch.ts.
+// Protection cluster lives in src/commands/protection.ts, re-exported from _shared.js.
+// Same barrel pattern used by seams.ts, doctor.ts, and dispatch.ts.
 import {
   MS_PER_SECOND,
   defaultRun,
@@ -194,7 +190,7 @@ export async function orchestrate(
     );
   }
 
-  // Nothing left to dispatch — every unit is already complete. Report the goal verdict and exit without launching the engine (a no-op dispatch would only re-review finished work).
+  // Nothing left to dispatch — exit early.
   if (units.length === 0) {
     out("vf");
     out("vf", c.green("All work units already complete — nothing to dispatch."));
@@ -208,9 +204,7 @@ export async function orchestrate(
     for (const reason of verdict.reasons) out("vf", c.dim(`  - ${reason}`));
     return verdict.verdict === "met" ? 0 : 1;
   }
-  // #682: intercept missing skill needs BEFORE launch/preflight/protection so approval
-  // (or rejection) never follows engine readiness. Rejected/unavailable/blocked/install-failed
-  // acquisitions keep the skill gap and dispatch continues.
+  // #682: intercept missing skill needs BEFORE launch/preflight/protection
   await preDispatchAcquisition(
     base,
     state.goal,
@@ -222,9 +216,7 @@ export async function orchestrate(
   );
   const launch = announceLaunch(engine, mode);
   if (launch.skip) return 1;
-  // Stronger gate: a real (cli) dispatch requires a live-ready engine. When the caller injects
-  // its own dispatch spawner (tests/headless), that spawner IS the engine round-trip, so we
-  // trust it rather than probing the real binary — unless an explicit preflight is supplied.
+  // Stronger gate: cli dispatch requires a live engine. Tests inject their own spawner.
   const preflight =
     inject.preflight ??
     (inject.spawner || inject.sessionRuntime?.processSpawner
@@ -339,8 +331,7 @@ export async function orchestrate(
   });
 
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);
-  // Merge dispatched results back with the skipped (already-complete and blocked) units so the ledger and
-  // goal eval see the full set — not just the ones we re-ran this pass.
+  // Merge dispatched results back with skipped (complete + blocked) units.
   state.work_units = [...done, ...blocked, ...ran];
   // issue #90: stamp the resolved risk class onto every unit that didn't declare one, so
   // goalEval applies the spec band (0.7-0.95) instead of the legacy hardcoded 1.0.
@@ -384,9 +375,7 @@ export async function orchestrate(
       ...ran.map((u) => `- ${u.name}: ${u.status} @ ${u.confidence}`),
       ...reviews.map((r) => `- review ${r.unit}: ${r.pass ? "pass" : "fail"} — ${r.reason}`),
     ]);
-    // Auto-crystallize: turn this run's repeated patterns into a DRAFT skill
-    // (never installed — review-then-`git add`). The deterministic backstop of
-    // the learning loop — fires regardless of which engine ran. issue #335.
+    // Auto-crystallize recurring patterns into a DRAFT skill.
     const runId = `orchestrate-${engine}-${new Date().toISOString().slice(0, 10)}`;
     const cz = autoCrystallizeRun(base, runId);
     if (cz.drafted) {
