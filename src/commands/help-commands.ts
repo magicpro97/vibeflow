@@ -102,7 +102,8 @@ ${c.bold("Examples:")}
   orchestrate:
     () => `${c.bold("vf orchestrate")} ${c.dim("[--engine <e>] [--yes] [--concurrency <n>] [--risk <class>] [--focus]")}
 Dispatch every saved work unit (bounded-parallel), run an independent reviewer,
-record evidence, then evaluate the goal. Default mode is a read-only dry run.
+record evidence, then evaluate the goal. Blocked units are skipped and logged.
+Default mode is a read-only dry run.
 
 ${c.bold("Options:")}
   --engine <e>        target engine (default: copilot)

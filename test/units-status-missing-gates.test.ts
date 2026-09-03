@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,12 +8,11 @@ import { join } from "node:path";
 // state). The `g = u.gates ?? {}` guard in units.ts:53 handles this.
 describe("vf units status — missing optional gates field (#782)", () => {
   const tmp = join(tmpdir(), "vf-test-782");
-  const cwd = process.cwd;
+  const origCwd = process.cwd;
 
   beforeAll(() => {
     rmSync(tmp, { recursive: true, force: true });
     mkdirSync(join(tmp, ".vibeflow"), { recursive: true });
-    // Craft a workflow state with a work unit that has NO gates field.
     writeFileSync(
       join(tmp, ".vibeflow", "WORKFLOW_STATE.json"),
       JSON.stringify({
@@ -35,10 +34,7 @@ describe("vf units status — missing optional gates field (#782)", () => {
   });
 
   test("status does not crash when gates is missing", async () => {
-    // Import inside the test so the tmp dir is ready.
     const { units } = await import("../src/commands/units.js");
-    // Monkey-patch cwd to our temp dir so readState reads from there.
-    const origCwd = process.cwd;
     process.cwd = () => tmp;
     try {
       const exit = await units("status", []);

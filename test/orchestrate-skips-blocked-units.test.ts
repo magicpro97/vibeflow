@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, jest, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,6 @@ import { join } from "node:path";
 // The filter in orchestrate.ts:176 now excludes BLOCKED in addition to DONE.
 describe("vf orchestrate skips blocked units (#783)", () => {
   const dir = join(tmpdir(), "vf-test-783");
-  const origCwd = process.cwd;
 
   beforeAll(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -52,16 +51,20 @@ describe("vf orchestrate skips blocked units (#783)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("dry-run with blocked units does not dispatch them", async () => {
+  test("dry-run skips blocked units and prints skip message", async () => {
     const { orchestrate } = await import("../src/commands/orchestrate.js");
-    process.cwd = () => dir;
+    // Capture console.log to verify the "Skipping blocked" message.
+    const logs: string[] = [];
+    const origLog = console.log.bind(console);
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
     try {
-      // Dry mode — no engine needed, just verifies the filter logic.
       const code = await orchestrate({ engine: "claude", dry: true }, dir);
-      // Blocked unit → goal eval returns "blocked" → exit 1.
       expect(code).toBe(1);
+      const all = logs.join("\n");
+      expect(all).toContain("Skipping 1 blocked unit(s)");
+      expect(all).toContain("u2-blocked");
     } finally {
-      process.cwd = origCwd;
+      console.log = origLog;
     }
   });
 });
