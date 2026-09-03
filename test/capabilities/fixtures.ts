@@ -25,7 +25,7 @@ export function roleManifest(): {
         documentation_url: null,
         icon: null,
       },
-      compatibility: { vf: "^0.15.0", engines: { codex: ">=1.0.0 <2.0.0" } },
+      compatibility: { vf: "*", engines: { codex: ">=1.0.0 <2.0.0" } },
       components: [
         {
           type: "role",
