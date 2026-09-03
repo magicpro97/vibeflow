@@ -1,6 +1,6 @@
 {
   "name": "@magicpro97/vibeflow",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "packageManager": "bun@1.4.0",
   "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI with shared context, skills, hooks, and verification.",
   "type": "module",
@@ -78,7 +78,9 @@
   "publishConfig": {
     "access": "public"
   },
-  "workspaces": ["src/ui"],
+  "workspaces": [
+    "src/ui"
+  ],
   "dependencies": {
     "koffi": "3.1.6",
     "proper-lockfile": "^4.1.2"
