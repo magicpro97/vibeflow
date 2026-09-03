@@ -6,6 +6,22 @@ import {
   type ConversationBootstrapOptions,
   createConversationBootstrap,
 } from "../orchestrator/conversation/bootstrap.js";
+import {
+  CONVERSATION_EXIT,
+  type ConversationCommandResultStatus,
+  classifyConversationError,
+  classifyConversationResult,
+  conversationJsonErrorCode,
+} from "../orchestrator/conversation/conversation-command-exit.js";
+import {
+  CONVERSATION_COMMAND_RESULT_STATUS,
+  CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE,
+} from "../orchestrator/conversation/conversation-command-result-contract.js";
+import { runConversationDelegationVerificationOracles } from "../orchestrator/conversation/conversation-delegation-workspace-verification.js";
+import {
+  CONVERSATION_TRACE_EVENT_KIND,
+  isConversationTerminalLifecycle,
+} from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import type {
   OrchestrateLibrary,
   PlanLibrary,
@@ -30,14 +46,12 @@ import {
   executeConversationWorkflow,
 } from "./_shared.js";
 
-export const CONVERSATION_EXIT = Object.freeze({
-  ok: 0,
-  validation: 1,
-  engineStart: 2,
-  transport: 3,
-  failed: 4,
-  aborted: 5,
-});
+export {
+  CONVERSATION_EXIT,
+  classifyConversationError,
+  classifyConversationResult,
+  conversationJsonErrorCode,
+};
 
 export interface ParsedConversationArgv {
   positionals: string[];
@@ -56,7 +70,7 @@ export interface ConversationCommandDeps {
 export interface ConversationExecutionRecord {
   conversationId: string;
   revisionId?: string;
-  status: "completed" | "aborted" | "failed" | "awaiting_approval" | "accepted" | "stopped";
+  status: ConversationCommandResultStatus;
   artifactRefs: string[];
   output: string;
   response?: MessageResponse;
@@ -73,19 +87,11 @@ interface ProductionLibraryDeps {
   ) => Promise<VerifyReport | { gates: PolicyVerifyReport } | PolicyVerifyReport>;
 }
 
-const VALID_ENGINES = new Set<string>(ENGINES);
-const START_ERROR_HINTS = /no ready admitted engine|explicit_engine_unavailable|unsupported engine/;
-const TRANSPORT_ERROR_HINTS = /conversation not found|configure failed|persistence failed/;
-const VALIDATION_ERROR_HINTS =
-  /invalid|unknown explicit|unsupported engine|missing --max-rounds|participant/;
 const VALUE_FLAGS = new Set(["policy", "resume", "max-rounds"]);
-const JSON_ERROR_CODES: Record<number, string> = {
-  1: "validation_error",
-  2: "engine_start_error",
-  3: "transport_error",
-  4: "conversation_failed",
-  5: "conversation_aborted",
-};
+
+function isConversationEngine(value: string): value is Engine {
+  return ENGINES.some((engine) => engine === value);
+}
 
 function parseTokenValue(args: string[], index: number): [string | boolean, number] {
   const current = args[index] as string;
@@ -140,7 +146,7 @@ export function parseParticipantSpec(spec: string): ConversationCreateParticipan
   const engine = (colon >= 0 ? rest.slice(0, colon) : rest).trim();
   const model = (colon >= 0 ? rest.slice(colon + 1) : "").trim();
   if (!roleRef) throw new Error(`invalid participant "${spec}"`);
-  if (!VALID_ENGINES.has(engine)) throw new Error(`unsupported engine "${engine}"`);
+  if (!isConversationEngine(engine)) throw new Error(`unsupported engine "${engine}"`);
   return {
     role_ref: roleRef,
     engine,
@@ -176,13 +182,9 @@ const readBriefRaw = (base: string): string | null => {
 const sidecarPlanPath = (base: string, revisionId: string): string =>
   join(base, ".vibeflow", "plans", `${revisionId}.md`);
 const lifecycleStatus = (lifecycle: string): ConversationExecutionRecord["status"] =>
-  lifecycle === "COMPLETED"
-    ? "completed"
-    : lifecycle === "STOPPED"
-      ? "stopped"
-      : lifecycle === "ABORTED"
-        ? "aborted"
-        : "failed";
+  isConversationTerminalLifecycle(lifecycle)
+    ? CONVERSATION_COMMAND_STATUS_BY_TERMINAL_LIFECYCLE[lifecycle]
+    : CONVERSATION_COMMAND_RESULT_STATUS.FAILED;
 
 const runVerifyReport = async (
   base: string,
@@ -248,6 +250,18 @@ export function conversationBootstrap(deps: ConversationCommandDeps = {}, base =
   return createConversationBootstrap({
     repoRoot: base,
     libraries: deps.bootstrap?.libraries ?? productionLibraries(base),
+    coordinationVerifier: async ({ cwd: workspace, expected_oracles: expectedOracles }) => {
+      const oracleResults = await runConversationDelegationVerificationOracles(
+        workspace,
+        expectedOracles,
+      );
+      const report = (
+        await collectVerifyReportAsync(workspace, {
+          requireReviewEvidence: false,
+        })
+      ).gates;
+      return { oracle_results: oracleResults, report };
+    },
     ...(deps.bootstrap ?? {}),
   });
 }
@@ -261,45 +275,9 @@ export function conversationService(
   return conversationBootstrap(deps, base).service;
 }
 
-export function classifyConversationError(error: unknown): number {
-  const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
-  if (VALIDATION_ERROR_HINTS.test(lower)) return CONVERSATION_EXIT.validation;
-  if (START_ERROR_HINTS.test(lower)) return CONVERSATION_EXIT.engineStart;
-  if (TRANSPORT_ERROR_HINTS.test(lower)) return CONVERSATION_EXIT.transport;
-  return CONVERSATION_EXIT.failed;
-}
-
-export function classifyConversationResult(
-  status: ConversationExecutionRecord["status"],
-  events: readonly PublicStoredTraceEvent[],
-): number {
-  if (
-    status === "completed" ||
-    status === "accepted" ||
-    status === "awaiting_approval" ||
-    status === "stopped"
-  )
-    return CONVERSATION_EXIT.ok;
-  if (status === "aborted") return CONVERSATION_EXIT.aborted;
-  const errorCodes = events.flatMap((event) =>
-    event.event.type === "error" && "code" in event.event.payload
-      ? [String(event.event.payload.code).toLowerCase()]
-      : [],
-  );
-  if (errorCodes.some((code) => code.includes("start") || code.includes("unavailable")))
-    return CONVERSATION_EXIT.engineStart;
-  if (errorCodes.some((code) => code.includes("transport"))) return CONVERSATION_EXIT.transport;
-  return CONVERSATION_EXIT.failed;
-}
-
 export function jsonWrite(value: unknown): number {
   process.stdout.write(`${JSON.stringify(value)}\n`);
   return 0;
-}
-
-export function conversationJsonErrorCode(exit: number): string {
-  return JSON_ERROR_CODES[exit] ?? "conversation_failed";
 }
 
 function subscribeOutput(
@@ -315,7 +293,7 @@ function subscribeOutput(
     if (event.seq <= lastSeq) return;
     lastSeq = event.seq;
     events.push(event);
-    if (event.event.type !== "agent_response_delta") return;
+    if (event.event.type !== CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) return;
     const delta = String(event.event.payload.content_delta ?? "");
     if (!delta) return;
     output += delta;
@@ -374,7 +352,7 @@ export async function executeConversationMessage(
     while (true) {
       const snapshot = await service.snapshot(targetConversationId);
       if (!snapshot) throw new Error("conversation not found");
-      if (["COMPLETED", "FAILED", "ABORTED", "STOPPED"].includes(snapshot.lifecycle)) {
+      if (isConversationTerminalLifecycle(snapshot.lifecycle)) {
         await stream.replayReady;
         return {
           conversationId: targetConversationId,

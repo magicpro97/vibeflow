@@ -49,6 +49,7 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
+import { WORK_UNIT_STATUS } from "../../../core/workflow-contract.js";
 import { useVfStore } from "../store.js";
 
 const store = useVfStore();
@@ -72,7 +73,7 @@ const confidence = computed<number | null>(() => {
 });
 
 const anyRunning = computed(
-  () => store.state?.work_units?.some((u) => u.status === "running") ?? false,
+  () => store.state?.work_units?.some((u) => u.status === WORK_UNIT_STATUS.RUNNING) ?? false,
 );
 
 // Elapsed time counter while running
@@ -104,4 +105,3 @@ const elapsed = computed(() => {
   return m > 0 ? `${m}m${s}s` : `${s}s`;
 });
 </script>
-

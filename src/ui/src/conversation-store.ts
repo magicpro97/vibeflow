@@ -1,9 +1,24 @@
 import { computed, reactive } from "vue";
-import { buildConversationMessages } from "./composables/useConversationStream.js";
+import { isAgentEngine } from "../../core/agent-contract.js";
+import {
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "../../orchestrator/conversation/conversation-public-wire-contract.js";
+import {
+  CONVERSATION_CLIENT_STREAM_STATE,
+  type ConversationClientStreamState,
+} from "../../orchestrator/conversation/conversation-sse-contract.js";
 import {
   projectConversationBaseline,
   projectConversationDecisionMatrix,
 } from "./conversation-api.js";
+import { buildConversationMessages } from "./conversation-message-projection.js";
+import {
+  isConversationPublicTraceRecordWireV1,
+  isConversationSnapshotWireV1,
+} from "./conversation-public-wire.js";
+import { collectTraceSessions } from "./conversation-session-projection.js";
 import type {
   ConversationCreateParticipant,
   ConversationCreateRequest,
@@ -12,7 +27,6 @@ import type {
 } from "./conversation-types.js";
 import { OPAQUE_ARTIFACT_PATTERN, isTerminalLifecycle } from "./conversation-types.js";
 
-const CREATE_ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
 const opaqueArtifact = (value: string | null | undefined) =>
   value && OPAQUE_ARTIFACT_PATTERN.test(value) ? value : null;
 
@@ -28,7 +42,7 @@ export interface ConversationWorkspaceState {
   streamToken: string | null;
   streamTokenExpiresAt: string | null;
   streamVersion: number;
-  streamStatus: "idle" | "connecting" | "live" | "reconnecting" | "error";
+  streamStatus: ConversationClientStreamState;
   streamError: string | null;
   notice: string | null;
 }
@@ -49,7 +63,7 @@ export function createConversationState(): ConversationWorkspaceState {
     streamToken: null,
     streamTokenExpiresAt: null,
     streamVersion: 0,
-    streamStatus: "idle",
+    streamStatus: CONVERSATION_CLIENT_STREAM_STATE.IDLE,
     streamError: null,
     notice: null,
   };
@@ -91,6 +105,7 @@ export function applyConversationSnapshot(
   state: ConversationWorkspaceState,
   snapshot: ConversationSnapshot,
 ) {
+  if (!isConversationSnapshotWireV1(snapshot)) return false;
   if (snapshot.conversation_id !== state.activeConversationId) return false;
   if (state.snapshot && snapshot.last_seq < Math.max(state.snapshot.last_seq, state.cursor)) {
     return false;
@@ -103,6 +118,7 @@ export function applyConversationTrace(
   state: ConversationWorkspaceState,
   record: ConversationTraceRecord,
 ) {
+  if (!isConversationPublicTraceRecordWireV1(record)) return false;
   if (record.conversation_id !== state.activeConversationId) return false;
   if (record.seq <= state.cursor || state.traces.some((entry) => entry.seq === record.seq)) {
     return false;
@@ -113,46 +129,18 @@ export function applyConversationTrace(
   state.cursor = Math.max(state.cursor, record.seq);
   if (!state.snapshot) return true;
   state.snapshot.last_seq = Math.max(state.snapshot.last_seq, record.seq);
-  if (record.event.type === "state_change") {
+  if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE) {
     state.snapshot.lifecycle = record.event.payload.lifecycle;
     state.snapshot.health = record.event.payload.health;
-  } else if (record.event.type === "conversation_terminal") {
+  } else if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL) {
     state.snapshot.lifecycle = record.event.payload.lifecycle;
-  } else if (record.event.type === "consensus_update") {
+  } else if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE) {
     state.snapshot.consensus_score = record.event.payload.decision.score;
   }
   return true;
 }
 
 export const currentConversationCursor = (state: ConversationWorkspaceState) => state.cursor;
-
-export function collectTraceSessions(records: readonly ConversationTraceRecord[]) {
-  const sessions = new Map<
-    string,
-    {
-      public_session_ref: string;
-      status: "reconciled" | "partial" | "unavailable";
-      imported_turn_count: number;
-      imported_tool_count: number;
-      completeness_reason: string;
-      provenance_refs: string[];
-      evidence_refs: string[];
-    }
-  >();
-  for (const record of records) {
-    if (record.event.type !== "native_history_reconciled") continue;
-    sessions.set(record.event.payload.public_session_ref, {
-      public_session_ref: record.event.payload.public_session_ref,
-      status: record.event.payload.status,
-      imported_turn_count: record.event.payload.imported_turn_count,
-      imported_tool_count: record.event.payload.imported_tool_count,
-      completeness_reason: record.event.payload.completeness_reason,
-      provenance_refs: [...record.event.payload.provenance_refs],
-      evidence_refs: [...record.event.payload.evidence_refs],
-    });
-  }
-  return sessions;
-}
 
 function parseConversationParticipants(text: string): ConversationCreateParticipant[] | undefined {
   const lines = text
@@ -163,10 +151,10 @@ function parseConversationParticipants(text: string): ConversationCreateParticip
   return lines.map((line) => {
     const match = /^([^@\s]+)@([a-z]+)(?::(.+))?$/i.exec(line);
     const engine = match?.[2]?.toLowerCase() ?? "";
-    if (!match || !CREATE_ENGINES.has(engine)) throw new Error(`Invalid participant: ${line}`);
+    if (!match || !isAgentEngine(engine)) throw new Error(`Invalid participant: ${line}`);
     return {
       role_ref: match[1] as string,
-      engine: engine as ConversationCreateParticipant["engine"],
+      engine,
       ...(match[3] ? { model: match[3] } : {}),
     };
   });
@@ -206,7 +194,7 @@ export function buildConversationCreateRequest(draft: {
 export function collectConversationApprovals(records: readonly ConversationTraceRecord[]) {
   const approvals = new Map<string, Record<string, unknown>>();
   for (const record of records) {
-    if (record.event.type === "approval_requested") {
+    if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED) {
       approvals.set(record.event.payload.token.approval_id, {
         approval_id: record.event.payload.token.approval_id,
         operation_id: record.event.payload.token.operation_id,
@@ -216,7 +204,7 @@ export function collectConversationApprovals(records: readonly ConversationTrace
         resolved: false,
         decision: null,
       });
-    } else if (record.event.type === "approval_resolved") {
+    } else if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED) {
       const current = approvals.get(record.event.payload.decision.approval_id);
       if (!current) continue;
       current.resolved = true;
@@ -233,7 +221,10 @@ export function collectConversationApprovals(records: readonly ConversationTrace
     requested_at: string;
     resolved: boolean;
     decision: ConversationTraceRecord["event"] extends infer Event
-      ? Event extends { type: "approval_resolved"; payload: { decision: infer Decision } }
+      ? Event extends {
+          type: typeof CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED;
+          payload: { decision: infer Decision };
+        }
         ? Decision
         : never
       : never;
@@ -243,7 +234,7 @@ export function collectConversationApprovals(records: readonly ConversationTrace
 export function collectConversationOperations(records: readonly ConversationTraceRecord[]) {
   const operations = new Map<string, Record<string, unknown>>();
   for (const record of records) {
-    if (record.event.type === "operation_lifecycle") {
+    if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE) {
       const current = operations.get(record.event.payload.operation_id);
       operations.set(record.event.payload.operation_id, {
         operation_id: record.event.payload.operation_id,
@@ -254,7 +245,7 @@ export function collectConversationOperations(records: readonly ConversationTrac
         cancelled_by: current?.cancelled_by ?? null,
         cancel_reason: current?.cancel_reason ?? null,
       });
-    } else if (record.event.type === "caller_cancelled") {
+    } else if (record.event.type === CONVERSATION_TRACE_EVENT_KIND.CALLER_CANCELLED) {
       const current = operations.get(record.event.payload.operation_id);
       if (!current) continue;
       current.cancelled = true;
@@ -269,7 +260,10 @@ export function collectConversationOperations(records: readonly ConversationTrac
     operation_id: string;
     attempt_id: string;
     state: ConversationTraceRecord["event"] extends infer Event
-      ? Event extends { type: "operation_lifecycle"; payload: { state: infer State } }
+      ? Event extends {
+          type: typeof CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE;
+          payload: { state: infer State };
+        }
         ? State
         : never
       : never;
@@ -283,7 +277,10 @@ export function collectConversationOperations(records: readonly ConversationTrac
 export function collectConversationArtifacts(records: readonly ConversationTraceRecord[]) {
   const artifacts = new Map<string, Record<string, unknown>>();
   for (const record of records) {
-    if (record.event.type !== "artifact_created" && record.event.type !== "artifact_updated") {
+    if (
+      record.event.type !== CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED &&
+      record.event.type !== CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED
+    ) {
       continue;
     }
     artifacts.set(record.event.payload.artifact_id, {
@@ -291,12 +288,15 @@ export function collectConversationArtifacts(records: readonly ConversationTrace
       artifact_type: record.event.payload.artifact_type,
       opaque_id: opaqueArtifact(record.event.payload.ref),
       previous_opaque_id:
-        record.event.type === "artifact_updated"
+        record.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED
           ? opaqueArtifact(record.event.payload.previous_ref)
           : null,
       last_seq: record.seq,
       ts: record.ts,
-      status: record.event.type === "artifact_created" ? "created" : "updated",
+      status:
+        record.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED
+          ? "created"
+          : "updated",
     });
   }
   return [...artifacts.values()].sort(
@@ -317,18 +317,26 @@ export function conversationControls(
   operations: ReturnType<typeof collectConversationOperations>,
   approvals: ReturnType<typeof collectConversationApprovals>,
 ) {
-  const lifecycle = snapshot?.lifecycle ?? "INIT";
+  const lifecycle = snapshot?.lifecycle ?? CONVERSATION_LIFECYCLE.INIT;
   return {
-    canPause: lifecycle === "ACTIVE",
-    canResume: lifecycle === "PAUSED",
-    canStop: lifecycle === "INIT" || lifecycle === "ACTIVE" || lifecycle === "PAUSED",
-    canInject: lifecycle === "ACTIVE",
-    canRevise: lifecycle === "COMPLETED",
+    canPause: lifecycle === CONVERSATION_LIFECYCLE.ACTIVE,
+    canResume: lifecycle === CONVERSATION_LIFECYCLE.PAUSED,
+    canStop:
+      lifecycle === CONVERSATION_LIFECYCLE.INIT ||
+      lifecycle === CONVERSATION_LIFECYCLE.ACTIVE ||
+      lifecycle === CONVERSATION_LIFECYCLE.PAUSED,
+    canInject: lifecycle === CONVERSATION_LIFECYCLE.ACTIVE,
+    canRevise:
+      lifecycle === CONVERSATION_LIFECYCLE.COMPLETED ||
+      lifecycle === CONVERSATION_LIFECYCLE.NEEDS_INPUT,
     canCancel:
       !isTerminalLifecycle(lifecycle) &&
-      operations.some((operation) => !operation.cancelled && operation.state !== "completed"),
+      operations.some(
+        (operation) =>
+          !operation.cancelled && operation.state !== CONVERSATION_OPERATION_STATE.COMPLETED,
+      ),
     canResolveApproval: (approvalId: string, operationId: string) =>
-      lifecycle === "ACTIVE" &&
+      lifecycle === CONVERSATION_LIFECYCLE.ACTIVE &&
       approvals.some(
         (approval) =>
           approval.approval_id === approvalId &&
@@ -355,6 +363,7 @@ export type TraceSessionView = ReturnType<typeof collectTraceSessions> extends M
 export type ConversationControls = ReturnType<typeof conversationControls>;
 
 export { buildConversationMessages };
+export { collectTraceSessions };
 export { projectConversationBaseline, projectConversationDecisionMatrix };
 
 export function useConversationWorkspaceModel() {

@@ -1,0 +1,265 @@
+import { ACTION_OPERATION_STATE } from "../../actions/protocol-contract.js";
+import { CAPABILITY_RUNTIME_ERROR_CODE } from "../../core/capability-contract.js";
+import { ownedProjectionRecord } from "../planning/resource-planner.js";
+import type {
+  CapabilityDurablePlanningGraphV1,
+  CapabilityFabricPlanV1,
+} from "../planning/types.js";
+import type { CapabilityScopeLockV1 } from "../storage/scope-lock.js";
+import {
+  CAPABILITY_PRE_EFFECT_FRONTIER,
+  CAPABILITY_WAL_PAYLOAD_KIND,
+  type CapabilityOperationV1,
+  type CapabilityPreEffectRefusalReasonV1,
+} from "../wire/operation.js";
+import { requireCapabilityActionAuthority } from "./action-authority.js";
+import { capabilityAuthorityFrontier } from "./authority-frontier.js";
+import { rollbackAppliedCapabilityEffects, runCapabilityHealth } from "./effect-runtime.js";
+import { CapabilityRuntimeError } from "./errors.js";
+import { foldCapabilityOperation } from "./fold.js";
+import {
+  buildCapabilityHealthInventory,
+  readCapabilityHealthCurrent,
+  readCapabilityHealthInventory,
+} from "./health-inventory.js";
+import { buildCapabilityLockFromResults } from "./lock-builder.js";
+import { ensureCapabilityLockCheckpoint } from "./lock-checkpoint.js";
+import type { CapabilityOperationJournalV1 } from "./operation-journal.js";
+import { materializeCapabilityPublicationHealthPointer } from "./publication-evidence.js";
+import { executeCapabilitySteps } from "./step-runtime.js";
+import type {
+  CapabilityOperationExecutorOptionsV1,
+  CapabilityOperationResultV1,
+  CapabilityRuntimeFaultPointV1,
+} from "./types.js";
+import { capabilityHostTargetIds } from "./validation.js";
+
+interface CapabilityCommitRuntimeV1 {
+  graph: CapabilityDurablePlanningGraphV1;
+  options: CapabilityOperationExecutorOptionsV1;
+  journal: CapabilityOperationJournalV1;
+  fault: ((point: CapabilityRuntimeFaultPointV1) => void) | null;
+}
+
+export function finishCapabilityOperationAfterRollback(
+  input: CapabilityCommitRuntimeV1 & {
+    plan: CapabilityFabricPlanV1;
+    operationId: string;
+    held: CapabilityScopeLockV1;
+    reason: string;
+  },
+): CapabilityOperationResultV1 {
+  const rollbackOk = rollbackAppliedCapabilityEffects({
+    plan: input.plan,
+    graph: input.graph,
+    operationId: input.operationId,
+    held: input.held,
+    journal: input.journal,
+    options: input.options,
+  });
+  input.journal.terminal(
+    input.operationId,
+    rollbackOk ? ACTION_OPERATION_STATE.FAILED : ACTION_OPERATION_STATE.NEEDS_RECOVERY,
+    rollbackOk ? input.reason : CAPABILITY_RUNTIME_ERROR_CODE.ROLLBACK_FAILED,
+    input.held,
+  );
+  return foldCapabilityOperation(
+    input.options.storage,
+    input.operationId,
+    requireCapabilityActionAuthority(input.options),
+  );
+}
+
+function fail(
+  input: CapabilityCommitRuntimeV1 & {
+    plan: CapabilityFabricPlanV1;
+    header: CapabilityOperationV1;
+    held: CapabilityScopeLockV1;
+  },
+  reason: string,
+): CapabilityOperationResultV1 {
+  return finishCapabilityOperationAfterRollback({
+    ...input,
+    operationId: input.header.operation_id,
+    reason,
+  });
+}
+
+export function continueCapabilityOperation(
+  input: CapabilityCommitRuntimeV1 & {
+    plan: CapabilityFabricPlanV1;
+    header: CapabilityOperationV1;
+    held: CapabilityScopeLockV1;
+  },
+): CapabilityOperationResultV1 {
+  const { plan, header, held, journal, options } = input;
+  const stepOutcome = executeCapabilitySteps(input);
+  if (stepOutcome.kind === "result") return stepOutcome.result;
+  if (stepOutcome.kind === "rollback") return fail(input, stepOutcome.reason);
+  const healthFailure = runCapabilityHealth({
+    plan,
+    graph: input.graph,
+    operationId: header.operation_id,
+    held,
+    journal,
+    options,
+    fault: input.fault,
+  });
+  if (healthFailure) return fail(input, healthFailure);
+  const publicationAdmission = capabilityAuthorityFrontier({
+    graph: input.graph,
+    options,
+    operation: `capability-publication-admission:${header.operation_id}`,
+    onRefusal: (authorityCheck) =>
+      journal.appendRefusal({
+        operationId: header.operation_id,
+        plan,
+        reason: authorityCheck.reason,
+        planId: null,
+        stepId: null,
+        targetIds: capabilityHostTargetIds(plan),
+        held,
+        frontier: CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION,
+        authorityCheck,
+      }),
+    effect: () => null,
+  });
+  if (!publicationAdmission.authorized) return fail(input, publicationAdmission.reason);
+  input.fault?.("before-publication-base-validation");
+  const currentStatus = options.storage.readStatus();
+  if (currentStatus.state === "corrupt" || currentStatus.state === "unsupported")
+    throw new CapabilityRuntimeError(
+      "capability current lock cannot be validated for publication",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+    );
+  const current = currentStatus.lock;
+  const interim = foldCapabilityOperation(
+    options.storage,
+    header.operation_id,
+    requireCapabilityActionAuthority(options),
+  );
+  const proposed = buildCapabilityLockFromResults({
+    plan,
+    results: interim.targets,
+    base: current,
+  });
+  if (plan.runtime_closure.packages.length > 0 && proposed.packages.length === 0)
+    return fail(input, "no-surviving-package-targets");
+  for (const descriptor of plan.runtime_closure.descriptors.filter(
+    (item) => item.descriptor_kind === "intent",
+  )) {
+    const projection = ownedProjectionRecord(descriptor.resource, descriptor.target_id);
+    options.storage.putObject(
+      projection.projection_digest,
+      projection,
+      { domain: "VF-OWNED-PROJECTION\0v1\0", omit_keys: ["projection_digest"] },
+      held,
+    );
+  }
+  if (
+    (current === null) !== (plan.base_lock_digest === null) ||
+    (current !== null &&
+      (current.generation_id !== plan.base_generation_id ||
+        current.content_digest !== plan.base_lock_digest))
+  )
+    throw new CapabilityRuntimeError(
+      "capability checkpoint base differs from the locked operation base",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+    );
+  const priorPointer = readCapabilityHealthCurrent(options.storage);
+  if (current !== null && priorPointer === null)
+    throw new CapabilityRuntimeError(
+      "capability base lock has no selected health inventory",
+      CAPABILITY_RUNTIME_ERROR_CODE.INTEGRITY_FAILURE,
+    );
+  if (priorPointer)
+    readCapabilityHealthInventory(options.storage, priorPointer.inventory_digest, current);
+  if (
+    ensureCapabilityLockCheckpoint({
+      storage: options.storage,
+      operationId: header.operation_id,
+      base: current,
+      held,
+      journal,
+      fault: input.fault ?? undefined,
+    })
+  )
+    input.fault?.("after-lock-checkpoint");
+  options.storage.putHistory(proposed, held);
+  const inventory = buildCapabilityHealthInventory({
+    storage: options.storage,
+    operationId: header.operation_id,
+    plan,
+    lock: proposed,
+    held,
+  });
+  options.storage.putHealthInventory(inventory, held);
+  const nextPointer = materializeCapabilityPublicationHealthPointer({
+    scope: proposed.scope,
+    scopeIdentityDigest: plan.scope_identity_digest,
+    inventoryEpoch: (priorPointer?.inventory_epoch ?? -1) + 1,
+    inventoryDigest: inventory.inventory_digest,
+  });
+  journal.append(
+    header.operation_id,
+    {
+      kind: CAPABILITY_WAL_PAYLOAD_KIND.HEALTH_INVENTORY_PREPARED,
+      generation_id: proposed.generation_id,
+      lock_digest: proposed.content_digest,
+      health_inventory_digest: inventory.inventory_digest,
+      expected_health_pointer_digest: priorPointer?.pointer_digest ?? null,
+      expected_health_pointer_epoch: priorPointer?.inventory_epoch ?? null,
+      next_health_pointer_epoch: nextPointer.inventory_epoch,
+      next_health_pointer_digest: nextPointer.pointer_digest,
+    },
+    held,
+  );
+  input.fault?.("after-health-inventory-prepared");
+  const publication = capabilityAuthorityFrontier({
+    graph: input.graph,
+    options,
+    operation: `capability-publication:${header.operation_id}`,
+    onRefusal: (authorityCheck) =>
+      journal.appendRefusal({
+        operationId: header.operation_id,
+        plan,
+        reason: authorityCheck.reason,
+        planId: null,
+        stepId: null,
+        targetIds: capabilityHostTargetIds(plan),
+        held,
+        frontier: CAPABILITY_PRE_EFFECT_FRONTIER.LOCK_PUBLICATION,
+        authorityCheck,
+      }),
+    effect: () => {
+      options.storage.publishLock(current, proposed, held);
+      input.fault?.("after-lock-publish");
+      journal.append(
+        header.operation_id,
+        {
+          kind: CAPABILITY_WAL_PAYLOAD_KIND.LOCK_COMMIT,
+          generation_id: proposed.generation_id,
+          lock_digest: proposed.content_digest,
+          health_inventory_digest: inventory.inventory_digest,
+          expected_health_pointer_digest: priorPointer?.pointer_digest ?? null,
+          expected_health_pointer_epoch: priorPointer?.inventory_epoch ?? null,
+          next_health_pointer_epoch: nextPointer.inventory_epoch,
+          next_health_pointer_digest: nextPointer.pointer_digest,
+          directory_fsync_completed: true,
+        },
+        held,
+      );
+      input.fault?.("after-lock-commit");
+      options.storage.publishHealthCurrent(priorPointer, nextPointer, held);
+      journal.terminal(header.operation_id, ACTION_OPERATION_STATE.SUCCEEDED, null, held);
+    },
+  });
+  if (!publication.authorized) {
+    return fail(input, publication.reason);
+  }
+  return foldCapabilityOperation(
+    options.storage,
+    header.operation_id,
+    requireCapabilityActionAuthority(options),
+  );
+}

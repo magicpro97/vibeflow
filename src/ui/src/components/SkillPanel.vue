@@ -82,17 +82,17 @@
             v-for="skill in store.skills"
             :key="skill.name"
             class="rounded border border-neutral-800 p-3"
-            :class="skill.status === 'deprecated' ? 'opacity-50' : ''"
+            :class="skill.status === SKILL_STATUS.DEPRECATED ? 'opacity-50' : ''"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <h3
                   class="text-sm font-medium text-neutral-100 truncate"
-                  :class="skill.status === 'deprecated' ? 'line-through' : ''"
+                  :class="skill.status === SKILL_STATUS.DEPRECATED ? 'line-through' : ''"
                 >{{ skill.name }}</h3>
                 <p
                   class="text-xs text-neutral-400 mt-0.5 line-clamp-2"
-                  :class="skill.status === 'deprecated' ? 'line-through' : ''"
+                  :class="skill.status === SKILL_STATUS.DEPRECATED ? 'line-through' : ''"
                 >{{ skill.description }}</p>
               </div>
               <div class="flex items-center gap-1.5 shrink-0">
@@ -152,6 +152,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
+import { SKILL_STATUS } from "../../../core/skill-contract.js";
 import { scanDisplay } from "../lib/scan-helper.js";
 import { useVfStore } from "../store.js";
 import DomainFactsView from "./DomainFactsView.vue";

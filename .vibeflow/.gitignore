@@ -6,6 +6,8 @@
 !SETTINGS.json
 !WORKFLOW_POLICY.md
 !REQUIREMENTS.md
+!SKILL_POLICY.json
+!PROJECT_ID.json
 
 # Shareable skills
 !skills/
@@ -19,6 +21,20 @@
 !skills/merge-when-green/**
 !skills/coordinator/
 !skills/coordinator/**
+!skills/typed-protocol-contracts/
+!skills/typed-protocol-contracts/**
+!skills/durable-authority-crash-replay/
+!skills/durable-authority-crash-replay/**
+!skills/runtime-portable-process-fixtures/
+!skills/runtime-portable-process-fixtures/**
+!skills/exact-coverage-repair/
+!skills/exact-coverage-repair/**
+!skills/bun-typescript-conventions/
+!skills/bun-typescript-conventions/**
+!skills/deterministic-async-teardown/
+!skills/deterministic-async-teardown/**
+!skills/windows-path-authority-leases/
+!skills/windows-path-authority-leases/**
 
 # Machine-specific (explicit for clarity):
 # PROJECT_CONTEXT.md, TASK_CONTEXT.md, SKILL_INDEX.md

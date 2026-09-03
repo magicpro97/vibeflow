@@ -11,6 +11,9 @@ import {
 } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WORK_UNIT_STATUS } from "./core/workflow-contract.js";
+import { decodeWorkflowState } from "./core/workflow-state-codec.js";
+import { RUNTIME_PLATFORM } from "./durability/process-identity-contract.js";
 
 /** Read the package version from the nearest package.json (walking up from this module),
  * so `vf --version` never drifts from the published version. Falls back to "0.0.0". */
@@ -77,7 +80,47 @@ export type {
   DebateResult,
 } from "./core/types.js";
 export { ENGINES } from "./core/types.js";
-
+export {
+  HOOK_DECISION,
+  HOOK_DECISIONS,
+  HOOK_EVENT,
+  HOOK_EVENTS,
+  RISK_LEVEL,
+  RISK_LEVELS,
+  SECURITY_BEARING_HOOK_DECISIONS,
+  isHookDecision,
+  isHookEvent,
+  isRiskLevel,
+} from "./core/hook-contract.js";
+export {
+  ACCEPTANCE_PRIORITIES,
+  ACCEPTANCE_PRIORITY,
+  GATE_STATE,
+  GATE_STATES,
+  KNOWLEDGE_HEAVY_SOURCE,
+  KNOWLEDGE_HEAVY_SOURCES,
+  PENDING_REQUIRED_WORK_UNIT_GATES,
+  PRE_REVIEW_WORK_UNIT_GATES,
+  REQUIRED_WORK_UNIT_GATES,
+  SECURITY_CONSENT,
+  SECURITY_CONSENTS,
+  SECURITY_VERDICT,
+  SECURITY_VERDICTS,
+  WORK_UNIT_GATE,
+  WORK_UNIT_GATES,
+  WORK_UNIT_RISK_CLASS,
+  WORK_UNIT_RISK_CLASSES,
+  WORK_UNIT_STATUS,
+  WORK_UNIT_STATUSES,
+  isAcceptancePriority,
+  isGateState,
+  isKnowledgeHeavySource,
+  isSecurityConsent,
+  isSecurityVerdict,
+  isWorkUnitGateName,
+  isWorkUnitRiskClass,
+  isWorkUnitStatus,
+} from "./core/workflow-contract.js";
 export function cwd(): string {
   return process.cwd();
 }
@@ -105,12 +148,7 @@ export function readState(base: string = cwd()): WorkflowState | null {
   // having the merged content land in the default-goal pre-fill.
   assertInsideBase(p, base);
   try {
-    const state = JSON.parse(readFileSync(p, "utf8")) as WorkflowState;
-    if (Array.isArray(state.work_units))
-      for (const unit of state.work_units)
-        if (unit && typeof unit === "object" && unit.depends_on !== undefined)
-          unit.depends_on = strArray(unit.depends_on);
-    return state;
+    return decodeWorkflowState(JSON.parse(readFileSync(p, "utf8")));
   } catch {
     return null;
   }
@@ -257,7 +295,7 @@ export function indexPath(base?: string): string {
 export function recomputeTotals(s: WorkflowState): WorkflowState {
   s.totals = {
     units: s.work_units.length,
-    done: s.work_units.filter((u) => u.status === "done").length,
+    done: s.work_units.filter((u) => u.status === WORK_UNIT_STATUS.DONE).length,
     tokens: s.work_units.reduce((a, u) => a + u.resources.tokens, 0),
     cost_usd: Number(s.work_units.reduce((a, u) => a + u.resources.cost_usd, 0).toFixed(4)),
     wall_seconds: s.work_units.reduce((a, u) => a + u.resources.wall_seconds, 0),
@@ -281,7 +319,7 @@ export function resolveCommand(cmd: string): string | undefined {
 
 /** Windows .cmd/.bat shims require shell execution under node:child_process. */
 export function needsShellForCommand(cmd: string): boolean {
-  return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(cmd);
+  return process.platform === RUNTIME_PLATFORM.WINDOWS && /\.(?:cmd|bat)$/i.test(cmd);
 }
 
 /**
@@ -306,7 +344,7 @@ const WINDOWS_SHIM_VARIANTS = [".cmd", ".bat", ".ps1"] as const;
 export function resolveEngineBinary(engine: string): string | undefined {
   const direct = resolveCommand(engine);
   if (direct !== undefined) return engine;
-  if (process.platform !== "win32") return undefined;
+  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return undefined;
   for (const ext of WINDOWS_SHIM_VARIANTS) {
     if (resolveCommand(`${engine}${ext}`) !== undefined) return `${engine}${ext}`;
   }

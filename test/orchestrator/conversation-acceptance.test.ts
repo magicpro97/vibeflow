@@ -96,6 +96,11 @@ const VERIFY_REPORT = {
     details: "current-HEAD review evidence passed",
     evidence_refs: ["evidence:review"],
   },
+  normative_matrix: {
+    status: "pass",
+    details: "normative matrix passed",
+    evidence_refs: ["evidence:normative-matrix"],
+  },
   advisory_e2e: {
     status: "pass",
     details: "advisory end-to-end checks passed",

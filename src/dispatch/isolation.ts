@@ -1,6 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, posix, relative, resolve } from "node:path";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { sanitizedGitEnvironment } from "../git-environment.js";
+import { ENGINE_ISOLATION_KIND } from "./session-contract.js";
 import type { IsolationLeaseProjection } from "./session-types.js";
 
 export interface ContainerRuntimeInspector {
@@ -63,7 +66,7 @@ function assertInside(root: string, cwd: string): void {
   const rel = relative(root, cwd);
   if (
     rel === ".." ||
-    rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+    rel.startsWith(`..${process.platform === RUNTIME_PLATFORM.WINDOWS ? "\\" : "/"}`) ||
     isAbsolute(rel)
   ) {
     throw new Error(`isolation cwd is outside isolation root: ${cwd}`);
@@ -75,6 +78,7 @@ function git(cwd: string, args: readonly string[]): string {
     encoding: "utf8",
     timeout: 5000,
     stdio: ["ignore", "pipe", "ignore"],
+    env: sanitizedGitEnvironment(),
   }).trim();
 }
 
@@ -142,7 +146,9 @@ function inspectContainer(record: IsolationLeaseRecord): void {
       const hostRelative = relative(canonicalSource, record.repoRoot as string);
       if (
         hostRelative === ".." ||
-        hostRelative.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+        hostRelative.startsWith(
+          `..${process.platform === RUNTIME_PLATFORM.WINDOWS ? "\\" : "/"}`,
+        ) ||
         isAbsolute(hostRelative)
       ) {
         return false;
@@ -220,7 +226,7 @@ export function createIsolationLease(input: IsolationLeaseInput): IsolationLease
   let root: string;
   let cwd: string;
   let common: string | undefined;
-  if (input.kind === "worktree") {
+  if (input.kind === ENGINE_ISOLATION_KIND.WORKTREE) {
     root = canonicalDirectory(input.root, "isolation root");
     cwd = canonicalDirectory(input.cwd, "isolation cwd");
     assertInside(root, cwd);
@@ -252,7 +258,7 @@ export function createIsolationLease(input: IsolationLeaseInput): IsolationLease
     ...(input.containerId ? { containerId: input.containerId } : {}),
     ...(input.runtimeInspector ? { runtimeInspector: input.runtimeInspector } : {}),
   };
-  if (input.kind === "container") inspectContainer(record);
+  if (input.kind === ENGINE_ISOLATION_KIND.CONTAINER) inspectContainer(record);
   leases.set(projection, record);
   return projection;
 }
@@ -262,7 +268,7 @@ function validateRecord(projection: IsolationLeaseProjection): IsolationLeaseRec
   if (!record || record.state !== "available" || record.projection !== projection) {
     throw new Error("isolation lease is absent, claimed, or released");
   }
-  if (projection.kind === "worktree") {
+  if (projection.kind === ENGINE_ISOLATION_KIND.WORKTREE) {
     const root = canonicalDirectory(record.root, "isolation root");
     const cwd = canonicalDirectory(projection.cwd, "isolation cwd");
     assertInside(root, cwd);
@@ -303,7 +309,7 @@ export function materializeIsolationInvocation(
   env: NodeJS.ProcessEnv,
 ): { argv: string[]; cwd?: string } {
   if (!lease) return { argv: [...argv] };
-  if (lease.kind === "worktree") return { argv: [...argv], cwd: lease.cwd };
+  if (lease.kind === ENGINE_ISOLATION_KIND.WORKTREE) return { argv: [...argv], cwd: lease.cwd };
   const passEnv = Object.keys(env)
     .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
     .sort()

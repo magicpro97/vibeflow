@@ -14,6 +14,11 @@
 // a passing unit is never failed on its own evidence.
 
 import type { AcceptanceCriterion } from "../core/types.js";
+import {
+  ACCEPTANCE_PRIORITY,
+  type AcceptancePriority,
+  isAcceptancePriority,
+} from "../core/workflow-contract.js";
 import type { GateRunner } from "./scoped-gate.js";
 
 /** #533: normalize a persisted, hand-editable `priority` to the canonical enum.
@@ -23,13 +28,13 @@ import type { GateRunner } from "./scoped-gate.js";
  *  can warn on it AND fail open to SHOULD — an unrecognized priority never
  *  hardens a green gate. Absent ⇒ `{ level: "SHOULD" }` (the #522 default). */
 function normalizePriority(raw: AcceptanceCriterion["priority"]): {
-  level: "MUST" | "SHOULD" | "NICE";
+  level: AcceptancePriority;
   unknown?: string;
 } {
-  if (raw == null) return { level: "SHOULD" };
+  if (raw == null) return { level: ACCEPTANCE_PRIORITY.SHOULD };
   const up = String(raw).trim().toUpperCase();
-  if (up === "MUST" || up === "SHOULD" || up === "NICE") return { level: up };
-  return { level: "SHOULD", unknown: String(raw) };
+  if (isAcceptancePriority(up)) return { level: up };
+  return { level: ACCEPTANCE_PRIORITY.SHOULD, unknown: String(raw) };
 }
 
 export function verifyAcceptance(
@@ -62,7 +67,7 @@ export function verifyAcceptance(
       warn.push(`${c.id}: unknown priority "${unknown}" — treated as SHOULD (warn-only)`);
     }
     if (r.status === 0) continue;
-    (level === "MUST" ? hardFail : warn).push(`${c.id}: ${c.criterion}`);
+    (level === ACCEPTANCE_PRIORITY.MUST ? hardFail : warn).push(`${c.id}: ${c.criterion}`);
   }
   return { hardFail, warn, evidence };
 }

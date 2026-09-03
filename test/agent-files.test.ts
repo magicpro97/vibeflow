@@ -29,7 +29,7 @@ describe("agentFiles integration", () => {
     expect(roles).toContain("doc-writer");
   });
 
-  test("agentFiles emits 3 files per role (claude/codex/copilot)", () => {
+  test("agentFiles emits 3 files per role (claude/codex/copilot)", async () => {
     const profile = {
       name: "x",
       summary: "test",
@@ -57,7 +57,7 @@ describe("agentFiles integration", () => {
       ],
     };
     const roles: RoleName[] = ["cli-engine", "web-ui", "doc-writer"];
-    const files = agentFiles(profile, roles, false);
+    const files = await agentFiles(profile, roles, false);
     for (const role of roles) {
       expect(files[`.claude/agents/${role}.md`]).toBeDefined();
       expect(files[`.codex/agents/${role}.toml`]).toBeDefined();
@@ -65,7 +65,7 @@ describe("agentFiles integration", () => {
     }
   });
 
-  test("Claude agent file is valid YAML frontmatter", () => {
+  test("Claude agent file is valid YAML frontmatter", async () => {
     const profile = {
       name: "x",
       summary: "test",
@@ -79,14 +79,14 @@ describe("agentFiles integration", () => {
       manifests: [],
       findings: [],
     };
-    const out = agentFiles(profile, ["doc-writer"], false)[".claude/agents/doc-writer.md"];
+    const out = (await agentFiles(profile, ["doc-writer"], false))[".claude/agents/doc-writer.md"];
     expect(out).toBeDefined();
     // Valid frontmatter must have exactly 2 `---` fences at line start.
     const fences = [...(out ?? "").matchAll(/^---$/gm)];
     expect(fences.length).toBe(2);
   });
 
-  test("Codex agent file has developer_instructions triple-string body", () => {
+  test("Codex agent file has developer_instructions triple-string body", async () => {
     const profile = {
       name: "x",
       summary: "test",
@@ -100,7 +100,7 @@ describe("agentFiles integration", () => {
       manifests: [],
       findings: [],
     };
-    const out = agentFiles(profile, ["doc-writer"], false)[".codex/agents/doc-writer.toml"];
+    const out = (await agentFiles(profile, ["doc-writer"], false))[".codex/agents/doc-writer.toml"];
     if (!out) throw new Error("missing toml output");
     // Opening fence at line start. The TOML parser auto-trims the
     // newline after the opener (per spec), so the body is preserved exactly.
@@ -133,12 +133,16 @@ describe("agentFiles AI enrichment", () => {
     findings: [],
   };
 
-  test("useAi=false skips the spawnSync call entirely", () => {
+  test("useAi=false skips the owned AI route entirely", async () => {
     // ensure no VIBEFLOW_AI is set
     const orig = process.env.VIBEFLOW_AI;
     process.env.VIBEFLOW_AI = "echo BODY-MARKER-SHOULD-NOT-APPEAR";
     try {
-      const files = agentFiles(profile, ["doc-writer"], false);
+      const files = await agentFiles(profile, ["doc-writer"], false, ["claude"], {
+        ownedRoute: async () => {
+          throw new Error("owned route must not run");
+        },
+      });
       const out = files[".claude/agents/doc-writer.md"];
       expect(out).toBeDefined();
       // The hard-coded template is used; AI echo body is NOT injected.
@@ -149,25 +153,38 @@ describe("agentFiles AI enrichment", () => {
     }
   });
 
-  test("useAi=true (default) honours VIBEFLOW_AI to enrich body", () => {
+  test("useAi=true (default) honours VIBEFLOW_AI through exact owned route", async () => {
     const orig = process.env.VIBEFLOW_AI;
     process.env.VIBEFLOW_AI = "echo AI-ENRICHED-BODY-CONTENT";
     try {
-      const files = agentFiles(profile, ["doc-writer"], true);
+      const requests: Array<{ engine: string; command: string }> = [];
+      const files = await agentFiles(profile, ["doc-writer"], true, ["claude"], {
+        ownedRoute: async (request) => {
+          requests.push({ engine: request.engine, command: request.command });
+          return {
+            attemptId: "attempt-agent-files",
+            status: 0,
+            stdout: "AI-ENRICHED-BODY-CONTENT\n",
+            stderr: "",
+            timedOut: false,
+          };
+        },
+      });
       const out = files[".claude/agents/doc-writer.md"];
       expect(out).toBeDefined();
       expect(out).toContain("AI-ENRICHED-BODY-CONTENT");
+      expect(requests).toEqual([{ engine: "claude", command: "echo AI-ENRICHED-BODY-CONTENT" }]);
     } finally {
       if (orig === undefined) process.env.VIBEFLOW_AI = "";
       else process.env.VIBEFLOW_AI = orig;
     }
   });
 
-  test("useAi=true with VIBEFLOW_AI unset falls back to hard-coded template", () => {
+  test("useAi=true with VIBEFLOW_AI unset falls back to hard-coded template", async () => {
     const orig = process.env.VIBEFLOW_AI;
     process.env.VIBEFLOW_AI = "";
     try {
-      const files = agentFiles(profile, ["doc-writer"], true);
+      const files = await agentFiles(profile, ["doc-writer"], true);
       const out = files[".claude/agents/doc-writer.md"];
       expect(out).toBeDefined();
       // Should be the template body, not an empty body.

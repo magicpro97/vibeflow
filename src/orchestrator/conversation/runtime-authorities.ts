@@ -47,6 +47,7 @@ export function createConversationRuntimeAuthorities(
   options: ConversationRuntimeOptions,
   host: ConversationRuntimeAuthorityHost,
 ): ConversationRuntimeAuthorities {
+  options.homeAuthorities?.revisionLanes.bindStartAuthority(options.sessionAdapter.startAuthority);
   const operations: OperationRegistry = new OperationRegistry({
     authority: options.artifactStore.operationAuthority(),
     onCancelled: (id, operationId) => emissions.adoptCancellation(id, operationId),
@@ -95,6 +96,9 @@ export function createConversationRuntimeAuthorities(
     traceStore: options.traceStore,
     artifactRegistry: options.artifactRegistry,
     artifactStore: options.artifactStore,
+    ...(options.homeAuthorities
+      ? { reviewedActionAuthority: options.homeAuthorities.reviewedActionAuthority() }
+      : {}),
     id: host.id,
     current: host.current,
     reconcileActive: (live) => reconcileActiveConversation(live, operations, emissions, attempts),
@@ -113,6 +117,7 @@ export function createConversationRuntimeAuthorities(
     isOpen: (conversationId, operationId) => emissions.isOpen(conversationId, operationId),
     isRetained: (conversationId, operationId) => emissions.isRetained(conversationId, operationId),
     awaitOpen: (conversationId, operationId) => emissions.awaitOpen(conversationId, operationId),
+    ...(options.homeAuthorities ? { revisionLanes: options.homeAuthorities.revisionLanes } : {}),
   });
   const controls = new ControlRuntime({
     operations,
@@ -124,9 +129,11 @@ export function createConversationRuntimeAuthorities(
     read: (id) => options.traceStore.readConversation(id),
     correlation: ({ manifest, operationId }, attemptId) =>
       host.correlation(manifest, operationId, attemptId),
-    appendActive: (correlation, emission) =>
+    appendActive: (correlation, emission, requestedEventId) =>
       emissions.control(correlation.conversation_id, correlation.operation_id, false, () =>
-        effects.write(correlation, emission),
+        requestedEventId
+          ? effects.writeRequestedEvent(correlation, emission, requestedEventId)
+          : effects.write(correlation, emission),
       ),
     appendCancellation: (correlation, emission) => effects.write(correlation, emission),
     appendTransition: (correlation, emission) => effects.write(correlation, emission),

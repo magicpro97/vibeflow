@@ -1,11 +1,23 @@
-import { ENGINES, type Engine } from "../../core.js";
+import type { Engine } from "../../core.js";
+import { CONVERSATION_ROLE_NAME } from "../../core/role-name-contract.js";
+import { supportsAuthenticatedCoordinationOutput } from "../../dispatch/session-contract.js";
+import { CONVERSATION_POLICY } from "./conversation-policy-contract.js";
+import {
+  COORDINATE_ROUTE_PROJECTION_ERROR,
+  ENGINE_PRECEDENCE,
+  explicitMultiParticipantPolicy,
+  normalizedRoutingText,
+  projectCoordinateRouteParticipants,
+  routingAttachmentExtension,
+  routingStringList,
+  selectConversationIntent,
+} from "./router-helpers.js";
 
 export interface ConversationRouteParticipant {
   readonly roleRef: string;
   readonly engine?: Engine;
   readonly model?: string;
 }
-
 export interface ConversationRoutingInput {
   readonly topic: string;
   readonly explicitPolicy?: string | null;
@@ -14,26 +26,22 @@ export interface ConversationRoutingInput {
   readonly attachments?: readonly string[];
   readonly skillDomains?: readonly string[];
 }
-
 export interface ConversationEngineReadiness {
   readonly engine: Engine;
   readonly ready: boolean;
   readonly admitted: boolean;
 }
-
 export interface ConversationDomainRole {
   readonly roleRef: string;
   readonly domains: readonly string[];
   readonly attachmentExtensions: readonly string[];
 }
-
 export interface ConversationRoutingAuthority {
   readonly registeredPolicies: readonly string[];
   readonly registeredRoles: readonly string[];
   readonly engines: readonly ConversationEngineReadiness[];
   readonly domainRoles: readonly ConversationDomainRole[];
 }
-
 export type ConversationRouteReason =
   | "explicit_policy"
   | "explicit_participants"
@@ -44,21 +52,26 @@ export type ConversationRouteReason =
   | "debate_intent"
   | "domain_role_match"
   | "direct_fallback";
-
 export interface ConversationRoute {
   readonly policy: string;
   readonly participants: readonly ConversationRouteParticipant[];
   readonly reason: ConversationRouteReason;
 }
 
+export const CONVERSATION_ROUTING_ERROR_CODE = Object.freeze({
+  INVALID_ROUTING_INPUT: "invalid_routing_input",
+  INVALID_ROUTING_AUTHORITY: "invalid_routing_authority",
+  UNKNOWN_EXPLICIT_POLICY: "unknown_explicit_policy",
+  UNKNOWN_EXPLICIT_ROLE: "unknown_explicit_role",
+  EXPLICIT_ENGINE_UNAVAILABLE: "explicit_engine_unavailable",
+  COORDINATE_EXECUTOR_UNAVAILABLE: COORDINATE_ROUTE_PROJECTION_ERROR.EXECUTOR_UNAVAILABLE,
+  COORDINATE_ENGINE_UNSUPPORTED: COORDINATE_ROUTE_PROJECTION_ERROR.ENGINE_UNSUPPORTED,
+  COORDINATE_ENGINE_NOT_DISTINCT: COORDINATE_ROUTE_PROJECTION_ERROR.ENGINE_NOT_DISTINCT,
+  POLICY_UNAVAILABLE: "policy_unavailable",
+  ROLE_UNAVAILABLE: "role_unavailable",
+} as const);
 export type ConversationRoutingErrorCode =
-  | "invalid_routing_input"
-  | "invalid_routing_authority"
-  | "unknown_explicit_policy"
-  | "unknown_explicit_role"
-  | "explicit_engine_unavailable"
-  | "policy_unavailable"
-  | "role_unavailable";
+  (typeof CONVERSATION_ROUTING_ERROR_CODE)[keyof typeof CONVERSATION_ROUTING_ERROR_CODE];
 
 export class ConversationRoutingError extends Error {
   override readonly name = "ConversationRoutingError";
@@ -68,27 +81,19 @@ export class ConversationRoutingError extends Error {
   }
 }
 
-const normalizedText = (value: string): string =>
-  value
-    .normalize("NFKC")
-    .replace(/\p{White_Space}+/gu, " ")
-    .trim()
-    .toLowerCase();
-
-const stringList = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === "string");
-
 const normalizedRegistry = (values: unknown): ReadonlyMap<string, string> => {
-  if (!stringList(values)) throw new ConversationRoutingError("invalid_routing_authority");
+  if (!routingStringList(values)) {
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_AUTHORITY);
+  }
   const output = new Map<string, string>();
   for (const value of values) {
-    if (typeof value !== "string" || !normalizedText(value)) {
-      throw new ConversationRoutingError("invalid_routing_authority");
+    if (typeof value !== "string" || !normalizedRoutingText(value)) {
+      throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_AUTHORITY);
     }
-    const key = normalizedText(value);
+    const key = normalizedRoutingText(value);
     const prior = output.get(key);
     if (prior !== undefined && prior !== value) {
-      throw new ConversationRoutingError("invalid_routing_authority");
+      throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_AUTHORITY);
     }
     output.set(key, value);
   }
@@ -97,7 +102,7 @@ const normalizedRegistry = (values: unknown): ReadonlyMap<string, string> => {
 
 function validateInput(value: unknown): asserts value is ConversationRoutingInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ConversationRoutingError("invalid_routing_input");
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_INPUT);
   }
   const input = value as Record<string, unknown>;
   if (
@@ -106,8 +111,8 @@ function validateInput(value: unknown): asserts value is ConversationRoutingInpu
       input.explicitPolicy !== null &&
       typeof input.explicitPolicy !== "string") ||
     (input.workflowReady !== undefined && typeof input.workflowReady !== "boolean") ||
-    (input.attachments !== undefined && !stringList(input.attachments)) ||
-    (input.skillDomains !== undefined && !stringList(input.skillDomains)) ||
+    (input.attachments !== undefined && !routingStringList(input.attachments)) ||
+    (input.skillDomains !== undefined && !routingStringList(input.skillDomains)) ||
     (input.participants !== undefined &&
       (!Array.isArray(input.participants) ||
         input.participants.some(
@@ -122,75 +127,9 @@ function validateInput(value: unknown): asserts value is ConversationRoutingInpu
               typeof (item as Record<string, unknown>).model !== "string"),
         )))
   ) {
-    throw new ConversationRoutingError("invalid_routing_input");
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_INPUT);
   }
 }
-
-const topicWords = (topic: string): readonly string[] =>
-  normalizedText(topic)
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
-
-const hasPhrase = (words: readonly string[], phrase: readonly string[]): boolean => {
-  if (!phrase.length || phrase.length > words.length) return false;
-  for (let start = 0; start <= words.length - phrase.length; start += 1) {
-    if (phrase.every((word, offset) => words[start + offset] === word)) return true;
-  }
-  return false;
-};
-
-const hasAnyPhrase = (words: readonly string[], phrases: readonly (readonly string[])[]): boolean =>
-  phrases.some((phrase) => hasPhrase(words, phrase));
-
-const EXECUTE = [
-  ["execute"],
-  ["implement"],
-  ["build"],
-  ["ship"],
-  ["run"],
-  ["apply"],
-  ["orchestrate"],
-  ["dispatch"],
-] as const;
-const VERIFY = [
-  ["verify"],
-  ["test"],
-  ["tests"],
-  ["testing"],
-  ["gate"],
-  ["gates"],
-  ["confidence"],
-  ["validate"],
-  ["validation"],
-] as const;
-const REVIEW = [["review"], ["audit"], ["critique"], ["assess"]] as const;
-const PLAN = [
-  ["plan"],
-  ["planning"],
-  ["design"],
-  ["spec"],
-  ["specification"],
-  ["architecture"],
-  ["roadmap"],
-] as const;
-const DEBATE = [
-  ["brainstorm"],
-  ["debate"],
-  ["compare"],
-  ["comparison"],
-  ["option"],
-  ["options"],
-  ["alternative"],
-  ["alternatives"],
-  ["tradeoff"],
-  ["tradeoffs"],
-  ["trade", "off"],
-  ["trade", "offs"],
-  ["pros", "and", "cons"],
-  ["versus"],
-  ["vs"],
-] as const;
-const ENGINE_PRECEDENCE: readonly Engine[] = Object.freeze([...ENGINES]);
 
 const frozenParticipant = (
   roleRef: string,
@@ -217,7 +156,7 @@ const frozenRoute = (
 function engineAuthority(authority: ConversationRoutingAuthority): ReadonlyMap<Engine, boolean> {
   const statuses = new Map<Engine, boolean>();
   if (!Array.isArray(authority.engines)) {
-    throw new ConversationRoutingError("invalid_routing_authority");
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_AUTHORITY);
   }
   for (const item of authority.engines) {
     if (
@@ -228,7 +167,7 @@ function engineAuthority(authority: ConversationRoutingAuthority): ReadonlyMap<E
       typeof item.admitted !== "boolean" ||
       statuses.has(item.engine)
     ) {
-      throw new ConversationRoutingError("invalid_routing_authority");
+      throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_AUTHORITY);
     }
     statuses.set(item.engine, item.ready === true && item.admitted === true);
   }
@@ -247,12 +186,12 @@ function validateDomainRoles(
         typeof item !== "object" ||
         Array.isArray(item) ||
         typeof (item as ConversationDomainRole).roleRef !== "string" ||
-        !roles.has(normalizedText((item as ConversationDomainRole).roleRef)) ||
-        !stringList((item as ConversationDomainRole).domains) ||
-        !stringList((item as ConversationDomainRole).attachmentExtensions),
+        !roles.has(normalizedRoutingText((item as ConversationDomainRole).roleRef)) ||
+        !routingStringList((item as ConversationDomainRole).domains) ||
+        !routingStringList((item as ConversationDomainRole).attachmentExtensions),
     )
   ) {
-    throw new ConversationRoutingError("invalid_routing_authority");
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_AUTHORITY);
   }
 }
 
@@ -262,9 +201,11 @@ const preferredEngine = (statuses: ReadonlyMap<Engine, boolean>): Engine | undef
 const required = (
   registry: ReadonlyMap<string, string>,
   value: string,
-  code: "policy_unavailable" | "role_unavailable",
+  code:
+    | typeof CONVERSATION_ROUTING_ERROR_CODE.POLICY_UNAVAILABLE
+    | typeof CONVERSATION_ROUTING_ERROR_CODE.ROLE_UNAVAILABLE,
 ): string => {
-  const found = registry.get(normalizedText(value));
+  const found = registry.get(normalizedRoutingText(value));
   if (!found) throw new ConversationRoutingError(code);
   return found;
 };
@@ -278,35 +219,73 @@ function explicitParticipants(
   const fallback = preferredEngine(engines);
   return Object.freeze(
     selected.map((participant) => {
-      const roleRef = roles.get(normalizedText(participant.roleRef));
-      if (!roleRef) throw new ConversationRoutingError("unknown_explicit_role");
+      const roleRef = roles.get(normalizedRoutingText(participant.roleRef));
+      if (!roleRef)
+        throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.UNKNOWN_EXPLICIT_ROLE);
       if (participant.engine !== undefined && engines.get(participant.engine) !== true) {
-        throw new ConversationRoutingError("explicit_engine_unavailable");
+        throw new ConversationRoutingError(
+          CONVERSATION_ROUTING_ERROR_CODE.EXPLICIT_ENGINE_UNAVAILABLE,
+        );
       }
       return frozenParticipant(roleRef, participant.engine ?? fallback, participant.model);
     }),
   );
 }
 
+function canonicalCoordinateParticipants(
+  requested: readonly ConversationRouteParticipant[],
+  participants: readonly ConversationRouteParticipant[],
+  roles: ReadonlyMap<string, string>,
+  engines: ReadonlyMap<Engine, boolean>,
+): readonly ConversationRouteParticipant[] {
+  const ready = ENGINE_PRECEDENCE.filter(
+    (engine) => engines.get(engine) === true && supportsAuthenticatedCoordinationOutput(engine),
+  );
+  const projected = projectCoordinateRouteParticipants({
+    requested,
+    participants,
+    coordinatorRole: required(
+      roles,
+      CONVERSATION_ROLE_NAME.COORDINATION_COORDINATOR,
+      CONVERSATION_ROUTING_ERROR_CODE.ROLE_UNAVAILABLE,
+    ),
+    readyEngines: ready,
+  });
+  if (!projected.ok) throw new ConversationRoutingError(projected.error);
+  return projected.participants;
+}
+
 function defaultParticipants(
   policy: string,
   roles: ReadonlyMap<string, string>,
   engine: Engine | undefined,
+  executorEngine: Engine | undefined,
 ): readonly ConversationRouteParticipant[] {
+  if (
+    normalizedRoutingText(policy) === CONVERSATION_POLICY.COORDINATE &&
+    (!engine || !executorEngine)
+  )
+    throw new ConversationRoutingError(
+      CONVERSATION_ROUTING_ERROR_CODE.COORDINATE_EXECUTOR_UNAVAILABLE,
+    );
   const defaults =
-    normalizedText(policy) === "debate"
-      ? ["brainstorm-participant", "brainstorm-skeptic"]
-      : ["direct"];
+    normalizedRoutingText(policy) === CONVERSATION_POLICY.DEBATE
+      ? [CONVERSATION_ROLE_NAME.BRAINSTORM_PARTICIPANT, CONVERSATION_ROLE_NAME.BRAINSTORM_SKEPTIC]
+      : normalizedRoutingText(policy) === CONVERSATION_POLICY.COORDINATE
+        ? [
+            CONVERSATION_ROLE_NAME.COORDINATION_COORDINATOR,
+            CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+          ]
+        : [CONVERSATION_ROLE_NAME.DIRECT];
   return Object.freeze(
-    defaults.map((role) => frozenParticipant(required(roles, role, "role_unavailable"), engine)),
+    defaults.map((role, index) =>
+      frozenParticipant(
+        required(roles, role, CONVERSATION_ROUTING_ERROR_CODE.ROLE_UNAVAILABLE),
+        index === 1 ? executorEngine : engine,
+      ),
+    ),
   );
 }
-
-const attachmentExtension = (value: string): string => {
-  const name = value.replace(/\\/g, "/").split("/").at(-1) ?? "";
-  const dot = name.lastIndexOf(".");
-  return dot > 0 && dot < name.length - 1 ? normalizedText(name.slice(dot + 1)) : "";
-};
 
 function matchedDomainParticipant(
   input: ConversationRoutingInput,
@@ -314,87 +293,108 @@ function matchedDomainParticipant(
   roles: ReadonlyMap<string, string>,
   engine: Engine | undefined,
 ): ConversationRouteParticipant | null {
-  const domains = new Set((input.skillDomains ?? []).map(normalizedText).filter(Boolean));
-  const extensions = new Set((input.attachments ?? []).map(attachmentExtension).filter(Boolean));
+  const domains = new Set((input.skillDomains ?? []).map(normalizedRoutingText).filter(Boolean));
+  const extensions = new Set(
+    (input.attachments ?? []).map(routingAttachmentExtension).filter(Boolean),
+  );
   const matched = authority.domainRoles.flatMap((candidate) => {
-    const byDomain = candidate.domains.some((domain) => domains.has(normalizedText(domain)));
+    const byDomain = candidate.domains.some((domain) => domains.has(normalizedRoutingText(domain)));
     const byAttachment = candidate.attachmentExtensions.some((extension) =>
-      extensions.has(normalizedText(extension).replace(/^\./, "")),
+      extensions.has(normalizedRoutingText(extension).replace(/^\./, "")),
     );
     return byDomain || byAttachment ? [candidate.roleRef] : [];
   });
   if (!matched.length) return null;
   matched.sort((left, right) => {
-    const a = normalizedText(left);
-    const b = normalizedText(right);
+    const a = normalizedRoutingText(left);
+    const b = normalizedRoutingText(right);
     return a < b ? -1 : a > b ? 1 : 0;
   });
-  const roleRef = roles.get(normalizedText(matched[0] as string));
-  if (!roleRef) throw new ConversationRoutingError("role_unavailable");
+  const roleRef = roles.get(normalizedRoutingText(matched[0] as string));
+  if (!roleRef)
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.ROLE_UNAVAILABLE);
   return frozenParticipant(roleRef, engine);
 }
 
-/** Pure Phase-2/3 coordinator: frozen precedence, no provider or filesystem reads. */
 export function routeConversation(
   input: ConversationRoutingInput,
   authority: ConversationRoutingAuthority,
 ): ConversationRoute {
   validateInput(input);
   if (!authority || typeof authority !== "object" || Array.isArray(authority)) {
-    throw new ConversationRoutingError("invalid_routing_authority");
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.INVALID_ROUTING_AUTHORITY);
   }
   const policies = normalizedRegistry(authority.registeredPolicies);
   const roles = normalizedRegistry(authority.registeredRoles);
   const engines = engineAuthority(authority);
   validateDomainRoles(authority.domainRoles, roles);
   const preferred = preferredEngine(engines);
+  const secondary = ENGINE_PRECEDENCE.find(
+    (engine) => engine !== preferred && engines.get(engine) === true,
+  );
+  const coordinateEngines = ENGINE_PRECEDENCE.filter(
+    (engine) => engines.get(engine) === true && supportsAuthenticatedCoordinationOutput(engine),
+  );
   const explicit =
     input.explicitPolicy === null || input.explicitPolicy === undefined
       ? null
-      : policies.get(normalizedText(input.explicitPolicy));
+      : policies.get(normalizedRoutingText(input.explicitPolicy));
   if (input.explicitPolicy !== null && input.explicitPolicy !== undefined && !explicit) {
-    throw new ConversationRoutingError("unknown_explicit_policy");
+    throw new ConversationRoutingError(CONVERSATION_ROUTING_ERROR_CODE.UNKNOWN_EXPLICIT_POLICY);
   }
   const participants = explicitParticipants(input, roles, engines);
   if (explicit) {
+    const coordinate = normalizedRoutingText(explicit) === CONVERSATION_POLICY.COORDINATE;
     return frozenRoute(
       explicit,
-      participants.length ? participants : defaultParticipants(explicit, roles, preferred),
+      participants.length
+        ? coordinate
+          ? canonicalCoordinateParticipants(input.participants ?? [], participants, roles, engines)
+          : participants
+        : defaultParticipants(
+            explicit,
+            roles,
+            coordinate ? coordinateEngines[0] : preferred,
+            coordinate ? coordinateEngines[1] : secondary,
+          ),
       "explicit_policy",
     );
   }
   if (participants.length) {
     const policy = required(
       policies,
-      participants.length > 1 ? "debate" : "direct",
-      "policy_unavailable",
+      participants.length > 1
+        ? explicitMultiParticipantPolicy(participants)
+        : CONVERSATION_POLICY.DIRECT,
+      CONVERSATION_ROUTING_ERROR_CODE.POLICY_UNAVAILABLE,
     );
-    return frozenRoute(policy, participants, "explicit_participants");
+    return frozenRoute(
+      policy,
+      normalizedRoutingText(policy) === CONVERSATION_POLICY.COORDINATE
+        ? canonicalCoordinateParticipants(input.participants ?? [], participants, roles, engines)
+        : participants,
+      "explicit_participants",
+    );
   }
 
-  const words = topicWords(input.topic);
-  const selected: readonly [string, ConversationRouteReason] =
-    input.workflowReady === true && hasAnyPhrase(words, EXECUTE)
-      ? ["orchestrate", "ready_workflow_execute"]
-      : hasAnyPhrase(words, VERIFY)
-        ? ["verify", "verify_intent"]
-        : hasAnyPhrase(words, REVIEW)
-          ? ["review", "review_intent"]
-          : hasAnyPhrase(words, PLAN)
-            ? ["plan", "plan_intent"]
-            : hasAnyPhrase(words, DEBATE)
-              ? ["debate", "debate_intent"]
-              : ["direct", "direct_fallback"];
-  if (selected[0] === "direct") {
+  const selected: readonly [string, ConversationRouteReason] = selectConversationIntent(
+    input.topic,
+    input.workflowReady,
+  );
+  if (selected[0] === CONVERSATION_POLICY.DIRECT) {
     const domain = matchedDomainParticipant(input, authority, roles, preferred);
     if (domain) {
       return frozenRoute(
-        required(policies, "direct", "policy_unavailable"),
+        required(policies, "direct", CONVERSATION_ROUTING_ERROR_CODE.POLICY_UNAVAILABLE),
         [domain],
         "domain_role_match",
       );
     }
   }
-  const policy = required(policies, selected[0], "policy_unavailable");
-  return frozenRoute(policy, defaultParticipants(policy, roles, preferred), selected[1]);
+  const policy = required(
+    policies,
+    selected[0],
+    CONVERSATION_ROUTING_ERROR_CODE.POLICY_UNAVAILABLE,
+  );
+  return frozenRoute(policy, defaultParticipants(policy, roles, preferred, secondary), selected[1]);
 }

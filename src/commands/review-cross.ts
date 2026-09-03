@@ -18,6 +18,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { AGENT_ENGINE, type Engine } from "../core/agent-contract.js";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import {
   type ReviewTarget,
   type ReviewVerdict,
@@ -31,7 +33,10 @@ import {
 /** Default review pair for the cross-debate. The first engine is
  *  the "primary" (its verdict is reported first in the
  *  disagreements summary). */
-export const DEFAULT_CROSS_ENGINES: readonly [string, string] = ["codex", "claude"] as const;
+export const DEFAULT_CROSS_ENGINES: readonly [Engine, Engine] = [
+  AGENT_ENGINE.CODEX,
+  AGENT_ENGINE.CLAUDE,
+];
 
 /** Where the pilot data lives. */
 export const PILOT_DATA_PATH = ".vibeflow/knowledge/cross-debate-pilot.json";
@@ -194,8 +199,8 @@ export async function reviewCross(
     },
   );
   const [primaryResult, secondaryResult] = await Promise.all([
-    dispatch({ engine: primary, prompt, mode: "cli" }),
-    dispatch({ engine: secondary, prompt, mode: "cli" }),
+    dispatch({ engine: primary, prompt, mode: DISPATCH_MODE.CLI }),
+    dispatch({ engine: secondary, prompt, mode: DISPATCH_MODE.CLI }),
   ]);
   if (!primaryResult.ok) {
     out(

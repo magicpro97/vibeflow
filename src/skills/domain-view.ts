@@ -4,6 +4,7 @@
 // or raw file bytes are ever emitted to the browser — every field is a bounded,
 // validated value derived from those two authorities.
 
+import { SKILL_DOMAIN_ROLE } from "../core/skill-contract.js";
 import { readDomainFacts } from "./facts.js";
 import { discoverSkills } from "./registry.js";
 
@@ -141,7 +142,7 @@ export function buildDomainView(
 
   const canonicalNameById = new Map<string, string>();
   for (const skill of skills) {
-    if (skill.domain?.role !== "canonical" || !skill.domain.id) continue;
+    if (skill.domain?.role !== SKILL_DOMAIN_ROLE.CANONICAL || !skill.domain.id) continue;
     if (!canonicalNameById.has(skill.domain.id)) canonicalNameById.set(skill.domain.id, skill.name);
   }
   const canonicalEntries = [...canonicalNameById];

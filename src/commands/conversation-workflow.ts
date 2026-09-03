@@ -1,5 +1,7 @@
 import { defaultContext } from "../adapters/context-builders.js";
 import { type Engine, type WorkUnit, readState, recomputeTotals, writeState } from "../core.js";
+import { GATE_STATE, WORK_UNIT_STATUS } from "../core/workflow-contract.js";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import type { ConversationContext } from "../orchestrator/conversation/types.js";
 import { deriveHandoff } from "../orchestrator/handoff.js";
 import { thresholdFor } from "../orchestrator/investigate.js";
@@ -56,9 +58,9 @@ const failClosed = (
       return {
         ...unit,
         ...current,
-        status: "blocked",
+        status: WORK_UNIT_STATUS.BLOCKED,
         confidence: 0,
-        gates: { ...unit.gates, ...(current?.gates ?? {}), review: "fail" },
+        gates: { ...unit.gates, ...(current?.gates ?? {}), review: GATE_STATE.FAIL },
       };
     }),
     reviews: pending.map(({ name }) => ({ unit: name, pass: false, reason })),
@@ -133,11 +135,11 @@ export async function executeConversationWorkflow(
     engine,
     project,
     base,
-    "bridge",
+    DISPATCH_MODE.BRIDGE,
     riskClass,
   );
   const reviewer = (deps.makeReviewer ?? makeReviewer)(
-    "bridge",
+    DISPATCH_MODE.BRIDGE,
     (deps.thresholdFor ?? thresholdFor)(riskClass),
     {
       cwd: base,

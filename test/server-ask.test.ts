@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AskInvocation } from "../src/commands/ask.js";
 import { captureSpawnAsync, resumeInvocation, streamSpawnAsync } from "../src/commands/ask.js";
+import type { OwnedAiRouteRequest, OwnedAiRouteRunner } from "../src/dispatch/owned-ai-route.js";
 import type { AsyncSpawner } from "../src/dispatch/types.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
 import { startServer } from "../src/server.js";
@@ -299,26 +300,34 @@ describe("captureSpawnAsync — async capture seam (#584)", () => {
     expect(r.text).toContain("--allow-all");
   });
 
-  // #584 + Copilot review: the DEFAULT spawner (no inject) must honor the repo's configured
-  // envPolicy, not just the DEFAULT_DENY floor — otherwise a user-denied var leaks to the engine.
-  test("default spawner honors the configured envPolicy (denies a custom var)", async () => {
+  test("default owned route receives the configured env policy and a cloned source env", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ask-envpol-"));
     const cwd0 = process.cwd();
     const origVar = process.env.MY_ASK_CUSTOM_VAR;
+    let request: OwnedAiRouteRequest | undefined;
     try {
       writeSettings(dir, { envPolicy: { deny: ["MY_ASK_CUSTOM_VAR"] } });
       process.chdir(dir);
       process.env.MY_ASK_CUSTOM_VAR = "leak-me";
-      // no injected spawner → captureSpawnAsync builds one from readSettings(cwd()).envPolicy
       const r = await captureSpawnAsync(
-        {
-          cmd: process.execPath,
-          args: ["-e", "process.stdout.write(process.env.MY_ASK_CUSTOM_VAR || 'SCRUBBED')"],
-          promptMode: "arg",
-        },
+        { cmd: "claude", args: ["-p"], promptMode: "stdin" },
         "",
+        undefined,
+        async (value) => {
+          request = value;
+          return {
+            attemptId: "ask-capture",
+            status: 0,
+            stdout: "SCRUBBED",
+            stderr: "",
+            timedOut: false,
+          };
+        },
       );
       expect(r.text).toBe("SCRUBBED");
+      expect(request?.envPolicy).toEqual({ deny: ["MY_ASK_CUSTOM_VAR"] });
+      expect(request?.sourceEnv).not.toBe(process.env);
+      expect(request?.sourceEnv?.MY_ASK_CUSTOM_VAR).toBe("leak-me");
     } finally {
       process.chdir(cwd0);
       // biome-ignore lint/performance/noDelete: restore to truly-absent when the var wasn't set
@@ -375,19 +384,24 @@ describe("prepareAsk — extracted orchestration (#580)", () => {
 });
 
 describe("streamSpawnAsync — SSE onChunk relay (#580)", () => {
-  test("wires onChunk into the default spawner (real process streams to callback)", async () => {
-    // No injected spawner → streamSpawnAsync builds the default via
-    // makeAsyncSpawner({ onChunk }); a real child writing to stdout must reach
-    // the callback. Proves the onChunk seam (ask.ts:264), not just accumulation.
+  test("wires onChunk into the default owned route", async () => {
     const chunks: string[] = [];
+    const route: OwnedAiRouteRunner = async (request) => {
+      request.onChunk?.("hello-stream");
+      return {
+        attemptId: "ask-stream",
+        status: 0,
+        stdout: "hello-stream",
+        stderr: "",
+        timedOut: false,
+      };
+    };
     const r = await streamSpawnAsync(
-      {
-        cmd: process.execPath,
-        args: ["-e", "process.stdout.write('hello-stream')"],
-        promptMode: "arg",
-      },
+      { cmd: "codex", args: ["exec", "-"], promptMode: "stdin" },
       "",
       (s) => chunks.push(s),
+      undefined,
+      route,
     );
     expect(chunks.join("")).toBe("hello-stream");
     expect(r).toEqual({ code: 0, text: "hello-stream" });
@@ -416,24 +430,35 @@ describe("streamSpawnAsync — SSE onChunk relay (#580)", () => {
     expect(r).toEqual({ code: 1, text: "oops" });
   });
 
-  test("default spawner honors envPolicy (denies custom var)", async () => {
+  test("default owned stream route receives envPolicy and cloned source env", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ask-stream-envpol-"));
     const cwd0 = process.cwd();
     const origVar = process.env.MY_ASK_STREAM_VAR;
+    let request: OwnedAiRouteRequest | undefined;
     try {
       writeSettings(dir, { envPolicy: { deny: ["MY_ASK_STREAM_VAR"] } });
       process.chdir(dir);
       process.env.MY_ASK_STREAM_VAR = "leak-me";
       const r = await streamSpawnAsync(
-        {
-          cmd: process.execPath,
-          args: ["-e", "process.stdout.write(process.env.MY_ASK_STREAM_VAR || 'SCRUBBED')"],
-          promptMode: "arg",
-        },
+        { cmd: "opencode", args: ["run"], promptMode: "stdin" },
         "",
         () => {},
+        undefined,
+        async (value) => {
+          request = value;
+          return {
+            attemptId: "ask-stream",
+            status: 0,
+            stdout: "SCRUBBED",
+            stderr: "",
+            timedOut: false,
+          };
+        },
       );
       expect(r.text).toBe("SCRUBBED");
+      expect(request?.envPolicy).toEqual({ deny: ["MY_ASK_STREAM_VAR"] });
+      expect(request?.sourceEnv).not.toBe(process.env);
+      expect(request?.sourceEnv?.MY_ASK_STREAM_VAR).toBe("leak-me");
     } finally {
       process.chdir(cwd0);
       // biome-ignore lint/performance/noDelete: restore to truly-absent
@@ -835,7 +860,7 @@ describe("GET /api/ask/stream — resume (#581)", () => {
     return m[1] as string;
   }
 
-  test("resume=true + engine=copilot is parsed and threaded to prepareAsk (→ 400, no probe)", async () => {
+  test("production resume rejects native-engine state without a durable conversation identity", async () => {
     // engine=copilot hits prepareAsk's explicit-copilot fast-path → 400 BEFORE
     // any readiness probe, so this real-server test stays fast + deterministic
     // regardless of which engines are installed. Proves the server parsed
@@ -851,8 +876,8 @@ describe("GET /api/ask/stream — resume (#581)", () => {
           `${url}/api/ask/stream?resume=true&question=hello-resume&engine=copilot&token=${encodeURIComponent(token)}`,
         );
         expect(res.status).toBe(400);
-        const body = (await res.json()) as { error: string };
-        expect(body.error).toContain("copilot");
+        const body = (await res.json()) as { error: { code: string } };
+        expect(body.error.code).toBe("invalid_request");
       } finally {
         server.stop();
       }

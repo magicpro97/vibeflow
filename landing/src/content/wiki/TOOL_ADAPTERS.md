@@ -2,7 +2,7 @@
 title: Tool Adapters
 description: How tool adapters translate canonical context into engine-specific files for supported coding CLIs.
 category: explanation
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # Tool Adapters
@@ -14,6 +14,7 @@ last_updated: 2026-06-24
 - [Claude Code Adapter](#claude-code-adapter)
 - [Codex Adapter](#codex-adapter)
 - [Copilot CLI Adapter](#copilot-cli-adapter)
+- [OpenCode CLI Adapter](#opencode-cli-adapter)
 - [Antigravity CLI Adapter](#antigravity-cli-adapter)
 - [Engine Quota Adapter](#engine-quota-adapter)
 - [Shared Adapter Contract](#shared-adapter-contract)
@@ -131,6 +132,13 @@ Do not invent manual steps when a matching verified skill exists.
 Return JSON summary including skills used, files changed, tests run, and uncertainty.
 ```
 
+## OpenCode CLI adapter
+
+Generated files use the shared `AGENTS.md`, `.opencode/skills/`, and OpenCode MCP/plugin
+configuration. Fresh work-unit prompts use stdin. Exact conversation resume is by validated
+opaque id only: `opencode run --session <validated ses_...> --format json` with the prompt on
+stdin. VibeFlow does not substitute latest-session `--continue` for exact authority.
+
 ## Antigravity CLI adapter
 
 Generated files:
@@ -143,7 +151,12 @@ AGENTS.md
 .agents/hooks.json
 ```
 
-Antigravity runs `agy -p <prompt>` with plain-text output. `agy --continue -p` resumes latest workspace session; `agy --conversation <id> -p` accepts a known explicit ID. The MCP writer preserves unmanaged servers and removes only VibeFlow-managed names. The hook writer merges its `vibeflow-guardrail` key into the hook config shape; enforcement is post-hoc-only until live denial proof.
+Antigravity runs `agy -p <prompt>` with plain-text output. VibeFlow has no evidenced safely
+captured exact-session binding for it, so exact resume fails closed; latest-workspace
+shortcuts are not exact authority. Full turn delivery supplies bounded structured own-history
+replay instead. The MCP writer preserves unmanaged servers and removes only VibeFlow-managed
+names. The hook writer merges its `vibeflow-guardrail` key into the hook config shape;
+enforcement is post-hoc-only until live denial proof.
 
 ## Engine quota adapter
 
@@ -170,7 +183,7 @@ All adapters should expose the same internal interface:
 
 ```ts
 interface EngineAdapter {
-  name: 'claude' | 'codex' | 'copilot'
+  name: 'claude' | 'codex' | 'copilot' | 'opencode' | 'antigravity'
   detect(): Promise<EngineStatus>
   // Declares whether this engine supports native blocking pre-action hooks or
   // must rely on a process-level enforcement layer / post-hoc verification.

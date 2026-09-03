@@ -36,13 +36,13 @@ function scaffold(name: string, frontmatter: Record<string, unknown>, body?: str
   writeFileSync(join(dir, "SKILL.md"), md);
 }
 
-function run(rest: string[]): number {
+async function run(rest: string[]): Promise<number> {
   const orig = process.cwd();
   const origHome = process.env.VF_SKILLS_HOME;
   process.env.VF_SKILLS_HOME = base;
   process.chdir(base);
   try {
-    return skills("propose-split", rest);
+    return await skills("propose-split", rest);
   } finally {
     process.chdir(orig);
     if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -101,10 +101,10 @@ describe("proposeSplit", () => {
     expect(billingPiece?.skillMd).toContain("Process payments");
   });
 
-  test("exit code 0 on success via CLI", () => {
+  test("exit code 0 on success via CLI", async () => {
     const body = "## Auth\nHandle login flow.\n\n## Billing\nProcess payments.\n\n";
     scaffold("my-skill", { triggers: ["node"] }, body);
-    expect(run(["my-skill"])).toBe(0);
+    expect(await run(["my-skill"])).toBe(0);
   });
 });
 
@@ -135,12 +135,12 @@ describe("proposeSplit errors", () => {
     expect(r.exitCode).toBe(2);
   });
 
-  test("missing CLI args", () => {
-    expect(run([])).toBe(2);
+  test("missing CLI args", async () => {
+    expect(await run([])).toBe(2);
   });
 
-  test("CLI returns nonzero on unknown skill", () => {
-    expect(run(["nonexistent"])).toBe(2);
+  test("CLI returns nonzero on unknown skill", async () => {
+    expect(await run(["nonexistent"])).toBe(2);
   });
 });
 

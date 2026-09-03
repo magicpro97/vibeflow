@@ -1,18 +1,16 @@
 import type { RoleSpec } from "../../agents/role.js";
 import type { Engine } from "../../core/types.js";
 import type { EvaluatorOutput, RoundDecision } from "../consensus.js";
+import type {
+  ConversationMessageQueueQuoteTargetKindV1,
+  ConversationMessageQueueTargetParticipantsV1,
+} from "../conversation/conversation-message-queue-contract.js";
+import type * as ConversationWire from "../conversation/conversation-public-wire-contract.js";
 export type { Engine } from "../../core/types.js";
 export type { RoleSpec } from "../../agents/role.js";
-export type ConversationLifecycle =
-  | "INIT"
-  | "ACTIVE"
-  | "PAUSED"
-  | "COMPLETED"
-  | "STOPPED"
-  | "FAILED"
-  | "ABORTED";
-export type ConversationHealth = "healthy" | "degraded";
-export type TerminalLifecycle = "COMPLETED" | "STOPPED" | "FAILED" | "ABORTED";
+export type ConversationLifecycle = ConversationWire.ConversationLifecycleV1;
+export type ConversationHealth = ConversationWire.ConversationHealthV1;
+export type TerminalLifecycle = ConversationWire.ConversationTerminalLifecycleV1;
 export interface TraceCorrelation {
   workflow_id: string;
   conversation_id: string;
@@ -68,17 +66,21 @@ export type PublicProjection<T> = T extends string
               ? never
               : K]: K extends "public_session_ref"
               ? OpaqueSessionRef
-              : K extends
-                    | "ref"
-                    | "previous_ref"
-                    | "input_ref"
-                    | "output_ref"
-                    | "decision_matrix_ref"
-                    | "baseline_comparison_ref"
-                ? OpaqueArtifactId | null
-                : K extends "evidence_refs" | "provenance_refs"
-                  ? OpaqueArtifactId[]
-                  : PublicProjection<T[K]>;
+              : K extends "artifact_type"
+                ? T[K]
+                : K extends
+                      | "ref"
+                      | "previous_ref"
+                      | "input_ref"
+                      | "output_ref"
+                      | "decision_matrix_ref"
+                      | "baseline_comparison_ref"
+                  ? null extends T[K]
+                    ? OpaqueArtifactId | null
+                    : OpaqueArtifactId
+                  : K extends "evidence_refs" | "provenance_refs"
+                    ? OpaqueArtifactId[]
+                    : PublicProjection<T[K]>;
           }
         : never;
 export interface PublicTraceCorrelation {
@@ -117,7 +119,7 @@ export interface ApprovalToken {
   operation_id: string;
   actor: string;
 }
-export type ApprovalOutcome = "approve" | "reject";
+export type ApprovalOutcome = ConversationWire.ConversationApprovalOutcomeV1;
 export interface ApprovalDecision extends ApprovalToken {
   outcome: ApprovalOutcome;
   reason: string | null;
@@ -143,7 +145,7 @@ export interface ParticipantBoundPayload {
 export interface SkillInjectedPayload {
   skill_refs: string[];
   resolved_hashes: string[];
-  source: "repo" | "shared" | "builtin";
+  source: ConversationWire.ConversationSkillSourceV1;
 }
 export interface PrecommitPayload {
   round_id: string;
@@ -162,18 +164,27 @@ export interface AgentResponseDeltaPayload {
 export interface ToolActionPayload {
   tool: string;
   action: string;
-  status: "started" | "completed" | "failed";
+  status: ConversationWire.ConversationToolActionStatusV1;
   input_ref: string | null;
   output_ref: string | null;
 }
 export interface EvaluatorAssessmentPayload {
   round_id: string;
-  stage: "blind" | "full";
+  stage: ConversationWire.ConversationAssessmentStageV1;
   assessment: EvaluatorOutput;
 }
 export interface UserMessagePayload {
   content: string;
-  target_participants: string[] | "all";
+  target_participants: ConversationMessageQueueTargetParticipantsV1;
+  quote_refs?: Array<{
+    root_session_id: string;
+    conversation_id: string;
+    revision_id: string;
+    target_event_id: string;
+    target_kind: ConversationMessageQueueQuoteTargetKindV1;
+    content_digest: string;
+    author_public_id: string;
+  }>;
 }
 export interface ConsensusUpdatePayload {
   round_id: string;
@@ -181,7 +192,7 @@ export interface ConsensusUpdatePayload {
 }
 export interface RoundBoundaryPayload {
   round_id: string;
-  phase: "start" | "end";
+  phase: ConversationWire.ConversationRoundPhaseV1;
 }
 export interface StateChangePayload {
   lifecycle: ConversationLifecycle;
@@ -190,10 +201,10 @@ export interface StateChangePayload {
   reason: string | null;
 }
 export interface BaselineResultPayload {
-  status: "success" | "failed" | "skipped";
+  status: ConversationWire.ConversationBaselineStatusV1;
   answer: string | null;
   confidence: number | null;
-  skip_reason: string | null;
+  skip_reason: ConversationWire.ConversationBaselineReasonV1 | null;
 }
 export interface SynthesisCompletedPayload {
   decision_matrix_ref: string;
@@ -218,7 +229,7 @@ export interface ErrorPayload {
 export interface OperationLifecyclePayload {
   operation_id: string;
   attempt_id: string;
-  state: "requested" | "dispatched" | "acknowledged" | "completed" | "ambiguous";
+  state: ConversationWire.ConversationOperationStateV1;
 }
 export interface ApprovalRequestedPayload {
   token: ApprovalToken;
@@ -234,53 +245,112 @@ export interface CallerCancelledPayload {
 }
 export interface ArtifactCreatedPayload {
   artifact_id: string;
-  artifact_type: "decision_matrix" | "plan" | "diff" | "tests" | "synthesis" | "transcript";
+  artifact_type: ConversationWire.ConversationArtifactTypeV1;
   ref: string;
 }
 export interface ArtifactUpdatedPayload {
   artifact_id: string;
-  artifact_type: string;
+  artifact_type: ConversationWire.ConversationArtifactTypeV1;
   ref: string;
   previous_ref: string;
 }
 export interface NativeHistoryReconciledPayload {
   public_session_ref: string;
-  status: "reconciled" | "partial" | "unavailable";
+  status: ConversationWire.ConversationReconciliationStatusV1;
   imported_turn_count: number;
   imported_tool_count: number;
   provenance_refs: string[];
   evidence_refs: string[];
   completeness_reason: string;
 }
+type TraceKinds = typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND;
+type TraceEventOf<Key extends keyof TraceKinds, Payload> = {
+  type: TraceKinds[Key];
+  payload: Payload;
+};
 export type TraceEvent =
-  | { type: "conversation_configured"; payload: ConversationConfiguredPayload }
-  | { type: "coordinator_decision"; payload: CoordinatorDecisionPayload }
-  | { type: "participant_bound"; payload: ParticipantBoundPayload }
-  | { type: "skill_injected"; payload: SkillInjectedPayload }
-  | { type: "precommit"; payload: PrecommitPayload }
-  | { type: "agent_response_delta"; payload: AgentResponseDeltaPayload }
-  | { type: "tool_action"; payload: ToolActionPayload }
-  | { type: "evaluator_assessment"; payload: EvaluatorAssessmentPayload }
-  | { type: "user_message"; payload: UserMessagePayload }
-  | { type: "consensus_update"; payload: ConsensusUpdatePayload }
-  | { type: "round_boundary"; payload: RoundBoundaryPayload }
-  | { type: "state_change"; payload: StateChangePayload }
-  | { type: "baseline_result"; payload: BaselineResultPayload }
-  | { type: "synthesis_completed"; payload: SynthesisCompletedPayload }
-  | { type: "conversation_terminal"; payload: ConversationTerminalPayload }
-  | { type: "dry_run_result"; payload: DryRunResultPayload }
-  | { type: "error"; payload: ErrorPayload }
-  | { type: "operation_lifecycle"; payload: OperationLifecyclePayload }
-  | { type: "approval_requested"; payload: ApprovalRequestedPayload }
-  | { type: "approval_resolved"; payload: ApprovalResolvedPayload }
-  | { type: "caller_cancelled"; payload: CallerCancelledPayload }
-  | { type: "artifact_created"; payload: ArtifactCreatedPayload }
-  | { type: "artifact_updated"; payload: ArtifactUpdatedPayload }
-  | { type: "native_history_reconciled"; payload: NativeHistoryReconciledPayload };
+  | TraceEventOf<"CONVERSATION_CONFIGURED", ConversationConfiguredPayload>
+  | TraceEventOf<"COORDINATOR_DECISION", CoordinatorDecisionPayload>
+  | TraceEventOf<"PARTICIPANT_BOUND", ParticipantBoundPayload>
+  | TraceEventOf<"SKILL_INJECTED", SkillInjectedPayload>
+  | TraceEventOf<"PRECOMMIT", PrecommitPayload>
+  | TraceEventOf<"AGENT_RESPONSE_DELTA", AgentResponseDeltaPayload>
+  | TraceEventOf<"TOOL_ACTION", ToolActionPayload>
+  | TraceEventOf<"EVALUATOR_ASSESSMENT", EvaluatorAssessmentPayload>
+  | TraceEventOf<"USER_MESSAGE", UserMessagePayload>
+  | TraceEventOf<"CONSENSUS_UPDATE", ConsensusUpdatePayload>
+  | TraceEventOf<"ROUND_BOUNDARY", RoundBoundaryPayload>
+  | TraceEventOf<"STATE_CHANGE", StateChangePayload>
+  | TraceEventOf<"BASELINE_RESULT", BaselineResultPayload>
+  | TraceEventOf<"SYNTHESIS_COMPLETED", SynthesisCompletedPayload>
+  | TraceEventOf<"CONVERSATION_TERMINAL", ConversationTerminalPayload>
+  | TraceEventOf<"DRY_RUN_RESULT", DryRunResultPayload>
+  | TraceEventOf<"ERROR", ErrorPayload>
+  | TraceEventOf<"OPERATION_LIFECYCLE", OperationLifecyclePayload>
+  | TraceEventOf<"APPROVAL_REQUESTED", ApprovalRequestedPayload>
+  | TraceEventOf<"APPROVAL_RESOLVED", ApprovalResolvedPayload>
+  | TraceEventOf<"CALLER_CANCELLED", CallerCancelledPayload>
+  | TraceEventOf<"ARTIFACT_CREATED", ArtifactCreatedPayload>
+  | TraceEventOf<"ARTIFACT_UPDATED", ArtifactUpdatedPayload>
+  | TraceEventOf<"NATIVE_HISTORY_RECONCILED", NativeHistoryReconciledPayload>;
+type AssertTrue<Value extends true> = Value;
+export type TraceEventKindParity = AssertTrue<
+  ConversationWire.SameUnion<TraceEvent["type"], ConversationWire.ConversationTraceEventKindV1>
+>;
+export type TraceDecisionOutcomeParity = AssertTrue<
+  ConversationWire.SameUnion<
+    RoundDecision["outcome"],
+    ConversationWire.ConversationDecisionOutcomeV1
+  >
+>;
+export type TraceToolIntentParity = AssertTrue<
+  ConversationWire.SameUnion<RoleSpec["tools"][number], ConversationWire.ConversationToolIntentV1>
+>;
+export type TraceSandboxParity = AssertTrue<
+  ConversationWire.SameUnion<
+    NonNullable<RoleSpec["sandbox"]>,
+    ConversationWire.ConversationSandboxV1
+  >
+>;
+export type TraceArtifactUpdatedTypeParity = AssertTrue<
+  ConversationWire.SameUnion<
+    ArtifactUpdatedPayload["artifact_type"],
+    ConversationWire.ConversationArtifactTypeV1
+  >
+>;
 export type PublicTraceProjection = {
   [T in TraceEvent as T["type"]]: { type: T["type"]; payload: PublicProjection<T["payload"]> };
 }[TraceEvent["type"]];
 export type PublicTraceEvent = PublicTraceProjection;
+export type PublicTraceArtifactUpdatedTypeParity = AssertTrue<
+  ConversationWire.SameUnion<
+    Extract<
+      PublicTraceEvent,
+      { type: typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED }
+    >["payload"]["artifact_type"],
+    ConversationWire.ConversationArtifactTypeV1
+  >
+>;
+export type PublicTraceRequiredArtifactRefParity = AssertTrue<
+  null extends Extract<
+    PublicTraceEvent,
+    {
+      type:
+        | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED
+        | typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED;
+    }
+  >["payload"]["ref"]
+    ? false
+    : true
+>;
+export type PublicTraceRequiredSynthesisRefParity = AssertTrue<
+  null extends Extract<
+    PublicTraceEvent,
+    { type: typeof ConversationWire.CONVERSATION_TRACE_EVENT_KIND.SYNTHESIS_COMPLETED }
+  >["payload"]["decision_matrix_ref" | "baseline_comparison_ref"]
+    ? false
+    : true
+>;
 export interface PolicyEmission {
   idempotency_key: string;
   event: TraceEvent;

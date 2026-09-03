@@ -193,6 +193,7 @@ function ensureCtxIgnored(base: string, fs: FsOps): void {
     "!knowledge/**",
     "!*.md",
     "!SETTINGS.json",
+    "!PROJECT_ID.json",
     "backup/",
     "dispatch/",
     "workunits/",

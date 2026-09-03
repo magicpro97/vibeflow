@@ -167,7 +167,6 @@ Rejected: `"done"`, `"tests pass"`, `"implementation complete"`, any string unde
 Use `vf units evidence <name> --add 'bun test 2>&1 | tail -3 → "<output>"'` to record.
 Phase 2 (current): **gate failure** — `vf verify` exits 1 when evidence is free-text.
 Escape hatch: `vf verify --allow-unverified-evidence` / `vf orchestrate --allow-unverified-evidence`.
-```
 
 This is the file-backed enforcement of the policy rule "no verification, no completion"
 (`MASTER_SPEC.md`) and ties directly to the hook `final-verify` and `skill-compliance`

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "skill": "durable-authority-crash-replay",
+  "cases": [
+    {
+      "id": "durable-positive-stopped-after-dispatch",
+      "type": "positive",
+      "prompt": "The tool stopped after dispatch; resume interrupted executor state from the existing workspace and do not repeat the completed batch."
+    },
+    {
+      "id": "durable-positive-borrowed-authority",
+      "type": "positive",
+      "prompt": "The owner process died while authentication was temporarily switched; recover borrowed authority after interruption and salvage its receipts."
+    },
+    {
+      "id": "durable-positive-native-resume",
+      "type": "positive",
+      "prompt": "Continue the stopped CLI run by reusing the existing native agent session and persisted process record."
+    },
+    {
+      "id": "durable-negative-fresh-native-feature",
+      "type": "negative",
+      "prompt": "Implement native session reuse as a brand-new feature; no run was interrupted and no durable state exists."
+    },
+    {
+      "id": "durable-negative-policy-explanation",
+      "type": "negative",
+      "prompt": "Explain crash replay, consumed epoch, and borrowed auth policy without recovering or changing anything."
+    },
+    {
+      "id": "durable-negative-fresh-task",
+      "type": "negative",
+      "prompt": "Start a fresh brainstorming screen implementation from a clean worktree."
+    },
+    {
+      "id": "durable-negative-copy-edit",
+      "type": "negative",
+      "prompt": "Rewrite these fresh docs without repeating words; no run stopped and no artifact needs recovery."
+    }
+  ]
+}

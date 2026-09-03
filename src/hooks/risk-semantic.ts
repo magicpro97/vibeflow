@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
-import type { RiskLevel } from "../core.js";
+import { ENGINES, type Engine } from "../core.js";
+import { RISK_LEVEL, type RiskLevel } from "../core/hook-contract.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 
 /**
  * Optional semantic (LLM) risk tier — a soft, injected, fail-open signal that can only
@@ -10,6 +11,7 @@ import type { RiskLevel } from "../core.js";
 
 /** A pluggable command classifier: returns a tier, or undefined when it has no opinion. */
 export type SemanticJudge = (command: string) => RiskLevel | undefined;
+export type AsyncSemanticJudge = (command: string) => Promise<RiskLevel | undefined>;
 
 /**
  * Parse a `RISK: <LOW|MED|HIGH|CRIT>` verdict out of an LLM's stdout. Pure + case-insensitive;
@@ -20,10 +22,10 @@ export function parseSemanticRisk(raw: string): RiskLevel | undefined {
   const m = /\bRISK:\s*(LOW|MED(?:IUM)?|HIGH|CRIT(?:ICAL)?)\b/i.exec(raw);
   if (!m) return undefined;
   const tier = (m[1] ?? "").toUpperCase();
-  if (tier === "LOW") return "low";
-  if (tier === "HIGH") return "high";
-  if (tier.startsWith("MED")) return "medium";
-  return "critical";
+  if (tier === "LOW") return RISK_LEVEL.LOW;
+  if (tier === "HIGH") return RISK_LEVEL.HIGH;
+  if (tier.startsWith("MED")) return RISK_LEVEL.MEDIUM;
+  return RISK_LEVEL.CRITICAL;
 }
 
 /**
@@ -33,7 +35,7 @@ export function parseSemanticRisk(raw: string): RiskLevel | undefined {
  * `ls` never triggers a call; an already medium+ command is left to the deterministic verdict.
  */
 export function shouldConsultSemantic(regexRisk: RiskLevel, command: string): boolean {
-  if (regexRisk !== "none" && regexRisk !== "low") return false;
+  if (regexRisk !== RISK_LEVEL.NONE && regexRisk !== RISK_LEVEL.LOW) return false;
   return /(?:^|\s)-c(?:\s|["']|$)|\$\(|`|\b(?:https?|curl|wget|nc|base64|eval)\b/i.test(command);
 }
 
@@ -43,23 +45,38 @@ export function shouldConsultSemantic(regexRisk: RiskLevel, command: string): bo
  * failure, yields undefined so the deterministic floor is unchanged. `spawn` is injectable
  * for tests (mirrors `defaultGoalEvalFn`).
  */
-export function defaultSemanticJudge(command: string, spawn = spawnSync): RiskLevel | undefined {
+export async function defaultSemanticJudge(
+  command: string,
+  inject: {
+    ownedRoute?: OwnedAiRouteRunner;
+    engine?: Engine;
+    cwd?: string;
+  } = {},
+): Promise<RiskLevel | undefined> {
   const bridge = process.env.VIBEFLOW_AI;
   if (!bridge) return undefined;
   try {
-    const parts = bridge.split(" ").filter(Boolean);
-    if (!parts[0]) return undefined;
     const instructions =
       "You are a security classifier. Score the RISK of running this shell command. Reply with exactly one line `RISK: <LOW|MED|HIGH|CRITICAL>` then a one-line reason.";
     const prompt = `${instructions} Command: ${command}`;
-    const r = spawn(parts[0], [...parts.slice(1), prompt], {
-      encoding: "utf8",
-      timeout: 10000,
+    const configured = process.env.VF_REVIEW_ENGINE;
+    const engine =
+      inject.engine ??
+      ((configured && (ENGINES as readonly string[]).includes(configured)
+        ? configured
+        : ENGINES[0]) as Engine);
+    const result = await (inject.ownedRoute ?? runOwnedAiRoute)({
+      engine,
+      command: bridge,
+      input: prompt,
+      cwd: inject.cwd ?? process.cwd(),
+      shell: true,
+      timeoutMs: 10_000,
     });
     // Fail-closed on a broken bridge: a non-zero exit means we can't trust stdout,
     // so we drop the signal (undefined) rather than parse a verdict off an error.
-    if (r.status !== 0) return undefined;
-    return parseSemanticRisk((r.stdout ?? "").toString());
+    if (result.status !== 0) return undefined;
+    return parseSemanticRisk(result.stdout);
   } catch {
     return undefined;
   }

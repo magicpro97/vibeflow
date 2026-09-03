@@ -1,17 +1,66 @@
-export type Engine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
 /**
-/**
- * Canonical engine priority. Single source of truth for "which engine
- * wins when more than one is ready?" — also used as the default-arg
- * iteration order everywhere we render agent files / skill roots.
- *
- * The user-facing doc says: `claude > copilot > codex`. If you change
- * this list, you MUST also update docs/USER_GUIDE.md AND the
- * cross-file invariant test in test/engine-priority.test.ts.
+ * Compatibility export for the dependency-free authority in agent-contract.ts.
+ * Browser-safe wire DTOs import that focused module directly.
  */
-export const ENGINES: Engine[] = ["claude", "copilot", "codex", "opencode", "antigravity"];
+import type { HookDecision, HookEvent, RiskLevel } from "./hook-contract.js";
+import type {
+  SkillDomainRole,
+  SkillFilesystemRequirement,
+  SkillFreshness,
+  SkillMcpTransport,
+  SkillScope,
+  SkillStatus,
+  SkillType,
+} from "./skill-contract.js";
+import type {
+  AcceptancePriority,
+  GateState,
+  KnowledgeHeavySource,
+  RequiredWorkUnitGateName,
+  SecurityConsent,
+  SecurityVerdict,
+  WorkUnitRiskClass,
+  WorkUnitStatus,
+} from "./workflow-contract.js";
 
-export type GateState = "pass" | "fail" | "running" | "pending";
+export { ENGINES, type Engine } from "./agent-contract.js";
+export {
+  HOOK_DECISION,
+  HOOK_DECISIONS,
+  HOOK_EVENT,
+  HOOK_EVENTS,
+  RISK_LEVEL,
+  RISK_LEVELS,
+  type HookDecision,
+  type HookEvent,
+  type RiskLevel,
+} from "./hook-contract.js";
+export type {
+  SkillDomainRole,
+  SkillFilesystemRequirement,
+  SkillFreshness,
+  SkillMcpTransport,
+  SkillScope,
+  SkillStatus,
+  SkillType,
+};
+export {
+  ACCEPTANCE_PRIORITY,
+  GATE_STATE,
+  KNOWLEDGE_HEAVY_SOURCE,
+  SECURITY_CONSENT,
+  SECURITY_VERDICT,
+  WORK_UNIT_GATE,
+  WORK_UNIT_RISK_CLASS,
+  WORK_UNIT_STATUS,
+  type AcceptancePriority,
+  type GateState,
+  type KnowledgeHeavySource,
+  type SecurityConsent,
+  type SecurityVerdict,
+  type WorkUnitRiskClass,
+  type WorkUnitStatus,
+} from "./workflow-contract.js";
 
 /** #522: one structured acceptance criterion. `verification`/`priority` optional so prose-only
  *  criteria still parse and adding this field never retroactively hardens a green gate. */
@@ -32,12 +81,14 @@ export interface AcceptanceCriterion {
    */
   verification?: string;
   /** Absent ⇒ treated as SHOULD (warn-only) so adding this field never hardens a green gate. */
-  priority?: "MUST" | "SHOULD" | "NICE";
+  priority?: AcceptancePriority;
+  /** @deprecated Legacy UI/API projection; `priority` is the current authority. */
+  required?: boolean;
 }
 
 export interface WorkUnit {
   name: string;
-  status: "pending" | "running" | "verifying" | "done" | "blocked";
+  status: WorkUnitStatus;
   confidence: number;
   /**
    * Per-unit risk class — drives the confidence threshold required for `goalEval` to mark the
@@ -45,18 +96,18 @@ export interface WorkUnit {
    * `src/orchestrator/investigate.ts` (docs=0.70 → deploy/security=0.95). Optional; units
    * without a value default to `"feature"` (threshold 0.85).
    */
-  riskClass?: "docs" | "simple-code" | "feature" | "architecture" | "security" | "deploy";
+  riskClass?: WorkUnitRiskClass;
   owner_agent?: string;
   skills_used?: string[];
   knowledge_heavy?: boolean;
-  knowledge_heavy_source?: "risk" | "regex";
+  knowledge_heavy_source?: KnowledgeHeavySource;
   skills_injected?: string[];
   skills_required?: string[];
   skill_waiver?: { reason: string; at: string; by?: string };
   scope?: string[];
   /** Free-text build spec injected into the dispatch prompt so the engine knows WHAT to build. */
   spec?: string;
-  gates: Record<"build" | "lint" | "test" | "review", GateState> & {
+  gates: Record<RequiredWorkUnitGateName, GateState> & {
     /** Populated by the orchestrator's post-coding security checkpoint. */
     security?: GateState;
     /** ADR-003: behavioral goal-eval result. */
@@ -103,8 +154,8 @@ export interface WorkUnit {
    * avoid a circular import from core → orchestrator/security-checkpoint.
    */
   security?: {
-    consent: "run" | "skip" | "abstain";
-    verdict: "pass" | "fail" | "needs-review" | "skipped" | "error";
+    consent: SecurityConsent;
+    verdict: SecurityVerdict;
     items_checked?: number;
     items_failed?: number[];
     notes?: string;
@@ -136,20 +187,8 @@ export interface WorkflowState {
 }
 
 // --- Skills (Anthropic skill-creator standard: SKILL.md folder) ---
-export type SkillScope = "common" | "organization" | "project" | "adapter";
-
-export type SkillStatus =
-  | "verified"
-  | "enriched"
-  | "experimental"
-  | "baseline"
-  | "template"
-  | "draft"
-  | "unverified"
-  | "deprecated";
-
 export interface SkillRequires {
-  filesystem?: "read" | "write" | "none";
+  filesystem?: SkillFilesystemRequirement;
   network?: boolean;
   shell?: boolean;
 }
@@ -168,12 +207,12 @@ export interface Skill {
   capabilities?: string[];
   triggers?: string[];
   /** #543: repo = always-on project law (injected every dispatch); knowledge (default) = keyword-gated. */
-  type?: "repo" | "knowledge";
+  type?: SkillType;
   requires?: SkillRequires;
   /** #552: an MCP server this skill provisions when present (executable skill bundle). */
   mcp?: {
     name?: string;
-    transport?: "stdio" | "http" | "sse";
+    transport?: SkillMcpTransport;
     command?: string;
     args?: string[];
     url?: string;
@@ -182,7 +221,7 @@ export interface Skill {
   /** #665: domain ownership metadata. */
   domain?: {
     id?: string;
-    role?: "canonical" | "child";
+    role?: SkillDomainRole;
   };
   /** #665: fact IDs this skill owns. */
   owns?: string[];
@@ -208,7 +247,7 @@ export interface Skill {
    * #662: computed freshness status for sourceAnchors verification.
    * Set by enrichFreshness; undefined until then.
    */
-  freshness?: "fresh" | "stale" | "unknown";
+  freshness?: SkillFreshness;
   /** #662: reason when stale or malformed. */
   freshnessReason?: string;
   /**
@@ -224,21 +263,6 @@ export interface SkillMatch {
   reason: string;
   score: number;
 }
-
-// --- Hooks: universal protocol shared by every engine adapter ---
-export type HookEvent =
-  | "pre-tool-use"
-  | "post-tool-use"
-  | "pre-write"
-  | "post-write"
-  | "pre-command"
-  | "post-command"
-  | "stop"
-  | "skill-compliance"
-  | "verify-result";
-
-export type HookDecision = "allow" | "warn" | "require_approval" | "block";
-export type RiskLevel = "none" | "low" | "medium" | "high" | "critical";
 
 export interface HookInput {
   event: HookEvent;

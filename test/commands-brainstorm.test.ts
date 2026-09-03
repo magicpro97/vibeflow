@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { brainstorm } from "../src/commands/brainstorm.js";
+import { CONVERSATION_BRAINSTORM_ERROR_KIND } from "../src/orchestrator/conversation/conversation-brainstorm-contract.js";
 
 const transcriptArtifactId = "transcript-catalog-1";
 const transcriptArtifactRef = `artifact_${"t".repeat(43)}`;
@@ -334,7 +335,7 @@ describe("vf brainstorm", () => {
         expect(JSON.parse(chunks[0] as string)).toEqual({
           status: "error",
           error: {
-            error_kind: "validation",
+            error_kind: CONVERSATION_BRAINSTORM_ERROR_KIND.VALIDATION,
             code: "validation_error",
             message: "request validation failed",
           },
@@ -848,7 +849,7 @@ describe("vf brainstorm", () => {
         },
         transcript_path: null,
         error: {
-          error_kind: "transport",
+          error_kind: CONVERSATION_BRAINSTORM_ERROR_KIND.TRANSPORT,
           code: "transport_down",
           message: "conversation transport failed",
         },
@@ -877,7 +878,7 @@ describe("vf brainstorm", () => {
       expect(JSON.parse(chunks[0] as string)).toEqual({
         status: "error",
         error: {
-          error_kind: "validation",
+          error_kind: CONVERSATION_BRAINSTORM_ERROR_KIND.VALIDATION,
           code: "validation_error",
           message: "request validation failed",
         },
@@ -925,7 +926,7 @@ describe("vf brainstorm", () => {
       expect(JSON.parse(chunks[0] as string)).toEqual({
         status: "error",
         error: {
-          error_kind: "engine_start",
+          error_kind: CONVERSATION_BRAINSTORM_ERROR_KIND.ENGINE_START,
           code: "engine_start_error",
           message: "engine start failed",
         },
@@ -955,7 +956,7 @@ describe("vf brainstorm", () => {
       expect(JSON.parse(chunks[0] as string)).toEqual({
         status: "error",
         error: {
-          error_kind: "transport",
+          error_kind: CONVERSATION_BRAINSTORM_ERROR_KIND.TRANSPORT,
           code: "transport_error",
           message: "conversation transport failed",
         },
@@ -964,5 +965,43 @@ describe("vf brainstorm", () => {
     } finally {
       process.stdout.write = write;
     }
+  });
+
+  test("fresh production --yes create routes through durable Home create compatibility", async () => {
+    let seen: Record<string, unknown> | undefined;
+    let dryRuns = 0;
+    const code = await brainstorm(["--yes", "compare", "options"], {
+      dryRun: async () => {
+        dryRuns += 1;
+        return debatePreview() as never;
+      },
+      durable: {
+        create: async (input) => {
+          seen = input as unknown as Record<string, unknown>;
+          return {
+            conversation_id: "conversation-1",
+            conversationId: "conversation-1",
+            revision_id: "revision-1",
+            revisionId: "revision-1",
+            artifact_refs: [],
+            artifactRefs: [],
+            status: "completed",
+            output: "",
+            events: [],
+          };
+        },
+        message: async () => {
+          throw new Error("unexpected durable message call");
+        },
+      },
+    });
+    expect(code).toBe(0);
+    expect(dryRuns).toBe(1);
+    expect(seen).toMatchObject({
+      request: {
+        topic: "compare options",
+        policy: "debate",
+      },
+    });
   });
 });

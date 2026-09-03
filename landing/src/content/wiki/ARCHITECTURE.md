@@ -1,8 +1,8 @@
 ---
 title: Architecture
-description: High-level architecture of VibeFlow — four main layers from npm CLI launcher to tool adapters.
+description: High-level architecture of VibeFlow — AI-first Home, conversation runtime, owned async dispatch, and typed capability fabric.
 category: explanation
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # Architecture
@@ -13,6 +13,8 @@ last_updated: 2026-06-24
 - [Main Components](#main-components)
 - [Stuck Detection](#stuck-detection)
 - [Crash Recovery](#crash-recovery)
+- [Conversation Turn Delivery](#conversation-turn-delivery)
+- [Protocol Authority Standard](#protocol-authority-standard)
 - [Tool Adapters](#tool-adapters)
 - [Source Modules](#source-modules)
 - [Core Data Flow](#core-data-flow)
@@ -20,16 +22,16 @@ last_updated: 2026-06-24
 
 ## Overview
 
-VibeFlow is a local-first tool composed of four main layers:
+VibeFlow is a local-first harness composed of four main layers:
 
 ```text
 npm CLI Launcher
   ↓
-Local Web UI
+AI-first Home + Local Web UI
   ↓
-Workflow Orchestrator Core
+Conversation / Dispatch Orchestrator Core
   ↓
-Tool Adapters: Claude Code / Codex CLI / Copilot CLI / OpenCode / Antigravity CLI
+Tool Adapters + Typed Capability Fabric
 ```
 
 The system should run on the user's machine and should not send source code to a remote service controlled by the tool owner unless the user explicitly configures it.
@@ -45,6 +47,7 @@ Responsibilities:
 - Check local dependencies.
 - Install or guide installation of optional tools.
 - Initialize workflow files inside the target repo.
+- Expose the command surface that launches AI-first Home and the owned dispatch paths.
 
 Example commands:
 
@@ -61,30 +64,35 @@ vf skills list
 vf tools status
 ```
 
-### 2. Local Web UI
+### 2. AI-first Home / Local Web UI
 
 Responsibilities:
 
-- Collect project information.
-- Ask structured questions.
-- Let user connect sources.
-- Show detected skills and missing skills.
-- Show generated instructions.
-- Show execution logs, diffs, tests, risks, and final report.
+- Show a searchable session rail, central conversation pane, and composer-first workflow.
+- Preserve the conversation in one place: participants, lifecycle, trace, approvals, and artifacts.
+- Keep add/remove-agent actions, queue editing, quotes, reactions, and approval/capability
+  actions inside the conversation instead of opening a separate workspace.
+- Surface details, capabilities, and trace drawers without leaving the current conversation.
+- Keep repository intake outside Home; `vf init` asks its questionnaire in a TTY.
 
-### 3. Workflow Orchestrator Core
+### 3. Conversation / Dispatch Orchestrator Core
 
 Responsibilities:
 
-- Act as the main agent coordinator.
-- Classify task type and risk level.
-- Resolve sources and file readers.
-- Select local or external skills.
-- Generate project context files.
-- Generate tool-specific adapters.
-- Dispatch Claude Code, Codex, Copilot, OpenCode, or Antigravity CLI.
-- Verify output.
-- Propose skill updates.
+- Keep the durable FIFO message queue, private file context, and turn envelope (`VF-TURN/1`).
+- Preserve native history for exact Claude, Codex, and OpenCode resumes. Otherwise attach bounded structured recipient history to canonical public context.
+- Dispatch Claude Code, Codex, Copilot, OpenCode, or Antigravity CLI through the canonical owned async route.
+- Verify output, trace evidence, and completion state.
+- Propose skill updates and owned-process recovery when evidence is incomplete.
+
+### 4. Tool Adapters + Typed Capability Fabric
+
+Responsibilities:
+
+- Translate canonical workflow context into each engine's expected format.
+- Maintain typed capability manifests and adapters for skills, MCP, tools, hooks, roles, and engine settings.
+- Extend the selected CLI with approved capabilities without turning VibeFlow into another coding engine or loading arbitrary browser plugin code.
+- Expose `quota()` and `probe()` capabilities used by the preflight gate.
 
 ## Stuck Detection
 
@@ -115,7 +123,54 @@ that unit's full transition ledger; `vf status --json` emits machine-readable ou
 
 See `src/commands/status.ts`, `src/orchestrator/marker.ts`, `src/orchestrator/timeline.ts`.
 
-Dispatch captures the engine's `session_id` (claude JSON envelope) into `DispatchMarker.engineSessionId`, persisted for crash-resume. PR2a (#618 PR2a) wires `resumeSessionId` through the dispatch layer so a claude unit can resume its prior session (`claude -p -r <id>`) instead of a fresh run. PR2b-1 wires `vf orchestrate --resume`: a crashed unit (marker `running`/`blocked`/`failed`) with a persisted `engineSessionId` resumes that claude session via the PR2a dispatch path; without `--resume`, or for codex/copilot (no persisted id), the unit re-runs fresh. PR2b-2 extends capture+resume to codex (`codex exec --json -` → `thread_id`; `codex exec resume <id>`). Copilot has no by-id resume and always runs fresh. The exact per-engine invocation flags, output-shape assumptions, verified CLI versions, and a re-verify procedure for CLI bumps live in `docs/ENGINE-COMPAT.md`.
+Dispatch captures the engine's native session id into `DispatchMarker.engineSessionId` for
+crash-resume. The canonical owned async launcher also stores supervisor and CLI PIDs, host,
+attempt/operation, and exact process-start identity. A terminal record is not released until
+the process is quiescent and stdout/stderr have crossed the `streams-drained` barrier.
+
+| Platform | Scope | Proof strength | Boundary |
+|----------|-------|----------------|----------|
+| Windows | `windows-job` | `kernel-contained` | A kill-on-close Job Object is established before receipt/spawn; exact creation ticks come from PowerShell/CIM, never `/bin/ps`. |
+| Linux / macOS | `posix-process-group` | `cooperative-lineage` | An isolated process group and exact root identity are proved, but descendants can deliberately escape the group. |
+
+Linux uses boot id plus `/proc` start ticks; macOS uses exact Darwin `libproc`
+seconds/microseconds. `vf doctor --fix` takes over only after exact proof that an owner is no
+longer the recorded process. Live or unprovable owners fail closed. Windows behavior has injected
+regression coverage. Live Windows evidence is accepted only from a green, exact-SHA
+`windows-latest` CI smoke job; a local macOS/Linux run is not a Windows canary.
+See `docs/ENGINE-COMPAT.md` for adapter-specific resume contracts.
+
+## Conversation Turn Delivery
+
+Public participant input is a canonical JSON envelope prefixed by `VF-TURN/1`. Claude,
+Codex, and OpenCode are the only engines with proved exact by-id authority. A proved exact
+native resume reuses the selected CLI's session and sends only new applicable user
+messages plus peer-agent responses/reactions. The recipient's own prior output stays in that
+native history and is not echoed back. Without valid exact authority, the full turn adds a
+bounded replay of the recipient's last eight public responses to applicable user/peer context.
+Each replay summary is capped at 2 KiB UTF-8 and carries source digest, provenance, and
+count/truncation metadata. Copilot and Antigravity therefore never claim exact resume or
+silently omit the recipient's own context. A full turn may also include content-addressed
+`VF-HANDOFF/1`.
+
+Private file ranges are materialized separately as one-shot canonical JSON prefixed by
+`VF-PRIVATE-FILE-RANGES/1`; they never enter public trace/browser persistence and are cleared
+after use. Prompt transport remains adapter-specific. A large Copilot work-unit prompt can use
+`.vibeflow/dispatch/<unit>.md` plus a short absolute read pointer, but that file is transport,
+not memory or native session state.
+
+## Protocol Authority Standard
+
+Persisted, API, and configuration closed vocabularies have one dependency-light source of
+truth. Production contracts declare an `Object.freeze({ ... } as const)` authority, infer
+their TypeScript union and frozen value list from it, and expose prototype-safe guards for
+untrusted boundaries. Backend, CLI, and browser consumers import or alias that same authority.
+
+TypeScript `enum`/`const enum`, duplicate UI wire unions, mutable vocabulary `Set`s, blind
+casts, and raw producer/comparison literals are rejected by dynamic source gates. Exhaustive
+maps and intentional subsets must also be frozen and typed from the authority. This rule is
+for cross-layer protocol vocabulary; ordinary prose and genuinely local one-off strings stay
+ordinary strings.
 
 ## Wave Handoff
 
@@ -177,6 +232,9 @@ See `src/server/dashboard-diff.ts` and `docs/WEB_UI_DESIGN.md` section 10.
 src/probe-cache.ts          # 60s stable / 5s short-TTL probe-result cache (vf doctor)
 src/engine-quota.ts         # parse claude / codex / copilot quota JSON; exhaustion signal
 src/preflight-delegate.ts   # 3-layer gate (presence → auth → quota) with auto-fallback
+src/dispatch/owned-ai-route.ts  # canonical lifecycle boundary for owned AI launches
+src/orchestrator/conversation/turn-delivery.ts # VF-TURN/1 exact/full-history turn delivery
+src/capabilities/service.ts # typed capability fabric service
 src/skills/sync.ts          # canonical .vibeflow/skills → engine mirrors (pointer | full)
 src/skills/importer.ts      # Context7 + local-dir import (temp → validate → promote → sync)
 src/skills/validator.ts     # Anthropic skill-creator standard validation
@@ -189,21 +247,23 @@ src/plan-review/            # immutable revision store, blocks parser, types
 ```text
 User input
   ↓
-Intake schema
+AI-first Home or the separate `vf init` TTY questionnaire
   ↓
 Source resolver
   ↓
 Skill resolver
   ↓
-Document/file reader skills
+Private file context + document/file reader skills
   ↓
 Normalized context
   ↓
 Planning + debate + task split
   ↓
+VF-TURN/1 turn delivery
+  ↓
 Engine adapter
   ↓
-CLI execution
+Owned async CLI execution
   ↓
 Hooks + verification
   ↓

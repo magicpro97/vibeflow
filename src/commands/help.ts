@@ -10,18 +10,18 @@
 // Private data (file-scoped, not re-exported):
 //   - COMMAND_HELP: per-subcommand help text registry
 
-import { COMMAND_HELP, VERSION, c, out } from "./_shared.js";
+import { COMMAND_HELP, DEFAULT_UI_PORT, EPHEMERAL_UI_PORT, VERSION, c, out } from "./_shared.js";
 
 export function printHelp(): number {
   out(
     "vf",
-    `${c.bold("VibeFlow")} v${VERSION} — orchestrate Claude Code, Codex & Copilot CLI
+    `${c.bold("VibeFlow")} v${VERSION} — connect and orchestrate AI coding CLIs
 
   ${c.bold("Usage:")} vf [command] [options]
 
   ${c.bold("Commands:")}
-    ${c.cyan("(none)")}            open the local web UI
-    ${c.cyan("ui")}                open the local web UI
+    ${c.cyan("(none)")}            open AI-first Home on 127.0.0.1:${DEFAULT_UI_PORT}
+    ${c.cyan("ui")}                open the same Home on ${DEFAULT_UI_PORT} (--port ${EPHEMERAL_UI_PORT} chooses a free port)
     ${c.cyan("doctor")}            check required and optional tools (--probe for live engine readiness)
     ${c.cyan("init")}              generate canonical context + engine files (--engine, --no-ask, --no-ai, --dry-run)
     ${c.cyan("run <engine>")}      dispatch claude | codex | copilot | opencode | antigravity (--yes to launch)
@@ -36,6 +36,8 @@ export function printHelp(): number {
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
     ${c.cyan("status")}             crash-recovery view of per-unit markers after a crash (--timeline <unit> | --json)
     ${c.cyan("config [sub]")}      memory <builtin|claude-mem|off|status> — read/toggle per-repo settings
+    ${c.cyan("capability [sub]")}  search | list | status | install | update | configure | retarget | remove | rollback | repair | adopt | private-input bind
+    ${c.cyan("authority [sub]")}   grant | policy | secret | trust | repair — Capability Fabric authority control
     ${c.cyan("skills [sub]")}      list | search <term> | resolve | validate | sync | verify-sync | verify-lock | import | semantic-filter | registry <add|list|update>
     ${c.cyan("superpowers sync")}  install exact registry-locked Superpowers into installed engine CLIs (--yes)
     ${c.cyan("tools [sub]")}       status | enable <tool> | disable <tool> | install <tool> (--yes)

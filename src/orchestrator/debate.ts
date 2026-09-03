@@ -1,12 +1,19 @@
 import type { WorkUnit } from "../core.js";
+import { AGENT_HOST_TOOL } from "../core/agent-contract.js";
 import { type EvaluatorOutput, decideRound } from "./consensus.js";
+import type { AgentSocialIntentRequestV1 } from "./conversation/conversation-interaction-types.js";
+import { CONVERSATION_DECISION_OUTCOME } from "./conversation/conversation-public-wire-contract.js";
 
 export interface DebateParticipantResult {
   answer: string;
   content: string;
   claim: string | null;
   evidence: string[];
+  social_intent: AgentSocialIntentRequestV1;
+  action_candidate?: AgentActionCandidateOutput;
 }
+
+export type AgentActionCandidateOutput = { present: false } | { present: true; value: unknown };
 
 interface PriorDebatePosition {
   claim: string | null;
@@ -28,6 +35,48 @@ function parseJson(value: string): unknown {
 const stringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
+export function parseAgentSocialIntent(value: unknown): AgentSocialIntentRequestV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return { present: false, quote_refs: undefined, reactions: undefined };
+  const record = value as Record<string, unknown>;
+  return {
+    present: Object.hasOwn(record, "quote_refs") || Object.hasOwn(record, "reactions"),
+    quote_refs: record.quote_refs,
+    reactions: record.reactions,
+  };
+}
+
+export function parseAgentTurnOutput(output: string): {
+  answer: string;
+  structured: boolean;
+  social_intent: AgentSocialIntentRequestV1;
+  action_candidate?: AgentActionCandidateOutput;
+} {
+  const parsed = parseJson(output);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.answer === "string")
+      return {
+        answer: record.answer,
+        structured: true,
+        social_intent: parseAgentSocialIntent(record),
+        ...(Object.hasOwn(record, AGENT_HOST_TOOL.PROPOSE_ACTION)
+          ? {
+              action_candidate: {
+                present: true as const,
+                value: record[AGENT_HOST_TOOL.PROPOSE_ACTION],
+              },
+            }
+          : {}),
+      };
+  }
+  return {
+    answer: output,
+    structured: false,
+    social_intent: { present: false, quote_refs: undefined, reactions: undefined },
+  };
+}
+
 /** Engines may return structured debate JSON; plain text remains a valid claim. */
 export function parseDebateParticipantOutput(output: string): DebateParticipantResult {
   const parsed = parseJson(output);
@@ -36,15 +85,31 @@ export function parseDebateParticipantOutput(output: string): DebateParticipantR
     const claim = typeof record.claim === "string" ? record.claim : null;
     const evidence = stringArray(record.evidence) ? [...new Set(record.evidence)] : [];
     if (claim !== null) {
+      const answer = typeof record.answer === "string" ? record.answer : claim;
       return {
-        answer: typeof record.answer === "string" ? record.answer : claim,
-        content: typeof record.content === "string" ? record.content : output,
+        answer,
+        content: typeof record.content === "string" ? record.content : answer,
         claim,
         evidence,
+        social_intent: parseAgentSocialIntent(record),
+        ...(Object.hasOwn(record, AGENT_HOST_TOOL.PROPOSE_ACTION)
+          ? {
+              action_candidate: {
+                present: true as const,
+                value: record[AGENT_HOST_TOOL.PROPOSE_ACTION],
+              },
+            }
+          : {}),
       };
     }
   }
-  return { answer: output, content: output, claim: output || null, evidence: [] };
+  return {
+    answer: output,
+    content: output,
+    claim: output || null,
+    evidence: [],
+    social_intent: { present: false, quote_refs: undefined, reactions: undefined },
+  };
 }
 
 export function parseDebateEvaluatorOutput(
@@ -53,7 +118,7 @@ export function parseDebateEvaluatorOutput(
   maxRounds: number,
 ): EvaluatorOutput | null {
   const parsed = parseJson(output);
-  return decideRound(parsed, round, maxRounds).outcome === "abort"
+  return decideRound(parsed, round, maxRounds).outcome === CONVERSATION_DECISION_OUTCOME.ABORT
     ? null
     : (parsed as EvaluatorOutput);
 }
@@ -66,7 +131,7 @@ export function debateParticipantPrompt(
 ): string {
   return [
     "Develop one evidence-backed option for this debate.",
-    "Return exactly one JSON object with answer, content, claim, and evidence fields.",
+    "Return one JSON object with answer, content, claim, and evidence fields; it may also include quote_refs and reactions from the typed social contract.",
     JSON.stringify({ topic, round, prior_positions: prior }),
   ].join("\n");
 }

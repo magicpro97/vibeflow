@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import type {
   AgentBinding,
   MaterializeAgentBindingOptions,
@@ -34,6 +35,11 @@ import {
   readDispatchResumeBinding,
   sanitizePublicText,
 } from "../src/dispatch/public-redaction.js";
+import {
+  MAX_SESSION_PROMPT_FILE_BYTES,
+  MAX_SESSION_PROMPT_POINTER_BYTES,
+  materializeCopilotSessionPrompt,
+} from "../src/dispatch/session-prompt-file.js";
 import type { AttemptHandle } from "../src/dispatch/session-types.js";
 import type {
   EngineProcess,
@@ -186,6 +192,7 @@ function completedHandle(
     }),
     terminate: async () => {},
     readResumeBinding: () => (nativeSessionId ? { attemptId, engine, nativeSessionId } : undefined),
+    readModelOutputBinding: () => undefined,
     readEvidenceBinding: () => ({ attemptId, internalRef: "internal/evidence" }),
   };
 }
@@ -284,7 +291,7 @@ describe("engine session execution projection", () => {
         "--excluded-tools=Write,Edit,Bash",
       ],
     ],
-    ["opencode", "opencode", ["run", "--format", "json", "--model", "default", "-"]],
+    ["opencode", "opencode", ["run", "--format", "json", "--model", "default"]],
     ["antigravity", "agy", ["-p", "prompt-antigravity", "--model", "default"]],
   ] as const;
 
@@ -404,16 +411,16 @@ describe("engine session execution projection", () => {
     },
   );
 
-  test("legacy argv and capture seams reject unsafe engine-specific native ids", () => {
+  test("legacy argv and capture seams reject unsafe engine-specific native ids", async () => {
     expect(() => engineCommand("claude", {}, false, "--dangerously-skip-permissions")).toThrow(
       /invalid claude native session id/,
     );
-    const result = runDispatch({
+    const result = await runDispatch({
       engine: "claude",
       mode: "cli",
       prompt: "prompt",
       has: () => true,
-      spawner: () => ({
+      spawner: async () => ({
         status: 0,
         stdout: '{"type":"result","session_id":"--dangerously-skip-permissions"}',
       }),
@@ -502,6 +509,220 @@ describe("engine session execution projection", () => {
     expect(Object.keys(request("codex"))).not.toContain("envPolicy");
   });
 
+  test("large Copilot handoff uses a bounded private file and cleans it after process drain", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-prompt-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    const prompt = `COPILOT-LARGE-HANDOFF\n${"x".repeat(1024 * 1024)}`;
+    let observedArgv: string[] = [];
+    let pointerPrompt = "";
+    const adapter = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: (argv, options) => {
+        observedArgv = [...argv];
+        const path = join(realpathSync(promptRoot), "attempt-copilot.prompt.md");
+        expect(options.stdinText).toBe("");
+        pointerPrompt = `Read ${path.replace(/\\/g, "/")} and follow it`;
+        expect(argv).toContain(pointerPrompt);
+        expect(argv.join("\n")).not.toContain("COPILOT-LARGE-HANDOFF");
+        expect(readFileSync(path, "utf8")).toBe(prompt);
+        if (process.platform !== "win32") {
+          expect(statSync(promptRoot).mode & 0o777).toBe(0o700);
+          expect(statSync(path).mode & 0o777).toBe(0o600);
+        }
+        return completedProcess([`${pointerPrompt}\n`]);
+      },
+      writeEvidence: async () => "evidence/copilot-large.json",
+    });
+    const result = await adapter.start(
+      request("copilot", {
+        spawn: spawnProjection("copilot", { rendered_prompt: prompt }),
+      }),
+    ).completion;
+    expect(result.ok).toBe(true);
+    expect(result.output).not.toContain(pointerPrompt);
+    expect(result.output).not.toContain(realpathSync(promptRoot));
+    expect(Buffer.byteLength(observedArgv.join("\0"), "utf8")).toBeLessThan(
+      MAX_SESSION_PROMPT_POINTER_BYTES,
+    );
+    expect(readdirSync(promptRoot)).toEqual([]);
+  });
+
+  test("large Copilot prompt file remains until stdout and stderr have drained", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-drain-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    let finishStdout!: () => void;
+    const stdout = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("copilot acknowledged\n"));
+        finishStdout = () => controller.close();
+      },
+    });
+    const adapter = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: () => ({
+        pid: 4343,
+        stdin: { write: () => {}, end: () => {} },
+        stdout,
+        stderr: stream(),
+        exited: Promise.resolve(0),
+        kill: () => {},
+      }),
+      writeEvidence: async () => "evidence/copilot-drain.json",
+    });
+    const handle = adapter.start(
+      request("copilot", {
+        spawn: spawnProjection("copilot", { rendered_prompt: "x".repeat(64 * 1024) }),
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const path = join(realpathSync(promptRoot), "attempt-copilot.prompt.md");
+    expect(existsSync(path)).toBe(true);
+    finishStdout();
+    await handle.completion;
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test("large Copilot prompt file is cleaned when process spawn fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-spawn-failure-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    const adapter = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: () => {
+        throw new Error("synthetic spawn failure");
+      },
+      writeEvidence: async () => "evidence/copilot-spawn-failure.json",
+    });
+    expect(() =>
+      adapter.start(
+        request("copilot", {
+          spawn: spawnProjection("copilot", { rendered_prompt: "x".repeat(64 * 1024) }),
+        }),
+      ),
+    ).toThrow(/synthetic spawn failure/);
+    expect(readdirSync(promptRoot)).toEqual([]);
+  });
+
+  test.each(["claude", "codex", "opencode"] as const)(
+    "%s keeps a large native prompt on stdin when Copilot file transport is configured",
+    async (engine) => {
+      const root = mkdtempSync(join(tmpdir(), `vf-${engine}-session-prompt-`));
+      temporaryPaths.push(root);
+      const promptRoot = join(root, "conversation-prompts");
+      const prompt = `${engine}-stdin\n${"x".repeat(64 * 1024)}`;
+      let observedInput = "";
+      const adapter = createEngineSessionAdapter({
+        privatePromptFileRoot: promptRoot,
+        spawn: (_argv, options) => {
+          observedInput = options.stdinText;
+          return completedProcess([
+            engine === "claude"
+              ? `${JSON.stringify({ type: "result", session_id: CLAUDE_UUID })}\n`
+              : engine === "codex"
+                ? `${JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID })}\n`
+                : '{"type":"step_start","sessionID":"opencode-session-safe"}\n',
+          ]);
+        },
+        writeEvidence: async () => `evidence/${engine}-large-stdin.json`,
+      });
+      await adapter.start(
+        request(engine, {
+          spawn: spawnProjection(engine, {
+            rendered_prompt: prompt,
+            ...(engine === "opencode" ? { rendered_tools: [], sandbox: null } : {}),
+          }),
+        }),
+      ).completion;
+      expect(observedInput).toBe(prompt);
+      expect(existsSync(promptRoot)).toBe(false);
+    },
+  );
+
+  test("bridge and Antigravity keep their established large-prompt semantics", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-noncopilot-session-prompt-"));
+    temporaryPaths.push(root);
+    const promptRoot = join(root, "conversation-prompts");
+    const prompt = "x".repeat(64 * 1024);
+    let bridgeInput = "";
+    const bridge = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      protocol: "bridge",
+      spawn: (_argv, options) => {
+        bridgeInput = options.stdinText;
+        return completedProcess(["bridge acknowledged\n"]);
+      },
+      writeEvidence: async () => "evidence/bridge-copilot.json",
+    });
+    await bridge.start(
+      request("copilot", { spawn: spawnProjection("copilot", { rendered_prompt: prompt }) }),
+    ).completion;
+    expect(bridgeInput).toBe(prompt);
+    expect(existsSync(promptRoot)).toBe(false);
+
+    const antigravity = createEngineSessionAdapter({
+      privatePromptFileRoot: promptRoot,
+      spawn: () => completedProcess(),
+      writeEvidence: async () => "evidence/antigravity-large.json",
+    });
+    expect(() =>
+      antigravity.start(
+        request("antigravity", {
+          spawn: spawnProjection("antigravity", {
+            rendered_prompt: prompt,
+            rendered_tools: [],
+            sandbox: null,
+          }),
+        }),
+      ),
+    ).toThrow(/Antigravity prompt too large/);
+  });
+
+  test("Copilot prompt files reuse byte-identical restart state and reject changed content", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-restart-"));
+    temporaryPaths.push(root);
+    const prompt = "r".repeat(64 * 1024);
+    const first = materializeCopilotSessionPrompt({
+      attemptId: "restart-attempt",
+      engine: "copilot",
+      prompt,
+      root,
+    });
+    const resumed = materializeCopilotSessionPrompt({
+      attemptId: "restart-attempt",
+      engine: "copilot",
+      prompt,
+      root,
+    });
+    expect(resumed?.pointerPrompt).toBe(first?.pointerPrompt);
+    expect(() =>
+      materializeCopilotSessionPrompt({
+        attemptId: "restart-attempt",
+        engine: "copilot",
+        prompt: `changed-${prompt}`,
+        root,
+      }),
+    ).toThrow(/prompt-file authority/);
+    first?.cleanup();
+    resumed?.cleanup();
+    expect(readdirSync(root)).toEqual([]);
+  });
+
+  test("Copilot prompt-file transport rejects content above its explicit bound", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-copilot-session-bound-"));
+    temporaryPaths.push(root);
+    expect(() =>
+      materializeCopilotSessionPrompt({
+        attemptId: "oversized-attempt",
+        engine: "copilot",
+        prompt: "x".repeat(MAX_SESSION_PROMPT_FILE_BYTES + 1),
+        root,
+      }),
+    ).toThrow(/byte bound/);
+    expect(readdirSync(root)).toEqual([]);
+  });
+
   test.each([
     [
       "claude",
@@ -525,38 +746,42 @@ describe("engine session execution projection", () => {
         "--disallowedTools",
         "Write,Edit,Bash",
       ],
+      { type: "result", session_id: CLAUDE_UUID },
     ],
     [
       "codex",
       CODEX_UUID,
       "gpt-5.4",
       ["--sandbox", "read-only", "--model", "gpt-5.4", "exec", "resume", CODEX_UUID, "--json", "-"],
+      { type: "thread.started", thread_id: CODEX_UUID },
     ],
     [
-      "antigravity",
-      "agy-conversation.42",
-      "gemini-3-pro",
+      "opencode",
+      "ses_fc311e3c9ffegocll2MayNGmaZ",
+      "provider/model",
       [
-        "--conversation",
-        "agy-conversation.42",
-        "-p",
-        "prompt-antigravity",
+        "run",
+        "--session",
+        "ses_fc311e3c9ffegocll2MayNGmaZ",
+        "--format",
+        "json",
         "--model",
-        "gemini-3-pro",
+        "provider/model",
       ],
+      { type: "step_start", sessionID: "ses_fc311e3c9ffegocll2MayNGmaZ" },
     ],
   ] as const)(
     "%s exact mode consumes the exact native id and model override",
-    async (engine, nativeSessionId, model, expectedArgs) => {
+    async (engine, nativeSessionId, model, expectedArgs, acknowledgement) => {
       let argv: string[] = [];
       const adapter = createEngineSessionAdapter({
         spawn: (next) => {
           argv = [...next];
-          return completedProcess();
+          return completedProcess([`${JSON.stringify(acknowledgement)}\n`]);
         },
         writeEvidence: async () => `evidence/${engine}-exact.json`,
       });
-      await adapter.start(
+      const handle = adapter.start(
         request(engine, {
           nativeSessionId,
           spawn: spawnProjection(engine, {
@@ -564,20 +789,146 @@ describe("engine session execution projection", () => {
             model,
             ...(engine === "codex"
               ? { rendered_tools: [] }
-              : engine === "antigravity"
+              : engine === "opencode"
                 ? { rendered_tools: [], sandbox: null }
                 : {}),
           }),
         }),
-      ).completion;
+      );
+      const result = await handle.completion;
       expect(argv.slice(1)).toEqual([...expectedArgs]);
+      expect(result.state).toBe("completed");
+      expect(handle.readResumeBinding()?.nativeSessionId).toBe(nativeSessionId);
       if (engine === "claude") expect(argv).toContain("--safe-mode");
       if (engine === "codex") {
         expect(argv.indexOf("--sandbox")).toBeLessThan(argv.indexOf("resume"));
         expect(argv.indexOf("--model")).toBeLessThan(argv.indexOf("resume"));
       }
+      if (engine === "opencode") {
+        expect(argv).not.toContain("--continue");
+        expect(argv.filter((value) => value === nativeSessionId)).toHaveLength(1);
+      }
     },
   );
+
+  test.each([
+    [
+      "claude",
+      "00000000-0000-4000-8000-000000000001",
+      { type: "result", session_id: "00000000-0000-4000-8000-000000000002" },
+    ],
+    [
+      "codex",
+      "00000000-0000-4000-8000-000000000001",
+      { type: "thread.started", thread_id: "00000000-0000-4000-8000-000000000002" },
+    ],
+    ["opencode", "opencode-session-001", { type: "step_start", sessionID: "opencode-session-002" }],
+  ] as const)(
+    "%s exact mode rejects a mismatched runtime session acknowledgement",
+    async (engine, requestedId, acknowledgement) => {
+      const adapter = createEngineSessionAdapter({
+        spawn: () => completedProcess([`${JSON.stringify(acknowledgement)}\n`]),
+        writeEvidence: async () => `evidence/${engine}-mismatched-resume.json`,
+      });
+      const handle = adapter.start(
+        request(engine, {
+          attemptId: `attempt-${engine}-mismatched-resume`,
+          nativeSessionId: requestedId,
+          spawn: spawnProjection(engine, {
+            sessionMode: "exact",
+            ...(engine === "opencode" ? { rendered_tools: [], sandbox: null } : {}),
+          }),
+        }),
+      );
+      const result = await handle.completion;
+
+      expect(handle.readResumeBinding()).toBeUndefined();
+      expect(handle.readModelOutputBinding()).toBeUndefined();
+      expect(result.state).toBe("ambiguous");
+      expect(result.lifecycle).not.toContain("acknowledged");
+      expect(result.nativeSessionStatus).toBe("unavailable");
+      expect(result.reason).toContain("exact native session acknowledgement mismatched");
+      expect(JSON.stringify(result)).not.toContain(requestedId);
+      expect(JSON.stringify(result)).not.toContain(Object.values(acknowledgement).at(-1));
+    },
+  );
+
+  test("an exact mismatch remains rejected even if a later record echoes the requested id", async () => {
+    const mismatchedId = "00000000-0000-4000-8000-000000000002";
+    const adapter = createEngineSessionAdapter({
+      spawn: () =>
+        completedProcess([
+          `${JSON.stringify({ type: "thread.started", thread_id: mismatchedId })}\n`,
+          `${JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID })}\n`,
+        ]),
+      writeEvidence: async () => "evidence/codex-sticky-resume-rejection.json",
+    });
+    const handle = adapter.start(
+      request("codex", {
+        attemptId: "attempt-codex-sticky-resume-rejection",
+        nativeSessionId: CODEX_UUID,
+        spawn: spawnProjection("codex", { sessionMode: "exact" }),
+      }),
+    );
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()).toBeUndefined();
+    expect(handle.readModelOutputBinding()).toBeUndefined();
+    expect(result.state).toBe("ambiguous");
+    expect(result.lifecycle).not.toContain("acknowledged");
+    expect(result.output).not.toContain(mismatchedId);
+    expect(result.output).not.toContain(CODEX_UUID);
+  });
+
+  test("OpenCode redacts a later opaque mismatch from the same acknowledged chunk", async () => {
+    const requestedId = "opencode-session-001";
+    const mismatchedId = "opencode-session-002";
+    const adapter = createEngineSessionAdapter({
+      spawn: () =>
+        completedProcess([
+          `${JSON.stringify({ type: "step_start", sessionID: requestedId })}\n${JSON.stringify({ type: "step_start", sessionID: mismatchedId })} ordinary ${mismatchedId}\n`,
+        ]),
+      writeEvidence: async () => "evidence/opencode-late-resume-mismatch.json",
+    });
+    const handle = adapter.start(
+      request("opencode", {
+        attemptId: "attempt-opencode-late-resume-mismatch",
+        nativeSessionId: requestedId,
+        spawn: spawnProjection("opencode", {
+          sessionMode: "exact",
+          rendered_tools: [],
+          sandbox: null,
+        }),
+      }),
+    );
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()).toBeUndefined();
+    expect(handle.readModelOutputBinding()).toBeUndefined();
+    expect(result.state).toBe("ambiguous");
+    expect(result.output).not.toContain(requestedId);
+    expect(result.output).not.toContain(mismatchedId);
+  });
+
+  test("Codex exact mode rejects turn.started without the requested thread identity", async () => {
+    const adapter = createEngineSessionAdapter({
+      spawn: () => completedProcess([`${JSON.stringify({ type: "turn.started" })}\n`]),
+      writeEvidence: async () => "evidence/codex-missing-resume-proof.json",
+    });
+    const handle = adapter.start(
+      request("codex", {
+        attemptId: "attempt-codex-missing-resume-proof",
+        nativeSessionId: CODEX_UUID,
+        spawn: spawnProjection("codex", { sessionMode: "exact" }),
+      }),
+    );
+    const result = await handle.completion;
+
+    expect(handle.readResumeBinding()).toBeUndefined();
+    expect(result.state).toBe("ambiguous");
+    expect(result.lifecycle).toEqual(["requested", "dispatched", "ambiguous"]);
+    expect(result.nativeSessionStatus).toBe("unavailable");
+  });
 
   test.each(["fresh", "replay"] as const)(
     "Claude %s mode never consumes a supplied native id",
@@ -622,7 +973,7 @@ describe("engine session execution projection", () => {
     },
   );
 
-  test("Antigravity rejects a flag-shaped exact conversation id before spawn", () => {
+  test("Antigravity rejects exact resume because no exact binding is evidenced", () => {
     let spawns = 0;
     const adapter = createEngineSessionAdapter({
       spawn: () => {
@@ -642,11 +993,38 @@ describe("engine session execution projection", () => {
           }),
         }),
       ),
-    ).toThrow(/invalid antigravity native session id/);
+    ).toThrow(/exact resume is unavailable/);
     expect(spawns).toBe(0);
   });
 
-  test.each(["copilot", "opencode"] as const)(
+  test.each(["--continue", "session id with spaces", "ses_safe\n--model"])(
+    "OpenCode rejects an argv-shaped or non-opaque exact session id: %s",
+    (nativeSessionId) => {
+      let spawns = 0;
+      const adapter = createEngineSessionAdapter({
+        spawn: () => {
+          spawns++;
+          return completedProcess();
+        },
+        writeEvidence: async () => "internal/invalid-opencode-native",
+      });
+      expect(() =>
+        adapter.start(
+          request("opencode", {
+            nativeSessionId,
+            spawn: spawnProjection("opencode", {
+              sessionMode: "exact",
+              rendered_tools: [],
+              sandbox: null,
+            }),
+          }),
+        ),
+      ).toThrow(/invalid opencode native session id/);
+      expect(spawns).toBe(0);
+    },
+  );
+
+  test.each(["copilot", "antigravity"] as const)(
     "%s exact mode fails closed because safe native resume is not admitted",
     (engine) => {
       const adapter = createEngineSessionAdapter({
@@ -832,7 +1210,12 @@ describe("attempt lifecycle and cleanup", () => {
     const req = request("claude", { attemptId: "attempt-pre-spawn-failure" });
     expect(() => adapter.start(req)).toThrow(/spawn exploded/);
     const files = readdirSync(root);
-    expect(files).toEqual(["attempt-pre-spawn-failure.json"]);
+    expect(files.sort()).toEqual(["attempt-pre-spawn-failure.json", "start-authority"]);
+    expect(adapter.startAuthority?.read("attempt-pre-spawn-failure")).toMatchObject({
+      attempt_id: "attempt-pre-spawn-failure",
+      outcome: "unknown",
+      process_quiescent: true,
+    });
     expect(statSync(join(root, files[0] as string)).size).toBeGreaterThan(0);
     const evidence = JSON.parse(readFileSync(join(root, files[0] as string), "utf8")) as Record<
       string,
@@ -844,6 +1227,46 @@ describe("attempt lifecycle and cleanup", () => {
     expect(evidence.lifecycle).toEqual(["requested"]);
     expect(JSON.stringify(evidence)).not.toContain("ambiguous");
     expect(() => adapter.start(req)).toThrow(/immutable attempt evidence already exists/);
+  });
+
+  test("canonicalizes an explicit relative evidence root once for every adapter authority", () => {
+    const parent = mkdtempSync(join(tmpdir(), "vf-relative-evidence-"));
+    temporaryPaths.push(parent);
+    const root = join(parent, "evidence");
+    const adapter = createEngineSessionAdapter({
+      evidenceRoot: relative(process.cwd(), root),
+      spawn: () => {
+        throw new Error("relative root proof");
+      },
+    });
+    expect(() => adapter.start(request("claude", { attemptId: "attempt-relative-root" }))).toThrow(
+      "relative root proof",
+    );
+    const record = adapter.startAuthority?.read("attempt-relative-root");
+    expect(record?.evidence_ref).toBe(join(root, "attempt-relative-root.json"));
+    expect(isAbsolute(record?.evidence_ref ?? "")).toBe(true);
+  });
+
+  test("does not consume an attempt until its evidence reservation succeeds", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-reservation-retry-"));
+    temporaryPaths.push(root);
+    const attemptId = "attempt-reservation-retry";
+    const poison = join(root, `${attemptId}.json`);
+    const adapter = createEngineSessionAdapter({
+      evidenceRoot: root,
+      spawn: () => {
+        throw new Error("retry reached spawn");
+      },
+    });
+    mkdirSync(poison);
+    expect(() => adapter.start(request("claude", { attemptId }))).toThrow(
+      "immutable attempt evidence already exists",
+    );
+    rmSync(poison, { recursive: true });
+    expect(() => adapter.start(request("claude", { attemptId }))).toThrow("retry reached spawn");
+    expect(() => adapter.start(request("claude", { attemptId }))).toThrow(
+      "immutable attempt evidence already exists",
+    );
   });
 
   test("requested observer failure releases its local lease and finalizes evidence", () => {
@@ -1032,8 +1455,8 @@ describe("attempt lifecycle and cleanup", () => {
       writeEvidence: async () => "evidence/acknowledged.json",
     });
     const result = await adapter.start(request("codex")).completion;
-    expect(result.state).toBe("completed");
-    expect(result.lifecycle).toEqual(["requested", "dispatched", "acknowledged", "completed"]);
+    expect(result.state).toBe("ambiguous");
+    expect(result.lifecycle).toEqual(["requested", "dispatched", "acknowledged", "ambiguous"]);
   });
 
   test("exit zero without protocol acknowledgement remains ambiguous", async () => {
@@ -1617,6 +2040,182 @@ describe("native resume evidence and history reconciliation", () => {
     expect(result.nativeSessionStatus).toBe("captured");
   });
 
+  test("keeps Claude model output byte-exact on the authenticated private channel only", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-private-model-output-"));
+    temporaryPaths.push(root);
+    const modelOutput = JSON.stringify({
+      schema_version: "1.0",
+      scope: ["src/private-coordination.ts"],
+      evidence_refs: ["artifact_private-coordination-proof"],
+    });
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      session_id: CLAUDE_UUID,
+      result: modelOutput,
+    });
+    const adapter = createEngineSessionAdapter({
+      evidenceRoot: root,
+      spawn: () => completedProcess([`${envelope}\n`]),
+    });
+    const handle = adapter.start(request("claude", { attemptId: "attempt-private-claude" }));
+
+    const result = await handle.completion;
+    expect(handle.readModelOutputBinding?.()).toEqual({
+      attemptId: "attempt-private-claude",
+      engine: "claude",
+      nativeSessionId: CLAUDE_UUID,
+      output: modelOutput,
+    });
+    expect(result.output).not.toContain("src/private-coordination.ts");
+    expect(JSON.stringify(result)).not.toContain(modelOutput);
+    expect(readFileSync(handle.readEvidenceBinding()?.internalRef as string, "utf8")).not.toContain(
+      modelOutput,
+    );
+  });
+
+  test("accepts only the last Codex agent message before one authenticated turn terminal", async () => {
+    const modelOutput = JSON.stringify({ schema_version: "1.0", kind: "delegate_task" });
+    const raw = [
+      JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "reasoning", text: "untrusted reasoning decoy" },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: modelOutput },
+      }),
+      JSON.stringify({ type: "turn.completed" }),
+    ].join("\n");
+    const adapter = createEngineSessionAdapter({
+      spawn: () => completedProcess([`${raw}\n`]),
+      writeEvidence: async () => "evidence/private-codex.json",
+    });
+    const handle = adapter.start(request("codex", { attemptId: "attempt-private-codex" }));
+
+    await handle.completion;
+    expect(handle.readModelOutputBinding?.()).toEqual({
+      attemptId: "attempt-private-codex",
+      engine: "codex",
+      nativeSessionId: CODEX_UUID,
+      output: modelOutput,
+    });
+    expect(handle.readModelOutputBinding?.()?.output).not.toContain("reasoning decoy");
+  });
+
+  test.each([
+    [
+      "opencode",
+      [
+        JSON.stringify({ type: "step_start", sessionID: "opencode-private-session" }),
+        JSON.stringify({ type: "text", part: { text: '{"kind":"complete"}' } }),
+      ].join("\n"),
+      "opencode-private-session",
+    ],
+    ["copilot", '{"kind":"complete"}', null],
+    ["antigravity", '{"kind":"complete"}', null],
+  ] as const)(
+    "captures bounded native %s model output without public fallback",
+    async (engine, raw, id) => {
+      const adapter = createEngineSessionAdapter({
+        spawn: () => completedProcess([`${raw}\n`]),
+        writeEvidence: async () => `evidence/private-${engine}.json`,
+      });
+      const handle = adapter.start(
+        request(engine, {
+          attemptId: `attempt-private-${engine}`,
+          spawn: spawnProjection(engine, {
+            ...(engine === "opencode" || engine === "antigravity"
+              ? { rendered_tools: [], sandbox: null }
+              : {}),
+          }),
+        }),
+      );
+
+      await handle.completion;
+      expect(handle.readModelOutputBinding()).toEqual({
+        attemptId: `attempt-private-${engine}`,
+        engine,
+        nativeSessionId: id,
+        output: engine === "opencode" ? '{"kind":"complete"}' : '{"kind":"complete"}\n',
+      });
+    },
+  );
+
+  test("never mints private model output for bridge protocol text", async () => {
+    const adapter = createEngineSessionAdapter({
+      protocol: "bridge",
+      spawn: () => completedProcess(['{"kind":"complete"}\n']),
+      writeEvidence: async () => "evidence/no-private-bridge.json",
+    });
+    const handle = adapter.start(request("copilot", { attemptId: "attempt-private-bridge" }));
+
+    await handle.completion;
+    expect(handle.readModelOutputBinding()).toBeUndefined();
+  });
+
+  test.each([
+    [
+      "missing Codex terminal",
+      "codex",
+      [
+        JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: '{"kind":"complete"}' },
+        }),
+      ].join("\n"),
+    ],
+    [
+      "duplicate Codex terminal",
+      "codex",
+      [
+        JSON.stringify({ type: "thread.started", thread_id: CODEX_UUID }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: '{"kind":"complete"}' },
+        }),
+        JSON.stringify({ type: "turn.completed" }),
+        JSON.stringify({ type: "turn.completed" }),
+      ].join("\n"),
+    ],
+    [
+      "Claude error envelope",
+      "claude",
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        session_id: CLAUDE_UUID,
+        result: '{"kind":"complete"}',
+      }),
+    ],
+    [
+      "oversized Claude model output",
+      "claude",
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        session_id: CLAUDE_UUID,
+        result: "x".repeat(70 * 1024),
+      }),
+    ],
+  ] as const)("does not mint private model output for %s", async (_label, engine, raw) => {
+    const adapter = createEngineSessionAdapter({
+      spawn: () => completedProcess([`${raw}\n`]),
+      writeEvidence: async () => `evidence/no-private-${engine}.json`,
+    });
+    const handle = adapter.start(
+      request(engine, { attemptId: `attempt-no-private-${engine}-${raw.length}` }),
+    );
+
+    await handle.completion;
+    expect(handle.readModelOutputBinding?.()).toBeUndefined();
+  });
+
   test("captures native identity internally but keeps status and immutable evidence opaque", async () => {
     const root = mkdtempSync(join(tmpdir(), "vf-attempt-evidence-"));
     temporaryPaths.push(root);
@@ -1651,6 +2250,14 @@ describe("native resume evidence and history reconciliation", () => {
     const evidence = readFileSync(internalEvidence?.internalRef as string, "utf8");
     expect(evidence).not.toContain(nativeId);
     expect(evidence).not.toContain("thread.started");
+    expect(adapter.startAuthority?.read("attempt-immutable-1")).toMatchObject({
+      attempt_id: "attempt-immutable-1",
+      engine: "codex",
+      outcome: "accepted",
+      native_session_id: nativeId,
+      evidence_ref: internalEvidence?.internalRef,
+      process_quiescent: true,
+    });
     expect(() => adapter.start(request("codex", { attemptId: "attempt-immutable-1" }))).toThrow(
       /immutable attempt evidence already exists/,
     );
@@ -1861,6 +2468,7 @@ describe("native resume evidence and history reconciliation", () => {
         status: "reconciled",
         imported_turn_count: 1,
         imported_tool_count: 1,
+        native_history_continuity: "intact",
         completeness_reason: "supported native history supplied",
       });
       expect(JSON.stringify(result)).not.toContain(nativeSessionId);
@@ -1893,6 +2501,35 @@ describe("native resume evidence and history reconciliation", () => {
     });
     expect(codex.imported_turn_count).toBe(1);
     expect(codex.imported_tool_count).toBe(1);
+  });
+
+  test.each([
+    {
+      engine: "claude" as const,
+      nativeSessionId: CLAUDE_UUID,
+      history: [
+        { type: "assistant", sessionId: CLAUDE_UUID, message: { content: [] } },
+        { type: "system", subtype: "compact_boundary", sessionId: CLAUDE_UUID },
+      ],
+    },
+    {
+      engine: "codex" as const,
+      nativeSessionId: CODEX_UUID,
+      history: [
+        { type: "session_meta", payload: { id: CODEX_UUID } },
+        { type: "compacted", payload: { replacement_history: [] } },
+      ],
+    },
+  ])("$engine reports a native compaction boundary as partial continuity", async (request) => {
+    const adapter = createEngineSessionAdapter({ spawn: () => completedProcess() });
+    const result = await adapter.reconcileHistory(request);
+
+    expect(result).toMatchObject({
+      status: "partial",
+      native_history_continuity: "compacted",
+    });
+    expect(result.completeness_reason).toContain("compaction boundary");
+    expect(JSON.stringify(result)).not.toContain(request.nativeSessionId);
   });
 
   test.each(["claude", "codex"] as const)(
@@ -1939,6 +2576,7 @@ describe("native resume evidence and history reconciliation", () => {
         status: "reconciled",
         imported_turn_count: 1,
         imported_tool_count: 1,
+        native_history_continuity: "intact",
         completeness_reason: "supported native history loaded",
       });
     },
@@ -1960,6 +2598,7 @@ describe("native resume evidence and history reconciliation", () => {
       status: "partial",
       imported_turn_count: 0,
       imported_tool_count: 0,
+      native_history_continuity: "unproved",
       completeness_reason: "supported native history was not supplied",
     });
   });
@@ -1988,6 +2627,7 @@ describe("native resume evidence and history reconciliation", () => {
         status: "unavailable",
         imported_turn_count: 0,
         imported_tool_count: 0,
+        native_history_continuity: "unproved",
         completeness_reason: `${engine} native history completeness is not supported`,
       });
     },

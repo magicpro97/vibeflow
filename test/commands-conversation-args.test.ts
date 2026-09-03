@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CONVERSATION_EXIT,
+  classifyConversationError,
   classifyConversationResult,
   executeConversationMessage,
   productionLibraries,
@@ -64,12 +65,16 @@ const fullVerifyManifest = (): PolicyVerifyReport =>
   ) as PolicyVerifyReport;
 
 describe("conversation command helpers", () => {
-  test("stopped is a distinct success exit", () => {
+  test("stopped and needs-input are distinct success exits", () => {
     expect(classifyConversationResult("stopped", [])).toBe(CONVERSATION_EXIT.ok);
+    expect(classifyConversationResult("needs_input", [])).toBe(CONVERSATION_EXIT.ok);
   });
 
   test("awaiting approval is an accepted nonterminal success exit", () => {
     expect(classifyConversationResult("awaiting_approval", [])).toBe(CONVERSATION_EXIT.ok);
+    expect(classifyConversationError(new Error("coordinate_executor_unavailable"))).toBe(
+      CONVERSATION_EXIT.engineStart,
+    );
   });
 
   test("buildConversationHttpAuthority caches one process-local authority per repo/host mode", async () => {
@@ -190,6 +195,47 @@ describe("conversation command helpers", () => {
       output: "child answer",
     });
     expect(result.events.map((record) => record.seq)).toEqual([1, 2]);
+  });
+
+  test("executeConversationMessage preserves an immediately needs-input child status", async () => {
+    const childId = "conversation-needs-input";
+    const childEvents = [
+      event(1, childId, "agent_response_delta", {
+        round_id: "coordination:task-1",
+        participant_id: "coordinator-1",
+        content_delta: "User decision required: choose the irreversible target",
+        final_claim: "User decision required: choose the irreversible target",
+        final_evidence: ["repo:compatibility"],
+        completes_response: true,
+      }),
+      event(2, childId, "conversation_terminal", {
+        lifecycle: "NEEDS_INPUT",
+        terminal: true,
+        final_score: null,
+      }),
+    ];
+    const service = {
+      message: async () => ({
+        message_id: "message-needs-input",
+        accepted: true as const,
+        child_conversation_id: childId,
+      }),
+      snapshot: async () => ({ lifecycle: "NEEDS_INPUT", last_seq: 2 }) as never,
+      events: async () => childEvents,
+      subscribe: (_id: string, listener: (record: PublicStoredTraceEvent) => void) =>
+        Object.assign(() => undefined, {
+          replayReady: Promise.resolve().then(() => childEvents.forEach(listener)),
+        }),
+    };
+
+    await expect(
+      executeConversationMessage(service as never, "conversation-parent", "clarification"),
+    ).resolves.toMatchObject({
+      conversationId: childId,
+      childConversationId: childId,
+      status: "needs_input",
+      output: "User decision required: choose the irreversible target",
+    });
   });
 
   test("executeConversationMessage waits on an active target and never returns accepted blank output", async () => {

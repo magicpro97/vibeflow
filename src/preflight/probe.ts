@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { type Engine, needsShellForCommand, resolveEngineBinary } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { filterEnv } from "../dispatch/env-filter.js";
 import type { ProbeResult, ProbeSpawner, ReadinessLevel } from "./types.js";
 
@@ -22,7 +23,7 @@ export interface ProbeInvocation {
 // Production callers pass undefined; tests pass 50ms for fast timeouts.
 export function probeTimeoutMs(engine: Engine, override?: number): number {
   if (override !== undefined) return override;
-  return engine === "copilot" ? GH_AUTH_TIMEOUT_MS : PROBE_TIMEOUT_MS;
+  return engine === AGENT_ENGINE.COPILOT ? GH_AUTH_TIMEOUT_MS : PROBE_TIMEOUT_MS;
 }
 
 /** Default launcher: bounded spawnSync, prompt on stdin, no shell. */
@@ -60,21 +61,21 @@ export function defaultSpawner(
 // throw branch (line 100-101) and the actual claude/codex cases.
 export function probeInvocation(engine: Engine, prompt = PROBE_PROMPT): ProbeInvocation {
   switch (engine) {
-    case "claude":
+    case AGENT_ENGINE.CLAUDE:
       return { cmd: "claude", args: ["-p", "--output-format", "json"], input: prompt };
-    case "codex":
+    case AGENT_ENGINE.CODEX:
       return { cmd: "codex", args: ["doctor"], input: prompt };
-    case "copilot":
+    case AGENT_ENGINE.COPILOT:
       throw new Error("copilot uses `gh auth status`; no probe invocation exists");
-    case "opencode":
-      return { cmd: "opencode", args: ["run", "--format", "json", "-"], input: prompt };
-    case "antigravity":
+    case AGENT_ENGINE.OPENCODE:
+      return { cmd: "opencode", args: ["run", "--format", "json"], input: prompt };
+    case AGENT_ENGINE.ANTIGRAVITY:
       return { cmd: "agy", args: ["-p", prompt], input: "" };
   }
 }
 
 export function engineBinary(engine: Engine): string {
-  return engine === "copilot" ? "copilot" : probeInvocation(engine).cmd;
+  return engine === AGENT_ENGINE.COPILOT ? "copilot" : probeInvocation(engine).cmd;
 }
 
 /**
@@ -96,9 +97,9 @@ export function ghInstallHint(): string {
 
 /** Install hint surfaced when an engine binary is missing. */
 export function installHint(engine: Engine): string {
-  if (engine === "copilot") return "copilot CLI not found — install GitHub Copilot CLI";
-  if (engine === "opencode") return "opencode CLI not found — install opencode CLI";
-  if (engine === "antigravity")
+  if (engine === AGENT_ENGINE.COPILOT) return "copilot CLI not found — install GitHub Copilot CLI";
+  if (engine === AGENT_ENGINE.OPENCODE) return "opencode CLI not found — install opencode CLI";
+  if (engine === AGENT_ENGINE.ANTIGRAVITY)
     return "agy (Antigravity CLI) not found — install from https://antigravity.google/docs/cli/install";
   return `${engine} CLI not found — install the ${engine} CLI`;
 }
@@ -116,9 +117,11 @@ export function installHint(engine: Engine): string {
  */
 export function probeSucceeded(engine: Engine, status: number, stdout: string): boolean {
   if (status !== 0) return false;
-  if (engine === "codex") return /\b0 fail ok\b/i.test(stdout) || /\b0 fail\b/i.test(stdout);
-  if (engine === "opencode" || engine === "antigravity") return containsToken(stdout);
-  if (engine === "claude") {
+  if (engine === AGENT_ENGINE.CODEX)
+    return /\b0 fail ok\b/i.test(stdout) || /\b0 fail\b/i.test(stdout);
+  if (engine === AGENT_ENGINE.OPENCODE || engine === AGENT_ENGINE.ANTIGRAVITY)
+    return containsToken(stdout);
+  if (engine === AGENT_ENGINE.CLAUDE) {
     const fromJson = claudeResultText(stdout);
     if (fromJson !== undefined) return containsToken(fromJson);
   }
@@ -200,7 +203,7 @@ export function checkCopilotAuth(
   const { args, input } = ghAuthInvocation();
   const result = spawner(ghCmd, args, input);
   if (result.status === 0) return { level: "ready", detail: "copilot: GitHub auth OK" };
-  return failedAuth("copilot", result);
+  return failedAuth(AGENT_ENGINE.COPILOT, result);
 }
 
 /**

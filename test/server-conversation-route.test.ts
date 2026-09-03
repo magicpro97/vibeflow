@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConversationRoutingError } from "../src/orchestrator/conversation/router.js";
+import {
+  CONVERSATION_ROUTING_ERROR_CODE,
+  ConversationRoutingError,
+} from "../src/orchestrator/conversation/router.js";
 import {
   ConversationControlConflictError,
   ConversationInvalidTargetParticipantError,
@@ -18,6 +22,7 @@ import type {
 import { DurableArtifactRegistry } from "../src/orchestrator/trace/artifacts.js";
 import { TraceStore } from "../src/orchestrator/trace/store.js";
 import { startServer } from "../src/server.js";
+import { deriveBrowserActionAuthority } from "../src/server/conversation-action-principal.js";
 import {
   ConversationSessionAuthority,
   ConversationStreamTokenAuthority,
@@ -212,6 +217,66 @@ describe("conversation namespace", () => {
     }
   });
 
+  test("startServer preserves a valid loopback conversation cookie across HTML reloads", async () => {
+    let sessionByte = 40;
+    const sessions = new ConversationSessionAuthority({
+      loopback: true,
+      randomBytes: () => Buffer.alloc(32, sessionByte++),
+    });
+    const running = await startServer(0, { conversation: authority({ sessions }) });
+    try {
+      const first = await fetch(running.url);
+      const firstCookie = first.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
+      expect(firstCookie).toMatch(/^vf_conversation_session=/);
+      const firstActor = deriveBrowserActionAuthority(
+        new Request(`${running.url}/`, { headers: { cookie: firstCookie } }),
+        "conversation-a",
+      ).actor.public_actor_id;
+
+      const second = await fetch(running.url, { headers: { cookie: firstCookie } });
+      expect(second.headers.get("set-cookie")).toBeNull();
+      expect(
+        deriveBrowserActionAuthority(
+          new Request(`${running.url}/`, { headers: { cookie: firstCookie } }),
+          "conversation-a",
+        ).actor.public_actor_id,
+      ).toBe(firstActor);
+
+      const third = await fetch(running.url, {
+        headers: { cookie: "vf_conversation_session=short" },
+      });
+      const replacement = third.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
+      expect(replacement).toMatch(/^vf_conversation_session=/);
+      expect(
+        sessions.authorize(new Request(`${running.url}/`, { headers: { cookie: replacement } })),
+      ).toBe(true);
+      expect(
+        deriveBrowserActionAuthority(
+          new Request(`${running.url}/`, { headers: { cookie: replacement } }),
+          "conversation-a",
+        ).actor.public_actor_id,
+      ).not.toBe(firstActor);
+    } finally {
+      await running.server.stop(true);
+    }
+  });
+
+  test("never serves HTML or mints a loopback session for a foreign request Host", async () => {
+    const sessions = new ConversationSessionAuthority({
+      loopback: true,
+      randomBytes: () => Buffer.alloc(32, 50),
+    });
+    const running = await startServer(0, { conversation: authority({ sessions }) });
+    try {
+      const response = await fetch(running.url, { headers: { host: "attacker.example" } });
+      expect(response.status).toBe(403);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.text()).toBe("Forbidden");
+    } finally {
+      await running.server.stop(true);
+    }
+  });
+
   test("rejects a loopback session authority when the server is bound to LAN", async () => {
     const shared = authority({
       sessions: new ConversationSessionAuthority({ loopback: true }),
@@ -238,6 +303,130 @@ describe("conversation namespace", () => {
       }),
     });
     await running.server.stop(true);
+  });
+
+  test("startServer composes catalog, lineage, timeline, handoff, and deferred action routes", async () => {
+    const calls: string[] = [];
+    const proposalId = `vf-proposal-${"a".repeat(64)}`;
+    const proposalDigest = `sha256:${"b".repeat(64)}`;
+    const response = {
+      schema_version: "1.0",
+      proposal: { proposal_id: proposalId, proposal_digest: proposalDigest },
+      approval: null,
+      operation: { state: "pending_review" },
+    };
+    const browser = {
+      catalog: { list: async () => ({ schema_version: "1.0", items: [], next_cursor: null }) },
+      lineage: {
+        read: async () => ({ schema_version: "1.0", nodes: [], next_cursor: null }),
+        head: () => ({
+          schema_version: "1.0",
+          root_session_id: "conversation-a",
+          head_status: "committed",
+          head_epoch: 0,
+          head_digest: `sha256:${"d".repeat(64)}`,
+          active: {
+            schema_version: "1.0",
+            conversation_id: "conversation-a",
+            revision_id: "revision-a",
+            revision_ordinal: 0,
+            lock_digest: `sha256:${"e".repeat(64)}`,
+          },
+        }),
+      },
+      timeline: {
+        read: async () => ({ schema_version: "1.0", items: [], next_cursor: null }),
+      },
+      handoff: { read: async () => ({ schema_version: "1.0", handoff_id: "handoff-a" }) },
+      rootSessionId: () => "conversation-a",
+      actions: {
+        async propose() {
+          calls.push("propose");
+          return { created: true, response };
+        },
+        async get() {
+          return response;
+        },
+        async pending() {
+          return [response];
+        },
+        async anchored() {
+          return [response];
+        },
+        async events() {
+          return [];
+        },
+        async challenge() {
+          throw new Error("not used");
+        },
+        async approve() {
+          throw new Error("not used");
+        },
+        async commit() {
+          throw new Error("not used");
+        },
+        async cancel() {
+          throw new Error("not used");
+        },
+      },
+    };
+    const running = await startServer(0, {
+      conversation: authority({ browser: browser as never }),
+    });
+    const browserHeaders = {
+      cookie: `vf_conversation_session=${Buffer.alloc(32, 5).toString("base64url")}`,
+    };
+    try {
+      for (const path of [
+        "/api/conversations",
+        "/api/conversations/conversation-a/lineage",
+        "/api/conversations/conversation-a/context-handoff",
+        "/api/conversation-sessions/conversation-a/head",
+        "/api/conversation-sessions/conversation-a/timeline",
+        "/api/conversations/conversation-a/action-proposals?state=pending",
+      ])
+        expect((await fetch(`${running.url}${path}`, { headers: browserHeaders })).status).toBe(
+          200,
+        );
+      const created = await fetch(
+        `${running.url}/api/conversations/conversation-a/action-proposals`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", ...browserHeaders },
+          body: JSON.stringify({
+            schema_version: "1.0",
+            idempotency_key: "http-deferred-settings",
+            anchor_event_id: null,
+            expected: {
+              mode: "writable-revision",
+              conversation_id: "conversation-a",
+              revision_id: "revision-a",
+              last_seq: 4,
+              conversation_lock_digest: `sha256:${"c".repeat(64)}`,
+            },
+            candidate: {
+              type: "conversation.update_settings",
+              changes: { max_rounds: 3 },
+            },
+          }),
+        },
+      );
+      expect(created.status).toBe(201);
+      expect(((await created.json()) as { operation: { state: string } }).operation.state).toBe(
+        "pending_review",
+      );
+      expect(calls).toEqual(["propose"]);
+      expect(
+        (
+          await fetch(
+            `${running.url}/api/conversations/conversation-a/action-proposals/${proposalId}`,
+            { headers: browserHeaders },
+          )
+        ).status,
+      ).toBe(200);
+    } finally {
+      await running.server.stop(true);
+    }
   });
 });
 
@@ -322,14 +511,27 @@ describe("conversation DTO and status mapping", () => {
   });
 
   test("messages return 202 and preserve child revision Location without reopening the parent", async () => {
+    let observedMessage: unknown;
+    const quote = {
+      root_session_id: "conversation-a",
+      conversation_id: "conversation-a",
+      revision_id: "revision-a",
+      target_event_id: "event-a",
+      target_kind: "completed-agent-response",
+      content_digest: `sha256:${"a".repeat(64)}`,
+      author_public_id: "participant-1",
+    };
     const auth = authority({
       service: service({
-        message: async () => ({
-          message_id: "message-a",
-          accepted: true,
-          child_conversation_id: "conversation-child",
-          location: "/api/conversations/conversation-child",
-        }),
+        message: async (_id: string, input: unknown) => {
+          observedMessage = structuredClone(input);
+          return {
+            message_id: "message-a",
+            accepted: true,
+            child_conversation_id: "conversation-child",
+            location: "/api/conversations/conversation-child",
+          };
+        },
       }),
     });
     const response = await route(
@@ -337,10 +539,16 @@ describe("conversation DTO and status mapping", () => {
       request("POST", "/api/conversations/conversation-a/messages", {
         content: "revise this",
         target_participants: ["participant-1"],
+        quote_refs: [quote],
       }),
     );
     expect(response.status).toBe(202);
     expect(response.headers.get("location")).toBe("/api/conversations/conversation-child");
+    expect(observedMessage).toEqual({
+      content: "revise this",
+      target_participants: ["participant-1"],
+      quote_refs: [quote],
+    });
     expect(await response.json()).toEqual({
       message_id: "message-a",
       accepted: true,
@@ -368,6 +576,13 @@ describe("conversation DTO and status mapping", () => {
         "invalid_request",
       ],
       [new ConversationRoutingError("unknown_explicit_policy"), 400, "invalid_request"],
+      [
+        new ConversationRoutingError(
+          CONVERSATION_ROUTING_ERROR_CODE.COORDINATE_EXECUTOR_UNAVAILABLE,
+        ),
+        400,
+        "invalid_request",
+      ],
       [new Error("conversation not found"), 500, "conversation_failed"],
       [new Error("unknown target participant"), 500, "conversation_failed"],
       [new Error("trace journal: invalid hash chain"), 500, "conversation_failed"],
@@ -647,7 +862,25 @@ describe("conversation DTO and status mapping", () => {
           },
         }),
         artifacts: {
-          registry: restartedRegistry,
+          ancestry: {
+            resolve(conversationId, artifactId) {
+              const resolution = restartedRegistry.resolve(conversationId, artifactId);
+              return resolution
+                ? {
+                    owner_conversation_id: conversationId,
+                    internal_ref: resolution.internalRef,
+                    reference: {
+                      artifact_id: artifactId,
+                      artifact_kind: "conversation-artifact" as const,
+                      media_type: "application/octet-stream",
+                      byte_length: Buffer.byteLength("durable artifact"),
+                      content_sha256: createHash("sha256").update("durable artifact").digest("hex"),
+                      resolver: "conversation-artifact-v1" as const,
+                    },
+                  }
+                : null;
+            },
+          },
           store: {
             readArtifactRef(conversationId, observedRef) {
               reads += 1;
@@ -660,7 +893,10 @@ describe("conversation DTO and status mapping", () => {
       });
       const response = await route(
         auth,
-        request("GET", `/api/conversations/conversation-a/artifacts/${opaqueId}`),
+        request(
+          "GET",
+          `/api/conversations/conversation-a/artifacts/${opaqueId}?expected_sha256=${createHash("sha256").update("durable artifact").digest("hex")}`,
+        ),
       );
       expect(response.status).toBe(200);
       expect(await response.text()).toBe("durable artifact");

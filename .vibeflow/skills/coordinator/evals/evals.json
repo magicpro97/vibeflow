@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "skill": "coordinator",
+  "cases": [
+    {
+      "id": "coord-positive-natural-delegation",
+      "type": "positive",
+      "prompt": "Claude delegates implementation to Codex, keeps the brief current, and independently verifies the returned patch."
+    },
+    {
+      "id": "coord-positive-executor-question",
+      "type": "positive",
+      "prompt": "The implementing CLI needs a spec detail; route executor clarification through the lead and repository evidence before asking me."
+    },
+    {
+      "id": "coord-positive-autopilot-handoff",
+      "type": "positive",
+      "prompt": "Run autopilot agent delegation, pass peer-only context handoff notes, and promote the candidate only after detached review."
+    },
+    {
+      "id": "coord-negative-keyword-explanation",
+      "type": "negative",
+      "prompt": "Explain what a coordinator, Hermes, and multi-agent workflow do; this is status-only and must not dispatch anything."
+    },
+    {
+      "id": "coord-negative-direct-typo",
+      "type": "negative",
+      "prompt": "Fix one typo directly in README.md with no agent handoff or delegated workflow."
+    },
+    {
+      "id": "coord-negative-existing-run-status",
+      "type": "negative",
+      "prompt": "Report the current CLI executor status and consumed epoch count without resuming, salvaging, or modifying the run."
+    },
+    {
+      "id": "coord-negative-language-keyword",
+      "type": "negative",
+      "prompt": "Explain how C# delegates work; do not dispatch an agent or edit code."
+    },
+    {
+      "id": "coord-negative-ui-autopilot",
+      "type": "negative",
+      "prompt": "Add an autopilot mode label to the landing page with no agent delegation."
+    }
+  ]
+}

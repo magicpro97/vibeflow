@@ -1,35 +1,18 @@
 // Coverage fixtures are compacted selectively to stay below the 400-line source cap.
 import { createRenderer, nextTick, reactive } from "vue";
+import { CONVERSATION_BASELINE_SKIP_REASON } from "../../../orchestrator/conversation/conversation-baseline-contract.js";
 import type { ConversationWorkspaceState } from "../conversation-store.js";
 import type { ConversationSnapshot, ConversationTraceRecord } from "../conversation-types.js";
+import {
+  caught,
+  eq,
+  ok,
+  restoreGlobal,
+  snapshot,
+  trace,
+  userMessage,
+} from "./ui-conversation-coverage-final.helpers.js";
 const { test } = await import(String("bun:test"));
-// biome-ignore format: compact helper keeps the coverage test below the source cap
-function ok(label: string, condition: unknown): asserts condition { if (!condition) throw new Error(`FAIL: ${label}`); }
-function eq(label: string, actual: unknown, expected: unknown) {
-  const left = JSON.stringify(actual);
-  const right = JSON.stringify(expected);
-  if (left !== right) throw new Error(`FAIL: ${label}\nexpected ${right}\nreceived ${left}`);
-}
-// biome-ignore format: compact fixture keeps the coverage test below the source cap
-const userMessage = (content: string): ConversationTraceRecord["event"] => ({ type: "user_message", payload: { content, target_participants: "all" } });
-async function caught(promise: Promise<unknown>) {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-  throw new Error("FAIL: expected promise to reject");
-}
-// biome-ignore format: compact fixture helper keeps the coverage test below the source cap
-function trace(seq: number, event: ConversationTraceRecord["event"], over: Partial<ConversationTraceRecord> = {}): ConversationTraceRecord {
-  return { event_id: `event-${seq}`, seq, ts: `2026-08-23T00:00:${String(seq).padStart(2, "0")}Z`, conversation_id: "conversation-1", public_session_ref: null, event, ...over } as unknown as ConversationTraceRecord;
-}
-// biome-ignore format: compact fixture keeps the coverage test below the source cap
-const snapshot = { conversation_id: "conversation-1", participants: [], last_seq: 7 } as unknown as ConversationSnapshot;
-function restoreGlobal(name: string, descriptor: PropertyDescriptor | undefined) {
-  if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-  else Reflect.deleteProperty(globalThis, name);
-}
 test("conversation API, projections, and stream lifecycle cover final behavioral branches", async () => {
   const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
   const apiPath = require.resolve("../conversation-api.ts");
@@ -52,11 +35,11 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
   const clearTimeoutDescriptor = Object.getOwnPropertyDescriptor(globalThis, "clearTimeout");
   const calls: Array<{ path: string; init: RequestInit }> = [];
   // biome-ignore format: compact fetch fixture keeps the coverage test below the source cap
-  let response: () => Response | Promise<Response> = () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+  let response: (path: string) => Response | Promise<Response> = (path) => new Response(JSON.stringify(path.endsWith("/snapshot") ? { ...snapshot, conversation_id: "conversation-a" } : { ok: true }), { status: 200 });
   const timers = new Map<number, { delay: number; callback: () => unknown }>();
   try {
     // biome-ignore format: compact fetch fixture keeps the coverage test below the source cap
-    globalThis.fetch = (async (input, init = {}) => { calls.push({ path: String(input), init }); return response(); }) as typeof fetch;
+    globalThis.fetch = (async (input, init = {}) => { calls.push({ path: String(input), init }); return response(String(input)); }) as typeof fetch;
     const id = "conversation-a";
     const signal = new AbortController().signal;
     await csrfApi.conversationApi.create({ topic: "hello" }, signal);
@@ -100,9 +83,10 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
         { status, code: expectedCode, message: expectedMessage },
       );
     }
-    response = () => new Response("not-json", { status: 200 });
+    // biome-ignore format: compact malformed snapshot keeps this coverage file within the source cap
+    response = () => new Response(JSON.stringify({ ...snapshot, lifecycle: "FUTURE" }), { status: 200 });
     const invalid = await caught(api.conversationApi.snapshot("conversation-1"));
-    ok("invalid JSON", invalid instanceof api.ConversationApiError);
+    ok("invalid snapshot", invalid instanceof api.ConversationApiError);
     eq("invalid fields", [invalid.status, invalid.code], [200, null]);
     eq("invalid copy", invalid.message, "conversation response was invalid");
     const directError = new api.ConversationApiError(400, "bad", "bad request");
@@ -140,15 +124,17 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
     // biome-ignore format: compact projection fixture keeps the coverage test below the source cap
     const winner = (option: string) => matrix?.rows[0] ? { ...matrix, rows: [{ ...matrix.rows[0], option, rank: 1 }] } : null;
     // biome-ignore format: compact projection fixture keeps the coverage test below the source cap
-    const baseline = (status: "success" | "failed" | "skipped", answer: string | null, decision = matrix) => api.projectConversationBaseline([trace(25, { type: "baseline_result", payload: { status, answer, confidence: null, skip_reason: status === "success" ? null : "reason" } })], decision);
+    const baseline = (status: "success" | "failed" | "skipped", answer: string | null, decision = matrix) => api.projectConversationBaseline([trace(25, { type: "baseline_result", payload: { status, answer, confidence: null, skip_reason: status === "success" ? null : CONVERSATION_BASELINE_SKIP_REASON.DISABLED } })], decision);
     // biome-ignore format: exact compact matrix keeps every public baseline branch below the source cap
-    eq("baseline projection branches", [api.projectConversationBaseline([], matrix), baseline("skipped", null), baseline("success", "answer", null), baseline("success", "", matrix), baseline("success", "---", winner("!!!")), baseline("success", "---", matrix), baseline("success", "alpha beta", winner("beta gamma")), baseline("success", "  ＡLPHA café ", winner("alpha CAFÉ"))], [null, { status: "skipped", baseline_answer: null, debate_answer: "Alpha", divergence: null, skip_reason: "reason" }, { status: "failed", baseline_answer: "answer", debate_answer: null, divergence: null, skip_reason: "no_debate_answer" }, { status: "failed", baseline_answer: "", debate_answer: "Alpha", divergence: null, skip_reason: "baseline_missing" }, { status: "success", baseline_answer: "---", debate_answer: "!!!", divergence: 0, skip_reason: null }, { status: "success", baseline_answer: "---", debate_answer: "Alpha", divergence: 1, skip_reason: null }, { status: "success", baseline_answer: "alpha beta", debate_answer: "beta gamma", divergence: 0.666667, skip_reason: null }, { status: "success", baseline_answer: "  ＡLPHA café ", debate_answer: "alpha CAFÉ", divergence: 0, skip_reason: null }]);
+    eq("baseline projection branches", [api.projectConversationBaseline([], matrix), baseline("skipped", null), baseline("success", "answer", null), baseline("success", "", matrix), baseline("success", "---", winner("!!!")), baseline("success", "---", matrix), baseline("success", "alpha beta", winner("beta gamma")), baseline("success", "  ＡLPHA café ", winner("alpha CAFÉ"))], [null, { status: "skipped", baseline_answer: null, debate_answer: "Alpha", divergence: null, skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED }, { status: "failed", baseline_answer: "answer", debate_answer: null, divergence: null, skip_reason: "no_debate_answer" }, { status: "failed", baseline_answer: "", debate_answer: "Alpha", divergence: null, skip_reason: "baseline_missing" }, { status: "success", baseline_answer: "---", debate_answer: "!!!", divergence: 0, skip_reason: null }, { status: "success", baseline_answer: "---", debate_answer: "Alpha", divergence: 1, skip_reason: null }, { status: "success", baseline_answer: "alpha beta", debate_answer: "beta gamma", divergence: 0.666667, skip_reason: null }, { status: "success", baseline_answer: "  ＡLPHA café ", debate_answer: "alpha CAFÉ", divergence: 0, skip_reason: null }]);
     const types = await import("../conversation-types.js");
     const changingAttempt = types.createConversationStreamAttemptGuard();
     const terminal = await types.recoverConversationStreamAttempt(
       changingAttempt,
       async () => {
-        changingAttempt.acceptTypedError('{"code":"stream_unavailable"}');
+        changingAttempt.acceptTypedError(
+          '{"code":"not_found","message":"Gone","correlation_id":"vf-stream-test","retryable":false,"recovery_action":null,"details":null}',
+        );
         return false;
       },
       () => {
@@ -178,15 +164,12 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
       }),
       trace(5, {
         type: "conversation_terminal",
-        payload: { lifecycle: "COMPLETED", terminal: true, final_score: 0.5 },
+        payload: { lifecycle: "NEEDS_INPUT", terminal: true, final_score: null },
       }),
       trace(6, { type: "error", payload: { agent_id: null, code: "failed", message: "boom" } }),
     ]);
-    eq(
-      "message kinds",
-      messages.map((message) => message.kind),
-      ["user", "precommit", "decision", "status", "status", "error"],
-    );
+    // biome-ignore format: compact projection oracle keeps the coverage test below the source cap
+    eq("message kinds and needs-input copy", [messages.map((message) => message.kind), messages[4]?.body], [["user", "precommit", "decision", "status", "status", "error"], "Needs input"]);
     type Listener = (event: Event) => void;
     class FakeEventSource {
       static instances: FakeEventSource[] = [];
@@ -270,14 +253,9 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
     function state(over: Partial<ConversationWorkspaceState> = {}) {
       return reactive(Object.assign(store.createConversationState(), over));
     }
-    const connected = (token: string, expires: string | null = null) =>
-      state({
-        activeConversationId: "conversation-1",
-        streamToken: token,
-        streamTokenExpiresAt: expires,
-      });
-
-    function mountStream(current: ConversationWorkspaceState) {
+    // biome-ignore format: compact fixture keeps this exhaustive coverage test below the source cap
+    const connected = (token: string, expires: string | null = null) => state({ activeConversationId: "conversation-1", streamToken: token, streamTokenExpiresAt: expires });
+    function mountStream(current: ConversationWorkspaceState, frameAccepted = true) {
       const snapshots: ConversationSnapshot[] = [];
       const traces: ConversationTraceRecord[] = [];
       let controls!: ReturnType<typeof streamModule.useConversationStream>;
@@ -288,11 +266,11 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
             currentCursor: () => current.cursor,
             applySnapshot(value) {
               snapshots.push(value);
-              return true;
+              return frameAccepted;
             },
             applyTrace(value) {
               traces.push(value);
-              return true;
+              return frameAccepted;
             },
             setStreamCredentials(token, expiresAt) {
               current.streamToken = token;
@@ -305,41 +283,46 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
       app.mount(host());
       return { app, controls, snapshots, traces };
     }
-
-    const credentials = (token: string) => ({
-      stream_token: token,
-      stream_token_expires_at: "invalid",
-    });
+    // biome-ignore format: compact fixture keeps this exhaustive coverage test below the source cap
+    const credentials = (token: string) => ({ stream_token: token, stream_token_expires_at: "invalid" });
     let renewalCount = 0;
     response = () => new Response(JSON.stringify(credentials(`renewed-${++renewalCount}`)));
-
     const idle = mountStream(state());
     idle.controls.reconnect();
     idle.controls.disconnect();
     idle.app.unmount();
     idle.controls.reconnect();
     eq("idle", FakeEventSource.instances.length, 0);
-
     const liveState = connected("token x", "invalid");
     liveState.cursor = 7;
     const live = mountStream(liveState);
     await settle();
     const first = FakeEventSource.instances.at(-1) as FakeEventSource;
-    ok(
-      "cursor",
-      first.url.endsWith("stream_token=token+x&since=7") && liveState.streamStatus === "connecting",
-    );
+    // biome-ignore format: compact assertion keeps this exhaustive coverage test below the source cap
+    ok("cursor", first.url.endsWith("stream_token=token+x&since=7") && liveState.streamStatus === "connecting");
     first.emit("snapshot", JSON.stringify(snapshot));
-    first.emit("snapshot", "{");
+    first.emit("snapshot", JSON.stringify({ ...snapshot, lifecycle: "FUTURE" }));
     first.emit("trace", JSON.stringify(trace(9, userMessage("hi"))));
-    first.emit("trace", "{");
+    // biome-ignore format: compact unknown-event regression keeps this coverage file within the source cap
+    first.emit("trace", JSON.stringify({ ...trace(10, userMessage("unknown")), event: { type: "future_event", payload: {} } }));
     first.emit("error", undefined, false);
     first.emit("error", '{"code":"temporary","message":"retry"}');
     eq(
       "frames",
       [live.snapshots.length, live.traces.length, liveState.streamError, first.closed],
-      [1, 1, "retry", false],
+      [1, 1, "conversation stream failed", false],
     );
+    const rejectedState = connected("token y");
+    const rejected = mountStream(rejectedState, false);
+    await settle();
+    const rejectedSource = FakeEventSource.instances.at(-1) as FakeEventSource;
+    rejectedSource.emit("snapshot", JSON.stringify(snapshot));
+    // biome-ignore format: compact regression keeps this exhaustive coverage test below the source cap
+    eq("snapshot adoption failure", [rejected.snapshots.length, rejectedState.streamStatus, rejectedState.streamError], [1, "error", "conversation snapshot was invalid"]);
+    rejectedSource.emit("trace", JSON.stringify(trace(9, userMessage("rejected"))));
+    // biome-ignore format: compact regression keeps this exhaustive coverage test below the source cap
+    eq("trace adoption failure", [rejected.traces.length, rejectedState.streamStatus, rejectedState.streamError], [1, "error", "conversation trace event was invalid"]);
+    rejected.app.unmount();
     live.controls.reconnect();
     await settle();
     const second = FakeEventSource.instances.at(-1) as FakeEventSource;
@@ -347,7 +330,10 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
     first.emit("trace", JSON.stringify(trace(10, userMessage("stale"))));
     first.emit("error", '{"code":"temporary"}');
     await first.onerror?.();
-    second.emit("error", '{"code":"stream_unavailable","message":"gone"}');
+    second.emit(
+      "error",
+      '{"code":"not_found","message":"gone","correlation_id":"vf-stream-test","retryable":false,"recovery_action":null,"details":null}',
+    );
     await second.onerror?.();
     eq(
       "fatal",
@@ -363,21 +349,37 @@ test("conversation API, projections, and stream lifecycle cover final behavioral
     await runTimer(1_000);
     eq("scheduled renew", renewalState.streamToken, "renewed-1");
     const renewedSource = FakeEventSource.instances.at(-1) as FakeEventSource;
+    const sourceCountBeforeRenewal = FakeEventSource.instances.length;
     await renewedSource.onerror?.();
     await settle();
-    eq("transport renew", [renewalState.streamToken, renewedSource.closed], ["renewed-2", true]);
+    // biome-ignore format: compact assertion keeps this exhaustive coverage test below the source cap
+    eq("transport renew", [renewalState.streamToken, renewedSource.closed, FakeEventSource.instances.length], ["renewed-2", true, sourceCountBeforeRenewal + 1]);
     renewal.app.unmount();
+
+    let resolveStale!: (value: Response) => void;
+    // biome-ignore format: compact deferred fixture keeps this exhaustive coverage test below the source cap
+    response = () => new Promise<Response>((resolve) => { resolveStale = resolve; });
+    const switchingState = connected("token-a");
+    const switching = mountStream(switchingState);
+    await settle();
+    const staleRenewal = (FakeEventSource.instances.at(-1) as FakeEventSource).onerror?.();
+    switchingState.activeConversationId = "conversation-2";
+    switchingState.streamToken = "token-b";
+    await settle();
+    resolveStale(new Response(JSON.stringify(credentials("stale-token-a"))));
+    await staleRenewal;
+    await settle();
+    // biome-ignore format: compact assertion keeps this exhaustive coverage test below the source cap
+    eq("stale renewal", [switchingState.activeConversationId, switchingState.streamToken], ["conversation-2", "token-b"]);
+    switching.app.unmount();
 
     response = () => Promise.reject(new Error("renew denied"));
     const retryState = connected("retry");
     const retry = mountStream(retryState);
     const retrySource = FakeEventSource.instances.at(-1) as FakeEventSource;
     await retrySource.onerror?.();
-    ok(
-      "retry status",
-      retryState.streamStatus === "reconnecting" &&
-        retryState.streamError === "conversation stream disconnected",
-    );
+    // biome-ignore format: compact assertion keeps this exhaustive coverage test below the source cap
+    ok("retry status", retryState.streamStatus === "reconnecting" && retryState.streamError === "conversation stream disconnected");
     await runTimer(1_500);
     ok("retry source", FakeEventSource.instances.at(-1) !== retrySource);
     retry.app.unmount();

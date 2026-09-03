@@ -16,6 +16,20 @@ Full workflow guide: load the `vf` skill (or `/vf` in a CLI) — Flow A–D, pit
 Powered by VibeFlow v0.15.0 — https://github.com/magicpro97/vibeflow
 <!-- vibeflow:end -->
 
+## Bun and TypeScript conventions
+
+- Read `docs/CODING_CONVENTIONS.md` before changing source, tests, protocols,
+  subprocesses, or build configuration.
+- Bun drives development and tests; shipped source must remain compatible with
+  the Node-targeted ESM bundle.
+- Do not add TypeScript `enum` or `const enum`. Shared closed vocabularies use
+  one frozen `as const` runtime authority with inferred unions and total
+  `satisfies` projections. Do not centralize genuinely local one-use literals.
+- Keep strict TypeScript, portable argv-based process launches, deterministic
+  cleanup, descriptive `bun:test` coverage, and the 400-line source cap.
+- Run focused checks while iterating and the final `vf verify` confidence gate
+  after any code edit.
+
 ## Commit messages (Conventional Commits)
 
 VibeFlow integrates `release-please` (see commit `d88d061`), so the commit message on `main` is the **only** signal that decides the next version bump. Write commits accordingly.

@@ -4,6 +4,8 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import {
+  authority,
+  capability,
   defaultGit,
   demo,
   discover,
@@ -37,9 +39,15 @@ import { config, decision } from "./commands/config-decision.js";
 import { buildConversationHttpAuthority } from "./commands/conversation-http.js";
 import { coord } from "./commands/coord.js";
 import { evalCmd } from "./commands/eval.js";
-import { lanExposureWarning } from "./commands/lan-warning.js";
 import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
+import {
+  DEFAULT_UI_PORT,
+  EPHEMERAL_UI_PORT,
+  UI_LAN_BOOTSTRAP_QUERY,
+  createUiServerDiscovery,
+} from "./core/ui-cli-contract.js";
+import { RUNTIME_PLATFORM } from "./durability/process-identity-contract.js";
 import { checkReviewEvidence } from "./hooks/review-evidence.js";
 import { installLogbus, out } from "./logbus.js";
 import { parseSandboxFlags } from "./sandbox.js";
@@ -48,16 +56,26 @@ import { notifyUpdate, updateCheck } from "./update-check.js";
 
 function openBrowser(url: string): void {
   const cmd =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+    process.platform === RUNTIME_PLATFORM.DARWIN
+      ? "open"
+      : process.platform === RUNTIME_PLATFORM.WINDOWS
+        ? "start"
+        : "xdg-open";
   try {
     spawn(cmd, [url], {
       stdio: "ignore",
       detached: true,
-      shell: process.platform === "win32",
+      shell: process.platform === RUNTIME_PLATFORM.WINDOWS,
     }).unref();
   } catch {
     /* opening the browser is best-effort */
   }
+}
+
+function revealLanBootstrapForNoOpen(url: string): void {
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has(UI_LAN_BOOTSTRAP_QUERY)) return;
+  process.stdout.write(`Owner bootstrap URL (single use; do not share): ${url}\n`);
 }
 
 function promptYesNo(question: string): Promise<boolean> {
@@ -88,7 +106,7 @@ async function startServerResilient(
         level: "error",
       });
       const change = await promptYesNo("Switch to a different port? (y/N) ");
-      if (change) return await startServer(0, { host, conversation });
+      if (change) return await startServer(EPHEMERAL_UI_PORT, { host, conversation });
       out("vf", c.dim("Stopped."), {
         level: "error",
       });
@@ -124,34 +142,33 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
   } catch {
     /* best-effort */
   }
-  const port = typeof flags.port === "string" ? Number(flags.port) : 0;
+  const port = typeof flags.port === "string" ? Number(flags.port) : DEFAULT_UI_PORT;
   const host = typeof flags.host === "string" ? flags.host : undefined;
   const conversation = buildConversationHttpAuthority({}, host, cwd());
-  const warn = lanExposureWarning(host);
-  if (warn) out("vf", c.red(warn));
-  let { server, url } = await startServerResilient(
-    Number.isFinite(port) ? port : 0,
+  let { server, url, hookOrigin } = await startServerResilient(
+    Number.isFinite(port) ? port : DEFAULT_UI_PORT,
     host,
     conversation,
   );
-  if (!flags["no-open"]) openBrowser(url);
+  if (flags["no-open"]) revealLanBootstrapForNoOpen(url);
+  else openBrowser(url);
 
   // --- .ui-port: cross-process port discovery for the "watch live" tip ---
   const uiPortFile = join(cwd(), CTX_DIR, ".ui-port");
-  const writeUiPort = (u: string) => {
+  const writeUiPort = (u: string, approvalOrigin: string) => {
     try {
       const p = Number(new URL(u).port);
       if (Number.isFinite(p)) {
         writeFileSafe(
           uiPortFile,
-          JSON.stringify({ port: p, pid: process.pid, startedAt: Date.now() }),
+          JSON.stringify(createUiServerDiscovery(p, process.pid, Date.now(), approvalOrigin)),
         );
       }
     } catch {
       /* best-effort */
     }
   };
-  writeUiPort(url);
+  writeUiPort(url, hookOrigin);
   process.on("exit", () => {
     try {
       unlinkSync(uiPortFile);
@@ -186,11 +203,16 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
           .stop(true)
           .then(() => {
             process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
-            return startServer(Number.isFinite(port) ? port : 0, { host, conversation });
+            return startServer(Number.isFinite(port) ? port : DEFAULT_UI_PORT, {
+              host,
+              conversation,
+            });
           })
           .then((next) => {
-            ({ server, url } = next);
-            writeUiPort(url);
+            ({ server, url, hookOrigin } = next);
+            if (flags["no-open"]) revealLanBootstrapForNoOpen(url);
+            else if (new URL(url).searchParams.has(UI_LAN_BOOTSTRAP_QUERY)) openBrowser(url);
+            writeUiPort(url, hookOrigin);
             out("vf", c.dim("  press r to restart · q to quit"));
           })
           .catch((err) => {
@@ -214,6 +236,14 @@ async function ui(flags: Record<string, string | boolean>): Promise<number> {
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  if (cmd === "capability") {
+    if (rest.includes("--help") || rest.includes("-h")) return printCommandHelp("capability");
+    return await capability(rest);
+  }
+  if (cmd === "authority") {
+    if (rest.includes("--help") || rest.includes("-h")) return printCommandHelp("authority");
+    return await authority(rest);
+  }
   const { positionals, flags } = parseFlags(rest);
 
   if (flags.version || cmd === "--version" || cmd === "-v") return printVersion();
@@ -236,10 +266,7 @@ async function main(argv: string[]): Promise<number> {
     case "pr":
       return await pr(positionals, flags);
     case undefined:
-      return await ui({
-        port: "7799",
-        dev: true,
-      });
+      return await ui({ dev: true });
     case "ui":
       return await ui(flags);
     case "doctor":
@@ -269,7 +296,7 @@ async function main(argv: string[]): Promise<number> {
     case "config":
       return config(positionals[0], positionals.slice(1), cwd(), flags);
     case "skills":
-      return skills(rest[0], rest.slice(1));
+      return await skills(rest[0], rest.slice(1));
     case "superpowers":
       return superpowers(positionals[0], flags);
     case "tools":

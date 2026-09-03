@@ -1,307 +1,72 @@
-// src/commands/ask.ts
-//
-// #562: `vf ask <path>:<start>-<end> "<question>"` — inline code Q&A.
-// Reads a line range, frames a fenced prompt, picks the first ready engine
-// (or --engine), and streams the answer straight to the terminal via
-// inherit-stdio. Reuses vf's readiness selection; no new dispatch path, no dep.
-//
-// ponytail: inherit-stdio instead of a streaming JSON parser — the engine writes
-//   to the user's TTY directly, which IS streaming. Upgrade to a captured/parsed
-//   stream only if `vf ask` ever needs its output in the logbus (it doesn't today).
-
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import {
+  type AskInvocation,
+  type ParsedTarget,
+  askInvocation,
+  framePrompt,
+  inheritSpawn,
+  langFence,
+  parseTarget,
+  pickEngine,
+  resumeInvocation,
+  sliceRange,
+} from "../ask-support.js";
 import { ENGINES, type Engine, c, cwd } from "../core.js";
-import { filterEnv } from "../dispatch/env-filter.js";
-import { makeAsyncSpawner } from "../dispatch/spawners.js";
-import type { AsyncSpawner } from "../dispatch/types.js";
 import { out } from "../logbus.js";
-import { preflightAll } from "../preflight.js";
+import { CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND } from "../orchestrator/conversation/conversation-ask-compatibility.js";
+import {
+  type DurableQueuedConversationMessageV1,
+  type ObservedConversationResultV1,
+  durableCliIdempotencyKey,
+  durableCliPrincipalDigest,
+  executeDurableAskV1,
+  executeDurableQueuedConversationMessageV1,
+  repoRelativePrivateRange,
+} from "../orchestrator/conversation/conversation-command-compatibility.js";
+import { preflightAllAsync } from "../preflight.js";
 import type { EngineReadiness } from "../preflight/types.js";
-import { readSettings } from "../settings.js";
 import {
   type ConversationCommandDeps,
   classifyConversationResult,
+  conversationBootstrap,
   conversationService,
   executeConversationCreate,
   executeConversationMessage,
 } from "./_shared.js";
-
-/** Prompt delivery per engine: on stdin, or as a trailing argv token. */
-type PromptMode = "stdin" | "arg";
-
-export interface AskInvocation {
-  cmd: string;
-  args: string[];
-  promptMode: PromptMode;
-}
+export {
+  type AskInvocation,
+  type ParsedTarget,
+  askInvocation,
+  captureSpawn,
+  captureSpawnAsync,
+  framePrompt,
+  inheritSpawn,
+  langFence,
+  materializeArgs,
+  parseTarget,
+  pickEngine,
+  resumeInvocation,
+  sliceRange,
+  streamSpawnAsync,
+} from "../ask-support.js";
 
 export interface AskDeps {
-  /** Readiness probe (default: real preflightAll with a live probe). */
-  readiness?: (engines: Engine[]) => EngineReadiness[];
-  /** Spawn seam: run cmd with the prompt, stream to the terminal, return exit code. */
-  spawn?: (inv: AskInvocation, prompt: string) => number;
-  /** File reader (default: readFileSync utf8). */
+  readiness?: (engines: Engine[]) => EngineReadiness[] | Promise<EngineReadiness[]>;
+  spawn?: (inv: AskInvocation, prompt: string) => number | Promise<number>;
   readText?: (path: string) => string;
-  /** Conversation runtime injection seam for the production direct-policy path. */
   service?: ConversationCommandDeps["service"];
   createService?: ConversationCommandDeps["createService"];
   bootstrap?: ConversationCommandDeps["bootstrap"];
-}
-
-export interface ParsedTarget {
-  path: string;
-  start: number;
-  end: number;
-}
-
-/**
- * Parse `<path>:<start>[-<end>]`. Windows-safe: the line spec is the tail after
- * the LAST colon, so `C:\a\b.ts:3-4` keeps the drive letter in the path.
- * Returns a string (error message) on any malformed input.
- */
-export function parseTarget(spec: string | undefined): ParsedTarget | string {
-  if (!spec) return 'missing <path>:<lines> — e.g. `vf ask src/x.ts:5-12 "why?"`';
-  const at = spec.lastIndexOf(":");
-  if (at <= 0) return `invalid target "${spec}" — expected <path>:<start>[-<end>]`;
-  const path = spec.slice(0, at);
-  const range = spec.slice(at + 1);
-  const m = /^(\d+)(?:-(\d+))?$/.exec(range);
-  if (!path || !m) return `invalid line spec "${range}" — expected <start>[-<end>]`;
-  const start = Number(m[1]);
-  const end = m[2] === undefined ? start : Number(m[2]);
-  if (start < 1) return `invalid line range "${range}" — lines are 1-indexed`;
-  if (end < start) return `invalid line range "${range}" — end before start`;
-  return { path, start, end };
-}
-
-/** 1-indexed inclusive slice. Error string when the range exceeds the file. */
-export function sliceRange(text: string, start: number, end: number): string | { snippet: string } {
-  const lines = text.split("\n");
-  if (start > lines.length) return `line ${start} is past end of file (${lines.length} lines)`;
-  return { snippet: lines.slice(start - 1, end).join("\n") };
-}
-
-/** Map a file extension to a markdown fence tag; "" when unknown. */
-export function langFence(path: string): string {
-  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
-  const map: Record<string, string> = {
-    ts: "ts",
-    tsx: "tsx",
-    js: "js",
-    jsx: "jsx",
-    mjs: "js",
-    cjs: "js",
-    py: "python",
-    rs: "rust",
-    go: "go",
-    java: "java",
-    rb: "ruby",
-    c: "c",
-    h: "c",
-    cpp: "cpp",
-    hpp: "cpp",
-    cs: "csharp",
-    php: "php",
-    sh: "bash",
-    bash: "bash",
-    zsh: "bash",
-    yaml: "yaml",
-    yml: "yaml",
-    json: "json",
-    toml: "toml",
-    md: "markdown",
-    sql: "sql",
-    vue: "vue",
-    swift: "swift",
-    kt: "kotlin",
-    scala: "scala",
-    lua: "lua",
-    r: "r",
+  durable?: {
+    ask(
+      input: Parameters<typeof executeDurableAskV1>[1],
+      onDelta?: (chunk: string) => void,
+    ): Promise<ObservedConversationResultV1>;
+    message(
+      input: DurableQueuedConversationMessageV1,
+      onDelta?: (chunk: string) => void,
+    ): Promise<ObservedConversationResultV1>;
   };
-  return map[ext] ?? "";
-}
-
-/** Frame the snippet + question into the engine prompt (mirrors #562's framing). */
-export function framePrompt(
-  path: string,
-  start: number,
-  end: number,
-  lang: string,
-  snippet: string,
-  question: string,
-): string {
-  const lineRef = start === end ? `line ${start}` : `lines ${start}-${end}`;
-  return `In file ${path}, ${lineRef}:\n\n\`\`\`${lang}\n${snippet}\n\`\`\`\n\n${question}`;
-}
-
-/** Plain (streamable) non-interactive invocation per engine — no JSON envelope. */
-export function askInvocation(engine: Engine): AskInvocation {
-  switch (engine) {
-    case "claude":
-      return { cmd: "claude", args: ["-p"], promptMode: "stdin" };
-    case "codex":
-      return { cmd: "codex", args: ["exec", "-"], promptMode: "stdin" };
-    case "copilot":
-      // copilot takes the prompt as an argv token (promptMode "arg"); --allow-all
-      // is its omnibus permission flag (see dispatch.ts copilotCommand).
-      return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" };
-    case "opencode":
-      return { cmd: "opencode", args: ["run", "--format", "json", "-"], promptMode: "stdin" };
-    case "antigravity":
-      return { cmd: "agy", args: ["-p"], promptMode: "arg" };
-  }
-  throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
-}
-
-/**
- * #562 multi-turn: continue the engine's MOST RECENT conversation so a follow-up
- * `vf ask --resume "q2"` has the prior turn's context. Engine-native, so vf stores
- * no session state — the engine tracks its own most-recent conversation.
- *   - claude: `-c -p` (continue most recent, print mode, prompt on stdin)
- *   - codex:  `exec resume --last -` (resume most recent, prompt on stdin)
- *   - copilot: no stable resume flag → returns a string (unsupported) so the caller errors.
- *   - opencode: `-c/--continue` resumes most recent session.
- */
-export function resumeInvocation(engine: Engine): AskInvocation | string {
-  switch (engine) {
-    case "claude":
-      return { cmd: "claude", args: ["-c", "-p"], promptMode: "stdin" };
-    case "codex":
-      return { cmd: "codex", args: ["exec", "resume", "--last", "-"], promptMode: "stdin" };
-    case "copilot":
-      return "resume is not supported for copilot — omit --resume to ask a fresh question";
-    case "opencode":
-      return {
-        cmd: "opencode",
-        args: ["run", "--continue", "--format", "json", "-"],
-        promptMode: "stdin",
-      };
-    case "antigravity":
-      return { cmd: "agy", args: ["--continue", "-p"], promptMode: "arg" };
-  }
-  throw new Error(`unreachable: unhandled engine ${engine satisfies never}`);
-}
-
-/** Choose the engine: an explicit override must be ready; else first ready in ENGINES order. */
-export function pickEngine(
-  readiness: EngineReadiness[],
-  override: string | undefined,
-): Engine | string {
-  if (override) {
-    if (!(ENGINES as string[]).includes(override)) {
-      return `unknown engine "${override}" — valid: ${ENGINES.join(", ")}`;
-    }
-    const r = readiness.find((x) => x.engine === override);
-    if (!r || r.level !== "ready") {
-      return `engine "${override}" is not ready${r ? ` (${r.detail})` : ""} — run \`vf doctor --probe\``;
-    }
-    return override as Engine;
-  }
-  const ready = ENGINES.find((e) => readiness.find((x) => x.engine === e && x.level === "ready"));
-  if (!ready) return "no ready engine — run `vf doctor --probe` or pass --engine <name>";
-  return ready;
-}
-
-/**
- * Build the argv for an arg-mode invocation. copilot's `-p/--prompt` takes a
- * VALUE, so the prompt must sit IMMEDIATELY AFTER `-p` (not appended at the end,
- * or `-p` swallows the next flag e.g. `--allow-all` and the question is silently
- * lost). Mirrors dispatch.ts materializePrompt so both paths agree. #562.
- */
-export function materializeArgs(inv: AskInvocation, prompt: string): string[] {
-  if (
-    inv.cmd === "agy" &&
-    inv.promptMode === "arg" &&
-    Buffer.byteLength(prompt, "utf8") >= 30 * 1024
-  ) {
-    throw new Error("Antigravity prompt too large for agy argv; shorten or split the task");
-  }
-  if (inv.promptMode !== "arg") return inv.args;
-  const flag = inv.args.findIndex((a) => a === "-p" || a === "--prompt");
-  if (flag === -1) return [...inv.args, prompt];
-  const args = [...inv.args];
-  args.splice(flag + 1, 0, prompt);
-  return args;
-}
-
-/** Default spawn: stream the engine's answer straight to the terminal. */
-export function inheritSpawn(inv: AskInvocation, prompt: string): number {
-  const { env } = filterEnv(process.env, readSettings(cwd()).envPolicy ?? {});
-  const r = spawnSync(inv.cmd, materializeArgs(inv, prompt), {
-    input: inv.promptMode === "stdin" ? prompt : undefined,
-    stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "inherit", "inherit"],
-    env,
-  });
-  return r.status ?? 1;
-}
-
-/**
- * Captured runner: like inheritSpawn but COLLECTS stdout instead of streaming to
- * the TTY. The Web-UI /api/ask route needs this — a browser has no TTY. onChunk
- * fires ONCE with the full text; spawnSync is not incrementally streaming, so true
- * token streaming (SSE) is a follow-up. #556: env is scrubbed via filterEnv before
- * spawnSync — no secrets leak to the engine CLI subprocess.
- */
-export function captureSpawn(
-  inv: AskInvocation,
-  prompt: string,
-  onChunk?: (s: string) => void,
-): { code: number; text: string } {
-  const { env } = filterEnv(process.env, readSettings(cwd()).envPolicy ?? {});
-  const r = spawnSync(inv.cmd, materializeArgs(inv, prompt), {
-    input: inv.promptMode === "stdin" ? prompt : undefined,
-    stdio: [inv.promptMode === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
-    encoding: "utf8",
-    env,
-  });
-  // Fall back to stderr when stdout is empty so a failing engine surfaces its error
-  // to the Web-UI instead of a blank "(no output)".
-  const text = (r.stdout ?? "") || (r.stderr ?? "");
-  onChunk?.(text);
-  return { code: r.status ?? 1, text };
-}
-
-/**
- * Async, non-blocking counterpart of captureSpawn for the Bun HTTP server (#584).
- * Builds a spawner honoring the repo's configured envPolicy (not just the DEFAULT_DENY
- * floor) so it matches the sync captureSpawn's #556/#582 scrub — makeAsyncSpawner applies
- * filterEnv(process.env, envPolicy) at build. onChunk/SSE streaming is a follow-up (#580).
- */
-export async function captureSpawnAsync(
-  inv: AskInvocation,
-  prompt: string,
-  spawner: AsyncSpawner = makeAsyncSpawner({ envPolicy: readSettings(cwd()).envPolicy ?? {} }),
-): Promise<{ code: number; text: string }> {
-  const r = await spawner(
-    inv.cmd,
-    materializeArgs(inv, prompt),
-    inv.promptMode === "stdin" ? prompt : "",
-  );
-  const text = r.stdout || r.stderr || "";
-  return { code: r.status, text };
-}
-
-/**
- * Streaming async spawn for SSE (#580). Mirrors captureSpawnAsync but the default
- * spawner is built WITH onChunk so tokens stream incrementally through the callback.
- * When an injected spawner is passed (tests), it is used as-is.
- */
-export async function streamSpawnAsync(
-  inv: AskInvocation,
-  prompt: string,
-  onChunk: (s: string) => void,
-  spawner?: AsyncSpawner,
-): Promise<{ code: number; text: string }> {
-  const s =
-    spawner ?? makeAsyncSpawner({ envPolicy: readSettings(cwd()).envPolicy ?? {}, onChunk });
-  const r = await s(
-    inv.cmd,
-    materializeArgs(inv, prompt),
-    inv.promptMode === "stdin" ? prompt : "",
-  );
-  const text = r.stdout || r.stderr || "";
-  return { code: r.status, text };
 }
 
 function fail(msg: string): number {
@@ -320,77 +85,232 @@ export async function ask(
   // resume, and fold a string value back in as the first word of the question.
   const resume = flags.resume === true || typeof flags.resume === "string";
   const resumeLead = typeof flags.resume === "string" ? flags.resume : "";
-
-  // Resolve the engine first (both paths need it).
-  const readiness = (deps.readiness ?? ((e: Engine[]) => preflightAll(e, { probe: true })))(
-    ENGINES,
-  );
-  const engine = pickEngine(readiness, typeof flags.engine === "string" ? flags.engine : undefined);
-  if (typeof engine === "string" && !(ENGINES as string[]).includes(engine)) return fail(engine);
-  const eng = engine as Engine;
-
-  const spawn = deps.spawn ?? inheritSpawn;
   const conversationId =
     typeof flags.conversation === "string" && flags.conversation.trim()
       ? flags.conversation.trim()
       : null;
 
-  // --resume: continue the engine's most-recent conversation with just a follow-up
-  // question — no target/snippet needed (the prior turn already has the code context).
-  if (resume) {
-    const question = [resumeLead, ...positionals].join(" ").trim();
-    if (!question) return fail('missing question — e.g. `vf ask --resume "and why is that safe?"`');
-    const inv = resumeInvocation(eng);
-    if (typeof inv === "string") return fail(inv);
-    out("vf", c.dim(`ask: ${eng} · continuing previous conversation`));
-    return spawn(inv, question);
-  }
-
-  // Fresh ask: <path>:<lines> "<question>".
-  const target = parseTarget(positionals[0]);
-  if (typeof target === "string") return fail(target);
-  const question = positionals.slice(1).join(" ").trim();
-  if (!question) return fail('missing question — e.g. `vf ask src/x.ts:5-12 "what does this do?"`');
-
-  const readText = deps.readText ?? ((p: string) => readFileSync(p, "utf8"));
-  let text: string;
-  try {
-    text = readText(target.path);
-  } catch {
-    return fail(`no such file: ${target.path}`);
-  }
-  const sliced = sliceRange(text, target.start, target.end);
-  if (typeof sliced === "string") return fail(sliced);
-
-  const lang = langFence(target.path);
-  const prompt = framePrompt(target.path, target.start, target.end, lang, sliced.snippet, question);
   if (deps.spawn) {
+    const readiness = await (
+      deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
+    )([...ENGINES]);
+    const engine = pickEngine(
+      readiness,
+      typeof flags.engine === "string" ? flags.engine : undefined,
+    );
+    if (typeof engine === "string" && !(ENGINES as string[]).includes(engine)) return fail(engine);
+    const eng = engine as Engine;
+    if (resume) {
+      const question = [resumeLead, ...positionals].join(" ").trim();
+      if (!question)
+        return fail('missing question — e.g. `vf ask --resume "and why is that safe?"`');
+      const inv = resumeInvocation(eng);
+      if (typeof inv === "string") return fail(inv);
+      out("vf", c.dim(`ask: ${eng} · continuing previous conversation`));
+      return await deps.spawn(inv, question);
+    }
+    const target = parseTarget(positionals[0]);
+    if (typeof target === "string") return fail(target);
+    const question = positionals.slice(1).join(" ").trim();
+    if (!question)
+      return fail('missing question — e.g. `vf ask src/x.ts:5-12 "what does this do?"`');
+    const readText = deps.readText ?? ((p: string) => readFileSync(p, "utf8"));
+    let text: string;
+    try {
+      text = readText(target.path);
+    } catch {
+      return fail(`no such file: ${target.path}`);
+    }
+    const sliced = sliceRange(text, target.start, target.end);
+    if (typeof sliced === "string") return fail(sliced);
+    const lang = langFence(target.path);
+    const prompt = framePrompt(
+      target.path,
+      target.start,
+      target.end,
+      lang,
+      sliced.snippet,
+      question,
+    );
     const inv = askInvocation(eng);
     out("vf", c.dim(`ask: ${eng} · ${target.path}:${target.start}-${target.end}`));
-    return spawn(inv, prompt);
+    return await deps.spawn(inv, prompt);
   }
-  const service = conversationService(
-    {
-      ...(deps.service ? { service: deps.service } : {}),
-      ...(deps.createService ? { createService: deps.createService } : {}),
-      ...(deps.bootstrap ? { bootstrap: deps.bootstrap } : {}),
-    },
-    cwd(),
-  );
+
+  if (resume && !conversationId)
+    return fail(
+      "ask resume now requires --conversation <id>; native latest-session resume is disabled",
+    );
+
+  const target =
+    !resume && positionals[0] && typeof parseTarget(positionals[0]) !== "string"
+      ? (parseTarget(positionals[0]) as ParsedTarget)
+      : null;
+  const question = (
+    resume ? [resumeLead, ...positionals] : target ? positionals.slice(1) : positionals
+  )
+    .join(" ")
+    .trim();
+  if (!question)
+    return fail(
+      conversationId
+        ? 'missing question — e.g. `vf ask --conversation conversation-123 "revise that answer"`'
+        : 'missing question — e.g. `vf ask src/x.ts:5-12 "what does this do?"`',
+    );
+
+  if (deps.service || deps.createService) {
+    const service = conversationService(
+      {
+        ...(deps.service ? { service: deps.service } : {}),
+        ...(deps.createService ? { createService: deps.createService } : {}),
+        ...(deps.bootstrap ? { bootstrap: deps.bootstrap } : {}),
+      },
+      cwd(),
+    );
+    if (conversationId) {
+      const prompt =
+        target === null
+          ? question
+          : (() => {
+              const readText = deps.readText ?? ((p: string) => readFileSync(p, "utf8"));
+              let text: string;
+              try {
+                text = readText(target.path);
+              } catch {
+                throw new Error(`no such file: ${target.path}`);
+              }
+              const sliced = sliceRange(text, target.start, target.end);
+              if (typeof sliced === "string") throw new Error(sliced);
+              return framePrompt(
+                target.path,
+                target.start,
+                target.end,
+                langFence(target.path),
+                sliced.snippet,
+                question,
+              );
+            })();
+      const resumed = await executeConversationMessage(service, conversationId, prompt, (chunk) =>
+        process.stdout.write(chunk),
+      );
+      return classifyConversationResult(resumed.status, resumed.events);
+    }
+    if (!target) return fail('missing <path>:<lines> — e.g. `vf ask src/x.ts:5-12 "why?"`');
+    const readText = deps.readText ?? ((p: string) => readFileSync(p, "utf8"));
+    let text: string;
+    try {
+      text = readText(target.path);
+    } catch {
+      return fail(`no such file: ${target.path}`);
+    }
+    const sliced = sliceRange(text, target.start, target.end);
+    if (typeof sliced === "string") return fail(sliced);
+    const readiness = await (
+      deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
+    )([...ENGINES]);
+    const engine = pickEngine(
+      readiness,
+      typeof flags.engine === "string" ? flags.engine : undefined,
+    );
+    if (typeof engine === "string" && !(ENGINES as string[]).includes(engine)) return fail(engine);
+    const execution = await executeConversationCreate(
+      service,
+      {
+        topic: framePrompt(
+          target.path,
+          target.start,
+          target.end,
+          langFence(target.path),
+          sliced.snippet,
+          question,
+        ),
+        policy: "direct",
+        participants: [
+          {
+            role_ref: "direct",
+            engine: engine as Engine,
+          },
+        ],
+      },
+      (chunk) => process.stdout.write(chunk),
+    );
+    return classifyConversationResult(execution.status, execution.events);
+  }
+
+  const bootstrap = deps.durable
+    ? null
+    : conversationBootstrap({ ...(deps.bootstrap ? { bootstrap: deps.bootstrap } : {}) });
+  const durable = deps.durable ?? {
+    ask: (input: Parameters<typeof executeDurableAskV1>[1], onDelta?: (chunk: string) => void) =>
+      executeDurableAskV1(bootstrap as NonNullable<typeof bootstrap>, input, onDelta),
+    message: (input: DurableQueuedConversationMessageV1, onDelta?: (chunk: string) => void) =>
+      executeDurableQueuedConversationMessageV1(
+        bootstrap as NonNullable<typeof bootstrap>,
+        input,
+        onDelta,
+      ),
+  };
+  const principalDigest = durableCliPrincipalDigest("vf.ask");
   if (conversationId) {
-    const resumed = await executeConversationMessage(service, conversationId, prompt, (chunk) =>
-      process.stdout.write(chunk),
+    const resumed = await durable.message(
+      {
+        conversation_id: conversationId,
+        principal_digest: principalDigest,
+        idempotency_key: durableCliIdempotencyKey("vf.ask.resume", {
+          conversation_id: conversationId,
+          question,
+          ...(target
+            ? {
+                path: target.path,
+                start: target.start,
+                end: target.end,
+              }
+            : {}),
+        }),
+        content: question,
+        ...(target
+          ? (() => {
+              const selected = repoRelativePrivateRange(
+                cwd(),
+                target.path,
+                target.start,
+                target.end,
+              );
+              if (typeof selected === "string") throw new Error(selected);
+              return { private_file_range: selected };
+            })()
+          : {}),
+      },
+      (chunk) => process.stdout.write(chunk),
     );
     return classifyConversationResult(resumed.status, resumed.events);
   }
-  const execution = await executeConversationCreate(
-    service,
+  if (!target) return fail('missing <path>:<lines> — e.g. `vf ask src/x.ts:5-12 "why?"`');
+  const selected = repoRelativePrivateRange(cwd(), target.path, target.start, target.end);
+  if (typeof selected === "string") return fail(selected);
+  const readiness = await (
+    deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
+  )([...ENGINES]);
+  const engine = pickEngine(readiness, typeof flags.engine === "string" ? flags.engine : undefined);
+  if (typeof engine === "string" && !(ENGINES as string[]).includes(engine)) return fail(engine);
+  const created = await durable.ask(
     {
-      topic: prompt,
-      policy: "direct",
-      participants: [{ role_ref: "direct", engine: eng }],
+      principal_digest: principalDigest,
+      idempotency_key: durableCliIdempotencyKey("vf.ask.create", {
+        question,
+        ...selected,
+        engine,
+      }),
+      request: {
+        kind: CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.FRESH,
+        question,
+        repo_relative_path: selected.repo_relative_path,
+        start_line: selected.start_line,
+        end_line: selected.end_line,
+        engine: engine as Engine,
+      },
     },
     (chunk) => process.stdout.write(chunk),
   );
-  return classifyConversationResult(execution.status, execution.events);
+  return classifyConversationResult(created.status, created.events);
 }

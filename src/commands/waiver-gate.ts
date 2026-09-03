@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { VERIFY_RUNTIME_AUTHORITY } from "../verify/runtime-authority.js";
 import { c, out } from "./_shared.js";
 
 export function runWaiverGate(base: string, inject?: { spawner?: typeof spawnSync }): boolean {
@@ -9,7 +10,11 @@ export function runWaiverGate(base: string, inject?: { spawner?: typeof spawnSyn
     return true;
   }
   const s = inject?.spawner ?? spawnSync;
-  const w = s("node", ["scripts/waiver-policy.cjs"], { stdio: "pipe", cwd: base });
+  const w = s("node", ["scripts/waiver-policy.cjs"], {
+    stdio: "pipe",
+    cwd: base,
+    timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
+  });
   if (w.status !== 0) {
     out("vf", c.red("✗ waiver policy gate failed"));
     return false;

@@ -1,3 +1,4 @@
+import { LOG_CHANNEL, LOG_LEVEL, type LogLevel, isLogLevel } from "../core/log-contract.js";
 import { getLogbus } from "../logbus.js";
 import { activeSpinner } from "../ui.js";
 import type { Channel } from "./types.js";
@@ -69,7 +70,7 @@ export function out(channel: Channel, ...rawParts: unknown[]): void {
     //
     // Set VF_QUIET=1 to suppress engine-* output (for CI / piped
     // output where you want only the [vf] channel).
-    if (channel === "vf" || process.env.VF_QUIET !== "1") {
+    if (channel === LOG_CHANNEL.VIBE_FLOW || process.env.VF_QUIET !== "1") {
       emitToConsole(channel, level, text);
     }
     return;
@@ -78,13 +79,10 @@ export function out(channel: Channel, ...rawParts: unknown[]): void {
   emitToConsole(channel, level, text);
 }
 
-function emitToConsole(
-  channel: Channel,
-  level: "debug" | "info" | "warn" | "error",
-  text: string,
-): void {
-  const toStderr = level === "warn" || level === "error" || level === "debug";
-  const prefix = toStderr || channel !== "vf" ? `[${channel}] ` : "";
+function emitToConsole(channel: Channel, level: LogLevel, text: string): void {
+  const toStderr =
+    level === LOG_LEVEL.WARN || level === LOG_LEVEL.ERROR || level === LOG_LEVEL.DEBUG;
+  const prefix = toStderr || channel !== LOG_CHANNEL.VIBE_FLOW ? `[${channel}] ` : "";
   const line = `${prefix}${text}`;
 
   // When a spinner is active, stop its animation and clear its line so
@@ -112,7 +110,7 @@ function emitToConsole(
 }
 
 function extractOptsAndParts(rawParts: unknown[]): {
-  level: "debug" | "info" | "warn" | "error";
+  level: LogLevel;
   unit?: string;
   meta?: Record<string, unknown>;
   parts: unknown[];
@@ -122,17 +120,13 @@ function extractOptsAndParts(rawParts: unknown[]): {
     if (last !== null && typeof last === "object" && !Array.isArray(last)) {
       const bag = last as { level?: unknown; unit?: unknown; meta?: unknown };
       const candidate = bag.level;
-      const hasLevel =
-        candidate === "debug" ||
-        candidate === "info" ||
-        candidate === "warn" ||
-        candidate === "error";
+      const hasLevel = isLogLevel(candidate);
       // Consume the bag as options only when it carries a recognized `level` field
       // (the codemod shape). A bare metadata object (e.g. {engine:"claude"}) is NOT
       // consumed — it falls through to be joined as text, matching the prior contract.
       if (hasLevel) {
         const out: {
-          level: "debug" | "info" | "warn" | "error";
+          level: LogLevel;
           unit?: string;
           meta?: Record<string, unknown>;
           parts: unknown[];
@@ -148,5 +142,5 @@ function extractOptsAndParts(rawParts: unknown[]): {
       }
     }
   }
-  return { level: "info", parts: rawParts };
+  return { level: LOG_LEVEL.INFO, parts: rawParts };
 }

@@ -90,10 +90,10 @@ This should also survive.
 // 1. Version stamp present after fresh init
 // ---------------------------------------------------------------------------
 describe("vf init version stamp", () => {
-  test("fresh init stamps vibeflow_version on the state", () => {
+  test("fresh init stamps vibeflow_version on the state", async () => {
     const dir = tmpRepo();
     try {
-      const result = applyIntake(
+      const result = await applyIntake(
         { goal: "stamp test", engines: ["claude"] },
         { base: dir, dry: true, skipPreflight: true },
       );
@@ -106,10 +106,10 @@ describe("vf init version stamp", () => {
     }
   });
 
-  test("state on disk carries version stamp after non-dry init", () => {
+  test("state on disk carries version stamp after non-dry init", async () => {
     const dir = tmpRepo();
     try {
-      applyIntake(
+      await applyIntake(
         { goal: "disk test", engines: ["claude"] },
         { base: dir, dry: false, skipPreflight: true },
       );
@@ -126,7 +126,7 @@ describe("vf init version stamp", () => {
 // 2. Re-init with old state (no version stamp) → stamp updated
 // ---------------------------------------------------------------------------
 describe("vf init re-init detection", () => {
-  test("re-init stamps version on old state that lacks it", () => {
+  test("re-init stamps version on old state that lacks it", async () => {
     const dir = tmpRepo();
     try {
       // Seed an old-style state with NO version field
@@ -142,7 +142,7 @@ describe("vf init re-init detection", () => {
       writeFileSync(join(ctxDir, "WORKFLOW_STATE.json"), JSON.stringify(oldState, null, 2));
 
       // Re-init
-      applyIntake(
+      await applyIntake(
         { goal: "new goal", engines: ["claude"] },
         { base: dir, dry: false, skipPreflight: true },
       );
@@ -253,7 +253,7 @@ describe("ensureInitUpdated version stamp", () => {
 //    human content outside preserved
 // ---------------------------------------------------------------------------
 describe("migration fixture: old fat block → slim markers", () => {
-  test("old CLAUDE.md without markers gets slim block inside markers, human text preserved", () => {
+  test("old CLAUDE.md without markers gets slim block inside markers, human text preserved", async () => {
     const dir = tmpRepo();
     try {
       const ctxDir = join(dir, CTX_DIR);
@@ -276,7 +276,7 @@ describe("migration fixture: old fat block → slim markers", () => {
       // (we do a separate test for the pure old-format case below)
 
       // Re-init
-      applyIntake(
+      await applyIntake(
         { goal: "migration test", engines: ["claude"] },
         { base: dir, dry: false, skipPreflight: true },
       );
@@ -300,7 +300,7 @@ describe("migration fixture: old fat block → slim markers", () => {
     }
   });
 
-  test("CLAUDE.md with human content outside markers — human text preserved, block updated to slim", () => {
+  test("CLAUDE.md with human content outside markers — human text preserved, block updated to slim", async () => {
     const dir = tmpRepo();
     try {
       const ctxDir = join(dir, CTX_DIR);
@@ -342,7 +342,7 @@ ${VF_BLOCK_END}`;
       writeFileSync(join(dir, "CLAUDE.md"), `${humanHeader}\n\n${oldBlock}\n\n${humanFooter}\n`);
 
       // Re-init
-      applyIntake(
+      await applyIntake(
         { goal: "preservation test", engines: ["claude"] },
         { base: dir, dry: false, skipPreflight: true },
       );
@@ -379,10 +379,10 @@ ${VF_BLOCK_END}`;
 // 4. vf skill seeding
 // ---------------------------------------------------------------------------
 describe("vf skill seeding", () => {
-  test("skill vf seeded into repo after init", () => {
+  test("skill vf seeded into repo after init", async () => {
     const dir = tmpRepo();
     try {
-      applyIntake(
+      await applyIntake(
         { goal: "skill seed test", engines: ["claude"] },
         { base: dir, dry: false, skipPreflight: true },
       );

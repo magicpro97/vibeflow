@@ -24,13 +24,13 @@ describe("skillsEvalCmd", () => {
   test("usage error when no skill dir", async () => {
     const d = tmpDir();
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, [])).toBe(2);
+    expect(await mod.skillsEvalCmd(d, [])).toBe(2);
   });
 
   test("fails when skill dir has no SKILL.md", async () => {
     const d = tmpDir();
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, [tmpDir()])).toBe(1);
+    expect(await mod.skillsEvalCmd(d, [tmpDir()])).toBe(1);
   });
 
   test("fails when no evals.json", async () => {
@@ -39,7 +39,7 @@ describe("skillsEvalCmd", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), "---\nname: my-skill\ndescription: test\n---\nbody");
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill"])).toBe(1);
+    expect(await mod.skillsEvalCmd(d, ["my-skill"])).toBe(1);
   });
 
   test("runs eval and returns 0 on pass", async () => {
@@ -78,8 +78,8 @@ describe("skillsEvalCmd", () => {
     const mod = await loadCmd();
     const prompts: string[] = [];
     expect(
-      mod.skillsEvalCmd(d, ["my-skill", "--engine", "opencode"], {
-        spawner: (_cmd, _args, input) => {
+      await mod.skillsEvalCmd(d, ["my-skill", "--engine", "opencode"], {
+        spawner: async (_cmd, _args, input) => {
           prompts.push(input);
           const text = input.includes("# Skill body") ? "parsed" : "wrong";
           return { status: 0, stdout: JSON.stringify({ type: "text", part: { text } }) };
@@ -93,7 +93,7 @@ describe("skillsEvalCmd", () => {
 
   test("rejects invalid --engine", async () => {
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(tmpDir(), ["my-skill", "--engine", "invalid"])).toBe(2);
+    expect(await mod.skillsEvalCmd(tmpDir(), ["my-skill", "--engine", "invalid"])).toBe(2);
   });
 
   test("returns 1 on regression with --previous", async () => {
@@ -130,7 +130,7 @@ describe("skillsEvalCmd", () => {
       }),
     );
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill", "--previous", prevPath])).toBe(1);
+    expect(await mod.skillsEvalCmd(d, ["my-skill", "--previous", prevPath])).toBe(1);
   });
 
   test("--json flag", async () => {
@@ -150,7 +150,7 @@ describe("skillsEvalCmd", () => {
       }),
     );
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill", "--json"])).toBe(0);
+    expect(await mod.skillsEvalCmd(d, ["my-skill", "--json"])).toBe(0);
   });
 
   test("--out writes result file", async () => {
@@ -171,7 +171,7 @@ describe("skillsEvalCmd", () => {
     );
     const outPath = join(d, "out.json");
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill", "--out", outPath])).toBe(0);
+    expect(await mod.skillsEvalCmd(d, ["my-skill", "--out", outPath])).toBe(0);
     expect(existsSync(outPath)).toBe(true);
   });
 
@@ -192,7 +192,7 @@ describe("skillsEvalCmd", () => {
       }),
     );
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill"])).toBe(0);
+    expect(await mod.skillsEvalCmd(d, ["my-skill"])).toBe(0);
   });
 
   test("handles error in loadSingleSkill gracefully", async () => {
@@ -201,19 +201,19 @@ describe("skillsEvalCmd", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(join(skillDir, "SKILL.md"), "---\nname: Bad Skill\ndescription: test\n---\nbody");
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["bad-skill"])).toBe(1);
+    expect(await mod.skillsEvalCmd(d, ["bad-skill"])).toBe(1);
   });
 
   test("--out without value returns error code 2", async () => {
     const d = tmpDir();
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill", "--out"])).toBe(2);
+    expect(await mod.skillsEvalCmd(d, ["my-skill", "--out"])).toBe(2);
   });
 
   test("--previous without value returns error code 2", async () => {
     const d = tmpDir();
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill", "--previous"])).toBe(2);
+    expect(await mod.skillsEvalCmd(d, ["my-skill", "--previous"])).toBe(2);
   });
 
   test("engineText handles item.completed agent_message format", async () => {
@@ -234,8 +234,8 @@ describe("skillsEvalCmd", () => {
     );
     const mod = await loadCmd();
     expect(
-      mod.skillsEvalCmd(d, ["my-skill"], {
-        spawner: () => ({
+      await mod.skillsEvalCmd(d, ["my-skill"], {
+        spawner: async () => ({
           status: 0,
           stdout: JSON.stringify({
             type: "item.completed",
@@ -289,7 +289,7 @@ describe("skillsEvalCmd", () => {
     );
     const mod = await loadCmd();
     const runner = (prompt: string, skillContext?: string) => (skillContext ? "wrong" : "parsed");
-    expect(mod.skillsEvalCmd(d, ["my-skill", "--previous", prevPath], { runner })).toBe(1);
+    expect(await mod.skillsEvalCmd(d, ["my-skill", "--previous", prevPath], { runner })).toBe(1);
   });
 
   test("displays baseline cases in human output", async () => {
@@ -312,7 +312,7 @@ describe("skillsEvalCmd", () => {
       }),
     );
     const mod = await loadCmd();
-    expect(mod.skillsEvalCmd(d, ["my-skill"])).toBe(0);
+    expect(await mod.skillsEvalCmd(d, ["my-skill"])).toBe(0);
   });
 });
 
@@ -322,11 +322,11 @@ describe("vf skills eval CLI integration", () => {
     expect(typeof mod.skills).toBe("function");
   });
 
-  function withCwd<T>(dir: string, fn: () => T): T {
+  async function withCwd<T>(dir: string, fn: () => T | Promise<T>): Promise<T> {
     const prev = process.cwd();
     process.chdir(dir);
     try {
-      return fn();
+      return await fn();
     } finally {
       process.chdir(prev);
     }
@@ -349,7 +349,7 @@ describe("vf skills eval CLI integration", () => {
       }),
     );
     const mod = await import("../src/commands/skills");
-    const code = withCwd(d, () => mod.skills("eval", ["my-skill"]));
+    const code = await withCwd(d, () => mod.skills("eval", ["my-skill"]));
     expect(code).toBe(0);
   });
 });

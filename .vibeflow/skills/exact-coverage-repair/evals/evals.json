@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "skill": "exact-coverage-repair",
+  "cases": [
+    {
+      "id": "coverage-positive-rebase-path",
+      "type": "positive",
+      "prompt": "After the rebase the coverage report points to the wrong file; repair canonical report identity and regenerate current evidence."
+    },
+    {
+      "id": "coverage-positive-playwright-mapping",
+      "type": "positive",
+      "prompt": "A Playwright result mapped incorrectly to a test file on a Windows drive; bind the test result to the repository path."
+    },
+    {
+      "id": "coverage-positive-stale-sha",
+      "type": "positive",
+      "prompt": "A new commit made the proof stale while the reporter still uses the old SHA; regenerate evidence for changed head without adding a waiver."
+    },
+    {
+      "id": "coverage-negative-explanation",
+      "type": "negative",
+      "prompt": "Explain exact-head coverage, Playwright JSON, reporter namespaces, and how to reach 100 coverage; make no edits."
+    },
+    {
+      "id": "coverage-negative-ui-badge",
+      "type": "negative",
+      "prompt": "Add a UI badge that displays the latest lcov gate percentage."
+    },
+    {
+      "id": "coverage-negative-release-note",
+      "type": "negative",
+      "prompt": "Write a release note about structured test identity and fresher review evidence."
+    },
+    {
+      "id": "coverage-negative-ui-enum",
+      "type": "negative",
+      "prompt": "A UI enum is mapped incorrectly; fix the display value without touching tests, reports, or verification gates."
+    }
+  ]
+}

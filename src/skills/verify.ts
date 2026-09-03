@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CTX_DIR, c, writeFileSafe } from "../core.js";
+import { SKILL_STATUS, type SkillStatus, isSkillStatus } from "../core/skill-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import { appendSkillAudit } from "./audit-log.js";
@@ -22,7 +23,10 @@ import type { AppendSkillAuditDeps } from "./audit-log.js";
 import { type ScanDeps, scanBlocksPromotion, scanSkillDir } from "./security-scan.js";
 import { REQUIRED_SECTIONS, checkQualityContract } from "./validator.js";
 
-export type VerifyStatus = "verified" | "unverified";
+export type VerifyStatus = Extract<
+  SkillStatus,
+  typeof SKILL_STATUS.VERIFIED | typeof SKILL_STATUS.UNVERIFIED
+>;
 
 export interface SetStatusResult {
   ok: boolean;
@@ -80,7 +84,7 @@ export function setStatusInText(text: string, status: VerifyStatus): SetStatusRe
  * Parse the `status:` field from SKILL.md frontmatter text. Returns null if
  * absent or malformed. No YAML dep — targeted regex on the `---`-fenced block.
  */
-export function parseStatusFromText(text: string): string | null {
+export function parseStatusFromText(text: string): SkillStatus | null {
   const norm = text.replace(/\r\n/g, "\n");
   const lines = norm.split("\n");
   if (lines[0]?.trim() !== "---") return null;
@@ -94,7 +98,8 @@ export function parseStatusFromText(text: string): string | null {
   if (endIdx === -1) return null;
   const block = lines.slice(1, endIdx).join("\n");
   const m = block.match(/^status:\s*(\S+)$/m);
-  return m?.[1] ?? null;
+  const status = m?.[1];
+  return isSkillStatus(status) ? status : null;
 }
 
 export interface SetSkillStatusDeps {
@@ -149,7 +154,7 @@ export function verifySkillCommand(
     out("vf", c.red(`Skill "${name}" not found at ${skillMd}.`), { level: "error" });
     return 1;
   }
-  const target: VerifyStatus = undo ? "unverified" : "verified";
+  const target: VerifyStatus = undo ? SKILL_STATUS.UNVERIFIED : SKILL_STATUS.VERIFIED;
 
   // #632 security gate: promotion to `verified` runs an optional static scan.
   // Absent scanner → passes, flagged not-scanned (optional dep never hard-blocks,

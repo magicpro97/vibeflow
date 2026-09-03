@@ -108,7 +108,7 @@
       </span>
       <span v-if="anyRunning" class="ml-auto flex items-center gap-1.5 text-neutral-500">
         <span class="inline-block w-1.5 h-1.5 rounded-full bg-white/50 animate-pulse"></span>
-        {{ units.filter(u=>u.status==='running').length }} running
+        {{ units.filter(u => u.status === WORK_UNIT_STATUS.RUNNING).length }} running
       </span>
     </div>
 
@@ -147,15 +147,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { AGENT_ENGINE, ENGINES, isAgentEngine } from "../../../core/agent-contract.js";
+import { WORK_UNIT_STATUS } from "../../../core/workflow-contract.js";
 import { api } from "../api.js";
 import { usePoller } from "../composables/usePoller.js";
 import { useVfStore } from "../store.js";
-import type { Engine } from "../types.js";
 import InfoTip from "./InfoTip.vue";
 import PlanReview from "./PlanReview.vue";
 import WorkUnitTable from "./WorkUnitTable.vue";
-
-const ENGINES: Engine[] = ["claude", "codex", "copilot", "opencode", "antigravity"];
 
 const store = useVfStore();
 // Pre-select engine from Stage1 choice (persisted in localStorage); fallback claude
@@ -166,9 +165,7 @@ const savedEngine = (() => {
     return null;
   }
 })();
-const engine = ref<Engine>(
-  (ENGINES as string[]).includes(savedEngine ?? "") ? (savedEngine as Engine) : "claude",
-);
+const engine = ref(isAgentEngine(savedEngine) ? savedEngine : AGENT_ENGINE.CLAUDE);
 const dispatching = ref(false);
 const dispatched = ref(false);
 const err = ref<string | null>(null);
@@ -188,15 +185,17 @@ const units = computed(() => store.state?.work_units ?? []);
 const totals = computed(
   () => store.state?.totals ?? { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
 );
-const anyRunning = computed(() => units.value.some((u) => u.status === "running"));
+const anyRunning = computed(() => units.value.some((u) => u.status === WORK_UNIT_STATUS.RUNNING));
 const allDone = computed(
-  () => units.value.length > 0 && units.value.every((u) => u.status === "done"),
+  () => units.value.length > 0 && units.value.every((u) => u.status === WORK_UNIT_STATUS.DONE),
 );
 // Allow advancing even if some units are blocked — user shouldn't be stuck
 const canAdvance = computed(
   () =>
     units.value.length > 0 &&
-    units.value.every((u) => u.status === "done" || u.status === "blocked"),
+    units.value.every(
+      (u) => u.status === WORK_UNIT_STATUS.DONE || u.status === WORK_UNIT_STATUS.BLOCKED,
+    ),
 );
 
 // Live polling — active only while any unit is running

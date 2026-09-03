@@ -1,4 +1,5 @@
 import type { WorkUnit } from "../core.js";
+import { PENDING_REQUIRED_WORK_UNIT_GATES, WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { findScopeConflicts } from "../gates.js";
 
 /** A planner's proposed slice of the task — name + the file scope it owns. */
@@ -27,12 +28,12 @@ export function planWorkUnits(proposals: UnitProposal[]): PlanResult {
   const conflicts = findScopeConflicts(proposals);
   const units: WorkUnit[] = proposals.map((p) => ({
     name: p.name,
-    status: "pending",
+    status: WORK_UNIT_STATUS.PENDING,
     confidence: p.confidence ?? 0,
     owner_agent: p.owner_agent,
     scope: p.scope,
     depends_on: p.depends_on,
-    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+    gates: { ...PENDING_REQUIRED_WORK_UNIT_GATES },
     resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
   }));
   return { ok: conflicts.length === 0, units, conflicts };

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { hasCommand } from "./core.js";
+import { RUNTIME_PLATFORM } from "./durability/process-identity-contract.js";
 
 export type NotifySpawn = (cmd: string, args: string[]) => void;
 
@@ -34,7 +35,7 @@ export function notify(
   const spawn = inject.spawn ?? defaultSpawn;
   const platform = inject.platform ?? process.platform;
   try {
-    if (platform === "darwin" && has("osascript")) {
+    if (platform === RUNTIME_PLATFORM.DARWIN && has("osascript")) {
       spawn("osascript", ["-e", `display notification ${asStr(body)} with title ${asStr(title)}`]);
     } else if (has("notify-send")) {
       spawn("notify-send", [title, body]);

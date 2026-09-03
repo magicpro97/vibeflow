@@ -19,6 +19,13 @@ import {
   streamSpawnAsync,
 } from "../commands/ask.js";
 import { ENGINES, type Engine } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
+import {
+  ASK_SSE_EVENT,
+  SSE_COMMENT,
+  serializeSseComment,
+  serializeSseJsonEvent,
+} from "../orchestrator/conversation/conversation-sse-contract.js";
 import { preflightAllAsync } from "../preflight.js";
 import type { EngineReadiness } from "../preflight/types.js";
 
@@ -141,7 +148,7 @@ async function resolveEngine(
 ): Promise<Engine | AskError> {
   const readiness = await (
     deps.readiness ?? ((e: Engine[]) => preflightAllAsync(e, { probe: true }))
-  )(ENGINES);
+  )([...ENGINES]);
   const engine = pickEngine(readiness, engineOverride);
   if (typeof engine === "string" && !(ENGINES as string[]).includes(engine))
     return { error: engine, status: 400 };
@@ -184,8 +191,8 @@ export async function prepareAsk(
     // copilot has no native resume — fail fast BEFORE the readiness probe so a
     // hung/slow copilot probe can't delay (or with an unlucky timeout, swallow)
     // the deterministic "not supported" 400.
-    if (b.engine === "copilot") {
-      const inv = resumeInvocation("copilot");
+    if (b.engine === AGENT_ENGINE.COPILOT) {
+      const inv = resumeInvocation(AGENT_ENGINE.COPILOT);
       // resumeInvocation("copilot") is always the unsupported error string.
       return { error: inv as string, status: 400 };
     }
@@ -291,18 +298,25 @@ export async function askStreamResponse(
             /* client gone */
           }
         };
-        safeEnqueue(enc.encode(": vibeflow-ask-1\n\n"));
-        heartbeat = setInterval(() => safeEnqueue(enc.encode(": keepalive\n\n")), 25_000);
+        safeEnqueue(enc.encode(serializeSseComment(SSE_COMMENT.ASK_OPEN)));
+        heartbeat = setInterval(
+          () => safeEnqueue(enc.encode(serializeSseComment(SSE_COMMENT.KEEPALIVE))),
+          25_000,
+        );
         // JSON.stringify the data so a token containing a newline can't break the SSE
         // `\n\n` frame terminator.
         const onChunk = (s: string) =>
-          safeEnqueue(enc.encode(`event: token\ndata: ${JSON.stringify({ text: s })}\n\n`));
+          safeEnqueue(enc.encode(serializeSseJsonEvent(ASK_SSE_EVENT.TOKEN, { text: s })));
 
         spawn(prep.inv, prep.prompt, onChunk)
           .then((result) => {
             safeEnqueue(
               enc.encode(
-                `event: done\ndata: ${JSON.stringify({ engine: prep.eng, code: result.code, ok: result.code === 0 })}\n\n`,
+                serializeSseJsonEvent(ASK_SSE_EVENT.DONE, {
+                  engine: prep.eng,
+                  code: result.code,
+                  ok: result.code === 0,
+                }),
               ),
             );
           })
@@ -310,9 +324,7 @@ export async function askStreamResponse(
             // Coerce non-Error rejections (string/unknown) so JSON.stringify
             // never drops the field and the UI always gets an actionable message.
             const message = err instanceof Error ? err.message : String(err);
-            safeEnqueue(
-              enc.encode(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`),
-            );
+            safeEnqueue(enc.encode(serializeSseJsonEvent(ASK_SSE_EVENT.ERROR, { error: message })));
           })
           .finally(() => {
             if (heartbeat) clearInterval(heartbeat);

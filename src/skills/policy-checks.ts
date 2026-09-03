@@ -3,6 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import { c } from "../core.js";
+import { WORK_UNIT_RISK_CLASS, type WorkUnitRiskClass } from "../core/workflow-contract.js";
 import { out } from "../logbus.js";
 import { type ProtectedPathRule, matchPolicyPaths, readSkillPolicy } from "./policy.js";
 
@@ -10,7 +11,7 @@ import { type ProtectedPathRule, matchPolicyPaths, readSkillPolicy } from "./pol
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
 
-export type RiskClass = "security" | "architecture" | "feature" | "docs" | "simple-code" | "deploy";
+export type RiskClass = WorkUnitRiskClass;
 
 export interface PolicyChecksResult {
   riskClass: RiskClass;
@@ -56,13 +57,13 @@ function isSecurityPath(p: string): boolean {
 
 export function deriveRiskClass(paths: string[]): RiskClass {
   // priority 1: security
-  if (paths.some(isSecurityPath)) return "security";
+  if (paths.some(isSecurityPath)) return WORK_UNIT_RISK_CLASS.SECURITY;
 
   // priority 2: architecture (exact file matches)
-  if (paths.some((p) => ARCH_FILES.has(normalise(p)))) return "architecture";
+  if (paths.some((p) => ARCH_FILES.has(normalise(p)))) return WORK_UNIT_RISK_CLASS.ARCHITECTURE;
 
   // priority 3: feature (any src/ path)
-  if (paths.some((p) => normalise(p).startsWith("src/"))) return "feature";
+  if (paths.some((p) => normalise(p).startsWith("src/"))) return WORK_UNIT_RISK_CLASS.FEATURE;
 
   // priority 4: docs (all paths are docs or markdown)
   if (
@@ -72,9 +73,9 @@ export function deriveRiskClass(paths: string[]): RiskClass {
       return n.startsWith("docs/") || n.endsWith(".md");
     })
   )
-    return "docs";
+    return WORK_UNIT_RISK_CLASS.DOCS;
 
-  return "simple-code";
+  return WORK_UNIT_RISK_CLASS.SIMPLE_CODE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -100,7 +101,7 @@ export function computeRequiredChecks(
   }
 
   // built-in: security risk → security-scan
-  if (risk === "security") checks.add("security-scan");
+  if (risk === WORK_UNIT_RISK_CLASS.SECURITY) checks.add("security-scan");
 
   // built-in: DOMAIN_FACTS.json changed → domain-facts-check
   if (

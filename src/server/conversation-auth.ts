@@ -51,6 +51,13 @@ function cookieCapability(request: Request): string | null {
   return values.length === 1 ? (values[0] ?? null) : null;
 }
 
+/** Returns only the normalized digest of the exact session capability parsed by auth. */
+export function conversationSessionCapabilityDigest(request: Request): string | null {
+  const raw = cookieCapability(request);
+  const decoded = raw === null ? null : tokenBytes(raw);
+  return decoded ? `sha256:${digest("session", decoded).toString("hex")}` : null;
+}
+
 export interface ConversationSessionAuthorityOptions {
   loopback: boolean;
   sessionCapability?: string;

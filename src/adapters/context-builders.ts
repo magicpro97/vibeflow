@@ -1,7 +1,7 @@
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { CTX_DIR, VERSION, cwd, statePath } from "../core.js";
+import { CTX_DIR, type Engine, VERSION, cwd, statePath } from "../core.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { type ToolTier, type VibeSettings, priorityRank } from "../settings.js";
 
 /** Banner shown in every generated instruction file so agents know VibeFlow is present. */
@@ -172,15 +172,22 @@ export function defaultContext(opts: DefaultContextOpts = {}): ProjectContext {
 }
 
 /** Run an external AI pipeline and return its output, or the fallback on failure. */
-export function aiGenerate(prompt: string, fallback: () => string): string {
+export async function aiGenerate(
+  engine: Engine,
+  prompt: string,
+  fallback: () => string,
+  inject: { cwd?: string; ownedRoute?: OwnedAiRouteRunner } = {},
+): Promise<string> {
   const cmd = process.env.VIBEFLOW_AI;
   if (!cmd) return fallback();
-  const r = spawnSync(cmd, {
+  const result = await (inject.ownedRoute ?? runOwnedAiRoute)({
+    engine,
+    command: cmd,
     input: prompt,
+    cwd: inject.cwd ?? process.cwd(),
     shell: true,
-    encoding: "utf8",
-    timeout: 30_000,
+    timeoutMs: 30_000,
   });
-  if (r.status !== 0 || !r.stdout?.trim()) return fallback();
-  return r.stdout.trim().slice(0, 4000);
+  if (result.status !== 0 || !result.stdout.trim()) return fallback();
+  return result.stdout.trim().slice(0, 4000);
 }

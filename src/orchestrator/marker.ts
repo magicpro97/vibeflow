@@ -11,35 +11,30 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Engine } from "../core.js";
 import { sanitizePublicValue } from "../dispatch/public-redaction.js";
+import {
+  ENGINE_NATIVE_SESSION_STATUS,
+  type EngineNativeSessionStatus,
+} from "../dispatch/session-contract.js";
+import {
+  type DispatchMarker,
+  MARKER_PROJECT,
+  MARKER_PROJECT_OPTION_BY_STATUS,
+  MARKER_STATUS,
+  type MarkerStatus,
+  parseDispatchMarker,
+} from "./marker-contract.js";
 import { applyResumeMarkerUpdate, resumeMarkerFields } from "./resume-binding.js";
 import { appendTimeline, timelinePath } from "./timeline.js";
 
-export type MarkerStatus = "pending" | "running" | "done" | "failed" | "blocked";
-export interface DispatchMarker {
-  unit: string;
-  status: MarkerStatus;
-  startedAt: number;
-  updatedAt: number;
-  confidence: number;
-  evidence: string[];
-  agent?: string;
-  exitCode?: number;
-  /** GitHub ProjectV2 item node ID (e.g. "PVTI_..."). Set after initial project linking. */
-  projectItemId?: string;
-  /** GitHub issue URL or number — used to auto-close when PR merge is detected. */
-  issueUrl?: string;
-  engineSessionId?: string;
-  engineSessionEngine?: Engine;
-  resumeStatus?: MarkerStatus;
-}
+export type { DispatchMarker, MarkerStatus } from "./marker-contract.js";
+export { MARKER_STATUS } from "./marker-contract.js";
 
 export type PublicDispatchMarker = Omit<
   DispatchMarker,
   "engineSessionId" | "engineSessionEngine" | "resumeStatus"
 > & {
-  nativeSessionStatus: "captured" | "unavailable";
+  nativeSessionStatus: EngineNativeSessionStatus;
 };
 
 function projectPublicMarker(marker: DispatchMarker): PublicDispatchMarker {
@@ -53,39 +48,13 @@ function projectPublicMarker(marker: DispatchMarker): PublicDispatchMarker {
     {
       ...publicMarker,
       evidence: publicMarker.evidence.map(() => "[opaque-evidence]"),
-      nativeSessionStatus: engineSessionId ? "captured" : "unavailable",
+      nativeSessionStatus: engineSessionId
+        ? ENGINE_NATIVE_SESSION_STATUS.CAPTURED
+        : ENGINE_NATIVE_SESSION_STATUS.UNAVAILABLE,
     },
     engineSessionId ? [engineSessionId] : [],
   );
 }
-
-/**
- * Project #6 status-field mapping. The IDs are hard-coded because they
- * are project-specific and must match the schema queried from the API.
- *
- * Run `gh project field-list 6 --owner magicpro97` to refresh if the
- * project schema changes.
- */
-const PROJECT_SYNC = {
-  projectId: "PVT_kwHOAT2vsM4Ba5YF",
-  /** Status single-select field in ProjectV2 #6. */
-  statusFieldId: "PVTSSF_lAHOAT2vsM4Ba5YFzhVtrdA",
-  options: {
-    Todo: "f75ad846",
-    InProgress: "47fc9ee4",
-    Done: "98236657",
-  },
-} as const;
-
-// TODO(#176): blocked/failed map to "Done" per current acceptance criteria.
-// Revisit when the project gains dedicated "Blocked" / "Failed" columns.
-const STATUS_TO_PROJECT_OPTION: Record<MarkerStatus, string | undefined> = {
-  running: PROJECT_SYNC.options.InProgress,
-  done: PROJECT_SYNC.options.Done,
-  blocked: PROJECT_SYNC.options.Done,
-  failed: PROJECT_SYNC.options.Done,
-  pending: undefined, // no sync on pending (marker is just created)
-};
 
 const MARKER_TTL_MS = 4 * 60 * 60 * 1000;
 
@@ -103,6 +72,14 @@ function lockPath(unitName: string): string {
   return join(markerDir(), `${unitName}.lock`);
 }
 
+function readPersistedMarker(path: string): DispatchMarker | null {
+  try {
+    return parseDispatchMarker(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 export function createMarker(
   unit: string,
   agent?: string,
@@ -110,7 +87,7 @@ export function createMarker(
 ): DispatchMarker {
   const marker: DispatchMarker = {
     unit,
-    status: "pending",
+    status: MARKER_STATUS.PENDING,
     startedAt: Date.now(),
     updatedAt: Date.now(),
     confidence: 0,
@@ -131,7 +108,7 @@ export function createMarker(
  */
 export function syncProjectStatus(marker: DispatchMarker): void {
   if (!marker.projectItemId) return;
-  const optionId = STATUS_TO_PROJECT_OPTION[marker.status];
+  const optionId = MARKER_PROJECT_OPTION_BY_STATUS[marker.status];
   if (!optionId) return; // pending — nothing to sync
 
   try {
@@ -143,9 +120,9 @@ export function syncProjectStatus(marker: DispatchMarker): void {
         "--id",
         marker.projectItemId,
         "--project-id",
-        PROJECT_SYNC.projectId,
+        MARKER_PROJECT.projectId,
         "--field-id",
-        PROJECT_SYNC.statusFieldId,
+        MARKER_PROJECT.statusFieldId,
         "--single-select-option-id",
         optionId,
       ],
@@ -170,7 +147,7 @@ export function closeLinkedIssue(
 ): void {
   if (!marker.issueUrl) return;
   // Only close when the unit is done — caller gates this.
-  if (marker.status !== "done") return;
+  if (marker.status !== MARKER_STATUS.DONE) return;
 
   // Heuristic: look for a merged PR whose branch/head-ref contains the
   // unit name. If found, auto-close the issue.
@@ -221,7 +198,8 @@ export function updateMarker(
 ): DispatchMarker | null {
   const path = markerPath(unit);
   if (!existsSync(path)) return null;
-  const current: DispatchMarker = JSON.parse(readFileSync(path, "utf8"));
+  const current = readPersistedMarker(path);
+  if (!current) return null;
   const marker: DispatchMarker = {
     ...current,
     ...update,
@@ -251,7 +229,7 @@ export function updateMarker(
       });
     }
     syncProjectStatus(marker);
-    if (update.status === "done") closeLinkedIssue(marker);
+    if (update.status === MARKER_STATUS.DONE) closeLinkedIssue(marker);
   }
 
   return marker;
@@ -260,17 +238,14 @@ export function updateMarker(
 export function readMarker(unit: string): DispatchMarker | null {
   const path = markerPath(unit);
   if (!existsSync(path)) return null;
-  try {
-    const marker: DispatchMarker = JSON.parse(readFileSync(path, "utf8"));
-    if (Date.now() - marker.startedAt > MARKER_TTL_MS) {
-      removeIfExists(path);
-      removeIfExists(timelinePath(unit)); // #557: don't orphan the sibling ledger on TTL expiry
-      return null;
-    }
-    return marker;
-  } catch {
+  const marker = readPersistedMarker(path);
+  if (!marker) return null;
+  if (Date.now() - marker.startedAt > MARKER_TTL_MS) {
+    removeIfExists(path);
+    removeIfExists(timelinePath(unit)); // #557: don't orphan the sibling ledger on TTL expiry
     return null;
   }
+  return marker;
 }
 
 export function listMarkers(): PublicDispatchMarker[] {
@@ -282,13 +257,9 @@ export function listMarkers(): PublicDispatchMarker[] {
   const now = Date.now();
   for (const entry of entries) {
     if (!entry.endsWith(".json")) continue;
-    try {
-      const marker: DispatchMarker = JSON.parse(readFileSync(join(dir, entry), "utf8"));
-      if (now - marker.startedAt <= MARKER_TTL_MS) {
-        markers.push(marker);
-      }
-    } catch {
-      /* skip corrupt files */
+    const marker = readPersistedMarker(join(dir, entry));
+    if (marker && now - marker.startedAt <= MARKER_TTL_MS) {
+      markers.push(marker);
     }
   }
   return markers.sort((a, b) => b.updatedAt - a.updatedAt).map(projectPublicMarker);

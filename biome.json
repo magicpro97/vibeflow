@@ -13,7 +13,8 @@
     "enabled": true,
     "rules": {
       "recommended": true,
-      "suspicious": { "noExplicitAny": "off" }
+      "nursery": { "noEnum": "error" },
+      "suspicious": { "noConstEnum": "error", "noExplicitAny": "off" }
     }
   },
   "javascript": {

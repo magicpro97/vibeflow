@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "skill": "runtime-portable-process-fixtures",
+  "cases": [
+    {
+      "id": "runtime-positive-windows-leak",
+      "type": "positive",
+      "prompt": "A Windows child stays alive after the CLI reports completion; persist launcher process ownership and prove its PID is released."
+    },
+    {
+      "id": "runtime-positive-shell-independent-tests",
+      "type": "positive",
+      "prompt": "Make the launcher cleanup tests portable on macOS and Windows with a shell-independent process fixture."
+    },
+    {
+      "id": "runtime-positive-pid-reuse",
+      "type": "positive",
+      "prompt": "The PID was reused by another process; reclaim the stale process record safely and prove the foreign process survives."
+    },
+    {
+      "id": "runtime-negative-windows-explanation",
+      "type": "negative",
+      "prompt": "Explain Windows path, UNC path, Bun.spawn, and PID semantics without changing launcher code or tests."
+    },
+    {
+      "id": "runtime-negative-landing",
+      "type": "negative",
+      "prompt": "Improve the landing page typography and loading animation."
+    },
+    {
+      "id": "runtime-negative-auth",
+      "type": "negative",
+      "prompt": "Add a general OAuth provider and document its callback URL."
+    }
+  ]
+}

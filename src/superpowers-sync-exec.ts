@@ -3,9 +3,12 @@ import { existsSync as nodeExistsSync, readFileSync as nodeReadFileSync } from "
 import { homedir as nodeHomedir } from "node:os";
 import { join } from "node:path";
 import { hasCommand as nodeHasCommand, writeFileSafe as nodeWriteFileSafe } from "./core.js";
+import { AGENT_ENGINE } from "./core/agent-contract.js";
 import { filterEnv } from "./dispatch/env-filter.js";
+import { RUNTIME_PLATFORM } from "./durability/process-identity-contract.js";
 import type { SpawnFn } from "./skills/registry-types.js";
 import {
+  SUPERPOWERS_ENGINES,
   type SuperpowersEngine,
   type SuperpowersPin,
   type SuperpowersReceipt,
@@ -39,7 +42,6 @@ export interface SuperpowersSyncInject {
   gitHead?: (cacheDir: string) => string | null;
 }
 
-const ENGINES: readonly SuperpowersEngine[] = ["claude", "codex", "opencode"];
 const TELEMETRY_KEY = "SUPERPOWERS_DISABLE_TELEMETRY";
 const MANAGED_ID = /^superpowers@/;
 
@@ -60,7 +62,7 @@ function paths(home: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform) 
   const codexDir = env.CODEX_HOME ?? join(home, ".codex");
   const openGlobalDir = join(
     env.XDG_CONFIG_HOME ??
-      (platform === "win32" && env.APPDATA ? env.APPDATA : join(home, ".config")),
+      (platform === RUNTIME_PLATFORM.WINDOWS && env.APPDATA ? env.APPDATA : join(home, ".config")),
     "opencode",
   );
   const openConfig =
@@ -141,7 +143,7 @@ function applyClaude(context: Context): string[] {
     desired &&
     foreign.length === 0 &&
     !telemetry.changed &&
-    context.receipt.engines.claude === context.pin.commitOID
+    context.receipt.engines[AGENT_ENGINE.CLAUDE] === context.pin.commitOID
   )
     return [];
 
@@ -155,7 +157,7 @@ function applyClaude(context: Context): string[] {
     context.run("claude", ["plugin", "marketplace", "add", market.root, "--scope", "user"]);
     context.run("claude", ["plugin", "install", market.selector, "--scope", "user"]);
     actions.push(`install ${market.selector}`);
-  } else if (context.receipt.engines.claude !== context.pin.commitOID) {
+  } else if (context.receipt.engines[AGENT_ENGINE.CLAUDE] !== context.pin.commitOID) {
     context.run("claude", ["plugin", "uninstall", market.selector, "--scope", "user", "-y"]);
     context.run("claude", ["plugin", "marketplace", "remove", market.name, "--scope", "user"]);
     context.write(market.manifest, renderMarketplace(context.pin));
@@ -173,7 +175,7 @@ function applyClaude(context: Context): string[] {
     verified.some((item) => MANAGED_ID.test(item.id) && item.id !== market.selector)
   )
     throw new Error("Claude did not report one exact Superpowers selector after sync");
-  writeReceipt(context, "claude");
+  writeReceipt(context, AGENT_ENGINE.CLAUDE);
   return actions;
 }
 
@@ -210,7 +212,7 @@ function applyCodex(context: Context): string[] {
     desired &&
     foreign.length === 0 &&
     !telemetry.changed &&
-    context.receipt.engines.codex === context.pin.commitOID
+    context.receipt.engines[AGENT_ENGINE.CODEX] === context.pin.commitOID
   )
     return [];
 
@@ -241,7 +243,7 @@ function applyCodex(context: Context): string[] {
     verified.some((item) => MANAGED_ID.test(item.pluginId) && item.pluginId !== market.selector)
   )
     throw new Error("Codex did not report one exact Superpowers commit after sync");
-  writeReceipt(context, "codex");
+  writeReceipt(context, AGENT_ENGINE.CODEX);
   return actions;
 }
 
@@ -252,7 +254,11 @@ function applyOpenCode(context: Context): string[] {
   const merged = mergeOpenCodeConfig(configRaw, spec);
   const hook = renderOpenCodeTelemetryHook();
   const hookCurrent = context.read(p.openHook) === hook;
-  if (!merged.changed && hookCurrent && context.receipt.engines.opencode === context.pin.commitOID)
+  if (
+    !merged.changed &&
+    hookCurrent &&
+    context.receipt.engines[AGENT_ENGINE.OPENCODE] === context.pin.commitOID
+  )
     return [];
 
   const actions: string[] = [];
@@ -271,18 +277,15 @@ function applyOpenCode(context: Context): string[] {
   if (!Array.isArray(resolved.plugin) || !resolved.plugin.includes(spec))
     throw new Error("OpenCode did not report the exact Superpowers spec after sync");
   actions.push(`install ${spec}`);
-  writeReceipt(context, "opencode");
+  writeReceipt(context, AGENT_ENGINE.OPENCODE);
   return actions;
 }
 
-function planned(
-  engine: SuperpowersEngine,
-  pin: SuperpowersPin,
-  present: boolean,
-): SuperpowersSyncResult {
+// biome-ignore format: compact signature keeps this capped orchestration module within 400 lines
+function planned(engine: SuperpowersEngine, pin: SuperpowersPin, present: boolean): SuperpowersSyncResult {
   const market = marketplace(pin, "~");
   const action =
-    engine === "opencode"
+    engine === AGENT_ENGINE.OPENCODE
       ? `configure superpowers@git+${pin.url}#${pin.commitOID}`
       : `install ${market.selector}`;
   return {
@@ -313,7 +316,9 @@ export function syncSuperpowers(
 
   const has = inject.hasCommand ?? nodeHasCommand;
   if (dryRun) {
-    const results = ENGINES.map((engine) => planned(engine, pinResult.pin, has(engine)));
+    const results = SUPERPOWERS_ENGINES.map((engine) =>
+      planned(engine, pinResult.pin, has(engine)),
+    );
     return { ok: true, dryRun: true, commitOID: pinResult.pin.commitOID, results };
   }
 
@@ -356,9 +361,13 @@ export function syncSuperpowers(
     receiptPath,
     receipt,
   };
-  const adapters = { claude: applyClaude, codex: applyCodex, opencode: applyOpenCode } as const;
+  const adapters = {
+    [AGENT_ENGINE.CLAUDE]: applyClaude,
+    [AGENT_ENGINE.CODEX]: applyCodex,
+    [AGENT_ENGINE.OPENCODE]: applyOpenCode,
+  } as const;
   const results: SuperpowersSyncResult[] = [];
-  for (const engine of ENGINES) {
+  for (const engine of SUPERPOWERS_ENGINES) {
     if (!has(engine)) {
       results.push(planned(engine, pinResult.pin, false));
       continue;

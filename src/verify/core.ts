@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { WorkflowState } from "../core.js";
 import { writeState } from "../core.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { type GateReport, computeConfidence, policyGates } from "../gates.js";
 import { snapshotImpl } from "../spec-freshness.js";
 
@@ -21,6 +22,7 @@ export const VERIFY_GATE_ORDER = [
   "waiver",
   "registry_lock",
   "review_evidence",
+  "normative_matrix",
   "advisory_e2e",
   "marker_result",
   "journal_result",
@@ -67,6 +69,7 @@ export interface VerifyCoreInput {
   waiver?: VerifyGateResult;
   registryLock?: VerifyGateResult;
   reviewEvidence?: VerifyGateResult;
+  normativeMatrix?: VerifyGateResult;
   advisoryE2e?: VerifyGateResult;
   markerResult?: VerifyGateResult;
   journalResult?: VerifyGateResult;
@@ -120,7 +123,7 @@ function clonePolicy(report: GateReport): GateReport {
   };
 }
 
-function addReviewEvidence(policy: GateReport, result: VerifyGateResult): void {
+function addPolicyResult(policy: GateReport, result: VerifyGateResult): void {
   if (result.status === "fail") policy.failures.push(result.details);
   else if (result.status === "warn") policy.warnings.push(result.details);
   else if (result.status === "pass") policy.passed.push(result.details);
@@ -179,9 +182,12 @@ export function evaluateVerifyCore(input: VerifyCoreInput): VerifyCoreReport {
       ? { ...input.state, _allowUnverifiedEvidence: true }
       : input.state;
   const policy = clonePolicy(policyGates(state, { base: input.base }));
+  const normativeMatrix =
+    input.normativeMatrix ?? gateResult("fail", "normative matrix gate not evaluated");
+  addPolicyResult(policy, normativeMatrix);
   const reviewEvidence =
     input.reviewEvidence ?? gateResult("fail", "review evidence not evaluated");
-  addReviewEvidence(policy, reviewEvidence);
+  addPolicyResult(policy, reviewEvidence);
   const confidence = exactConfidence(state);
   const confidencePolicy = policyResult(
     policy,
@@ -222,6 +228,7 @@ export function evaluateVerifyCore(input: VerifyCoreInput): VerifyCoreReport {
     waiver: input.waiver ?? gateResult("fail", "waiver gate not evaluated"),
     registry_lock: input.registryLock ?? gateResult("fail", "registry lock not evaluated"),
     review_evidence: reviewEvidence,
+    normative_matrix: normativeMatrix,
     advisory_e2e: external(input.advisoryE2e, "advisory E2E scan not evaluated"),
     marker_result: external(input.markerResult, "marker write not requested"),
     journal_result: external(input.journalResult, "journal write not requested"),
@@ -325,7 +332,7 @@ export function persistImplementationFingerprints(
       fingerprint: Record<string, string | null>;
     }> = [];
     for (const [index, unit] of state.work_units.entries()) {
-      if (unit.status !== "done" || !unit.scope?.length) continue;
+      if (unit.status !== WORK_UNIT_STATUS.DONE || !unit.scope?.length) continue;
       pending.push({ index, fingerprint: snapshot(base, unit.scope) });
     }
     if (!pending.length) return false;

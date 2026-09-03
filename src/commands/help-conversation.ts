@@ -1,23 +1,24 @@
 import { c } from "./_shared.js";
 
 export const ASK_HELP =
-  () => `${c.bold("vf ask")} ${c.dim('<path>:<start>[-<end>] "<question>" [--engine <e>] [--resume]')}
-Inline code Q&A: read a line range, frame it (file + language-fenced snippet +
-your question), and stream a ready engine's answer straight to the terminal.
-Reuses vf's engine-readiness selection; no chat app, no copy-paste.
+  () => `${c.bold("vf ask")} ${c.dim('[--conversation <id>] [--resume] [--engine <e>] [<path>:<start>[-<end>]] "<question>"')}
+Inline code Q&A backed by the durable Home/queue authority. Fresh asks stage the
+selected file range as private context. Follow-ups target a persisted VibeFlow
+conversation; no native "most recent engine session" resume path remains.
 
 ${c.bold("Options:")}
   --engine <name>   force claude | codex | copilot | opencode | antigravity (must be ready); else the
-                    first ready engine in priority order is used
-  --resume          continue the engine's MOST RECENT conversation with a
-                    follow-up question (no target needed) — claude/codex/opencode/antigravity
-  --conversation    send the framed ask prompt through a persisted VibeFlow
-                    conversation id instead of the native latest-session resume path
+                    first ready engine in priority order is used for fresh asks
+  --conversation    required for follow-ups; routes the ask through a persisted
+                    VibeFlow conversation id
+  --resume          compatibility flag for question-only follow-ups; requires
+                    --conversation and never targets a native latest session
 
 ${c.bold("Examples:")}
   vf ask src/cli.ts:210-267 "what does this switch do?"
   vf ask src/dispatch.ts:172 "why the json output format?" --engine claude
-  vf ask --resume "ok, and is that thread-safe?"
+  vf ask --conversation conversation-123 "ok, and is that thread-safe?"
+  vf ask --conversation conversation-123 --resume "keep going"
   vf ask --conversation conversation-123 src/cli.ts:210-267 "revise that explanation"`;
 
 export const CHAT_HELP =

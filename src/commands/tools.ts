@@ -30,6 +30,7 @@ import {
   writeSettings,
 } from "./_shared.js";
 import type { ToolName, ToolTier, VibeSettings } from "./_shared.js";
+import { guardLegacyWriter } from "./capability/legacy-fence.js";
 import { CLAUDE_MCP_FILE, repoLanguages, writeToolConfigs } from "./tools-mcp-config.js";
 
 /** Spawn seam for tool installs — defaults to a real spawnSync, injectable for tests. */
@@ -333,6 +334,11 @@ export function tools(
   const spawner: StepSpawner =
     inject.spawner ??
     ((cmd, args) => ({ status: spawnSync(cmd, args, { stdio: "inherit" }).status ?? 0 }));
+  const fence =
+    sub === "enable" || sub === "disable" || sub === "sync" || (sub === "install" && flags.yes)
+      ? guardLegacyWriter(base, `vf tools ${sub}`)
+      : null;
+  if (fence !== null) return fence;
   if (sub === "enable")
     return toolsToggle(base, name as ToolName, true, {
       approved: Boolean(flags.yes),

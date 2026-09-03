@@ -1,8 +1,8 @@
 ---
 title: Web UI Design
-description: Design specification for the web UI — main screens, UX principles, approval flow, and real-time updates.
+description: Design specification for the web UI — AI-first Home surfaces, UX principles, approval flow, and real-time updates.
 category: explanation
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # Web UI Design
@@ -10,215 +10,79 @@ last_updated: 2026-06-24
 ## Contents
 
 - [Purpose](#purpose)
-- [Main Screens](#main-screens)
+- [Primary Surfaces](#primary-surfaces)
 - [UI Principle](#ui-principle)
 - [Approval UX](#approval-ux)
+- [Contextual Loading and Empty States](#contextual-loading-and-empty-states)
 - [Real-Time Updates](#real-time-updates)
 
 ## Purpose
 
-The web UI is the visual workflow console for non-linear AI SDLC orchestration.
+The web UI is AI-first Home: the visual conversation workspace for the local harness.
+It should keep the user in the current thread, make the searchable session rail and
+central conversation pane the default surfaces, and surface details, trace, and
+capabilities without forcing a mode switch.
 
-It should help the user configure repo, sources, skills, engine, permissions, execution, review, and skill evolution.
+> **Implementation status.** `src/ui/src/components/ConversationHome.vue` implements the
+> AI-first Home shell: searchable session rail, central conversation pane, details inspector,
+> and the composer-driven conversation flow. `HomeSessionRail.vue`, `HomeTimeline.vue`,
+> `HomeComposer.vue`, `HomeCapabilityDrawer.vue`, and `HomeTraceDrawer.vue` provide the
+> rail, timeline, composer, capability, and trace surfaces. Repository intake is not a Home
+> mode: `vf init` asks its questionnaire when stdin is a TTY, and `--no-ask` skips it.
+> On a LAN bind, legacy mutations require the authorized LAN page session plus CSRF token.
+> Conversation Home uses a separate conversation session that is issued only on loopback,
+> so its JSON, artifact, and stream-token routes fail closed on LAN even after page
+> bootstrap (see `SECURITY_MODEL.md`).
+> The motion layer is a small inline count-up/entrance animation — no third-party CDN script
+> is loaded, because the page is same-origin with the write API and a compromised CDN must not
+> be able to reach it.
 
-> **Implementation status.** Phase 1 of this console is implemented in `src/server.ts`: an
-> interactive **intake wizard** with a **repo path picker** (auto-detects which engines a repo
-> already carries and which CLIs are installed), constrained inputs with `<datalist>`
-> autocomplete, **multi-file sample attachments** (any number; each mapped to a reader skill the
-> AI should use), an **editable work-unit board** (add/update/delete), and a **dispatch**
-> control. The intake posts to `POST /api/init` to generate the canonical context + per-engine
-> files and seed `WORKFLOW_STATE.json` in the chosen repo; `POST /api/detect`, `/api/units`, and
-> `POST`/`DELETE /api/upload` back the detection, CRUD, and attachment flows; the live dashboard
-> renders the ledger. All write endpoints are loopback-only and CSRF-protected (see
-> `SECURITY_MODEL.md`). The motion layer is a small inline count-up/entrance animation — no
-> third-party CDN script is loaded, because the page is same-origin with the write API and a
-> compromised CDN must not be able to reach it.
+## Primary surfaces
 
-## Main screens
+### 1. AI-first Home
 
-### 1. Setup
+The default surface is the searchable session rail plus the central conversation pane.
+It keeps the current conversation visible, shows participant state and live stream
+status, and makes new conversation creation obvious. Search filters sessions in place;
+selecting a result opens it directly without a resume dialog.
 
-Fields:
+### 2. Composer
 
-```text
-- Repo path or GitHub URL
-- Branch
-- Create new branch yes/no
-- Preferred engine: Claude Code / Codex / Copilot CLI / OpenCode / Antigravity CLI
-- Permission mode
-- Workspace path
-```
+The composer is conversation-first, not form-first. It owns the durable FIFO queue, ArrowUp editing for the latest queued human message, private file range capture, and typed capability selection. Sends made while an agent is busy queue automatically. ArrowUp starts an edit only for the latest queued human message; Escape cancels, and a lost dispatch/edit race preserves the draft for explicit send-as-new. Typed add-participant actions promote a direct route into coordinate through proposal/review/commit, and removing the last executor collapses it back to direct. Sent messages remain ordered and reviewable. Only a transport-ambiguous request, or a typed admission error with `retryable: true` and `recovery_action: retry`, becomes retryable and may replay the exact request and idempotency key. Typed failures wait for an explicit retry. An in-flight admission interrupted by browser offline remains **Reconciling** and automatically replays the same idempotency key only after authoritative refresh. A non-retryable collision retains the exact rejected payload as **Needs action**, outside the waiting count. Its typed action restores an unsent edit/new draft, refreshes the active conversation before restore, or gives CLI authority-repair guidance; confirmed dismissal settles retained private context first. No typed recovery auto-resends or overwrites newer composer state. Rejected rows are current Home state and are not persisted through `localStorage` or promised across a browser restart.
 
-### 2. Sources
+### 3. Details inspector
 
-Fields:
+The details inspector shows the active conversation's participants, continuity, lineage, and health so the user can verify who is involved before adding more context or changing route authority. Participants can be mentioned or removed from this surface. The visible `−` action prepares `-@participant` in the composer so removal remains a chat event instead of hidden settings.
 
-```text
-- Project documentation source
-- Task management source
-- Credentials/connectors status
-- Local folder selection
-- Files selected for context
-```
+### 4. Trace / capabilities drawers
 
-Supported source types:
+The trace drawer shows ordered public trace and evidence. The capabilities drawer
+shows typed capability actions and their current state without leaving the thread.
 
-```text
-GitHub
-GitLab
-Google Drive
-Confluence
-Notion
-Jira
-Linear
-Slack
-Local folder
-S3/R2
-```
+### 5. Message interactions
 
-### 3. Skills
+Users can quote one through eight currently visible messages from one or more sources.
+Ordered quote chips can move earlier/later, be removed, and jump back to their source.
+Messages accept only 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, and ❗ reactions. Reactions are typed
+records rather than prompt syntax; an agent may add at most three distinct non-self
+reactions so the affordance does not become noise.
 
-(Implementation: Skills Catalog panel via SkillPanel.vue — modal overlay from TopBar Skills button.)
+### 6. Repository intake
 
-Shows:
+Run `vf init` in a TTY for first-run repository intake; it asks the goal, engine, sources,
+and Definition of Done before generating canonical context. `vf init --no-ask` is the
+non-interactive path. `vf ui` always stays on AI-first Home.
 
-```text
-- Verified skills
-- Missing skills
-- External skills found
-- Skills requiring approval
-- Skill versions
-- Capabilities
-- Required permissions
-```
+### 7. Secondary workflow/review surfaces
 
-Actions:
-
-```text
-- Enable skill
-- Disable skill
-- Verify skill
-- Promote draft to verified
-- View SKILL.md
-- View changelog
-```
-
-**Panel behaviour.** The Skills Catalog panel (`SkillPanel.vue`) is a modal overlay
-controlled by `store.skillPanelOpen`. On close, it emits a `close` event; App.vue
-sets `skillPanelOpen = false` and returns keyboard focus to the Skills launcher
-button in the TopBar (matching the Settings panel pattern). Short error messages
-from the store (`skillError`) are displayed inline in the panel and cleared before
-each fetch. Skills loaded from the server are rendered with security-scan dots,
-origin, version, and deprecated styling. Installed pinned registry skills additionally
-show a read-only badge with registry ID, version, and "pinned" label. Local/unpinned
-skills display origin only. The panel auto-loads skills on mount when
-the list is empty.
-
-**Attachment skill badges.** In Stage1Describe, each uploaded attachment shows its
-assigned reader skill label. When that skill exists in the loaded catalog (`store.skills`),
-a coloured status badge (verified, enriched, experimental, etc.) is shown next to
-the skill label.
-
-### 4. Context
-
-Shows generated context files:
-
-```text
-PROJECT_CONTEXT.md
-REQUIREMENTS.md
-TASK_CONTEXT.md
-ARCHITECTURE_CONTEXT.md
-API_CONTEXT.md
-SKILL_INDEX.md
-```
-
-User should be able to inspect and edit context before execution.
-
-### 5. Plan and Debate
-
-Shows:
-
-```text
-- Orchestrator interpretation
-- Confidence scores
-- Assumptions
-- Risks
-- Investigation results
-- Debate summary
-- Recommended plan
-- Parallel task split
-```
-
-### 6. Generated Instructions
-
-Shows generated files:
-
-```text
-CLAUDE.md
-AGENTS.md
-.github/copilot-instructions.md
-.github/instructions/*.instructions.md
-.claude/agents/*.md
-.claude/skills/*/SKILL.md
-```
-
-### 7. Run
-
-Shows:
-
-```text
-- Selected engine
-- Active agent
-- Skills used
-- Commands running
-- Logs
-- Hook decisions
-- Warnings
-- Approval requests
-```
-
-The Run screen includes a live **orchestration dashboard** that renders the work-unit
-ledger from `.vibeflow/WORKFLOW_STATE.json` (see `WORK_UNIT_ORCHESTRATION.md`) so quality
-and resource use are visible without reading raw logs:
-
-```text
-- Work-unit board: one card per unit with status, owner agent, and confidence
-- Gate strip: build / lint / test / review shown as pass / fail / running / pending
-- Resource meter: tokens, estimated cost, and elapsed time per unit and rolled up to totals
-- Evidence drawer: links to recorded gate output under each unit's evidence/ folder
-- Triage banner: any BLOCKED / TOO_BIG / AMBIGUOUS / REGRESSED unit is surfaced first
-```
-
-### 8. Review
-
-Shows:
-
-```text
-- Git diff
-- Files changed
-- Tests run
-- Lint/build status
-- Risk report
-- Skill compliance report
-- Final recommendation
-```
-
-### 9. Skill Evolution
-
-Shows:
-
-```text
-- Problems encountered
-- Workarounds used
-- Proposed skill updates
-- Draft skill changes
-- Validation prompt
-- Promote / reject action
-```
+The work-unit board, orchestration dashboard, generated instructions, review surfaces,
+and skill-evolution panels remain available, but they are secondary to the home-first
+conversation flow.
 
 ## UI principle
 
-The UI should reduce user burden. It should not ask “What should I do next?”
+The UI should reduce user burden. It should not ask “What should I do next?” or send
+the user away from the current conversation unless it is necessary.
 
 It should show:
 
@@ -233,11 +97,14 @@ Approval button if required
 
 ## Approval UX
 
-Stage 3 polls for skill-acquisition cards while `/api/orchestrate` waits. Each card shows
-need, candidate version, pinned registry commit, and bounded security scan status. Approve
-is disabled for HIGH/CRITICAL; Reject skips acquisition and continues with a skill gap.
-The browser only resolves a guarded decision endpoint—it never installs directly. Cards
-are keyboard trapped, Escape rejects, errors are assertive, and focus returns to Run agents.
+Approval, cancellation, install, repair, and lifecycle proposals render as typed action cards
+in the central timeline. A card shows the target, reason, bounded evidence, risk, and exact
+operation id. The browser only resolves a guarded decision endpoint; it never installs or
+mutates capability state directly. Approve remains disabled for HIGH/CRITICAL findings,
+Reject keeps an explicit gap, errors are assertive, and completion returns focus to the
+composer. A `409` triggers a state refresh because another operation already won.
+Skill-acquisition cards additionally name the pinned registry commit and bounded
+security scan result; rejection or a blocked install leaves an explicit skill gap.
 
 Approval prompts should support:
 
@@ -248,6 +115,15 @@ Approve for this repo policy
 Reject
 Edit policy
 ```
+
+## Contextual Loading and Empty States
+
+Loading copy names the operation that is actually pending: reconnecting a stream, loading a
+session, waiting for an agent, applying a queued edit, resolving an action, searching
+capabilities, or fetching trace. The active conversation stays visible while a scoped region
+loads. New users see a simple session rail plus composer prompt; empty drawers explain what
+will appear there and do not block chat. Reduced-motion preference disables decorative motion
+without removing status text or progress semantics.
 
 ## 10. Diff Preview (#641)
 
@@ -274,15 +150,16 @@ truncated states are clearly labeled.
   to `HEAD`.
 
 **Integration points**:
-- Workflow Dashboard (stage 0): diff panel above the pipeline graph.
+- Workflow Dashboard (secondary view): diff panel above the pipeline graph.
   Selecting a pipeline node filters to that unit's scope.
 - Verify screen (stage 4): full workflow diff summary above the task table.
 
 ## Pipeline dashboard (ADR-006)
 
-The Home screen (stage 0) now shows a **Workflow Dashboard** listing every
-registered workflow. Each card displays repo, task ID, goal, done/total,
-running/blocked count, and latest activity. Selecting a card reveals:
+The workflow dashboard is a secondary view surfaced from the home shell; the default
+stage 0 surface remains AI-first Home. The dashboard still lists every registered
+workflow. Each card displays repo, task ID, goal, done/total, running/blocked count,
+and latest activity. Selecting a card reveals:
 
 1. A **dependency pipeline** (CSS Grid + SVG) with one column per wave.
    Nodes are keyboard-focusable `<button>` elements with status-based coloring:
@@ -306,8 +183,8 @@ remains but is secondary to the active workflow cards.
 
 ## 11. Interactive Plan Review (PR1)
 
-The Plan Review panel (Stage 2 of the intake wizard) is a file-backed plan-markdown
-review surface with three components:
+The Plan Review panel (Stage 2 of the legacy repository workflow surface, not
+AI-first Home) is a file-backed plan-markdown review surface with three components:
 
 **PlanReview.vue** — parent container. Loads revisions via `store.loadRevisions()`
 when `repoPath` resolves (watches `store.repoPath`). Renders a split layout:
@@ -347,6 +224,11 @@ Use Server-Sent Events for:
 ```text
 - command logs
 - agent status
+- queued send and edit reconciliation
+  - participant add/remove proposal/review/commit and collapse events
+- typed quote and reaction changes
+- inline approval/capability operation state
+- contextual reconnect/loading state
 - hook decisions
 - skill usage
 - diff updates

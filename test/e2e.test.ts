@@ -61,7 +61,7 @@ describe("e2e golden path", () => {
       writeFileSync(join(dir, "README.md"), "# Shop API\n\nA small commerce backend.\n");
 
       // 1) Intake + scan: PROJECT_CONTEXT reflects the real detected stack.
-      const { state } = applyIntake(
+      const { state } = await applyIntake(
         { goal: "Add product search endpoint", engines: ["claude"] },
         { useAi: false, base: dir },
       );
@@ -106,7 +106,10 @@ describe("e2e golden path", () => {
   test("non-dry confidence<1 still blocks (investigated, not silently closed)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-block-"));
     try {
-      applyIntake({ goal: "Add risky thing", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake(
+        { goal: "Add risky thing", engines: ["claude"] },
+        { useAi: false, base: dir },
+      );
       // Inject a spawner that always reports low confidence (0.4). The bounded investigation
       // runs but cannot reach 1.0, so the unit must stay blocked → orchestrate exits 1.
       const code = await orchestrate({ engine: "claude", yes: true }, dir, {
@@ -128,7 +131,7 @@ describe("e2e golden path", () => {
   test("overlapping work-unit scopes are NOT dispatched concurrently", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-scope-"));
     try {
-      applyIntake({ goal: "Touch auth", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake({ goal: "Touch auth", engines: ["claude"] }, { useAi: false, base: dir });
       // Two units with overlapping scopes (src/auth/ ⊃ src/auth/login.ts).
       mutateUnits(dir, "add", { name: "a", scope: ["src/auth/"] });
       mutateUnits(dir, "add", { name: "b", scope: ["src/auth/login.ts"] });
@@ -159,7 +162,7 @@ describe("e2e golden path", () => {
   test("disjoint scopes are dispatched concurrently (parallel preserved)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-parallel-"));
     try {
-      applyIntake({ goal: "Two lanes", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake({ goal: "Two lanes", engines: ["claude"] }, { useAi: false, base: dir });
       mutateUnits(dir, "add", { name: "a", scope: ["src/auth/"] });
       mutateUnits(dir, "add", { name: "b", scope: ["src/ui/"] });
 
@@ -189,7 +192,7 @@ describe("e2e golden path", () => {
   test("already-complete units are NOT re-dispatched (only incomplete ones run)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-skipdone-"));
     try {
-      applyIntake(
+      await applyIntake(
         { goal: "Two units, one finished", engines: ["claude"] },
         { useAi: false, base: dir },
       );
@@ -228,7 +231,10 @@ describe("e2e golden path", () => {
   test("orchestrate with every unit complete dispatches nothing and reports the verdict", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-alldone-"));
     try {
-      applyIntake({ goal: "Already finished", engines: ["claude"] }, { useAi: false, base: dir });
+      await applyIntake(
+        { goal: "Already finished", engines: ["claude"] },
+        { useAi: false, base: dir },
+      );
       mutateUnits(dir, "add", { name: "solo", scope: ["src/solo/"] });
       mutateUnits(dir, "update", {
         name: "solo",

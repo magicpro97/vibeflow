@@ -18,6 +18,7 @@
 // relay. Without it, the bus singleton is null and out() falls back to
 // console-only — no file log, no UI stream, no replay. Mirrors the
 // `orchestrate.ts:176` call. installLogbus is idempotent.
+import { LOG_CHANNEL, type LogChannel } from "../core/log-contract.js";
 import { installLogbus } from "../logbus.js";
 import {
   type AgentEngine,
@@ -43,7 +44,7 @@ import {
 export function makeEnrichmentSpawner(prefix: string): AsyncSpawner {
   let lineBuf = "";
   let errLineBuf = "";
-  const flush = (buf: string, channel: "engine-stdout" | "engine-stderr") => {
+  const flush = (buf: string, channel: LogChannel) => {
     const trimmed = buf.trim();
     if (trimmed) out(channel, `${prefix} ${trimmed}`);
   };
@@ -56,7 +57,7 @@ export function makeEnrichmentSpawner(prefix: string): AsyncSpawner {
       lineBuf = lines.pop() ?? "";
       for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed) out("engine-stdout", `${prefix} ${trimmed}`);
+        if (trimmed) out(LOG_CHANNEL.ENGINE_STDOUT, `${prefix} ${trimmed}`);
       }
     },
     onStderrChunk(text) {
@@ -65,18 +66,18 @@ export function makeEnrichmentSpawner(prefix: string): AsyncSpawner {
       errLineBuf = lines.pop() ?? "";
       for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed) out("engine-stderr", `${prefix} ${trimmed}`);
+        if (trimmed) out(LOG_CHANNEL.ENGINE_STDERR, `${prefix} ${trimmed}`);
       }
     },
   });
   // Flush the final partial line (no trailing newline) after each spawn and
   // reset buffers so output never leaks across spawn calls.
-  return async (cmd, args, input) => {
+  return async (cmd, args, input, owned) => {
     try {
-      return await inner(cmd, args, input);
+      return await inner(cmd, args, input, owned);
     } finally {
-      flush(lineBuf, "engine-stdout");
-      flush(errLineBuf, "engine-stderr");
+      flush(lineBuf, LOG_CHANNEL.ENGINE_STDOUT);
+      flush(errLineBuf, LOG_CHANNEL.ENGINE_STDERR);
       lineBuf = "";
       errLineBuf = "";
     }

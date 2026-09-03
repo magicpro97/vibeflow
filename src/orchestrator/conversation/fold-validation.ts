@@ -1,25 +1,34 @@
-import type { Engine } from "../../core/types.js";
+import { isAgentEngine } from "../../core/agent-contract.js";
 import { type EvaluatorOutput, type RoundDecision, decideRound } from "../consensus.js";
 import type {
   ConversationHealth,
   ConversationLifecycle,
   PublicStoredTraceEvent,
 } from "../trace/types.js";
+import {
+  CONVERSATION_COORDINATION_POLICY,
+  isConversationCoordinationResponseRoundId,
+} from "./conversation-coordination-contract.js";
+import {
+  CONVERSATION_ARTIFACT_TYPE,
+  CONVERSATION_CONTINUING_DECISION_OUTCOMES,
+  CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
+  CONVERSATION_DECISION_OUTCOME,
+  CONVERSATION_HEALTH_VALUES,
+  CONVERSATION_INVALID_ASSESSMENT_REASON,
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_SANDBOXES,
+  CONVERSATION_TOOL_INTENTS,
+  CONVERSATION_TRACE_EVENT_KIND,
+  isConversationGracefulTerminalLifecycle,
+  isConversationLifecycle,
+  isConversationLifecycleTransition,
+  isConversationTerminalLifecycle,
+} from "./conversation-public-wire-contract.js";
 import type { ConversationParticipantSnapshot } from "./types.js";
 
-const ENGINES = new Set<Engine>(["claude", "codex", "copilot", "opencode", "antigravity"]);
-const TOOLS = new Set(["read", "write", "edit", "bash", "grep", "glob", "web"]);
-const SANDBOXES = new Set(["read-only", "workspace-write", "danger-full-access"]);
-const TERMINAL = new Set<ConversationLifecycle>(["COMPLETED", "STOPPED", "FAILED", "ABORTED"]);
-const LEGAL: Readonly<Record<ConversationLifecycle, readonly ConversationLifecycle[]>> = {
-  INIT: ["ACTIVE", "STOPPED"],
-  ACTIVE: ["PAUSED", "COMPLETED", "STOPPED", "FAILED", "ABORTED"],
-  PAUSED: ["ACTIVE", "STOPPED", "FAILED", "ABORTED"],
-  COMPLETED: [],
-  STOPPED: [],
-  FAILED: [],
-  ABORTED: [],
-};
+const TOOLS = new Set<string>(CONVERSATION_TOOL_INTENTS);
+const SANDBOXES = new Set<string>(CONVERSATION_SANDBOXES);
 
 export class ConversationFoldError extends Error {}
 export const fail = (message: string): never => {
@@ -33,7 +42,47 @@ export const stringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 export const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => key in value);
-export const terminal = (value: ConversationLifecycle) => TERMINAL.has(value);
+
+/** Validate and consume coordination summaries without projecting them as debate rounds. */
+export function isCoordinationResponseSummary(
+  policy: string,
+  payload: Record<string, unknown>,
+): boolean {
+  if (
+    policy !== CONVERSATION_COORDINATION_POLICY ||
+    typeof payload.round_id !== "string" ||
+    !isConversationCoordinationResponseRoundId(payload.round_id)
+  )
+    return false;
+  if (
+    payload.completes_response !== true ||
+    typeof payload.final_claim !== "string" ||
+    payload.content_delta !== payload.final_claim
+  )
+    fail("invalid coordination response summary");
+  return true;
+}
+
+export function validateTerminalAppend(
+  lifecycle: ConversationLifecycle,
+  terminalRecorded: boolean,
+  record: PublicStoredTraceEvent,
+  reviewed: boolean,
+): void {
+  const reviewedAction =
+    reviewed &&
+    ((record.event.type === CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED &&
+      record.event.payload.artifact_type === CONVERSATION_ARTIFACT_TYPE.COMPACTION) ||
+      record.event.type === CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE);
+  if (terminalRecorded && !reviewedAction) fail("terminal lifecycle is immutable");
+  if (
+    terminal(lifecycle) &&
+    !terminalRecorded &&
+    record.event.type !== CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_TERMINAL
+  )
+    fail("terminal lifecycle is immutable until its terminal record");
+}
+export const terminal = isConversationTerminalLifecycle;
 
 export type ParticipantState = ConversationParticipantSnapshot & { bound: boolean };
 export interface ConfiguredConversation {
@@ -67,7 +116,7 @@ export function validateEnvelope(
 }
 
 export function validateConfigured(record: PublicStoredTraceEvent): ConfiguredConversation {
-  if (record.event.type !== "conversation_configured")
+  if (record.event.type !== CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED)
     return fail("conversation must be configured first");
   const payload = record.event.payload as unknown;
   if (
@@ -86,12 +135,12 @@ export function validateConfigured(record: PublicStoredTraceEvent): ConfiguredCo
     if (!object(item) || !exact(item, ["participant_id", "role_ref", "engine", "model"]))
       return fail("malformed configured participant");
     const id = item.participant_id as string;
-    const engine = item.engine as Engine;
+    const engine = item.engine;
     if (
       !text(id) ||
       seen.has(id) ||
       !text(item.role_ref) ||
-      !ENGINES.has(engine) ||
+      !isAgentEngine(engine) ||
       (item.model !== null && !text(item.model))
     )
       return fail("malformed configured participant");
@@ -115,11 +164,15 @@ export function validateConfigured(record: PublicStoredTraceEvent): ConfiguredCo
 
 export function validateParticipantBound(
   record:
-    | Extract<PublicStoredTraceEvent, { event: { type: "participant_bound" } }>
+    | Extract<
+        PublicStoredTraceEvent,
+        { event: { type: typeof CONVERSATION_TRACE_EVENT_KIND.PARTICIPANT_BOUND } }
+      >
     | PublicStoredTraceEvent,
   participants: Map<string, ParticipantState>,
 ): ParticipantState {
-  if (record.event.type !== "participant_bound") return fail("invalid participant binding");
+  if (record.event.type !== CONVERSATION_TRACE_EVENT_KIND.PARTICIPANT_BOUND)
+    return fail("invalid participant binding");
   const payload = record.event.payload as unknown;
   if (
     !object(payload) ||
@@ -177,9 +230,8 @@ export function applyState(
   if (
     !object(payload) ||
     !exact(payload, ["lifecycle", "health", "terminal", "reason"]) ||
-    typeof payload.lifecycle !== "string" ||
-    !(payload.lifecycle in LEGAL) ||
-    !["healthy", "degraded"].includes(payload.health as string) ||
+    !isConversationLifecycle(payload.lifecycle) ||
+    !CONVERSATION_HEALTH_VALUES.some((value) => value === payload.health) ||
     (payload.reason !== null && typeof payload.reason !== "string")
   )
     return fail("malformed state change");
@@ -187,15 +239,18 @@ export function applyState(
   const nextHealth = payload.health as ConversationHealth;
   if (payload.terminal !== terminal(next)) return fail("malformed state change terminal flag");
   if (next === current) {
-    if ((current !== "ACTIVE" && current !== "PAUSED") || nextHealth === health)
+    if (
+      (current !== CONVERSATION_LIFECYCLE.ACTIVE && current !== CONVERSATION_LIFECYCLE.PAUSED) ||
+      nextHealth === health
+    )
       return fail("invalid state change");
     return { lifecycle: current, health: nextHealth };
   }
-  if (!LEGAL[current].includes(next))
+  if (!isConversationLifecycleTransition(current, next))
     return fail(`illegal lifecycle transition ${current} -> ${next}`);
   if (nextHealth !== health) return fail("health must change independently of lifecycle");
-  if (next === "COMPLETED" && hasActiveRound)
-    return fail("cannot complete with an active response");
+  if (isConversationGracefulTerminalLifecycle(next) && hasActiveRound)
+    return fail("cannot settle with an active response");
   return { lifecycle: next, health };
 }
 
@@ -210,7 +265,7 @@ export function validateAssessment(value: unknown): EvaluatorOutput {
       !exact(gate, ["value", "evidence"]) ||
       typeof gate.evidence !== "string" ||
       (name === "convergence"
-        ? typeof gate.value !== "boolean" && gate.value !== "not_applicable"
+        ? typeof gate.value !== "boolean" && gate.value !== CONVERSATION_CONVERGENCE_NOT_APPLICABLE
         : typeof gate.value !== "boolean")
     )
       return fail("malformed evaluator assessment");
@@ -220,18 +275,22 @@ export function validateAssessment(value: unknown): EvaluatorOutput {
 
 export function validateDecision(value: unknown): RoundDecision {
   if (!object(value) || typeof value.outcome !== "string") return fail("malformed decision");
-  if (value.outcome === "abort") {
+  if (value.outcome === CONVERSATION_DECISION_OUTCOME.ABORT) {
     if (
       !exact(value, ["outcome", "score", "reason"]) ||
       value.score !== null ||
-      value.reason !== "invalid_assessment"
+      value.reason !== CONVERSATION_INVALID_ASSESSMENT_REASON
     )
       return fail("malformed decision");
-    return { outcome: "abort", score: null, reason: "invalid_assessment" };
+    return {
+      outcome: CONVERSATION_DECISION_OUTCOME.ABORT,
+      score: null,
+      reason: CONVERSATION_INVALID_ASSESSMENT_REASON,
+    };
   }
   if (
     !exact(value, ["outcome", "score"]) ||
-    !["consensus", "continue", "exhausted"].includes(value.outcome) ||
+    !CONVERSATION_CONTINUING_DECISION_OUTCOMES.some((outcome) => outcome === value.outcome) ||
     typeof value.score !== "number" ||
     !Number.isFinite(value.score) ||
     value.score < 0 ||
@@ -252,8 +311,9 @@ export function validateCanonicalDecision(
   const same =
     observed.outcome === expected.outcome &&
     observed.score === expected.score &&
-    (observed.outcome !== "abort" ||
-      (expected.outcome === "abort" && observed.reason === expected.reason));
+    (observed.outcome !== CONVERSATION_DECISION_OUTCOME.ABORT ||
+      (expected.outcome === CONVERSATION_DECISION_OUTCOME.ABORT &&
+        observed.reason === expected.reason));
   if (!same) return fail("consensus decision does not match canonical decideRound result");
   return observed;
 }
@@ -265,14 +325,14 @@ export function validateTerminalScore(
   consensusScore: number | null,
   lastDecision: RoundDecision | null,
 ): void {
-  const debateCompletion = lifecycle === "COMPLETED" && policy === "debate";
+  const debateCompletion = lifecycle === CONVERSATION_LIFECYCLE.COMPLETED && policy === "debate";
   if (debateCompletion && consensusScore === null) {
     fail("terminal score requires a completed debate decision");
   }
   if (
     debateCompletion &&
-    lastDecision?.outcome !== "consensus" &&
-    lastDecision?.outcome !== "exhausted"
+    lastDecision?.outcome !== CONVERSATION_DECISION_OUTCOME.CONSENSUS &&
+    lastDecision?.outcome !== CONVERSATION_DECISION_OUTCOME.EXHAUSTED
   ) {
     fail("terminal decision cannot complete while another debate round is required");
   }

@@ -3,6 +3,18 @@ import type { ArtifactRegistry } from "../trace/artifacts.js";
 import type { TraceStore } from "../trace/store.js";
 import type { InternalTraceStoreRecord } from "../trace/types.js";
 import type { ConversationArtifactStore, PersistedResumeBinding } from "./artifact-store.js";
+import {
+  CONVERSATION_DURABLE_OPERATION_MEMBERSHIP,
+  type DurableOperationMembership,
+} from "./conversation-durable-authority-contract.js";
+import {
+  CONVERSATION_HEALTH,
+  CONVERSATION_LIFECYCLE,
+  CONVERSATION_NONTERMINAL_LIFECYCLES,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
+import { reviewedActionEventIds } from "./conversation-reviewed-action.js";
+import type { ConversationReviewedActionAuthorityV1 } from "./conversation-reviewed-action.js";
 import { snapshotMaterializedBindings } from "./emission-authority.js";
 import { foldConversation } from "./fold.js";
 import { ConversationAuthorityClosedError, type LiveConversation } from "./lifecycle-gate.js";
@@ -28,6 +40,7 @@ interface RestartRuntimeOptions {
   traceStore: TraceStore;
   artifactRegistry: ArtifactRegistry;
   artifactStore: ConversationArtifactStore;
+  reviewedActionAuthority?: ConversationReviewedActionAuthorityV1;
   id(kind: string): string;
   current(id: string): LiveConversation | undefined;
   reconcileActive(live: LiveConversation): Promise<void>;
@@ -51,12 +64,15 @@ type ControlState = {
   health: ConversationHealth;
   transitionEpoch: number;
 };
-export type DurableOperationMembership = "current" | "historical" | "unknown";
+export type { DurableOperationMembership } from "./conversation-durable-authority-contract.js";
 
 const durableLifecycleOperation = (records: readonly InternalTraceStoreRecord[]): string | null => {
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const stored = records[index]?.stored_event;
-    if (stored?.event.type === "state_change" && !stored.event.payload.terminal) {
+    if (
+      stored?.event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE &&
+      !stored.event.payload.terminal
+    ) {
       return stored.operation_id;
     }
   }
@@ -75,8 +91,21 @@ export class ConversationRestartRuntime {
 
   private stateFromRecords(id: string, records: readonly InternalTraceStoreRecord[]): ControlState {
     const projected = projectConversationEvents(records, id, this.options.artifactRegistry, 0);
-    if (!projected.length) return { lifecycle: "INIT", health: "healthy", transitionEpoch: 0 };
-    const { lifecycle, health } = foldConversation(projected);
+    if (!projected.length)
+      return {
+        lifecycle: CONVERSATION_LIFECYCLE.INIT,
+        health: CONVERSATION_HEALTH.HEALTHY,
+        transitionEpoch: 0,
+      };
+    const { lifecycle, health } = foldConversation(
+      projected,
+      reviewedActionEventIds(
+        this.options.artifactStore.rootPath(),
+        this.options.reviewedActionAuthority,
+        this.options.artifactStore.readRecord(id)?.artifacts ?? [],
+        records,
+      ),
+    );
     return { lifecycle, health, transitionEpoch: conversationTransitionEpoch(records) };
   }
 
@@ -86,18 +115,19 @@ export class ConversationRestartRuntime {
   }
 
   async operationMembership(id: string, operationId: string): Promise<DurableOperationMembership> {
-    if (!this.options.artifactStore.has(id)) return "unknown";
+    if (!this.options.artifactStore.has(id))
+      return CONVERSATION_DURABLE_OPERATION_MEMBERSHIP.UNKNOWN;
     const records = await this.records(id);
     if (!records.some(({ stored_event: stored }) => stored.operation_id === operationId)) {
-      return "unknown";
+      return CONVERSATION_DURABLE_OPERATION_MEMBERSHIP.UNKNOWN;
     }
     this.options.artifactStore.recordOperation(id, operationId);
     const state = this.stateFromRecords(id, records);
     return state &&
-      ["INIT", "ACTIVE", "PAUSED"].includes(state.lifecycle) &&
+      CONVERSATION_NONTERMINAL_LIFECYCLES.some((lifecycle) => lifecycle === state.lifecycle) &&
       operationOwnsDurableLifecycle(records, operationId)
-      ? "current"
-      : "historical";
+      ? CONVERSATION_DURABLE_OPERATION_MEMBERSHIP.CURRENT
+      : CONVERSATION_DURABLE_OPERATION_MEMBERSHIP.HISTORICAL;
   }
 
   async prepareCancellation(
@@ -122,10 +152,10 @@ export class ConversationRestartRuntime {
         command.conversation_id,
         command.operation_id,
       );
-      if (membership === "historical") {
+      if (membership === CONVERSATION_DURABLE_OPERATION_MEMBERSHIP.HISTORICAL) {
         return { status: 409, body: { code: "operation_not_cancellable" } };
       }
-      if (membership === "current") {
+      if (membership === CONVERSATION_DURABLE_OPERATION_MEMBERSHIP.CURRENT) {
         if (live) return { status: 409, body: { code: "operation_not_cancellable" } };
         try {
           await this.restore(command.conversation_id, command.operation_id, true);
@@ -169,7 +199,7 @@ export class ConversationRestartRuntime {
       if (
         !controlOnly &&
         live.needsReconcile &&
-        (await this.controlState(id))?.lifecycle === "ACTIVE"
+        (await this.controlState(id))?.lifecycle === CONVERSATION_LIFECYCLE.ACTIVE
       ) {
         await this.options.reconcileActive(live);
       }
@@ -177,7 +207,7 @@ export class ConversationRestartRuntime {
     }
     const prior = await this.records(id);
     const state = this.stateFromRecords(id, prior);
-    if (!["INIT", "ACTIVE", "PAUSED"].includes(state.lifecycle)) {
+    if (!CONVERSATION_NONTERMINAL_LIFECYCLES.some((lifecycle) => lifecycle === state.lifecycle)) {
       throw new ConversationRestoreTerminalError(
         "conversation cannot be restored from terminal state",
       );
@@ -200,7 +230,7 @@ export class ConversationRestartRuntime {
       record.manifest,
       bindings,
       record.resume_bindings,
-      state.lifecycle === "PAUSED",
+      state.lifecycle === CONVERSATION_LIFECYCLE.PAUSED,
       conversationTransitionEpoch(prior),
       operationId,
       controlOnly,
@@ -208,7 +238,8 @@ export class ConversationRestartRuntime {
     live = this.options.current(id);
     if (!live) throw new Error("conversation resume authority missing");
     live.needsReconcile = !controlOnly;
-    if (!controlOnly && state.lifecycle === "ACTIVE") await this.options.reconcileActive(live);
+    if (!controlOnly && state.lifecycle === CONVERSATION_LIFECYCLE.ACTIVE)
+      await this.options.reconcileActive(live);
     return live.operationId;
   }
 }

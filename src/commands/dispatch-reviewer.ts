@@ -6,12 +6,14 @@
 // surface (commands.ts, _shared.js, tests) keeps importing it unchanged.
 
 import { ENGINES } from "../core/types.js";
+import { GATE_STATE, PRE_REVIEW_WORK_UNIT_GATES } from "../core/workflow-contract.js";
+import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
 import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
 import { out } from "./_shared.js";
 import type { Engine, Reviewer } from "./_shared.js";
 import { type DiffReader, analyzeDiff, defaultDiffReader } from "./dispatch-diff.js";
-import { getUnitDiff, makeVibflowLLMFn, runLLMReview } from "./dispatch-reviewer-llm.js";
+import { getUnitDiff, runLLMReview } from "./dispatch-reviewer-llm.js";
 
 /**
  * Independent reviewer. Signature: `(unit, outcome) → { pass, reason }` — the first arg is the
@@ -24,7 +26,7 @@ import { getUnitDiff, makeVibflowLLMFn, runLLMReview } from "./dispatch-reviewer
  * closed).
  */
 export function makeReviewer(
-  mode: "cli" | "bridge" | "dry",
+  mode: DispatchMode,
   threshold: number,
   inject?: {
     diffReader?: DiffReader;
@@ -40,16 +42,16 @@ export function makeReviewer(
   const readDiff = inject?.diffReader ?? defaultDiffReader;
   const cwd = inject?.cwd ?? process.cwd();
   // ADR-001: auto-wire llmFn only when VF_LLM_REVIEW=1 (opt-in) to avoid smoke/test interference.
-  const llmReviewFn =
-    inject?.llmReviewFn ??
-    (inject?.goal && process.env.VF_LLM_REVIEW === "1" ? makeVibflowLLMFn() : undefined);
+  const llmReviewFn = inject?.llmReviewFn;
+  const autoLlmReview =
+    Boolean(inject?.goal) && process.env.VF_LLM_REVIEW === "1" && Boolean(process.env.VIBEFLOW_AI);
 
   return async (unit, outcome) => {
-    if (mode === "dry") {
+    if (mode === DISPATCH_MODE.DRY) {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
     const failedGate = outcome.gates
-      ? (["build", "lint", "test"] as const).find((k) => outcome.gates?.[k] === "fail")
+      ? PRE_REVIEW_WORK_UNIT_GATES.find((gate) => outcome.gates?.[gate] === GATE_STATE.FAIL)
       : undefined;
     if (failedGate) {
       return { pass: false, reason: `measured gate failed: ${failedGate}` };
@@ -92,13 +94,14 @@ export function makeReviewer(
     };
 
     // ADR-001 phase 2: LLM review after local gate passes.
-    if (inject?.goal && llmReviewFn) {
+    if (inject?.goal && (llmReviewFn || autoLlmReview)) {
       const llmDiff = getUnitDiff(cwd, unit.scope ?? []);
       const llmResult = await runLLMReview({
         goal: inject.goal,
         spec: unit.spec,
         diff: llmDiff,
-        llmFn: llmReviewFn,
+        ...(llmReviewFn ? { llmFn: llmReviewFn } : {}),
+        cwd,
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
         ...(inject?.implementer

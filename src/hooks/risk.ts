@@ -1,7 +1,8 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
-import type { HookInput, RiskLevel } from "../core.js";
+import type { HookInput } from "../core.js";
+import { RISK_LEVEL, RISK_LEVEL_ORDER, type RiskLevel } from "../core/hook-contract.js";
 import { type SemanticJudge, shouldConsultSemantic } from "./risk-semantic.js";
 import {
   type ForceKind,
@@ -69,7 +70,7 @@ const CONFIG_PROTECTED = [
   /(^|\/)\.prettierrc[\w.-]*$/i,
 ];
 
-export const RISK_ORDER: RiskLevel[] = ["none", "low", "medium", "high", "critical"];
+export const RISK_ORDER = RISK_LEVEL_ORDER;
 
 /** Placeholder reason pushed when a scored input has NO risk signal. Exported so callers
  *  (e.g. the apply-gate hunk classifier) can filter it out without hard-coding the string. */
@@ -152,7 +153,7 @@ export function scoreRisk(
   judge?: SemanticJudge,
 ): { risk: RiskLevel; reasons: string[] } {
   const reasons: string[] = [];
-  let risk: RiskLevel = "none";
+  let risk: RiskLevel = RISK_LEVEL.NONE;
   const bump = (level: RiskLevel) => {
     if (RISK_ORDER.indexOf(level) > RISK_ORDER.indexOf(risk)) risk = level;
   };
@@ -201,10 +202,10 @@ function scoreCommand(
 
   if (enabled.has("protect-secrets")) {
     if (anyMatch(SECRET_CRITICAL, cmd)) {
-      bump("critical");
+      bump(RISK_LEVEL.CRITICAL);
       reasons.push("command reads/writes a sensitive secret");
     } else if (anyMatch(SECRET_HIGH, cmd)) {
-      bump("high");
+      bump(RISK_LEVEL.HIGH);
       reasons.push("command touches secret material");
     }
   }
@@ -214,10 +215,10 @@ function scoreCommand(
   // Floor: any command is at least low risk (low never blocks, so this is not a
   // guardrail and stays unconditional). Install detection only bumps when enabled.
   if (enabled.has("flag-installs") && anyMatch(INSTALL_COMMAND, cmd)) {
-    bump("medium");
+    bump(RISK_LEVEL.MEDIUM);
     reasons.push("package install has side effects");
   } else {
-    bump("low");
+    bump(RISK_LEVEL.LOW);
   }
 }
 
@@ -239,7 +240,7 @@ function scoreDestructive(
   const recursiveRm = subTokens.some(isRecursiveRm);
   const dangerous = destructiveText.some((s) => anyMatch(DANGEROUS_COMMAND, s));
   if (recursiveRm || dangerous) {
-    bump("critical");
+    bump(RISK_LEVEL.CRITICAL);
     reasons.push(`destructive command: ${rawCmd.slice(0, 80)}`);
   }
 }
@@ -257,10 +258,10 @@ function scoreForcePush(
     else if (force === "lease" && kind !== "force") kind = "lease";
   }
   if (kind === "force") {
-    bump("critical");
+    bump(RISK_LEVEL.CRITICAL);
     reasons.push("force push overwrites remote history");
   } else if (kind === "lease") {
-    bump("high");
+    bump(RISK_LEVEL.HIGH);
     reasons.push("force-with-lease push needs approval");
   }
 }
@@ -279,7 +280,7 @@ function scoreWorkspaceCommand(
     for (const p of pathArgs(tokens)) if (escapesWorkspace(p, ws)) escaped.add(p);
   }
   if (escaped.size) {
-    bump("medium");
+    bump(RISK_LEVEL.MEDIUM);
     reasons.push(`command reads outside workspace: ${[...escaped].join(", ")}`);
   }
 }
@@ -295,7 +296,7 @@ function scoreFiles(
   const flag = (patterns: RegExp[], label: string) => {
     const hits = files.filter((f) => anyMatch(patterns, f));
     if (hits.length) {
-      bump("high");
+      bump(RISK_LEVEL.HIGH);
       reasons.push(`${label}: ${hits.join(", ")}`);
     }
   };
@@ -306,28 +307,28 @@ function scoreFiles(
   // ADR-002: spec-first test files are oracle — implementer must not modify them.
   // These files are generated before dispatch and protected unconditionally.
   if (files?.some((f) => /\.spec-first\./.test(f))) {
-    bump("critical");
+    bump(RISK_LEVEL.CRITICAL);
     reasons.push("spec-first test file is an oracle — implementer must not modify it (ADR-002)");
   }
 
   // Vendor registry cache is read-only — block any file write inside it.
   const vendorFiles = files.filter((f) => isVendorRegistryPath(f));
   if (vendorFiles.length) {
-    bump("critical");
+    bump(RISK_LEVEL.CRITICAL);
     reasons.push(`vendor registry cache is read-only: ${vendorFiles.join(", ")}`);
   }
 
   if (enabled.has("workspace-guard")) {
     const escaped = outOfScope(files, input.scope);
     if (escaped.length) {
-      bump("high");
+      bump(RISK_LEVEL.HIGH);
       reasons.push(`out of declared scope: ${escaped.join(", ")}`);
     }
     if (input.workspace) {
       const ws = input.workspace;
       const outside = files.filter((f) => escapesWorkspace(f, ws));
       if (outside.length) {
-        bump("high");
+        bump(RISK_LEVEL.HIGH);
         reasons.push(`write escapes workspace: ${outside.join(", ")}`);
       }
     }
@@ -347,7 +348,7 @@ function scoreContent(
   if (!enabled.has("protect-secrets")) return;
   const hits = scanSecrets(input.content);
   if (hits.length) {
-    bump("critical");
+    bump(RISK_LEVEL.CRITICAL);
     // Report token TYPE only — never the secret substring (it surfaces verbatim
     // via presentDecision into agent/UI logs). Labels are non-leaking.
     reasons.push(`secret in file content: ${hits.map((h) => h.label).join(", ")}`);
@@ -374,7 +375,7 @@ function scoreToolDeny(input: HookInput, bump: (l: RiskLevel) => void, reasons: 
       .filter(Boolean),
   );
   if (denied.has(tool.toLowerCase())) {
-    bump("critical");
+    bump(RISK_LEVEL.CRITICAL);
     reasons.push(
       `coord mode refuses mutation tool "${tool}"; the shim is a read-only consultation surface. ` +
         `Blocked by VF_DENY_TOOLS=${denialEnv}. Use the engine outside \`vf coord\` to mutate state.`,

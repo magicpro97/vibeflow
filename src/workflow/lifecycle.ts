@@ -8,6 +8,7 @@ import {
   recomputeTotals,
   writeState,
 } from "../core.js";
+import { PENDING_REQUIRED_WORK_UNIT_GATES, WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { findScopeConflicts } from "../gates.js";
 
 /** Injected filesystem seams so tests never touch the real disk destructively. */
@@ -183,10 +184,10 @@ export interface MergeResult {
 function resetImported(unit: WorkUnit, srcLabel: string): ImportedUnit {
   return {
     ...unit,
-    status: "pending",
+    status: WORK_UNIT_STATUS.PENDING,
     confidence: 0,
     evidence: [],
-    gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+    gates: { ...PENDING_REQUIRED_WORK_UNIT_GATES },
     imported_from: srcLabel,
   };
 }

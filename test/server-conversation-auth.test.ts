@@ -56,6 +56,22 @@ describe("conversation session capability", () => {
     ).toBe(false);
   });
 
+  test("bounds issued loopback sessions", () => {
+    let fill = 40;
+    const authority = new ConversationSessionAuthority({
+      loopback: true,
+      randomBytes: () => Buffer.alloc(32, fill++),
+    });
+    const issued = Array.from({ length: 17 }, () => cookieValue(authority.issueCookie() as string));
+    const requestFor = (token: string) =>
+      new Request("http://127.0.0.1/", {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${token}` },
+      });
+    expect(authority.authorize(requestFor(issued[0] as string))).toBe(false);
+    expect(authority.authorize(requestFor(issued.at(-1) as string))).toBe(true);
+    expect(authority.authorize(requestFor(issued[1] as string))).toBe(true);
+  });
+
   test("LAN never auto-issues and fails closed without an explicit 256-bit capability", () => {
     const authority = new ConversationSessionAuthority({ loopback: false, randomBytes: bytes(9) });
     expect(authority.issueCookie()).toBeNull();

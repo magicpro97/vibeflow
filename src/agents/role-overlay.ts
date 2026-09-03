@@ -9,25 +9,23 @@ import {
   realpathSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { AGENT_ROLE_SOURCE } from "../core/agent-contract.js";
+import {
+  ROLE_FRONTMATTER_FIELD,
+  type ToolIntent,
+  isRoleFrontmatterField,
+  isRoleModel,
+  isRoleSandbox,
+  isRoleToolIntent,
+} from "../core/role-contract.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { assertNoSymlinkPathComponents } from "../orchestrator/trace/path-safety.js";
 import { isRoleRef, parseAgentRoleStrict } from "./role-loader.js";
 import { type RoleContext, getRoleSpec } from "./role-templates.js";
-import type { ResolvedRole, RoleModel, RoleSandbox, RoleSpec, ToolIntent } from "./role.js";
+import type { ResolvedRole, RoleSpec } from "./role.js";
 
 const MAX_ROLE_BYTES = 256 * 1024;
-const ROLE_FIELDS = new Set(["name", "description", "tools", "model", "sandbox", "extends"]);
-const TOOL_INTENTS = new Set<ToolIntent>(["read", "write", "edit", "bash", "grep", "glob", "web"]);
-const MODELS = new Set<RoleModel>([
-  "haiku",
-  "sonnet",
-  "opus",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.3-codex-spark",
-  "gpt-5.4-codex",
-]);
-const SANDBOXES = new Set<RoleSandbox>(["read-only", "workspace-write", "danger-full-access"]);
 
 export interface ResolveRoleOverlayOptions {
   repoRoot: string;
@@ -40,7 +38,7 @@ function isInside(root: string, candidate: string): boolean {
     rel === "" ||
     (!isAbsolute(rel) &&
       rel !== ".." &&
-      !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+      !rel.startsWith(`..${process.platform === RUNTIME_PLATFORM.WINDOWS ? "\\" : "/"}`))
   );
 }
 
@@ -183,7 +181,7 @@ function exactRepoRole(roleRef: string, repoRoot: string): { path: string; text:
 }
 
 function assertKnownFields(data: Record<string, unknown>, ref: string): void {
-  const unknown = Object.keys(data).filter((key) => !ROLE_FIELDS.has(key));
+  const unknown = Object.keys(data).filter((key) => !isRoleFrontmatterField(key));
   if (unknown.length > 0) {
     throw new Error(`malformed repo role "${ref}": unknown field ${unknown.join(", ")}`);
   }
@@ -191,14 +189,10 @@ function assertKnownFields(data: Record<string, unknown>, ref: string): void {
 
 function parseTools(value: unknown, ref: string): ToolIntent[] | undefined {
   if (value === undefined) return undefined;
-  if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    !value.every((v) => TOOL_INTENTS.has(v as ToolIntent))
-  ) {
+  if (!Array.isArray(value) || value.length === 0 || !value.every(isRoleToolIntent)) {
     throw new Error(`malformed repo role "${ref}": invalid tools`);
   }
-  return [...new Set(value as ToolIntent[])];
+  return value.filter((tool, index, tools) => tools.indexOf(tool) === index);
 }
 
 function hashRole(spec: RoleSpec): string {
@@ -239,55 +233,56 @@ function resolveNode(
     if (!repoRole) {
       const builtin = getRoleSpec(roleRef, options.context);
       if (!builtin) throw new Error(`unknown role: ${roleRef}`);
-      return resolved(builtin, "builtin", { role: roleRef });
+      return resolved(builtin, AGENT_ROLE_SOURCE.BUILTIN, { role: roleRef });
     }
 
     const { data, body } = parseFrontmatter(repoRole.text);
     assertKnownFields(data, roleRef);
-    if (data.name !== roleRef || !isRoleRef(roleRef)) {
+    if (data[ROLE_FRONTMATTER_FIELD.NAME] !== roleRef || !isRoleRef(roleRef)) {
       throw new Error(`malformed repo role "${roleRef}": name must match exact file ref`);
     }
 
-    const tools = parseTools(data.tools, roleRef);
-    const description = data.description;
+    const tools = parseTools(data[ROLE_FRONTMATTER_FIELD.TOOLS], roleRef);
+    const description = data[ROLE_FRONTMATTER_FIELD.DESCRIPTION];
     if (description !== undefined && (typeof description !== "string" || !description.trim())) {
       throw new Error(`malformed repo role "${roleRef}": invalid description`);
     }
-    const model = data.model;
-    if (model !== undefined && (typeof model !== "string" || !MODELS.has(model as RoleModel))) {
+    const model = data[ROLE_FRONTMATTER_FIELD.MODEL];
+    if (model !== undefined && !isRoleModel(model)) {
       throw new Error(`malformed repo role "${roleRef}": invalid model`);
     }
-    const sandbox = data.sandbox;
-    if (
-      sandbox !== undefined &&
-      (typeof sandbox !== "string" || !SANDBOXES.has(sandbox as RoleSandbox))
-    ) {
+    const sandbox = data[ROLE_FRONTMATTER_FIELD.SANDBOX];
+    if (sandbox !== undefined && !isRoleSandbox(sandbox)) {
       throw new Error(`malformed repo role "${roleRef}": invalid sandbox`);
     }
 
-    if (data.extends === undefined) {
+    const extendsRole = data[ROLE_FRONTMATTER_FIELD.EXTENDS];
+    if (extendsRole === undefined) {
       const spec = parseAgentRoleStrict(repoRole.text);
       if (!spec.body.trim()) {
         throw new Error(`malformed repo role "${roleRef}": prompt body is required`);
       }
-      return resolved(spec, "repo", { path: repoRole.path });
+      return resolved(spec, AGENT_ROLE_SOURCE.REPO, { path: repoRole.path });
     }
 
-    if (typeof data.extends !== "string" || !isRoleRef(data.extends)) {
+    if (typeof extendsRole !== "string" || !isRoleRef(extendsRole)) {
       throw new Error(`malformed repo role "${roleRef}": invalid extends`);
     }
-    const base = resolveNode(data.extends, options, resolving);
+    const base = resolveNode(extendsRole, options, resolving);
     const overlayBody = body.trim();
     const spec: RoleSpec = {
       ...base.spec,
       name: roleRef,
       ...(typeof description === "string" ? { description } : {}),
       ...(tools ? { tools } : {}),
-      ...(typeof model === "string" ? { model: model as RoleModel } : {}),
-      ...(typeof sandbox === "string" ? { sandbox: sandbox as RoleSandbox } : {}),
+      ...(isRoleModel(model) ? { model } : {}),
+      ...(isRoleSandbox(sandbox) ? { sandbox } : {}),
       body: overlayBody ? `${base.spec.body.trimEnd()}\n\n${overlayBody}\n` : base.spec.body,
     };
-    return resolved(spec, "repo", { path: repoRole.path, base: data.extends });
+    return resolved(spec, AGENT_ROLE_SOURCE.REPO, {
+      path: repoRole.path,
+      base: extendsRole,
+    });
   } catch (error) {
     if (
       error instanceof Error &&

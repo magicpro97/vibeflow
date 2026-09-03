@@ -1,34 +1,45 @@
+import { AGENT_ENGINE, type Engine } from "../core/agent-contract.js";
+import {
+  ROLE_MODEL,
+  ROLE_TOOL_INTENT,
+  type RoleModel,
+  type ToolIntent,
+  isRoleModel,
+} from "../core/role-contract.js";
 import type { SpawnOptionsProjection } from "../dispatch/session-types.js";
-import type { RoleModel, RoleSpec, ToolIntent } from "./role.js";
+import type { RoleSpec } from "./role.js";
 
 /** Engine keys consumed by `renderForEngine` / `agentFilePath`. */
-export type AgentEngine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
+export type AgentEngine = Engine;
 
 /** Map from engine-agnostic `ToolIntent` to Claude Code's tool names. */
-const CLAUDE_TOOL_MAP: Record<ToolIntent, string> = {
-  read: "Read",
-  write: "Write",
-  edit: "Edit",
-  bash: "Bash",
-  grep: "Grep",
-  glob: "Glob",
-  web: "WebFetch",
-};
+const CLAUDE_TOOL_MAP = Object.freeze({
+  [ROLE_TOOL_INTENT.READ]: "Read",
+  [ROLE_TOOL_INTENT.WRITE]: "Write",
+  [ROLE_TOOL_INTENT.EDIT]: "Edit",
+  [ROLE_TOOL_INTENT.BASH]: "Bash",
+  [ROLE_TOOL_INTENT.GREP]: "Grep",
+  [ROLE_TOOL_INTENT.GLOB]: "Glob",
+  [ROLE_TOOL_INTENT.WEB]: "WebFetch",
+} as const satisfies Readonly<Record<ToolIntent, string>>);
 
 /** Map from canonical role model identifiers to Codex model identifiers.
  * Claude-only values (`haiku`, `sonnet`, `opus`) map to the closest
  * Codex equivalent. Codex-specific identifiers pass through unchanged. */
-const CODEX_MODEL_MAP: Record<string, string> = {
-  haiku: "gpt-5.4-mini",
-  sonnet: "gpt-5.4",
-  opus: "gpt-5.4",
-};
+const CODEX_MODEL_MAP = Object.freeze({
+  [ROLE_MODEL.HAIKU]: ROLE_MODEL.GPT_5_4_MINI,
+  [ROLE_MODEL.SONNET]: ROLE_MODEL.GPT_5_4,
+  [ROLE_MODEL.OPUS]: ROLE_MODEL.GPT_5_4,
+  [ROLE_MODEL.GPT_5_4]: ROLE_MODEL.GPT_5_4,
+  [ROLE_MODEL.GPT_5_4_MINI]: ROLE_MODEL.GPT_5_4_MINI,
+  [ROLE_MODEL.GPT_5_3_CODEX_SPARK]: ROLE_MODEL.GPT_5_3_CODEX_SPARK,
+  [ROLE_MODEL.GPT_5_4_CODEX]: ROLE_MODEL.GPT_5_4_CODEX,
+} as const satisfies Readonly<Record<RoleModel, string>>);
 
 /** Strip Claude-only model aliases when rendering Codex TOML. Codex
  * identifiers are kept as-is. */
 function codexModel(model: RoleModel): string {
-  if (model.startsWith("gpt-")) return model;
-  return CODEX_MODEL_MAP[model] ?? model;
+  return CODEX_MODEL_MAP[model];
 }
 
 function renderedModel(
@@ -37,9 +48,13 @@ function renderedModel(
   modelOverride?: string,
 ): string | null {
   if (modelOverride)
-    return engine === "codex" ? (CODEX_MODEL_MAP[modelOverride] ?? modelOverride) : modelOverride;
-  if (engine === "claude") return model;
-  if (engine === "codex") return CODEX_MODEL_MAP[model] ?? model;
+    return engine === AGENT_ENGINE.CODEX
+      ? isRoleModel(modelOverride)
+        ? CODEX_MODEL_MAP[modelOverride]
+        : modelOverride
+      : modelOverride;
+  if (engine === AGENT_ENGINE.CLAUDE) return model;
+  if (engine === AGENT_ENGINE.CODEX) return CODEX_MODEL_MAP[model];
   return null;
 }
 
@@ -51,14 +66,19 @@ export function renderRoleForSpawn(
 ): Pick<SpawnOptionsProjection, "model" | "rendered_prompt" | "rendered_tools" | "sandbox"> {
   const model = renderedModel(engine, spec.model, options.modelOverride);
   const renderedTools =
-    engine === "codex" || engine === "opencode" || engine === "antigravity"
+    engine === AGENT_ENGINE.CODEX ||
+    engine === AGENT_ENGINE.OPENCODE ||
+    engine === AGENT_ENGINE.ANTIGRAVITY
       ? []
       : spec.tools.map((tool) => CLAUDE_TOOL_MAP[tool]);
   return {
     model,
     rendered_prompt: options.prompt ?? spec.body,
     rendered_tools: renderedTools,
-    sandbox: engine === "opencode" || engine === "antigravity" ? null : (spec.sandbox ?? null),
+    sandbox:
+      engine === AGENT_ENGINE.OPENCODE || engine === AGENT_ENGINE.ANTIGRAVITY
+        ? null
+        : (spec.sandbox ?? null),
   };
 }
 
@@ -270,15 +290,15 @@ export function renderAntigravityAgent(spec: RoleSpec): string {
 /** Render the agent file body for a given engine. */
 export function renderForEngine(engine: AgentEngine, spec: RoleSpec): string {
   switch (engine) {
-    case "claude":
+    case AGENT_ENGINE.CLAUDE:
       return renderClaudeAgent(spec);
-    case "codex":
+    case AGENT_ENGINE.CODEX:
       return renderCodexAgent(spec);
-    case "copilot":
+    case AGENT_ENGINE.COPILOT:
       return renderCopilotAgent(spec);
-    case "opencode":
+    case AGENT_ENGINE.OPENCODE:
       return renderOpencodeAgent(spec);
-    case "antigravity":
+    case AGENT_ENGINE.ANTIGRAVITY:
       return renderAntigravityAgent(spec);
   }
 }
@@ -296,15 +316,15 @@ export function agentFilePath(engine: AgentEngine, name: string): string {
     );
   }
   switch (engine) {
-    case "claude":
+    case AGENT_ENGINE.CLAUDE:
       return `.claude/agents/${safe}.md`;
-    case "codex":
+    case AGENT_ENGINE.CODEX:
       return `.codex/agents/${safe}.toml`;
-    case "copilot":
+    case AGENT_ENGINE.COPILOT:
       return `.github/agents/${safe}.md`;
-    case "opencode":
+    case AGENT_ENGINE.OPENCODE:
       return `.opencode/agents/${safe}.md`;
-    case "antigravity":
+    case AGENT_ENGINE.ANTIGRAVITY:
       return `.agents/agents/${safe}/agent.md`;
   }
 }

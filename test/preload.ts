@@ -28,6 +28,15 @@ if (!process.env.VF_SKILLS_HOME) {
   process.env.VF_SKILLS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "vf-test-skills-home-"));
 }
 
+// Trusted `vf init` activates the per-user recovery bootstrap. Keep that
+// durable authority root hermetic across every init test and CI worker.
+if (!process.env.VF_USER_VIBEFLOW_ROOT) {
+  const fs = require("node:fs") as typeof import("node:fs");
+  const os = require("node:os") as typeof import("node:os");
+  const path = require("node:path") as typeof import("node:path");
+  process.env.VF_USER_VIBEFLOW_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "vf-test-user-root-"));
+}
+
 // #559: suppress real OS desktop notifications for the whole test run. The
 // merge-when-green suite exercises post-claim terminals that call the real
 // notify() default path; without this a macOS/Linux runner would pop a real

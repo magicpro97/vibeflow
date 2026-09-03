@@ -1,56 +1,53 @@
 import { randomBytes } from "node:crypto";
+import { AGENT_HOST_TOOL } from "../../core/agent-contract.js";
+import {
+  ENGINE_SESSION_MODE,
+  supportsExactNativeSessionResume,
+} from "../../dispatch/session-contract.js";
 import {
   type EngineChunk,
-  type EngineSessionAdapter,
   type OperationLifecycleState,
   createSpawnOptionsProjection,
 } from "../../dispatch/session-types.js";
-import type { PolicyEmission, StoredTraceEvent, TraceCorrelation } from "../trace/types.js";
-import type { ConversationArtifactStore } from "./artifact-store.js";
+import type { PolicyEmission, TraceCorrelation } from "../trace/types.js";
 import type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
 export type { AttemptConversationAuthority } from "./attempt-runtime-types.js";
+import { projectConversationAgentTurnResult } from "./agent-turn-output-projection.js";
+import { reconcileAttemptHistory } from "./attempt-history-reconciliation.js";
+import { captureAttemptModelOutputBinding } from "./attempt-model-output-binding.js";
+import { publishAttemptResumeBinding } from "./attempt-resume-publication.js";
+import type { AttemptRuntimeOptions } from "./attempt-runtime-options.js";
+import { startAttemptRevisionBarrier } from "./attempt-runtime-revision-barrier.js";
+import { prepareInitialRevisionLane, startAndAdmitAttempt } from "./attempt-start-admission.js";
+import { renderAttemptPrompt, resolveAttemptTurnPrompt } from "./attempt-turn-delivery.js";
+import { publishAttemptTurnDelivery } from "./attempt-turn-publication.js";
+import { AGENT_ACTION_CANDIDATE_ROLE } from "./conversation-agent-action-candidate-contract.js";
+import { projectEngineCoordinationWorkspace } from "./conversation-coordination-workspace-binding.js";
+import {
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
+import { createDeferredPolicyAttempt } from "./deferred-policy-attempt.js";
 import { assertAttemptEmission, snapshotRuntimeValue } from "./emission-authority.js";
+import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
 import type { RegisteredOperation } from "./operation-registry.js";
-import type {
-  AttemptEmission,
-  AttemptRef,
-  ConversationManifest,
-  PolicyAttempt,
-  PolicyAttemptRequest,
-} from "./types.js";
-
+import type { AttemptEmission, AttemptRef, PolicyAttempt, PolicyAttemptRequest } from "./types.js";
 const MAX_CHUNKS = 4096;
 const MAX_CHUNK_BYTES = 1024 * 1024;
-interface AttemptRuntimeOptions {
-  id(kind: string): string;
-  sessionAdapter: EngineSessionAdapter;
-  artifactStore: ConversationArtifactStore;
-  correlation(manifest: ConversationManifest, operationId: string, id: string): TraceCorrelation;
-  append(
-    correlation: Readonly<TraceCorrelation>,
-    emission: PolicyEmission,
-    nativeSessionId?: string | null,
-  ): Promise<StoredTraceEvent>;
-  appendLifecycle(
-    correlation: Readonly<TraceCorrelation>,
-    emission: PolicyEmission,
-    nativeSessionId?: string | null,
-  ): Promise<void>;
-  appendRuntime(
-    correlation: Readonly<TraceCorrelation>,
-    emission: PolicyEmission,
-    nativeSessionId?: string | null,
-  ): Promise<StoredTraceEvent>;
-  isOpen(conversationId: string, operationId: string): boolean;
-  isRetained(conversationId: string, operationId: string): boolean;
-  awaitOpen(conversationId: string, operationId: string): Promise<void>;
-}
 export class AttemptRuntime {
   private readonly reconciliations = new WeakMap<
     AttemptConversationAuthority,
     Map<string, string | null>
   >();
   constructor(private readonly options: AttemptRuntimeOptions) {}
+  startRevisionBarrier(
+    live: AttemptConversationAuthority,
+    operation: RegisteredOperation,
+    plan: RevisionPreparationPlanV1,
+    authorityOperationId: string,
+  ): Promise<boolean> {
+    return startAttemptRevisionBarrier(this.options, live, operation, plan, authorityOperationId);
+  }
   launch(
     live: AttemptConversationAuthority,
     operation: RegisteredOperation,
@@ -67,35 +64,14 @@ export class AttemptRuntime {
       return this.launchNow(live, operation, request, refs);
     }
     const ref = randomBytes(32).toString("base64url") as AttemptRef;
-    let inner: PolicyAttempt | undefined;
-    let listener: ((chunk: Readonly<EngineChunk>) => void) | undefined;
-    let unsubscribe: (() => void) | undefined;
-    const ready = this.options
-      .awaitOpen(live.manifest.conversation_id, live.operationId)
-      .then(() => {
-        if (!operation.isLive()) throw new Error("operation is not live");
-        inner = this.launchNow(live, operation, request, refs, ref);
-        if (listener) unsubscribe = inner.onChunk(listener);
-        return inner;
-      });
-    const completion = ready.then((attempt) => attempt.completion);
-    void completion.catch(() => undefined);
-    return Object.freeze({
+    return createDeferredPolicyAttempt(
       ref,
-      completion,
-      emit: (emission: AttemptEmission) => {
-        const captured = snapshotRuntimeValue(emission);
-        return ready.then((attempt) => attempt.emit(captured));
+      this.options.awaitOpen(live.manifest.conversation_id, live.operationId),
+      () => {
+        if (!operation.isLive()) throw new Error("operation is not live");
+        return this.launchNow(live, operation, request, refs, ref);
       },
-      onChunk: (next: (chunk: Readonly<EngineChunk>) => void) => {
-        if (listener) throw new Error("attempt chunk stream already consumed");
-        listener = next;
-        return () => {
-          listener = undefined;
-          unsubscribe?.();
-        };
-      },
-    });
+    );
   }
   private launchNow(
     live: AttemptConversationAuthority,
@@ -117,30 +93,66 @@ export class AttemptRuntime {
     }
     const parentId = request.parent ? refs.get(request.parent) : undefined;
     if (request.parent && !parentId) throw new Error("attempt parent lacks runtime authority");
-    const attemptId = this.options.id("attempt");
+    let attemptId = this.options.id("attempt");
     const ref = reservedRef ?? (randomBytes(32).toString("base64url") as AttemptRef);
     const resolved = materialized.resolved;
     const roleName = resolved.role.spec.name;
-    if (request.purpose === "evaluator" && roleName !== "brainstorm-evaluator") {
+    const evaluatorRole = roleName === AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR;
+    if (request.purpose === "evaluator" && !evaluatorRole) {
       throw new Error("evaluator attempt requires evaluator role");
     }
-    if (request.purpose !== "evaluator" && roleName === "brainstorm-evaluator") {
+    if (request.purpose !== "evaluator" && evaluatorRole) {
       throw new Error("non-evaluator attempt cannot use evaluator role");
     }
+    const revisionLane = prepareInitialRevisionLane(
+      this.options.revisionLanes,
+      live,
+      request,
+      materialized,
+    );
+    if (revisionLane) attemptId = revisionLane.attempt_key;
     const isolatedHistory = request.purpose === "baseline" || request.purpose === "evaluator";
     const resumeOrdinal = ++live.resumeCounter.value;
-    const resume = isolatedHistory ? undefined : live.resumeBindings.get(request.participantId);
-    if (resume && resume.engine !== resolved.engine) throw new Error("resume engine mismatch");
-    if (!isolatedHistory && materialized.spawn.sessionMode === "exact" && !resume) {
+    const persistedResume = isolatedHistory
+      ? undefined
+      : live.resumeBindings.get(request.participantId);
+    if (persistedResume && persistedResume.engine !== resolved.engine)
+      throw new Error("resume engine mismatch");
+    const resume = supportsExactNativeSessionResume(resolved.engine) ? persistedResume : undefined;
+    if (
+      !isolatedHistory &&
+      materialized.spawn.sessionMode === ENGINE_SESSION_MODE.EXACT &&
+      !resume
+    ) {
       throw new Error("exact session requires persisted resume authority");
     }
-    const prompt =
-      request.promptInput === live.manifest.task_text
-        ? materialized.spawn.rendered_prompt
-        : `${materialized.spawn.rendered_prompt.trimEnd()}\n\n## Policy Attempt\n\n${request.promptInput}\n`;
+    const deliveredPrompt = resolveAttemptTurnPrompt({
+      request,
+      resume,
+      sharedHandoff: live.sharedHandoff,
+      isolatedHistory,
+    });
+    const prompt = renderAttemptPrompt(
+      materialized.spawn.rendered_prompt,
+      live.manifest.task_text,
+      deliveredPrompt,
+      {
+        purpose: request.purpose,
+        proposeAction:
+          request.purpose !== "baseline" &&
+          request.purpose !== "evaluator" &&
+          manifestBinding.input.roleRef !== AGENT_ACTION_CANDIDATE_ROLE.BRAINSTORM_EVALUATOR &&
+          manifestBinding.host_tools?.includes(AGENT_HOST_TOOL.PROPOSE_ACTION) === true,
+        delivery: request.delivery,
+      },
+    );
     const spawn = createSpawnOptionsProjection({
       ...materialized.spawn,
-      sessionMode: isolatedHistory ? "fresh" : resume ? "exact" : materialized.spawn.sessionMode,
+      sessionMode: isolatedHistory
+        ? ENGINE_SESSION_MODE.FRESH
+        : resume
+          ? ENGINE_SESSION_MODE.EXACT
+          : materialized.spawn.sessionMode,
       rendered_prompt: prompt,
     });
     const base: TraceCorrelation = {
@@ -157,6 +169,7 @@ export class AttemptRuntime {
     };
     let chain: Promise<unknown> = Promise.resolve();
     let evidenceRef: string | undefined;
+    let modelOutputBinding: ReturnType<typeof captureAttemptModelOutputBinding>;
     let nativeId: string | null = resume?.nativeSessionId ?? null;
     let chunkBytes = 0;
     let chunkError: Error | undefined;
@@ -199,7 +212,7 @@ export class AttemptRuntime {
           {
             idempotency_key: `attempt:${attemptId}:lifecycle:${state}`,
             event: {
-              type: "operation_lifecycle",
+              type: CONVERSATION_TRACE_EVENT_KIND.OPERATION_LIFECYCLE,
               payload: { operation_id: live.operationId, attempt_id: attemptId, state },
             },
           },
@@ -269,64 +282,99 @@ export class AttemptRuntime {
       chunks.push(snapshot);
       enqueueCallback({ kind: "chunk", index: chunks.length - 1 });
     };
-    const handle = this.options.sessionAdapter.start({
-      attemptId,
-      spawn,
-      ...(resume ? { nativeSessionId: resume.nativeSessionId } : {}),
-      signal: operation.signal,
-      onChunk: receiveChunk,
-      onLifecycle: (state) => {
-        if (!this.options.isRetained(live.manifest.conversation_id, live.operationId)) return;
-        enqueueCallback({ kind: "lifecycle", state });
+    const handle = startAndAdmitAttempt({
+      adapter: this.options.sessionAdapter,
+      operation,
+      revisionLane,
+      revisionLanes: this.options.revisionLanes,
+      request: {
+        attemptId,
+        spawn,
+        ...(request.coordinationWorkspace
+          ? {
+              coordinationWorkspace: projectEngineCoordinationWorkspace(
+                live.manifest.workflow_id,
+                request.coordinationWorkspace,
+              ),
+            }
+          : {}),
+        ...(resume ? { nativeSessionId: resume.nativeSessionId } : {}),
+        signal: operation.signal,
+        onChunk: receiveChunk,
+        onLifecycle: (state) => {
+          if (!this.options.isRetained(live.manifest.conversation_id, live.operationId)) return;
+          enqueueCallback({ kind: "lifecycle", state });
+        },
       },
     });
-    try {
-      operation.addAttempt(handle);
-    } catch (error) {
-      void handle.terminate("attempt admission failed").catch(() => undefined);
-      throw error;
-    }
     refs.set(ref, attemptId);
+    let revisionSettled = revisionLane === null || revisionLane === undefined;
     const completion = (async () => {
       try {
         const result = await handle.completion;
         const captured = handle.readResumeBinding();
+        modelOutputBinding = captureAttemptModelOutputBinding(
+          handle,
+          attemptId,
+          resolved.engine,
+          captured,
+        );
         nativeId = captured?.nativeSessionId ?? nativeId;
         evidenceRef = handle.readEvidenceBinding()?.internalRef;
+        if (revisionLane) {
+          this.options.revisionLanes?.observe(revisionLane, handle, result, {
+            artifacts: this.options.artifactStore,
+            live,
+            startAuthority: this.options.sessionAdapter.startAuthority,
+          });
+          revisionSettled = true;
+        }
         while (callbackFlush || callbackQueue.length) {
           scheduleCallbacks();
           await callbackFlush;
         }
         await chain;
         if (chunkError) throw chunkError;
-        if (
-          captured &&
-          !isolatedHistory &&
-          operation.isLive() &&
-          this.options.isRetained(live.manifest.conversation_id, live.operationId)
-        ) {
-          if (captured.attemptId !== attemptId) throw new Error("resume attempt identity mismatch");
-          if (resumeOrdinal > (live.resumeOrdinals.get(request.participantId) ?? -1)) {
-            this.options.artifactStore.recordResumeBinding(
-              live.manifest.conversation_id,
-              request.participantId,
-              captured,
-            );
-            live.resumeBindings.set(request.participantId, {
-              participant_id: request.participantId,
-              ...captured,
-            });
-            live.resumeOrdinals.set(request.participantId, resumeOrdinal);
-          }
-        }
-        return result;
+        if (!revisionLane)
+          publishAttemptTurnDelivery({
+            live,
+            operation,
+            store: this.options.artifactStore,
+            participantId: request.participantId,
+            attemptId,
+            delivery: request.delivery?.receipt,
+            capturedResume: captured !== undefined,
+            retained: this.options.isRetained(live.manifest.conversation_id, live.operationId),
+          });
+        if (!revisionLane)
+          publishAttemptResumeBinding({
+            live,
+            operation,
+            store: this.options.artifactStore,
+            participantId: request.participantId,
+            attemptId,
+            resumeOrdinal,
+            captured,
+            ...(resume ? { requestedExactResume: resume } : {}),
+            isolatedHistory,
+            retained: this.options.isRetained(live.manifest.conversation_id, live.operationId),
+            ...(request.delivery ? { delivery: request.delivery.receipt } : {}),
+          });
+        return projectConversationAgentTurnResult(result);
       } finally {
+        if (revisionLane && !revisionSettled)
+          this.options.revisionLanes?.effectUnknown(
+            revisionLane,
+            handle,
+            this.options.sessionAdapter.startAuthority,
+          );
         operation.removeAttempt(handle);
       }
     })();
     return Object.freeze({
       ref,
       completion,
+      readModelOutputBinding: () => modelOutputBinding,
       emit: append,
       onChunk: (next: (chunk: Readonly<EngineChunk>) => void) => {
         if (!this.options.isRetained(live.manifest.conversation_id, live.operationId)) {
@@ -343,56 +391,9 @@ export class AttemptRuntime {
       },
     });
   }
-
-  async reconcile(
-    live: AttemptConversationAuthority,
-    operation: RegisteredOperation,
-  ): Promise<void> {
+  reconcile(live: AttemptConversationAuthority, operation: RegisteredOperation): Promise<void> {
     const reconciliations = this.reconciliations.get(live) ?? new Map<string, string | null>();
     this.reconciliations.set(live, reconciliations);
-    for (let index = 0; index < live.manifest.bindings.length; index++) {
-      const participantId = live.manifest.bindings[index]?.participant_id ?? "";
-      const binding = live.bindings[index];
-      const resume = live.resumeBindings.get(participantId);
-      if (!resume || !binding || resume.engine !== binding.resolved.engine) continue;
-      if (reconciliations.get(participantId) === null) continue;
-      const attemptId = reconciliations.get(participantId) ?? this.options.id("attempt");
-      reconciliations.set(participantId, attemptId);
-      if (operation.signal.aborted) throw new Error("resume operation is not live");
-      const result = await this.options.sessionAdapter.reconcileHistory({
-        engine: resume.engine,
-        nativeSessionId: resume.nativeSessionId,
-      });
-      const resolved = binding.resolved;
-      await this.options.appendRuntime(
-        Object.freeze({
-          ...this.options.correlation(live.manifest, live.operationId, attemptId),
-          participant_id: participantId,
-          role_ref: resolved.role.spec.name,
-          role_resolved_hash: resolved.role.resolved_hash,
-          skill_refs: resolved.skills.map((skill) => skill.ref),
-          skill_resolved_hashes: resolved.skills.map((skill) => skill.resolved_hash),
-          engine: resolved.engine,
-          parent_attempt_id: resume.attemptId,
-        }),
-        {
-          idempotency_key: `native-history:${participantId}:${attemptId}`,
-          event: {
-            type: "native_history_reconciled",
-            payload: {
-              public_session_ref: resume.nativeSessionId,
-              status: result.status,
-              imported_turn_count: result.imported_turn_count,
-              imported_tool_count: result.imported_tool_count,
-              provenance_refs: [],
-              evidence_refs: [],
-              completeness_reason: result.completeness_reason,
-            },
-          },
-        },
-        resume.nativeSessionId,
-      );
-      reconciliations.set(participantId, null);
-    }
+    return reconcileAttemptHistory({ options: this.options, live, operation, reconciliations });
   }
 }

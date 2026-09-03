@@ -1,184 +1,306 @@
 ---
-import Layout from '../layouts/Layout.astro';
+import Layout from "../layouts/Layout.astro";
 
-const repo = 'https://github.com/magicpro97/vibeflow';
-const npmUrl = 'https://www.npmjs.com/package/@magicpro97/vibeflow';
+const repo = "https://github.com/magicpro97/vibeflow";
+const npmUrl = "https://www.npmjs.com/package/@magicpro97/vibeflow";
 
-const features = [
+const capabilities = [
   {
-    title: 'Multi-engine, out of the box',
-    body: 'Drive Claude Code, OpenAI Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI from one orchestrator with shared context and instruction files generated per engine.',
+    title: "One Home, no dashboard maze",
+    body: "Open a session and keep talking. Agents, capabilities, settings, and trace stay beside the conversation, not behind another control panel.",
+    detail: "Resume, steer, inspect",
+    className: "capability-card capability-card-home",
   },
   {
-    title: 'Source protection',
-    body: 'A git checkpoint before every real dispatch: clean-tree gate, opt-in --auto-wip snapshot, and one-command rollback so an engine run never loses your work.',
+    title: "Send now, queue safely",
+    body: "Keep typing while an agent works. Your messages stay ordered, failures stay attached to their payload, and exact retry appears only when safe. ArrowUp edits only your latest queued message before dispatch claims it.",
+    detail: "FIFO for your messages, editable before dispatch",
+    className: "capability-card capability-card-queue",
   },
   {
-    title: 'Engine preflight',
-    body: 'Probe each engine for presence, auth, and a live round-trip before dispatch. Workflows only start when an engine actually works — no silent dead ends.',
+    title: "Handoffs without the re-brief",
+    body: "Claude, Codex, and OpenCode resume by exact ID when proved. Copilot and Antigravity receive canonical user and peer context plus bounded own-history replay.",
+    detail: "Native resume when proved, bounded replay otherwise",
+    className: "capability-card capability-card-handoff",
   },
   {
-    title: 'Work-unit orchestration',
-    body: 'Decompose a task into non-overlapping work units, dispatch them in parallel, and gate completion on a confidence check with recorded evidence.',
+    title: "Quotes that keep agents aligned",
+    body: "Quote one message or several, react when a signal is enough, and keep collaboration readable without turning emoji into noise.",
+    detail: "Typed references, restrained reactions",
+    className: "capability-card capability-card-quotes",
   },
   {
-    title: 'Universal guardrails',
-    body: 'Hooks score every action and block destructive commands, secret reads, and out-of-scope writes — natively on Claude, detection-only with a banner elsewhere.',
+    title: "Install tools from the conversation",
+    body: "Ask for a skill, MCP, hook, or role in chat. Review its targets, approve once, and keep repair or rollback on the same audited path.",
+    detail: "Review, approve, repair, roll back",
+    className: "capability-card capability-card-fabric",
   },
   {
-    title: 'Skills & code-nav tools',
-    body: 'Capability-matched skills plus optional codegraph and LSP navigation, wired as MCP servers with a codegraph > lsp > native priority ladder.',
-  },
-  {
-    title: 'Skill curator & registry',
-    body: 'A git-backed skill registry with pinned commits, plus a curator that scans the catalog, shares findings via Git notes, and drafts reviewable issue/PR proposals.',
-  },
-  {
-    title: 'Review-evidence gates',
-    body: 'Commit-anchored self-review evidence, CI blocks on unresolved review threads, and skill-acquisition approval before anything ships.',
+    title: "No mystery processes",
+    body: "Every CLI run carries its PID, exact start identity, host, and operation. VibeFlow only reclaims proved orphans, and live Windows Job Object validation runs in CI.",
+    detail: "Owned launch, drain, release, recovery",
+    className: "capability-card capability-card-recovery",
   },
 ];
 
 const steps = [
-  { n: '01', cmd: 'vf init', text: 'Scan the repo and generate canonical context + per-engine instruction files.' },
-  { n: '02', cmd: 'vf doctor --probe', text: 'Confirm an engine is installed, authenticated, and responding before any work.' },
-  { n: '03', cmd: 'vf orchestrate --yes', text: 'Checkpoint the tree, dispatch work units in parallel, and review each result.' },
-  { n: '04', cmd: 'vf verify', text: 'Run typecheck / lint / test plus confidence, evidence, and scope gates.' },
+  {
+    cmd: "vf init",
+    title: "Give every CLI the same brief",
+    text: "Create shared repo context and install the vf skill where each supported CLI can use it.",
+  },
+  {
+    cmd: "vf doctor --probe",
+    title: "Know who is actually ready",
+    text: "Probe installed engines, real round trips, and owned-process health before work is dispatched.",
+  },
+  {
+    cmd: "vf orchestrate --yes",
+    title: "Let the right agent take the turn",
+    text: "Plan and dispatch work while a durable user-message queue keeps sends in order. Typed actions travel on their own audited authority path.",
+  },
+  {
+    cmd: "vf verify",
+    title: "Make done earn the word",
+    text: "Hold completion until types, lint, tests, scope, evidence, and confidence all agree.",
+  },
+];
+
+const demoHighlights = [
+  {
+    title: "Pick up, do not restart",
+    body: "Open any session and continue with its participants, queue, trace, and settings already in place.",
+  },
+  {
+    title: "Type while agents work",
+    body: "New messages wait in order, survive restarts, and stay editable until dispatch claims them.",
+  },
+  {
+    title: "Ask for tools in plain language",
+    body: "Capability requests move from chat to exact targets, review, approval, and an audited result.",
+  },
+  {
+    title: "Proof is part of the answer",
+    body: "Tests, evidence, scope, and confidence land before VibeFlow lets a run call itself done.",
+  },
+];
+
+const skillHighlights = [
+  "One skill gives Claude Code, Codex, Copilot, OpenCode, and Antigravity the same VibeFlow workflow.",
+  "A capability request stays in the conversation, including exactly which CLIs will receive it.",
+  "Repair and rollback use the same visible path, so tool state cannot drift behind your back.",
+];
+
+const reliabilityNotes = [
+  {
+    title: "One fast toolchain",
+    body: "Bun 1.4 powers the CLI, local Home, tests, coverage, and landing while the shipped executable stays Node compatible.",
+  },
+  {
+    title: "A process has a fingerprint",
+    body: "Queue claims and CLI runs bind PID, start identity, host, operation, and nonce. Live or unprovable owners fail closed.",
+  },
+  {
+    title: "Drift gets a name",
+    body: "Doctor and status say manual, unsupported, orphaned, stale, or needs recovery instead of quietly pretending all is well.",
+  },
+  {
+    title: "One vocabulary, everywhere",
+    body: "Backend, CLI, and Home share frozen typed protocol authority and fail-closed guards instead of duplicate enums or raw wire literals.",
+  },
 ];
 ---
 
 <Layout
-  title="VibeFlow — Orchestrate AI coding engines with guardrails"
-  description="Local-first npm CLI that orchestrates Claude Code, Codex, GitHub Copilot CLI, OpenCode, and Antigravity CLI with engine preflight, git source protection, work-unit orchestration, hooks, and verification."
+  title="VibeFlow | Keep your AI CLIs, lose the re-brief"
+  description="Bring Claude Code, Codex, Copilot, OpenCode, and Antigravity into one durable local conversation without replacing the tools you chose."
 >
   <main id="main">
-    <!-- Hero -->
     <section class="hero container">
-      <p class="eyebrow">Local-first · MIT</p>
-      <h1>Orchestrate AI coding engines<br /><span class="grad">with guardrails.</span></h1>
-      <p class="lede">
-        VibeFlow is a local-first CLI and web UI that drives Claude Code, Codex, GitHub
-        Copilot CLI, OpenCode, and Antigravity CLI as an orchestrator — with engine preflight,
-        git source protection, work-unit orchestration, and verification built in.
-      </p>
-
-      <div class="install">
-        <code>npx @magicpro97/vibeflow</code>
+      <div class="hero-copy">
+        <p class="eyebrow">Local-first harness, not another model</p>
+        <h1>
+          <span>Keep your AI CLIs.</span>
+          <span class="hero-accent">Lose the re-brief.</span>
+        </h1>
+        <p class="hero-lede">
+          VibeFlow connects your existing agents, carries context between them, owns each CLI run, and requires proof before it says done.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href={npmUrl}>Install VibeFlow</a>
+          <a class="btn btn-ghost" href={repo}>Read the source</a>
+        </div>
       </div>
-
-      <div class="cta">
-        <a class="btn btn-primary" href={repo}>View on GitHub</a>
-        <a class="btn btn-ghost" href={npmUrl}>npm package</a>
+      <div class="hero-stage">
+        <img
+          src="/demo-poster.jpg"
+          alt="VibeFlow conversation Home and orchestration preview"
+          loading="eager"
+          decoding="async"
+          fetchpriority="high"
+        />
       </div>
     </section>
 
-    <!-- Live demo -->
     <section class="container section" aria-labelledby="demo-h">
-      <h2 id="demo-h" class="section-h">Watch the coordinator orchestrate</h2>
-      <p class="lede" style="margin-bottom: 1.5rem;">
-        A real orchestration, start to finish: the engine plans a refactor, writes the code,
-        and self-verifies — typecheck, lint, full test suite, and 100% per-file coverage —
-        before an independent reviewer signs off. No completion without evidence.
-      </p>
-      <div class="demo-player">
-        <video
-          src="/demo.mp4"
-          poster="/demo-poster.jpg"
-          controls
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="metadata"
-          aria-label="VibeFlow coordinator demo — 4K"
-        ></video>
+      <div class="section-copy">
+        <div class="install">
+          <code>npx @magicpro97/vibeflow</code>
+        </div>
+        <h2 id="demo-h" class="section-h">See a real run go from prompt to evidence</h2>
+        <p class="section-lede">
+          Follow a Codex run through dispatch, edits, verification, and recorded evidence in one local workflow.
+        </p>
+      </div>
+      <div class="demo-frame">
+        <div class="demo-player">
+          <video
+            src="/demo.mp4"
+            poster="/demo-poster.jpg"
+            controls
+            autoplay
+            muted
+            loop
+            playsinline
+            preload="metadata"
+            aria-label="VibeFlow orchestration demo video"
+          ></video>
+        </div>
+        <div class="demo-rail" aria-label="Demo highlights">
+          {demoHighlights.map((item) => (
+            <article class="demo-item">
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
 
-    <!-- Features -->
     <section class="container section" aria-labelledby="features-h">
-      <h2 id="features-h" class="section-h">What it does</h2>
-      <div class="grid">
-        {features.map((f) => (
-          <article class="card">
-            <h3>{f.title}</h3>
-            <p>{f.body}</p>
+      <div class="section-copy">
+        <h2 id="features-h" class="section-h">Where multi-CLI work usually breaks</h2>
+        <p class="section-lede">
+          VibeFlow keeps sends ordered, handoffs explicit, installs reviewed, and process ownership proved.
+        </p>
+      </div>
+      <div class="capability-grid">
+        {capabilities.map((item) => (
+          <article class={item.className}>
+            <span>{item.detail}</span>
+            <h3>{item.title}</h3>
+            <p>{item.body}</p>
           </article>
         ))}
       </div>
     </section>
 
-    <!-- How it works -->
     <section class="container section" aria-labelledby="how-h">
-      <h2 id="how-h" class="section-h">How it works</h2>
-      <ol class="steps">
-        {steps.map((s) => (
-          <li class="step">
-            <span class="step-n" aria-hidden="true">{s.n}</span>
-            <div>
-              <code class="step-cmd">{s.cmd}</code>
-              <p>{s.text}</p>
-            </div>
+      <div class="section-copy">
+        <h2 id="how-h" class="section-h">From one prompt to a proven change</h2>
+        <p class="section-lede">
+          Start naturally. Underneath, every handoff and action stays on one inspectable authority path.
+        </p>
+      </div>
+      <ol class="process-flow">
+        {steps.map((step) => (
+          <li class="process-item">
+            <code class="step-cmd">{step.cmd}</code>
+            <h3>{step.title}</h3>
+            <p>{step.text}</p>
           </li>
         ))}
       </ol>
     </section>
 
-    <!-- Use as a skill -->
     <section class="container section" aria-labelledby="skill-h">
-      <h2 id="skill-h" class="section-h">Use VibeFlow as a skill</h2>
-      <p class="lede" style="margin-bottom: 1.5rem;">
-        <code class="step-cmd">vf init</code> seeds a <code class="step-cmd">vf</code> skill into your
-        repo and syncs it to Claude Code, Codex, GitHub Copilot, OpenCode, and Antigravity — one cross-engine skill, no
-        per-tool wiring. Activate it by typing <code class="step-cmd">&lt;your task&gt; + vf</code> in a
-        prompt, or <code class="step-cmd">/vf</code> in a CLI tool. Run <code class="step-cmd">/vf</code>
-        with no args and it grills you toward a spec from the chat context.
-      </p>
-      <div class="terminal" role="img" aria-label="Terminal showing npx @magicpro97/vibeflow init and the /vf skill command">
-        <div class="term-bar"><span></span><span></span><span></span></div>
-        <pre><code><span class="prompt">$</span> npx @magicpro97/vibeflow init
-<span class="dim">Seeding the `vf` skill → .claude / .codex / copilot / .opencode / .agents…</span>
-  <span class="ok">✓</span> vf skill written and synced to every engine
+      <div class="skill-layout">
+        <div class="terminal">
+          <div class="term-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+          <pre
+            role="region"
+            aria-label="VibeFlow terminal transcript"
+            tabindex="0"
+          ><code><span class="prompt">$</span> npx @magicpro97/vibeflow init
+<span class="dim">Seed shared context and sync the vf skill into every supported CLI</span>
+  <span class="ok">✓</span> claude
+  <span class="ok">✓</span> codex
+  <span class="ok">✓</span> copilot
+  <span class="ok">✓</span> opencode
+  <span class="ok">✓</span> antigravity
 
-<span class="dim"># then, inside Claude Code / Codex / Copilot / OpenCode:</span>
+<span class="dim"># inside Claude Code, Codex, Copilot, or OpenCode</span>
 <span class="prompt">&gt;</span> Refactor the auth middleware + vf
-<span class="prompt">&gt;</span> /vf            <span class="dim"># no args → grills you toward a spec</span></code></pre>
+<span class="prompt">&gt;</span> /vf</code></pre>
+        </div>
+        <div class="skill-copy">
+          <h2 id="skill-h" class="section-h">Teach every CLI the same way of working</h2>
+          <p class="section-lede">
+            <code class="step-cmd">vf init</code> gives each agent the shared workflow. Home keeps every later
+            tool install visible and target-specific before anything changes.
+          </p>
+          <div class="skill-list">
+            {skillHighlights.map((item) => (
+              <p>{item}</p>
+            ))}
+          </div>
+          <p class="section-link">
+            Learn more in the <a href="/wiki/skills_system">Skills system</a> reference.
+          </p>
+        </div>
       </div>
-      <p class="lede" style="margin-top: 1.25rem; font-size: 1rem;">
-        Learn more in the <a href="/wiki/skills_system">Skills system</a> reference.
-      </p>
     </section>
 
-    <!-- Terminal -->
     <section class="container section" aria-labelledby="term-h">
-      <h2 id="term-h" class="section-h">From install to first check</h2>
-      <div class="terminal" role="img" aria-label="Terminal showing npx @magicpro97/vibeflow and vf doctor output">
-        <div class="term-bar"><span></span><span></span><span></span></div>
-        <pre><code><span class="prompt">$</span> npx @magicpro97/vibeflow doctor
-<span class="dim">VibeFlow environment check</span>
-
-  <span class="ok">✓</span> node
-  <span class="ok">✓</span> git
-  <span class="ok">✓</span> claude
-  <span class="warn">•</span> codex <span class="dim">(optional)</span>
-  <span class="ok">✓</span> copilot
-  <span class="warn">•</span> opencode <span class="dim">(optional)</span>
-  <span class="warn">•</span> antigravity <span class="dim">(optional)</span>
-
-  git repo: <span class="ok">yes</span>
-
-Engine readiness (presence/auth):
-  <span class="ok">✓</span> claude: installed
-  <span class="ok">✓</span> copilot: installed
-
-<span class="ok">Ready.</span></code></pre>
+      <div class="section-copy">
+        <h2 id="term-h" class="section-h">No mystery processes</h2>
+        <p class="section-lede">
+          When a CLI finishes, hangs, or loses its owner, VibeFlow uses exact process identity before it
+          releases or recovers anything.
+        </p>
+      </div>
+      <div class="reliability-layout">
+        <div class="command-stack" aria-label="Key commands">
+          <div class="command-row">
+            <span>Install locally</span>
+            <code>bun install</code>
+          </div>
+          <div class="command-row">
+            <span>Open the harness</span>
+            <code>npx @magicpro97/vibeflow</code>
+          </div>
+          <div class="command-row">
+            <span>Choose an ephemeral port</span>
+            <code>vf ui --port 0</code>
+          </div>
+          <div class="command-row">
+            <span>Probe engines</span>
+            <code>vf doctor --probe</code>
+          </div>
+          <div class="command-row">
+            <span>Repair owned CLI state</span>
+            <code>vf doctor --fix</code>
+          </div>
+          <div class="command-row">
+            <span>Verify before done</span>
+            <code>vf verify</code>
+          </div>
+        </div>
+        <div class="reliability-notes">
+          {reliabilityNotes.map((item) => (
+            <article class="reliability-card">
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
 
     <footer class="container footer">
       <div>
         <strong>VibeFlow</strong>
-        <span class="dim"> — orchestrate AI coding engines with guardrails.</span>
+        <span class="dim"> Local-first harness for the AI CLIs you already chose.</span>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href={repo}>GitHub</a>
@@ -191,181 +313,436 @@ Engine readiness (presence/auth):
 </Layout>
 
 <style>
-  .demo-player {
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-    max-width: 960px;
-    margin-inline: auto;
-    background: #0d0d0d;
-    aspect-ratio: 16 / 9;
+  .section {
+    padding-block: clamp(4.5rem, 9vw, 6.75rem);
   }
+
+  .section-copy {
+    max-width: 43rem;
+    margin-bottom: 2rem;
+  }
+
+  .section-h {
+    font-size: clamp(2rem, 4vw, 3rem);
+  }
+
+  .section-lede {
+    margin-top: 1rem;
+    color: var(--text-dim);
+    font-size: 1.05rem;
+    line-height: 1.7;
+    max-width: 42rem;
+  }
+
+  .section-link {
+    margin-top: 1.35rem;
+    color: var(--text-dim);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    gap: clamp(2rem, 4vw, 4rem);
+    align-items: end;
+    min-height: calc(100dvh - 76px);
+    padding-top: clamp(3rem, 7vw, 4.75rem);
+    padding-bottom: 2.5rem;
+  }
+
+  .hero-copy {
+    max-width: 34rem;
+  }
+
+  .eyebrow {
+    color: var(--accent-strong);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 1.2rem;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.9rem, 3.7vw, 3.45rem);
+    font-weight: 800;
+    letter-spacing: -0.045em;
+  }
+
+  .hero h1 span {
+    display: block;
+    white-space: nowrap;
+  }
+
+  .hero-accent {
+    color: var(--accent-strong);
+  }
+
+  .hero-lede {
+    margin-top: 1.25rem;
+    max-width: 28rem;
+    color: var(--text-dim);
+    font-size: 1.08rem;
+    line-height: 1.6;
+  }
+
+  .hero-stage {
+    position: relative;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+      var(--bg-panel);
+    box-shadow: var(--shadow);
+    isolation: isolate;
+  }
+
+  .hero-stage img {
+    width: 100%;
+    display: block;
+    aspect-ratio: 15 / 11;
+    object-fit: cover;
+  }
+
+  .hero-stage::before,
+  .hero-stage::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .hero-stage::before {
+    background:
+      linear-gradient(180deg, rgba(8, 16, 24, 0) 52%, rgba(8, 16, 24, 0.28) 100%),
+      radial-gradient(circle at 18% 18%, rgba(89, 225, 203, 0.18), transparent 32%);
+  }
+
+  .hero-stage::after {
+    inset: -12% auto -12% -24%;
+    width: 46%;
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0),
+      rgba(255, 255, 255, 0.03),
+      rgba(89, 225, 203, 0.18),
+      rgba(255, 255, 255, 0.03),
+      rgba(255, 255, 255, 0)
+    );
+    filter: blur(18px);
+    transform: rotate(10deg);
+    opacity: 0.6;
+  }
+
+  .install {
+    margin-bottom: 1rem;
+    display: inline-flex;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.78rem 1.15rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .install code {
+    color: var(--text);
+    font-size: 0.96rem;
+  }
+
+  .install code::before {
+    content: '$ ';
+    color: var(--accent);
+  }
+
+  .cta {
+    margin-top: 2rem;
+    display: flex;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46px;
+    padding: 0.78rem 1.45rem;
+    border-radius: var(--radius);
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition:
+      transform 180ms ease,
+      border-color 180ms ease,
+      background-color 180ms ease;
+  }
+
+  .btn:hover {
+    text-decoration: none;
+    transform: translateY(-1px);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #062420;
+    box-shadow: 0 18px 36px rgba(89, 225, 203, 0.15);
+  }
+
+  .btn-ghost {
+    border-color: var(--border);
+    color: var(--text);
+    background: rgba(13, 22, 33, 0.72);
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--accent);
+  }
+
+  .demo-frame {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.55fr);
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .demo-player {
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    background: #081018;
+    border: 1px solid var(--border);
+    min-height: 100%;
+  }
+
   .demo-player video {
     width: 100%;
     height: 100%;
     display: block;
     object-fit: contain;
   }
-  .section {
-    padding-block: 3.5rem;
-  }
-  .section-h {
-    font-size: clamp(1.4rem, 3vw, 2rem);
-    margin-bottom: 1.75rem;
-  }
 
-  /* Hero */
-  .hero {
-    padding-block: clamp(4rem, 10vw, 7rem) 2rem;
-    text-align: center;
-  }
-  .eyebrow {
-    color: var(--accent);
-    font-family: var(--mono);
-    font-size: 0.8rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    margin-bottom: 1.25rem;
-  }
-  .hero h1 {
-    font-size: clamp(2.4rem, 7vw, 4rem);
-    font-weight: 800;
-  }
-  .grad {
-    background: var(--accent-grad);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  .lede {
-    color: var(--text-dim);
-    max-width: 640px;
-    margin: 1.5rem auto 0;
-    font-size: 1.1rem;
-  }
-  .install {
-    margin: 2rem auto 0;
-    display: inline-flex;
-    background: var(--code-bg);
+  .demo-rail {
+    border-radius: var(--radius);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0.85rem 1.25rem;
-  }
-  .install code {
-    color: var(--text);
-    font-size: 1rem;
-  }
-  .install code::before {
-    content: '$ ';
-    color: var(--accent);
-  }
-  .cta {
-    margin-top: 2rem;
-    display: flex;
-    gap: 0.85rem;
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-  .btn {
-    display: inline-block;
-    padding: 0.75rem 1.5rem;
-    border-radius: 10px;
-    font-weight: 600;
-    border: 1px solid transparent;
-  }
-  .btn:hover {
-    text-decoration: none;
-  }
-  .btn-primary {
-    background: var(--accent-grad);
-    color: #04201b;
-  }
-  .btn-ghost {
-    border-color: var(--border);
-    color: var(--text);
-    background: var(--bg-elev);
-  }
-  .btn-ghost:hover {
-    border-color: var(--accent);
-  }
-
-  /* Feature grid */
-  .grid {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+      var(--bg-elev);
+    padding: 1rem 1.1rem;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 1rem;
   }
-  .card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--radius);
-    padding: 1.5rem;
-  }
-  .card h3 {
-    font-size: 1.1rem;
-    margin-bottom: 0.6rem;
-  }
-  .card p {
-    color: var(--text-dim);
-    font-size: 0.98rem;
+
+  .demo-item {
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(124, 166, 187, 0.12);
   }
 
-  /* Steps */
-  .steps {
+  .demo-item:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .demo-item h3,
+  .capability-card h3,
+  .process-item h3,
+  .reliability-card h3 {
+    font-size: 1.08rem;
+    margin-bottom: 0.45rem;
+  }
+
+  .demo-item p,
+  .capability-card p,
+  .process-item p,
+  .skill-list p,
+  .reliability-card p {
+    color: var(--text-dim);
+    font-size: 0.98rem;
+    line-height: 1.7;
+  }
+
+  .capability-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .capability-card {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.45rem;
+    min-height: 220px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  .capability-card span {
+    display: inline-block;
+    color: var(--accent-strong);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    margin-bottom: 1rem;
+  }
+
+  .capability-card h3 {
+    font-size: 1.34rem;
+    margin-bottom: 0.7rem;
+    max-width: 14rem;
+  }
+
+  .capability-card::before {
+    content: "";
+    position: absolute;
+    inset: auto -10% -18% auto;
+    width: 190px;
+    height: 190px;
+    border-radius: 50%;
+    background: rgba(89, 225, 203, 0.08);
+    filter: blur(8px);
+  }
+
+  .capability-card-home {
+    grid-column: span 7;
+    background:
+      linear-gradient(135deg, rgba(89, 225, 203, 0.12), rgba(255, 255, 255, 0.02)),
+      var(--bg-panel-strong);
+  }
+
+  .capability-card-home::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 34px 34px;
+    mask-image: linear-gradient(145deg, rgba(0, 0, 0, 0.95), transparent 86%);
+    pointer-events: none;
+  }
+
+  .capability-card-queue {
+    grid-column: span 5;
+    background:
+      radial-gradient(circle at top right, rgba(89, 225, 203, 0.12), transparent 38%),
+      var(--bg-panel);
+  }
+
+  .capability-card-handoff {
+    grid-column: span 4;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+      var(--bg-panel);
+  }
+
+  .capability-card-quotes {
+    grid-column: span 3;
+    background:
+      linear-gradient(160deg, rgba(89, 225, 203, 0.1), transparent 46%),
+      var(--bg-elev);
+  }
+
+  .capability-card-fabric {
+    grid-column: span 5;
+    background:
+      linear-gradient(135deg, rgba(89, 225, 203, 0.08), transparent 48%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+      var(--bg-panel-strong);
+  }
+
+  .capability-card-recovery {
+    grid-column: span 12;
+    min-height: 0;
+    background:
+      linear-gradient(90deg, rgba(89, 225, 203, 0.12), rgba(89, 225, 203, 0)),
+      var(--bg-panel);
+  }
+
+  .process-flow {
     list-style: none;
     padding: 0;
     margin: 0;
     display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 1rem;
   }
-  .step {
-    display: flex;
-    gap: 1.25rem;
-    align-items: baseline;
-    background: var(--bg-elev);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--radius);
-    padding: 1.25rem 1.5rem;
-  }
-  .step-n {
-    font-family: var(--mono);
-    color: var(--accent);
-    font-size: 1.1rem;
-    font-weight: 700;
-  }
-  .step-cmd {
-    color: var(--text);
-    background: var(--code-bg);
-    padding: 0.2rem 0.5rem;
-    border-radius: 6px;
-    font-size: 0.95rem;
-  }
-  .step p {
-    color: var(--text-dim);
-    margin-top: 0.5rem;
-    font-size: 0.98rem;
+
+  .process-item {
+    position: relative;
+    padding-top: 1.1rem;
+    border-top: 1px solid var(--border-strong);
+    min-height: 180px;
   }
 
-  /* Terminal */
+  .process-item::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 0;
+    width: 42px;
+    height: 1px;
+    background: var(--accent);
+  }
+
+  .step-cmd {
+    display: inline-flex;
+    color: var(--text);
+    background: var(--code-bg);
+    border: 1px solid rgba(124, 166, 187, 0.16);
+    padding: 0.24rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.92rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .process-item h3 {
+    font-size: 1.2rem;
+    margin-bottom: 0.55rem;
+  }
+
+  .skill-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.88fr);
+    gap: 1.2rem;
+    align-items: start;
+  }
+
+  .skill-copy {
+    padding-top: 0.35rem;
+  }
+
+  .skill-list {
+    display: grid;
+    gap: 0.95rem;
+    margin-top: 1.4rem;
+  }
+
+  .skill-list p {
+    padding-left: 1rem;
+    border-left: 1px solid rgba(124, 166, 187, 0.24);
+  }
+
   .terminal {
     background: var(--code-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
+    box-shadow: var(--shadow);
   }
+
   .term-bar {
     display: flex;
     gap: 0.5rem;
-    padding: 0.85rem 1rem;
+    padding: 0.9rem 1rem;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-elev);
+    background: rgba(255, 255, 255, 0.02);
   }
+
   .term-bar span {
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: #2a3344;
+    background: #284052;
   }
+
   .terminal pre {
     margin: 0;
     padding: 1.25rem 1.5rem;
@@ -373,23 +750,74 @@ Engine readiness (presence/auth):
     font-size: 0.9rem;
     line-height: 1.7;
   }
+
   .prompt {
     color: var(--accent);
   }
+
   .ok {
     color: var(--accent);
   }
-  .warn {
-    color: #f5c451;
-  }
+
   .dim {
     color: var(--text-faint);
   }
 
-  /* Footer */
+  .reliability-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .command-stack {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+      var(--bg-elev);
+    overflow: hidden;
+  }
+
+  .command-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 1rem 1.1rem;
+    border-bottom: 1px solid rgba(124, 166, 187, 0.12);
+  }
+
+  .command-row:last-child {
+    border-bottom: 0;
+  }
+
+  .command-row span {
+    color: var(--text-dim);
+    font-size: 0.92rem;
+  }
+
+  .command-row code {
+    color: var(--text);
+    font-size: 0.96rem;
+  }
+
+  .reliability-notes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+
+  .reliability-card {
+    min-height: 100%;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-panel);
+  }
+
   .footer {
-    border-top: 1px solid var(--border-soft);
-    margin-top: 2rem;
+    border-top: 1px solid rgba(124, 166, 187, 0.14);
+    margin-top: 1rem;
     padding-block: 2.5rem;
     display: flex;
     justify-content: space-between;
@@ -399,15 +827,154 @@ Engine readiness (presence/auth):
     color: var(--text-dim);
     font-size: 0.95rem;
   }
+
   .footer-links {
     display: flex;
     gap: 1.25rem;
     flex-wrap: wrap;
   }
+
   .footer-links a {
     color: var(--text-dim);
   }
+
   .footer-links a:hover {
     color: var(--accent);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-stage::after {
+      animation: stage-sweep 7s ease-in-out infinite;
+    }
+
+    .hero-copy,
+    .hero-stage,
+    .demo-frame,
+    .capability-grid,
+    .process-flow,
+    .skill-layout,
+    .reliability-layout {
+      animation: rise-in 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .hero-stage,
+    .demo-frame {
+      animation-delay: 70ms;
+    }
+
+    .capability-grid {
+      animation-delay: 140ms;
+    }
+
+    .process-flow {
+      animation-delay: 210ms;
+    }
+
+    .skill-layout {
+      animation-delay: 280ms;
+    }
+
+    .reliability-layout {
+      animation-delay: 350ms;
+    }
+  }
+
+  @keyframes stage-sweep {
+    0%,
+    100% {
+      transform: rotate(10deg) translateX(0);
+      opacity: 0.4;
+    }
+    50% {
+      transform: rotate(10deg) translateX(180%);
+      opacity: 0.7;
+    }
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (max-width: 1080px) {
+    .hero,
+    .demo-frame,
+    .skill-layout,
+    .reliability-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .hero {
+      min-height: auto;
+      padding-top: 3rem;
+    }
+
+    .hero-copy,
+    .section-copy,
+    .hero-lede,
+    .section-lede {
+      max-width: none;
+    }
+
+    .capability-card-home,
+    .capability-card-queue,
+    .capability-card-handoff,
+    .capability-card-quotes,
+    .capability-card-fabric,
+    .capability-card-recovery {
+      grid-column: span 12;
+    }
+
+    .reliability-notes {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 760px) {
+    .section {
+      padding-block: 3.75rem;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.6rem, 11vw, 4rem);
+    }
+
+    .hero h1 span {
+      white-space: normal;
+    }
+
+    .process-flow {
+      grid-template-columns: 1fr;
+      gap: 1.4rem;
+    }
+
+    .capability-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .capability-card-home,
+    .capability-card-queue,
+    .capability-card-handoff,
+    .capability-card-quotes,
+    .capability-card-fabric,
+    .capability-card-recovery {
+      grid-column: span 1;
+      min-height: 0;
+    }
+
+    .reliability-notes {
+      grid-template-columns: 1fr;
+    }
+
+    .footer {
+      flex-direction: column;
+      align-items: flex-start;
+    }
   }
 </style>

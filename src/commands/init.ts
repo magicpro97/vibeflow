@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 // src/commands/init.ts
 //
 //
@@ -36,8 +37,10 @@ import {
   join,
   out,
   panel,
+  readFileSync,
   type spawnSync,
   updateLastConsult,
+  writeFileSafe,
   writeToolConfigs,
 } from "./_shared.js";
 import type {
@@ -53,7 +56,23 @@ import type {
   UnitDispatcher,
 } from "./_shared.js";
 
+import { activateRecoveryBootstrapForTrustedInstall } from "../capabilities/authority-repair/index.js";
+import { activateProjectCapabilityAuthorityForVfInit } from "../capabilities/source/authority-activation.js";
 import { writeInitArtifacts } from "./init-artifacts.js";
+
+const PROJECT_ID_ALLOW_RULE = "!PROJECT_ID.json";
+
+/** Keep the portable project authority identity visible to Git without replacing repo policy. */
+export function ensurePortableProjectIdentityTracked(base: string): void {
+  const ignorePath = join(base, CTX_DIR, ".gitignore");
+  const existing = existsSync(ignorePath) ? readFileSync(ignorePath, "utf8") : "";
+  if (existing.split(/\r?\n/u).includes(PROJECT_ID_ALLOW_RULE)) return;
+  const separator = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+  writeFileSafe(
+    ignorePath,
+    `${existing}${separator}# Portable Capability Fabric authority identity.\n${PROJECT_ID_ALLOW_RULE}\n`,
+  );
+}
 
 /** Print per-engine readiness hints, then a clear refusal line. Returns the nonzero exit code. */
 // Test seam: exported so unit tests can verify the readiness listing
@@ -130,6 +149,8 @@ export async function init(
     // real install. Forwarded to runMemoryPhase. Production callers leave
     // this undefined; the real prompt + install run.
     memoryInject?: MemoryPhaseInject;
+    /** Fixed user authority root for trusted recovery-bootstrap activation. */
+    userVibeflowRoot?: string;
   } = {},
 ): Promise<number> {
   // A1 brief-surface gate (#167 + #194): `vf init` ALWAYS consults the
@@ -197,9 +218,9 @@ export async function init(
   // the AI enrichment phase (Phase 2) is the only AI path.
   const initSpinner = new Spinner();
   initSpinner.start(dry ? "Preparing init dry run" : "Generating VibeFlow context");
-  let result: ReturnType<typeof applyIntake>;
+  let result: Awaited<ReturnType<typeof applyIntake>>;
   try {
-    result = applyIntake(answers, {
+    result = await applyIntake(answers, {
       dry,
       skipPreflight: dry,
       preflight: inject.preflight,
@@ -219,6 +240,13 @@ export async function init(
   else initSpinner.succeed(dry ? "Init dry run prepared" : "VibeFlow context generated");
 
   if (result.refused) return reportPreflightRefusal(result.readiness);
+  if (!dry) {
+    ensurePortableProjectIdentityTracked(cwd());
+    activateProjectCapabilityAuthorityForVfInit(cwd());
+    activateRecoveryBootstrapForTrustedInstall(
+      inject.userVibeflowRoot ?? process.env.VF_USER_VIBEFLOW_ROOT ?? join(homedir(), ".vibeflow"),
+    );
+  }
   const label = dry ? "dry run" : "init";
   out("vf", panel("VibeFlow", c.bold(label)));
   const dropped = (result.readiness ?? []).filter((r) => r.level !== "ready");

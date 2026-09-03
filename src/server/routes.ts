@@ -11,10 +11,17 @@ import {
 } from "../commands.js";
 import { collectVerifyReportAsync, defaultGoalEvalFn } from "../commands/tools-detect.js";
 import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
+import { HOOK_DECISION } from "../core/hook-contract.js";
+import { UI_HOOK_ROUTE } from "../core/ui-cli-contract.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { writeGuidance } from "../dispatch/guidance.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
-import { askResponse } from "./ask-route.js";
+import {
+  type ConversationAskCompatibilityHttpAuthorityV1,
+  handleConversationAskCompatibilityRoute,
+} from "./conversation-ask-compatibility-route.js";
 import { handleCuratorSetupRoute } from "./curator-setup-route.js";
 import {
   ATTACH_CAP,
@@ -40,6 +47,7 @@ export interface RouteCtx {
   getActiveRepo: () => string;
   setActiveRepo: (repo: string) => void;
   orchestrateFn?: typeof orchestrate;
+  askCompatibility?: ConversationAskCompatibilityHttpAuthorityV1;
 }
 
 const GUIDANCE_NOTE_CAP = 100 * 1024;
@@ -109,13 +117,12 @@ export async function handleMutationRoute(
     const response = await handleCuratorSetupRoute(ctx.getActiveRepo(), path, req);
     if (response) return response;
   }
+  if (method === "POST" && path === "/api/ask")
+    return handleConversationAskCompatibilityRoute(ctx.askCompatibility, req, ctx.getActiveRepo());
   const payload = (await req.json()) as Record<string, unknown>;
 
   if (path === "/api/detect") {
     const rawPath = typeof payload.path === "string" ? payload.path.trim() : "";
-    // Validate: if a path was supplied, it must exist and be a directory.
-    // resolveRepo() silently falls back to cwd() for non-existent paths — that
-    // would make detect appear to succeed with the wrong repo, so we catch it here.
     if (rawPath) {
       const abs = isAbsolute(rawPath) ? rawPath : resolve(process.cwd(), rawPath);
       let valid = false;
@@ -164,7 +171,7 @@ export async function handleMutationRoute(
     if (typeof payload.repoPath === "string" && payload.repoPath.trim()) {
       ctx.setActiveRepo(resolveRepo(payload.repoPath));
     }
-    const { files, state } = applyIntake(payload, {
+    const { files, state } = await applyIntake(payload, {
       useAi: payload.useAi === true,
       base: ctx.getActiveRepo(),
     });
@@ -202,7 +209,7 @@ export async function handleMutationRoute(
     if (!readState(ctx.getActiveRepo())) {
       return Response.json({ error: "no workflow state — run init first" }, { status: 400 });
     }
-    const engine = typeof payload.engine === "string" ? payload.engine : "claude";
+    const engine = typeof payload.engine === "string" ? payload.engine : AGENT_ENGINE.CLAUDE;
     // Web dry:false selects a real run; acquisition still uses its injected approver.
     const dry = payload.dry !== false;
     const yes = !dry; // yes:true enables cli mode in resolveMode()
@@ -213,7 +220,7 @@ export async function handleMutationRoute(
         const ts = new Date().toISOString();
         let prePatched = false;
         for (const u of preState.work_units) {
-          if (u.status === "done" && !u.evidence?.length) {
+          if (u.status === WORK_UNIT_STATUS.DONE && !u.evidence?.length) {
             u.evidence = [`dispatched via web UI at ${ts}`];
             prePatched = true;
           }
@@ -225,13 +232,6 @@ export async function handleMutationRoute(
       acquisitionApprover: (proposals) => requestSkillAcquisitionDecisions(proposals),
     });
     return Response.json({ ok: true, state: readState(ctx.getActiveRepo()) });
-  }
-
-  if (path === "/api/ask") {
-    // #562 Stage B: thin glue. All validation/path-guard/slice/engine-pick lives
-    // in runAskRequest (ask-route.ts, unit-tested); real deps used here.
-    // #584: now async — do not block the Bun event loop.
-    return await askResponse(ctx.getActiveRepo(), payload);
   }
 
   if (path === "/api/discover") {
@@ -291,7 +291,7 @@ export async function handleMutationRoute(
   }
 
   if (path === "/api/preflight") {
-    return Response.json(runPreflight(payload));
+    return Response.json(await runPreflight(payload));
   }
 
   if (path === "/api/settings" && ("envPolicy" in payload || "hooks" in payload))
@@ -312,10 +312,10 @@ export async function handleMutationRoute(
     const gates = report.toolchain.map((g) => ({ label: g.label, pass: g.pass }));
     return Response.json({ ok: report.ok, gates, policy: report.policy });
   }
-
-  if (path === "/api/hook/approve") {
+  if (path === UI_HOOK_ROUTE.APPROVE) {
     const id = typeof payload.id === "string" ? payload.id : "";
-    const decision = payload.decision === "allow" ? "allow" : "block";
+    const decision =
+      payload.decision === HOOK_DECISION.ALLOW ? HOOK_DECISION.ALLOW : HOOK_DECISION.BLOCK;
     if (!id) return Response.json({ error: "id required" }, { status: 400 });
     const ok = resolvePending(id, decision);
     if (!ok) return Response.json({ error: "no such pending hook" }, { status: 404 });
@@ -326,7 +326,7 @@ export async function handleMutationRoute(
     return handleSkillAcquisitionDecision(payload);
   }
 
-  if (path === "/api/hook/pending") {
+  if (path === UI_HOOK_ROUTE.PENDING) {
     const id = typeof payload.id === "string" ? payload.id : "";
     if (!id) return Response.json({ error: "id required" }, { status: 400 });
     const { registerPending } = await import("./pending-hooks.js");
@@ -378,7 +378,7 @@ export function handleProjectsRoute(path: string, url: URL): Response | null {
   if (path === "/api/projects") {
     return Response.json({ projects: readRegistry() });
   }
-  if (path === "/api/hook/pending") {
+  if (path === UI_HOOK_ROUTE.PENDING) {
     return Response.json({ pending: listPending() });
   }
   if (path === "/api/projects/state") {

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "skill": "merge-when-green",
+  "cases": [
+    {
+      "id": "merge-positive-authorized-green-pr",
+      "type": "positive",
+      "prompt": "PR #778 is green and I authorized this pull request to land; confirm the green merge head and complete the merge."
+    },
+    {
+      "id": "merge-positive-current-tip-after-fix",
+      "type": "positive",
+      "prompt": "After the repair commit, land an authorized pull request only after reading checks and review evidence for the new tip."
+    },
+    {
+      "id": "merge-positive-red-windows-job",
+      "type": "positive",
+      "prompt": "The Windows job is red: fix red CI then merge the same tested SHA once every required check passes."
+    },
+    {
+      "id": "merge-negative-review-before-pr",
+      "type": "negative",
+      "prompt": "Run exact-head review on this local branch before opening any pull request; there is nothing to merge yet."
+    },
+    {
+      "id": "merge-negative-create-pr",
+      "type": "negative",
+      "prompt": "Create a new PR and request reviewers, but do not merge it."
+    },
+    {
+      "id": "merge-negative-release",
+      "type": "negative",
+      "prompt": "Publish the release package from main after the tag exists; this is not ordinary PR shepherding."
+    },
+    {
+      "id": "merge-negative-authorized-edit",
+      "type": "negative",
+      "prompt": "I authorized you to edit README locally; no pull request exists and nothing should be merged."
+    },
+    {
+      "id": "merge-negative-prior-config-permission",
+      "type": "negative",
+      "prompt": "Use the permission I already gave you to change local config only; there is no PR."
+    }
+  ]
+}

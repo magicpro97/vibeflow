@@ -9,12 +9,21 @@ import {
   sanitizeUnitName,
   writeFileSafe,
 } from "./core.js";
+import { AGENT_ENGINE } from "./core/agent-contract.js";
+import { ENGINE_ARG_PROMPT_LIMIT_BYTES } from "./dispatch/prompt-limits.js";
 import { parseEngineSummary, parseSessionId } from "./dispatch/prompt.js";
 import {
   buildPublicDispatchResult,
   persistPublicDispatchEvidence,
   requireSafeNativeSessionId,
 } from "./dispatch/public-redaction.js";
+import {
+  DISPATCH_MODE,
+  type DispatchMode,
+  ENGINE_PROMPT_MODE,
+  type EnginePromptMode,
+  supportsExactNativeSessionResume,
+} from "./dispatch/session-contract.js";
 import {
   defaultAsyncSpawner,
   defaultSpawner,
@@ -75,7 +84,7 @@ function copilotVersion(cmd = "copilot"): string | undefined {
 interface DispatchOpts {
   engine: Engine;
   prompt: string;
-  mode: "bridge" | "cli" | "dry";
+  mode: DispatchMode;
   bridgeCmd?: string;
   /** Injectable PATH-presence probe so tests can force absent without spawning a real engine. */
   has?: (cmd: string) => boolean;
@@ -92,11 +101,8 @@ interface DispatchOpts {
   /** Test seam: injected writer so unit tests capture the dispatch file without real FS. */
   writeDispatchFile?: (path: string, content: string) => void;
   /**
-   * Bridge-mode stderr sink. The async path streams stderr
-   * per-chunk via the spawner's onStderrChunk; the bridge path
-   * uses Bun.spawnSync and can only emit the full stderr after
-   * the process exits. Callers wire this to the same logbus
-   * channel so both paths are visible.
+   * Bridge-mode stderr sink. The owned async spawner streams each chunk to this
+   * callback so bridge diagnostics use the same logbus channel as CLI engines.
    */
   onStderrChunk?: (text: string) => void;
   /** #618 PR2a: resume the engine's prior session (claude only) instead of a fresh
@@ -131,9 +137,9 @@ export function writeDispatchPrompt(
 
 /** Prompt actually fed to materializePrompt: the short file-pointer for copilot
  *  (when a unit name is supplied), else the prompt unchanged. */
-function preparePrompt(cli: { promptMode?: "stdin" | "arg" }, opts: DispatchOpts): string {
-  if (opts.engine === "antigravity") return opts.prompt;
-  if (cli.promptMode !== "arg" || opts.unit === undefined) return opts.prompt;
+function preparePrompt(cli: { promptMode?: EnginePromptMode }, opts: DispatchOpts): string {
+  if (opts.engine === AGENT_ENGINE.ANTIGRAVITY) return opts.prompt;
+  if (cli.promptMode !== ENGINE_PROMPT_MODE.ARG || opts.unit === undefined) return opts.prompt;
   return writeDispatchPrompt(opts.unit, opts.prompt, {
     base: opts.base,
     writeFile: opts.writeDispatchFile,
@@ -165,7 +171,7 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
   return {
     cmd: "copilot",
     args: ["-p", "--allow-all"],
-    promptMode: "arg",
+    promptMode: ENGINE_PROMPT_MODE.ARG,
     warning,
   };
 }
@@ -175,6 +181,7 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
  *   claude          -> claude -p --output-format json            (fresh)
  *   claude (resume) -> claude -p -r <id> --output-format json   (#618 PR2a)
  *   codex           -> codex exec -                              (stdin prompt)
+ *   opencode        -> opencode run [--session <id>] --format json --auto
  *   copilot         -> copilot -p <prompt> --allow-all-tools
  * Claude and Codex receive the prompt on stdin; Copilot's current CLI requires it as the
  * `-p/--prompt` option value, so we pass it as a single argv element without a shell.
@@ -188,14 +195,18 @@ export function engineCommand(
    *  Claude, --allow-all for Copilot already present). Used in AI init /
    *  workflow dispatch to avoid permission-denial stalls (eccho 2026-06-18). */
   dangerouslySkipPermissions = false,
-  /** #618 PR2a: when set AND engine supports resume (claude only in PR2a), the
-   *  invocation resumes that session instead of starting fresh. codex/copilot
-   *  ignore this until PR2b. */
+  /** When set, the invocation must resume exactly this validated native session.
+   *  Engines without a proven exact-session argv contract fail closed. */
   resumeSessionId?: string,
 ): EngineCommandResult {
-  if (resumeSessionId) requireSafeNativeSessionId(engine, resumeSessionId);
+  if (resumeSessionId) {
+    if (!supportsExactNativeSessionResume(engine)) {
+      throw new Error(`${engine} exact resume is unavailable for safe admission`);
+    }
+    requireSafeNativeSessionId(engine, resumeSessionId);
+  }
   switch (engine) {
-    case "claude": {
+    case AGENT_ENGINE.CLAUDE: {
       // #618 PR2a: `-r <id>` resumes a session (claude requires it alongside -p/--print).
       const args = resumeSessionId
         ? ["-p", "-r", resumeSessionId, "--output-format", "json"]
@@ -205,24 +216,28 @@ export function engineCommand(
       }
       return { cmd: "claude", args };
     }
-    case "codex":
+    case AGENT_ENGINE.CODEX:
       // #618 PR2b-2: `--json` enables JSONL output (thread_id + summary);
       // `resume <id>` continues a crashed session. Prompt stays on stdin (`-`).
       return resumeSessionId
         ? { cmd: "codex", args: ["exec", "resume", resumeSessionId, "--json", "-"] }
         : { cmd: "codex", args: ["exec", "--json", "-"] };
-    case "copilot":
+    case AGENT_ENGINE.COPILOT:
       return copilotCommand(probe);
-    case "opencode":
+    case AGENT_ENGINE.OPENCODE:
       return {
         cmd: "opencode",
-        args: ["run", "--format", "json", "--auto", "-"],
-        promptMode: "stdin",
+        args: [
+          "run",
+          ...(resumeSessionId ? ["--session", resumeSessionId] : []),
+          "--format",
+          "json",
+          "--auto",
+        ],
+        promptMode: ENGINE_PROMPT_MODE.STDIN,
       };
-    case "antigravity":
-      return resumeSessionId
-        ? { cmd: "agy", args: ["--conversation", resumeSessionId, "-p"], promptMode: "arg" }
-        : { cmd: "agy", args: ["-p"], promptMode: "arg" };
+    case AGENT_ENGINE.ANTIGRAVITY:
+      return { cmd: "agy", args: ["-p"], promptMode: ENGINE_PROMPT_MODE.ARG };
   }
 }
 
@@ -231,10 +246,10 @@ function resolveCli(
   engine: Engine,
   hasSpawner: boolean,
   has: (cmd: string) => boolean = hasCommand,
-  /** #618 PR2a: resume session id forwarded to engineCommand (claude only). */
+  /** Exact native session id forwarded only for an admitted resume-capable engine. */
   resumeSessionId?: string,
 ):
-  | { ok: true; cmd: string; args: string[]; promptMode?: "stdin" | "arg"; warning?: string }
+  | { ok: true; cmd: string; args: string[]; promptMode?: EnginePromptMode; warning?: string }
   | { ok: false; reason: string } {
   // With an injected spawner we never touch the real PATH, so treat the engine as present.
   const invocation = engineCommand(
@@ -261,17 +276,18 @@ function bridgeCommand(opts: DispatchOpts): string | undefined {
 }
 
 export function materializePrompt(
-  cli: { cmd: string; args: string[]; promptMode?: "stdin" | "arg" },
+  cli: { cmd: string; args: string[]; promptMode?: EnginePromptMode },
   prompt: string,
 ): { cmd: string; args: string[]; input: string } {
   const normCmd = cli.cmd.replace(/\\/g, "/");
   if (
     basename(normCmd, extname(normCmd)) === "agy" &&
-    Buffer.byteLength(prompt, "utf8") >= 30 * 1024
+    Buffer.byteLength(prompt, "utf8") >= ENGINE_ARG_PROMPT_LIMIT_BYTES
   ) {
     throw new Error("Antigravity prompt too large for agy argv; shorten or split the task");
   }
-  if (cli.promptMode !== "arg") return { cmd: cli.cmd, args: cli.args, input: prompt };
+  if (cli.promptMode !== ENGINE_PROMPT_MODE.ARG)
+    return { cmd: cli.cmd, args: cli.args, input: prompt };
   const promptFlag = cli.args.findIndex((arg) => arg === "-p" || arg === "--prompt");
   if (promptFlag === -1) return { cmd: cli.cmd, args: [...cli.args, prompt], input: "" };
   const args = [...cli.args];
@@ -279,59 +295,11 @@ export function materializePrompt(
   return { cmd: cli.cmd, args, input: "" };
 }
 
-/**
- * Dispatch a prompt to an engine (synchronous).
- *  - mode "bridge": pipe to $VIBEFLOW_AI (default, engine-agnostic, offline-friendly)
- *  - mode "cli":    shell out to the real engine CLI (opt-in)
- *  - mode "dry":    write the prompt only; run nothing
- */
-export function runDispatch(opts: DispatchOpts & { spawner?: Spawner }): DispatchResult {
-  const { engine, prompt, mode } = opts;
-  const attemptId = randomUUID();
-  const spawn = opts.spawner ?? defaultSpawner;
-  if (mode === "dry") return { attemptId, engine, mode, ok: true, raw: "" };
-  if (mode === "bridge") {
-    const cmd = bridgeCommand(opts);
-    if (!cmd) {
-      return { attemptId, engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
-    }
-    // VIBEFLOW_AI is a shell command string (may include args) — spawn via shell unless a
-    // test injected its own spawner.
-    const bridgeSpawn =
-      opts.spawner ??
-      ((c: string, a: string[], input: string): SyncResult => {
-        const shell =
-          process.platform === "win32" ? ["cmd.exe", "/c", c, ...a] : ["/bin/sh", "-c", c];
-        const r = Bun.spawnSync(shell, {
-          stdin: Buffer.from(input, "utf8"),
-          stdout: "pipe",
-          stderr: "pipe",
-        });
-        // Bridge path can't stream stderr per-chunk; emit the full
-        // content through the same sink the async path uses (PR28
-        // audit Task 7 / M5).
-        const stderrText = r.stderr.toString();
-        if (stderrText) opts.onStderrChunk?.(stderrText);
-        return { status: r.exitCode, stdout: r.stdout.toString(), stderr: stderrText };
-      });
-    return buildPublicDispatchResult(
-      opts,
-      bridgeSpawn(cmd, [], prompt),
-      "bridge command failed",
-      undefined,
-      attemptId,
-    );
-  }
-  const cli = resolveCli(engine, Boolean(opts.spawner), opts.has, opts.resumeSessionId);
-  if (!cli.ok) return { attemptId, engine, mode, ok: false, raw: "", reason: cli.reason };
-  const invocation = materializePrompt(cli, preparePrompt(cli, opts));
-  return buildPublicDispatchResult(
-    opts,
-    spawn(invocation.cmd, invocation.args, invocation.input),
-    `${cli.cmd} failed`,
-    cli.warning,
-    attemptId,
-  );
+/** Back-compatible name for the now fully async, owned-process dispatch path. */
+export function runDispatch(
+  opts: DispatchOpts & { spawner?: AsyncSpawner },
+): Promise<DispatchResult> {
+  return runDispatchAsync(opts);
 }
 
 /**
@@ -345,18 +313,27 @@ export async function runDispatchAsync(
   const { engine, prompt, mode } = opts;
   const attemptId = randomUUID();
   const spawn = opts.spawner ?? defaultAsyncSpawner;
-  if (mode === "dry") return { attemptId, engine, mode, ok: true, raw: "" };
-  if (mode === "bridge") {
+  if (mode === DISPATCH_MODE.DRY) return { attemptId, engine, mode, ok: true, raw: "" };
+  if (mode === DISPATCH_MODE.BRIDGE) {
     const cmd = bridgeCommand(opts);
     if (!cmd) {
       return { attemptId, engine, mode, ok: false, raw: "", reason: "VIBEFLOW_AI is not set" };
     }
     // VIBEFLOW_AI is a shell command string (may include args), consistent with aiGenerate's
     // shell:true spawn. Use a shell-aware spawner unless a test injected its own.
-    const bridgeSpawn = opts.spawner ?? makeAsyncSpawner({ shell: true });
+    const bridgeSpawn =
+      opts.spawner ??
+      makeAsyncSpawner({
+        shell: true,
+        ...(opts.onStderrChunk ? { onStderrChunk: opts.onStderrChunk } : {}),
+      });
     return buildPublicDispatchResult(
       opts,
-      await bridgeSpawn(cmd, [], prompt),
+      await bridgeSpawn(cmd, [], prompt, {
+        attemptId,
+        engine,
+        ...(opts.base ? { evidenceRoot: join(opts.base, CTX_DIR, "attempts") } : {}),
+      }),
       "bridge command failed",
       undefined,
       attemptId,
@@ -367,7 +344,11 @@ export async function runDispatchAsync(
   const invocation = materializePrompt(cli, preparePrompt(cli, opts));
   return buildPublicDispatchResult(
     opts,
-    await spawn(invocation.cmd, invocation.args, invocation.input),
+    await spawn(invocation.cmd, invocation.args, invocation.input, {
+      attemptId,
+      engine,
+      ...(opts.base ? { evidenceRoot: join(opts.base, CTX_DIR, "attempts") } : {}),
+    }),
     `${cli.cmd} failed`,
     cli.warning,
     attemptId,

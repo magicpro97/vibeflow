@@ -1,23 +1,9 @@
-// src/commands/doctor.ts
-//
-// `vf doctor` subcommand + the resolveRepo / detectRepo helpers it owns.
-// Issue #80, phase 3/14.
-//
-// Contents:
-// - readinessMark, printReadiness: visual helpers for the doctor table.
-// - doctor: the main exported subcommand. Takes flags + optional
-//   injection seams (readiness array, hasCommand override) so unit
-//   tests can exercise the "missing required tool" and "engine probe
-//   failed" branches without spawning real binaries.
-// - resolveRepo: validate a user-supplied repo path; fall back to
-//   cwd if the path is empty or not a directory.
-// - detectRepo + RepoDetection: probe a repo for engine-specific
-//   marker files and CLI presence. Used by the UI shell and the
-//   server (`src/server.ts`) at runtime.
-//
-// All helpers used by `doctor` (liveGuardrailArmed, guardrailOffNote)
-// come from the seams module via the barrel.
-
+import { AGENT_ENGINE } from "../core/agent-contract.js";
+import {
+  type DoctorOwnedProcessInject,
+  inspectDoctorOwnedProcesses,
+  printDoctorOwnedProcessHealth,
+} from "../dispatch/doctor-owned-process-health.js";
 import { opencodePluginStale } from "../hooks/adapters.js";
 import { sharedCatalogDir, sharedSkillNames } from "../skills/catalog.js";
 import type { Engine, EngineReadiness } from "./_shared.js";
@@ -42,6 +28,7 @@ import {
   statSync,
   table,
 } from "./_shared.js";
+import { legacyWriterFence } from "./capability/legacy-fence.js";
 
 /** Shape written by `ensureCtx7Auth` (issue #630). Untrusted on-disk JSON —
  *  callers must not assume the fields are present/well-typed. */
@@ -164,10 +151,7 @@ function readinessMark(level: EngineReadiness["level"]): string {
  * presence/auth check; with --probe it runs the live round-trip. Informational only —
  * the hard gate lives in applyIntake/run, not here.
  */
-function printReadiness(
-  probe: boolean,
-  list = preflightAll(ENGINES, { probe }),
-): EngineReadiness[] {
+function printReadiness(probe: boolean, list: EngineReadiness[]): EngineReadiness[] {
   out("vf");
   out("vf", c.bold(`Engine readiness${probe ? " (live probe)" : " (presence/auth)"}:`));
   for (const r of list) {
@@ -191,7 +175,7 @@ export async function doctor(
     // can force the "wrote nothing" / "threw" defensive branches without
     // mock.module() (which leaks across test files in the same process).
     emitHookFiles?: (base: string, engines?: Engine[]) => string[];
-  } = {},
+  } & DoctorOwnedProcessInject = {},
 ): Promise<number> {
   const _hasCommand = inject.hasCommand ?? hasCommand;
   const base = inject.base ?? cwd();
@@ -229,6 +213,13 @@ export async function doctor(
       "  codex hook coverage: native Bash/shell only; config is global at ~/.codex/ (Edit/Write/apply_patch/MCP calls remain unguarded)",
     ),
   );
+  const legacyFence = legacyWriterFence(base);
+  out(
+    "vf",
+    `  compatibility writers: ${
+      legacyFence.blocked ? c.yellow(`BLOCKED — ${legacyFence.details}`) : c.green("clear")
+    }`,
+  );
   printCtx7AuthStatus(base);
 
   // #624: detect a stale opencode plugin. The generator hard-codes the
@@ -243,7 +234,7 @@ export async function doctor(
         // emitHookFiles always re-emits .githooks/* (VibeFlow-owned, engine-
         // agnostic), so filter to the opencode plugin only — that's what the
         // user came here to fix.
-        const all = emitHookFiles(base, ["opencode"]);
+        const all = emitHookFiles(base, [AGENT_ENGINE.OPENCODE]);
         const written = all.filter((rel) => rel.startsWith(".opencode/"));
         if (written.length > 0) {
           out(
@@ -300,6 +291,8 @@ export async function doctor(
       // stat failed — ignore
     }
   }
+  const ownedProcessHealth = inspectDoctorOwnedProcesses(base, Boolean(flags.fix), inject);
+  printDoctorOwnedProcessHealth(ownedProcessHealth);
 
   const probe = Boolean(flags.probe);
   const refresh = Boolean(flags.refresh);
@@ -314,10 +307,10 @@ export async function doctor(
   } else if (probe) {
     const spinner = new Spinner();
     spinner.start("Running engine probes (parallel)…");
-    readiness = await preflightAllAsync(ENGINES, { probe: true, skipCache: refresh });
+    readiness = await preflightAllAsync([...ENGINES], { probe: true, skipCache: refresh });
     spinner.succeed("Engine probes complete");
   } else {
-    readiness = preflightAll(ENGINES, { probe: false, skipCache: refresh });
+    readiness = preflightAll([...ENGINES], { probe: false, skipCache: refresh });
   }
   printReadiness(probe, readiness);
 
@@ -334,6 +327,19 @@ export async function doctor(
         `\n${probeFailed.length} engine probe(s) failed: ${probeFailed.map((r) => r.engine).join(", ")}. Other tools are present.`,
       ),
       { level: "error" },
+    );
+    return 1;
+  }
+  if (ownedProcessHealth.uncertain.length > 0) {
+    out("vf");
+    out(
+      "vf",
+      c.yellow(
+        "Owned CLI recovery remains uncertain. Run `vf doctor --fix` or inspect the records manually.",
+      ),
+      {
+        level: "error",
+      },
     );
     return 1;
   }

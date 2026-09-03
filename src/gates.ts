@@ -1,5 +1,11 @@
 import { defaultCanaryCheck } from "./canary.js";
 import { type GateState, type WorkUnit, type WorkflowState, strArray } from "./core.js";
+import {
+  GATE_STATE,
+  KNOWLEDGE_HEAVY_SOURCE,
+  WORK_UNIT_RISK_CLASS,
+  WORK_UNIT_STATUS,
+} from "./core/workflow-contract.js";
 import { thresholdFor } from "./orchestrator/investigate.js";
 import { defaultCodeTime, defaultImplDrift } from "./spec-freshness.js";
 
@@ -47,10 +53,6 @@ export function findScopeConflicts(
   return conflicts;
 }
 
-/**
- * The three policy gates that compose with build/lint/test (WORK_UNIT_ORCHESTRATION.md):
-// ─── ADR-004: Machine-verifiable evidence standard ────────────────────────
-
 /** Accepted evidence format patterns — at least one must match for evidence to be verifiable. */
 const VERIFIABLE_EVIDENCE_PATTERNS = [
   /→\s*".{2,}"$/, // cmd → "output"
@@ -81,12 +83,12 @@ export function isVerifiableEvidence(s: string): boolean {
 // superlinearly, unlike an arithmetic mean which hides it). A failed *critical*
 // gate is a hard zero.
 
-const GATE_VAL: Record<GateState, number> = {
-  pass: 1,
-  pending: 0.4, // not-yet-run: partial credit, never full
-  running: 0,
-  fail: 0,
-};
+const GATE_VAL = Object.freeze({
+  [GATE_STATE.PASS]: 1,
+  [GATE_STATE.PENDING]: 0.4, // not-yet-run: partial credit, never full
+  [GATE_STATE.RUNNING]: 0,
+  [GATE_STATE.FAIL]: 0,
+} satisfies Record<GateState, number>);
 
 /** Weighted geometric mean of [value,weight], values in [0,1]. EPS floors soft
  *  signals so one 0 on a non-critical signal doesn't zero all (critical gates
@@ -113,11 +115,11 @@ export function computeConfidence(u: {
   const g = u.gates ?? {};
   // Tier 1: an executed-and-FAILED critical gate ⇒ 0.
   if (
-    g.build === "fail" ||
-    g.test === "fail" ||
-    g.review === "fail" ||
-    g.security === "fail" ||
-    g.goal_eval === "fail"
+    g.build === GATE_STATE.FAIL ||
+    g.test === GATE_STATE.FAIL ||
+    g.review === GATE_STATE.FAIL ||
+    g.security === GATE_STATE.FAIL ||
+    g.goal_eval === GATE_STATE.FAIL
   )
     return 0;
   // Tier 2: weighted geo-mean. test = strongest (execution); review = independent
@@ -185,7 +187,7 @@ export function policyGates(
   const units = state.work_units ?? [];
 
   // Running gate — can't verify while agents are still working
-  const stillRunning = units.filter((u) => u.status === "running");
+  const stillRunning = units.filter((u) => u.status === WORK_UNIT_STATUS.RUNNING);
   if (stillRunning.length) {
     for (const u of stillRunning) {
       failures.push(
@@ -198,13 +200,13 @@ export function policyGates(
   // (gate results via weighted geometric mean) must clear the unit's risk
   // threshold. Only applies to non-running units.
   const lowConf = units.filter((u) => {
-    if (u.status === "running") return false;
-    return computeConfidence(u) < thresholdFor(u.riskClass ?? "feature");
+    if (u.status === WORK_UNIT_STATUS.RUNNING) return false;
+    return computeConfidence(u) < thresholdFor(u.riskClass ?? WORK_UNIT_RISK_CLASS.FEATURE);
   });
   if (lowConf.length) {
     for (const u of lowConf) {
       const computed = computeConfidence(u);
-      const threshold = thresholdFor(u.riskClass ?? "feature");
+      const threshold = thresholdFor(u.riskClass ?? WORK_UNIT_RISK_CLASS.FEATURE);
       failures.push(
         `computed-confidence: "${u.name}" self=${u.confidence} computed=${computed.toFixed(2)} < ${threshold} — investigate/debate before close`,
       );
@@ -214,7 +216,7 @@ export function policyGates(
   }
 
   // Evidence gate.
-  const noEvidence = units.filter((u) => u.status === "done" && !u.evidence?.length);
+  const noEvidence = units.filter((u) => u.status === WORK_UNIT_STATUS.DONE && !u.evidence?.length);
   if (noEvidence.length) {
     for (const u of noEvidence) {
       failures.push(
@@ -228,7 +230,9 @@ export function policyGates(
   // #764: superpowers' RED→GREEN checkpoint is a hard gate, not guidance.
   // Generic evidence (commit/file/CI URL) cannot substitute for an executed
   // passing test gate on a unit that claims completion.
-  const noPassingTests = units.filter((u) => u.status === "done" && u.gates.test !== "pass");
+  const noPassingTests = units.filter(
+    (u) => u.status === WORK_UNIT_STATUS.DONE && u.gates.test !== GATE_STATE.PASS,
+  );
   for (const u of noPassingTests) {
     failures.push(
       `test-evidence: "${u.name}" is done but its test gate is ${u.gates.test ?? "missing"} — run tests and record the passing gate before close`,
@@ -239,7 +243,7 @@ export function policyGates(
   // ADR-004 phase 2: fail on unverifiable evidence strings.
   // Escape hatch: state._allowUnverifiedEvidence=true (set by --allow-unverified-evidence flag).
   if (!state._allowUnverifiedEvidence) {
-    for (const u of units.filter((u) => u.status === "done" && u.evidence?.length)) {
+    for (const u of units.filter((u) => u.status === WORK_UNIT_STATUS.DONE && u.evidence?.length)) {
       const bad = (u.evidence ?? []).filter((e) => !isVerifiableEvidence(e));
       if (bad.length) {
         failures.push(
@@ -255,7 +259,9 @@ export function policyGates(
   // cover the current code. FAIL-OPEN: no evidence_at OR null codeTime ⇒ no warning
   // (adding the field never hardens a green gate). ISO UTC strings sort lexically.
   const codeTime = inject.codeTimeFn ?? ((u: WorkUnit) => defaultCodeTime(inject.base ?? ".", u));
-  for (const u of units.filter((x) => x.status === "done" && x.evidence_at && x.scope?.length)) {
+  for (const u of units.filter(
+    (x) => x.status === WORK_UNIT_STATUS.DONE && x.evidence_at && x.scope?.length,
+  )) {
     // #534: evidence_at is persisted and hand-editable — a non-UTC-Z value
     // (`+07:00`) or garbage string breaks the lexical==chronological invariant
     // that in-process producers (toISOString()) uphold. Date.parse-normalize
@@ -298,20 +304,22 @@ export function policyGates(
   if (!overlapFound) passed.push("scope: no overlapping work-unit scopes");
 
   // ADR-003: goal-eval gate
-  const goalEvalFailed = units.filter((u) => u.gates.goal_eval === "fail");
+  const goalEvalFailed = units.filter((u) => u.gates.goal_eval === GATE_STATE.FAIL);
   for (const u of goalEvalFailed) {
     failures.push(
       `goal-eval-fail: "${u.name}" — behavioral review found uncovered goal behaviors → Fix: address missing cases in spec or implementation, re-run vf verify --goal-eval`,
     );
   }
-  if (!goalEvalFailed.length && units.some((u) => u.gates.goal_eval === "pass")) {
+  if (!goalEvalFailed.length && units.some((u) => u.gates.goal_eval === GATE_STATE.PASS)) {
     passed.push("goal-eval: all units covered behavioral review");
   }
 
   // Skill gate — WARN/report only, NEVER fail (see GateReport.warnings).
   // Acts only on units that CLAIM completion AND were classified knowledge-heavy at dispatch.
   // `=== true` is deliberate: legacy/undefined units (pre-feature) are skipped, not gated.
-  const khDone = units.filter((u) => u.knowledge_heavy === true && u.status === "done");
+  const khDone = units.filter(
+    (u) => u.knowledge_heavy === true && u.status === WORK_UNIT_STATUS.DONE,
+  );
   let waived = 0;
   for (const u of khDone) {
     if (u.skill_waiver?.reason) {
@@ -319,7 +327,7 @@ export function policyGates(
       passed.push(`skills: "${u.name}" closed under waiver (${u.skill_waiver.reason})`);
       continue;
     }
-    if (u.knowledge_heavy_source === "regex") {
+    if (u.knowledge_heavy_source === KNOWLEDGE_HEAVY_SOURCE.REGEX) {
       warnings.push(
         `skills(warn): "${u.name}" flagged knowledge-heavy by heuristic; verify manually`,
       );
@@ -368,7 +376,9 @@ export function policyGates(
   // the changed lines are test-covered (likely benign), FAIL when uncovered
   // (can't confirm the spec still holds; needs human). Best-effort + injectable.
   const drift = inject.implDrift ?? ((u: WorkUnit) => defaultImplDrift(u, inject.base));
-  for (const u of state.work_units.filter((x) => x.status === "done" && x.impl_fingerprint)) {
+  for (const u of state.work_units.filter(
+    (x) => x.status === WORK_UNIT_STATUS.DONE && x.impl_fingerprint,
+  )) {
     const d = drift(u);
     if (!d.drifted.length) continue;
     if (d.uncovered.length) {

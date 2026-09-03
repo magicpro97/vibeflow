@@ -39,13 +39,13 @@ function scaffold(name: string, frontmatter: Record<string, unknown>, body?: str
   writeFileSync(join(dir, "SKILL.md"), md);
 }
 
-function run(rest: string[]): number {
+async function run(rest: string[]): Promise<number> {
   const orig = process.cwd();
   const origHome = process.env.VF_SKILLS_HOME;
   process.env.VF_SKILLS_HOME = base;
   process.chdir(base);
   try {
-    return skills("audit-duplicates", rest);
+    return await skills("audit-duplicates", rest);
   } finally {
     process.chdir(orig);
     if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -135,7 +135,7 @@ describe("procedure section duplication", () => {
 
 // ── Stable ordering ────────────────────────────────────────────────────
 describe("stable sorted output", () => {
-  test("findings sorted by type then skill names", () => {
+  test("findings sorted by type then skill names", async () => {
     scaffold("z-skill", { owns: ["shared-fact"], triggers: ["react", "jsx", "component", "hook"] });
     scaffold("a-skill", { owns: ["shared-fact"], triggers: ["react", "jsx", "component", "hook"] });
     const r = auditSkillDuplicates(base);
@@ -146,32 +146,32 @@ describe("stable sorted output", () => {
       expect(f.skills).toEqual(sorted);
     }
     // Also check CLI ordering
-    const exitCode = run([]);
+    const exitCode = await run([]);
     expect(exitCode).toBe(1);
   });
 });
 
 // ── CLI exit ────────────────────────────────────────────────────────────
 describe("CLI exit codes", () => {
-  test("returns 0 when no duplicates", () => {
+  test("returns 0 when no duplicates", async () => {
     scaffold("a", { triggers: ["python"] });
     scaffold("b", { triggers: ["react"] });
-    expect(run([])).toBe(0);
+    expect(await run([])).toBe(0);
   });
 
-  test("returns 1 when duplicates found", () => {
+  test("returns 1 when duplicates found", async () => {
     scaffold("a", { owns: ["f1"] });
     scaffold("b", { owns: ["f1"] });
-    expect(run([])).toBe(1);
+    expect(await run([])).toBe(1);
   });
 
-  test("returns 0 with single skill (no comparisons)", () => {
+  test("returns 0 with single skill (no comparisons)", async () => {
     scaffold("a", { owns: ["f1"] });
-    expect(run([])).toBe(0);
+    expect(await run([])).toBe(0);
   });
 
-  test("returns 0 with no skills", () => {
-    expect(run([])).toBe(0);
+  test("returns 0 with no skills", async () => {
+    expect(await run([])).toBe(0);
   });
 
   test("returns 1 when audit fails", () => {

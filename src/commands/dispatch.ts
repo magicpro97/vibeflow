@@ -21,6 +21,14 @@
 // so existing callers (`import { applyDispatch } from
 // "../commands.js"`) keep working.
 
+import {
+  GATE_STATE,
+  PENDING_REQUIRED_WORK_UNIT_GATES,
+  WORK_UNIT_GATE,
+  WORK_UNIT_STATUS,
+  isKnowledgeHeavySource,
+  isWorkUnitStatus,
+} from "../core/workflow-contract.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { loadAuthoritativeSpec, writeSpecSnapshot } from "../spec-freshness.js";
 import type { Engine, ProjectContext, WorkUnit, WorkflowState } from "./_shared.js";
@@ -86,8 +94,6 @@ export function applyDispatch(
   return { file: rel, prompt };
 }
 
-const VALID_STATUS: WorkUnit["status"][] = ["pending", "running", "verifying", "done", "blocked"];
-
 /**
  * Sanitize a work-unit name to a safe slug. Moved to core.js (#526) so the
  * dispatch layer can share it without an ESM import cycle; re-exported here so
@@ -105,9 +111,7 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
   const r: Partial<WorkUnit["resources"]> = input.resources ?? {};
   return {
     name: sanitizeUnitName(String(input.name)),
-    status: VALID_STATUS.includes(input.status as WorkUnit["status"])
-      ? (input.status as WorkUnit["status"])
-      : "pending",
+    status: isWorkUnitStatus(input.status) ? input.status : WORK_UNIT_STATUS.PENDING,
     confidence:
       typeof input.confidence === "number" ? Math.min(1, Math.max(0, input.confidence)) : 0,
     // issue #90: round-trip the per-unit risk class so goalEval applies the correct threshold
@@ -115,10 +119,9 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
     owner_agent: input.owner_agent,
     skills_used: input.skills_used,
     knowledge_heavy: typeof input.knowledge_heavy === "boolean" ? input.knowledge_heavy : undefined,
-    knowledge_heavy_source:
-      input.knowledge_heavy_source === "risk" || input.knowledge_heavy_source === "regex"
-        ? input.knowledge_heavy_source
-        : undefined,
+    knowledge_heavy_source: isKnowledgeHeavySource(input.knowledge_heavy_source)
+      ? input.knowledge_heavy_source
+      : undefined,
     skills_injected: Array.isArray(input.skills_injected) ? input.skills_injected : undefined,
     skills_required: Array.isArray(input.skills_required) ? input.skills_required : undefined,
     skill_waiver:
@@ -153,12 +156,13 @@ export function normalizeUnit(input: Partial<WorkUnit> & { name: string }): Work
     verified_sha: input.verified_sha,
     security: input.security,
     gates: {
-      build: g.build ?? "pending",
-      lint: g.lint ?? "pending",
-      test: g.test ?? "pending",
-      review: g.review ?? "pending",
-      security: g.security,
-      goal_eval: g.goal_eval,
+      ...PENDING_REQUIRED_WORK_UNIT_GATES,
+      [WORK_UNIT_GATE.BUILD]: g.build ?? GATE_STATE.PENDING,
+      [WORK_UNIT_GATE.LINT]: g.lint ?? GATE_STATE.PENDING,
+      [WORK_UNIT_GATE.TEST]: g.test ?? GATE_STATE.PENDING,
+      [WORK_UNIT_GATE.REVIEW]: g.review ?? GATE_STATE.PENDING,
+      [WORK_UNIT_GATE.SECURITY]: g.security,
+      [WORK_UNIT_GATE.GOAL_EVAL]: g.goal_eval,
     },
     resources: {
       agents: Math.max(0, Math.round(Number(r.agents) || 0)),

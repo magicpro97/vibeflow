@@ -7,6 +7,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { c } from "../core.js";
+import { isSkillStatus } from "../core/skill-contract.js";
 import { out } from "../logbus.js";
 
 export type SkillAuditAction = "verify" | "unverify" | "waiver" | "policy" | "curator-setup";
@@ -55,8 +56,6 @@ const VALID_ACTIONS: ReadonlySet<string> = new Set([
   "policy",
   "curator-setup",
 ]);
-const VALID_STATUSES: ReadonlySet<string> = new Set(["verified", "unverified"]);
-
 function logDir(repo: string): string {
   return join(repo, ".vibeflow", "logs");
 }
@@ -70,8 +69,8 @@ function validateEvent(e: SkillAuditEvent): boolean {
   if (!VALID_ACTIONS.has(e.action)) return false;
   if (e.skillName !== null && (typeof e.skillName !== "string" || e.skillName.length === 0))
     return false;
-  if (e.oldStatus !== null && !VALID_STATUSES.has(e.oldStatus)) return false;
-  if (e.newStatus !== null && !VALID_STATUSES.has(e.newStatus)) return false;
+  if (e.oldStatus !== null && !isSkillStatus(e.oldStatus)) return false;
+  if (e.newStatus !== null && !isSkillStatus(e.newStatus)) return false;
   if (!Array.isArray(e.evidence)) return false;
   for (const ev of e.evidence) {
     if (typeof ev !== "string" || ev.length === 0) return false;
@@ -92,11 +91,9 @@ function isValidStoredEvent(v: unknown): v is StoredSkillAuditEvent {
   if (e.skillName !== null && (typeof e.skillName !== "string" || e.skillName.length === 0))
     return false;
   if (!("oldStatus" in e)) return false;
-  if (e.oldStatus !== null && (typeof e.oldStatus !== "string" || !VALID_STATUSES.has(e.oldStatus)))
-    return false;
+  if (e.oldStatus !== null && !isSkillStatus(e.oldStatus)) return false;
   if (!("newStatus" in e)) return false;
-  if (e.newStatus !== null && (typeof e.newStatus !== "string" || !VALID_STATUSES.has(e.newStatus)))
-    return false;
+  if (e.newStatus !== null && !isSkillStatus(e.newStatus)) return false;
   if (!Array.isArray(e.evidence)) return false;
   for (const ev of e.evidence) {
     if (typeof ev !== "string" || ev.length === 0) return false;

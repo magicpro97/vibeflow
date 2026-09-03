@@ -15,6 +15,7 @@
 //
 // Refs: issue #80 (split src/commands.ts).
 
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import type { AcquisitionApprover, AcquisitionReadDeps } from "../skills/acquisition.js";
 import type { confirmInput } from "../terminal-prompts/prompts.js";
 import {
@@ -174,7 +175,7 @@ async function launchEngine(
 ): Promise<number> {
   // Stronger gate: confirm a live-ready engine. An injected spawner IS the round-trip, so trust it.
   const preflight = inject.preflight ?? (inject.spawner ? () => [readyStub(engine)] : undefined);
-  if (!engineReady(engine, "cli", preflight)) return 1;
+  if (!(await engineReady(engine, DISPATCH_MODE.CLI, preflight))) return 1;
 
   // Source-protection — identical to orchestrate(): refuse a dirty/non-git tree unless opted in.
   const fp = resolveProtection(flags, readSettings(base).failureProtection);
@@ -221,7 +222,7 @@ async function launchEngine(
   const result = await runDispatchAsync({
     engine,
     prompt,
-    mode: "cli",
+    mode: DISPATCH_MODE.CLI,
     spawner,
     unit: "run",
     base,

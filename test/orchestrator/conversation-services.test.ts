@@ -1,13 +1,27 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MaterializedAgentBinding, PreviewAgentBinding } from "../../src/agents/binding.js";
+import type {
+  MaterializeAgentBindingOptions,
+  MaterializedAgentBinding,
+} from "../../src/agents/binding.js";
 import type { WorkUnit } from "../../src/core.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
-import { createSpawnOptionsProjection } from "../../src/dispatch/session-types.js";
-import { createConversationBootstrap } from "../../src/orchestrator/conversation/bootstrap.js";
+import {
+  type EngineProcess,
+  createSpawnOptionsProjection,
+} from "../../src/dispatch/session-types.js";
+import { defaultConversationIsolationAuthority } from "../../src/orchestrator/conversation/bootstrap-isolation.js";
+import {
+  type ConversationBootstrap,
+  type ConversationBootstrapOptions,
+  createConversationBootstrap,
+} from "../../src/orchestrator/conversation/bootstrap.js";
+import type { ConversationMessageQueueRuntimeV1 } from "../../src/orchestrator/conversation/conversation-message-queue-runtime.js";
+import { validatePublishedRevisionTransition } from "../../src/orchestrator/conversation/lineage-published-transition.js";
 import { OrchestrateConversationPolicy } from "../../src/orchestrator/conversation/orchestrate-policy.js";
 import { PlanConversationPolicy } from "../../src/orchestrator/conversation/plan-policy.js";
 import {
@@ -33,10 +47,123 @@ const artifact = (ref = "vf-artifact-plan") => ({
   ref,
 });
 
-function materializedBinding(): MaterializedAgentBinding {
+function waitForQueuedChild(
+  queue: ConversationMessageQueueRuntimeV1,
+  rootSessionId: string,
+  queueItemId: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let unsubscribe: () => void = () => undefined;
+    let poll: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    const finish = (error: unknown | null, childId?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (poll) clearTimeout(poll);
+      unsubscribe();
+      if (error) reject(error);
+      else resolve(childId as string);
+    };
+    const observe = () => {
+      try {
+        const row = queue.storeAuthority(rootSessionId).readItemAuthority(queueItemId);
+        if (row?.item.state === "stale") {
+          finish(new Error(`queued bootstrap message became stale (${row.item.stale_reason})`));
+          return;
+        }
+        const childId = row?.delivery_proof?.successor_authority.conversation_id;
+        if (row?.item.state === "delivered" && childId) {
+          finish(null, childId);
+          return;
+        }
+      } catch {
+        // A durable writer-lock race is retried below even if delivery was the final invalidation.
+      }
+      poll = setTimeout(observe, 5);
+    };
+    const timeout = setTimeout(() => {
+      let detail = "authority unreadable";
+      try {
+        const row = queue.storeAuthority(rootSessionId).readItemAuthority(queueItemId);
+        detail = row
+          ? `${row.item.state}, proof=${row.delivery_proof ? "present" : "absent"}`
+          : "item absent";
+      } catch (error) {
+        detail = error instanceof Error ? error.message : String(error);
+      }
+      finish(new Error(`timed out waiting for queued bootstrap child (${detail})`));
+    }, 20_000);
+    try {
+      unsubscribe = queue.subscribe(rootSessionId, (event) => {
+        if (event.queue_item_id === queueItemId) observe();
+      });
+      observe();
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+
+async function waitForPublishedQueueChild(
+  bootstrap: ConversationBootstrap,
+  rootSessionId: string,
+): Promise<string> {
+  const deadline = Date.now() + 20_000;
+  while (true) {
+    const active = bootstrap.authorities.homeAuthorities.lineage.readHead(rootSessionId)?.active;
+    const transition = bootstrap.authorities.homeAuthorities
+      .publishedRevisionTransitions()
+      .map(validatePublishedRevisionTransition)
+      .find(
+        ({ parent, child }) =>
+          parent.conversation_id === rootSessionId &&
+          child.conversation_id === active?.conversation_id &&
+          child.revision_id === active.revision_id,
+      );
+    if (transition) return transition.child.conversation_id;
+    if (Date.now() >= deadline)
+      throw new Error("timed out waiting for authoritative queued child publication");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function completedCodexProcess(): EngineProcess {
+  const output = new TextEncoder().encode(
+    `${JSON.stringify({
+      type: "thread.started",
+      thread_id: "019f278f-d7ff-77d3-9c44-7459bbf08d19",
+    })}\n`,
+  );
+  return {
+    stdin: null,
+    stdout: new ReadableStream({
+      start(controller) {
+        controller.enqueue(output);
+        controller.close();
+      },
+    }),
+    stderr: null,
+    exited: Promise.resolve(0),
+    kill: () => undefined,
+  };
+}
+
+function initializedTestRepo(root: string): string {
+  const repo = join(root, "repo");
+  execFileSync("git", ["init", "--quiet", repo]);
+  execFileSync("git", ["-C", repo, "config", "user.email", "test@example.com"]);
+  execFileSync("git", ["-C", repo, "config", "user.name", "VibeFlow Test"]);
+  execFileSync("git", ["-C", repo, "commit", "--quiet", "--allow-empty", "-m", "fixture"]);
+  return repo;
+}
+
+function materializedBinding(options: MaterializeAgentBindingOptions): MaterializedAgentBinding {
+  if (!options.isolation) throw new Error("test binder requires canonical isolation");
   const roleHash = "a".repeat(64);
-  const provenance = { roleSource: "builtin" as const, roleHash, skillHashes: [] };
-  const traceMetadata = { role_resolved_hash: roleHash, skill_resolved_hashes: [] };
+  const skillHash = "b".repeat(64);
+  const provenance = { roleSource: "builtin" as const, roleHash, skillHashes: [skillHash] };
+  const traceMetadata = { role_resolved_hash: roleHash, skill_resolved_hashes: [skillHash] };
   const envPolicy = conversationEnvPolicy("codex");
   const resolved = {
     role: {
@@ -52,14 +179,14 @@ function materializedBinding(): MaterializedAgentBinding {
       resolved_hash: roleHash,
       metadata: {},
     },
-    skills: [],
+    skills: [{ ref: "repo-law", source: "repo" as const, version: null, resolved_hash: skillHash }],
     engine: "codex" as const,
     model: "gpt-5.4",
     sessionMode: "fresh" as const,
     tool_intents: ["read" as const],
     sandbox: "read-only" as const,
     env_policy: envPolicy,
-    isolation: null,
+    isolation: options.isolation,
     provenance,
     trace_metadata: traceMetadata,
   };
@@ -70,10 +197,10 @@ function materializedBinding(): MaterializedAgentBinding {
       model: "gpt-5.4",
       sessionMode: "fresh",
       rendered_prompt: "answer directly",
-      rendered_tools: ["read"],
+      rendered_tools: [],
       sandbox: "read-only",
       env_policy: envPolicy,
-      isolation: null,
+      isolation: options.isolation,
       provenance,
       trace_metadata: traceMetadata,
     }),
@@ -1289,27 +1416,36 @@ test("orchestrate policy delegates approval continuation without a second author
 test("bootstrap creates one shared authority set and registers every built-in policy", async () => {
   const root = await mkdtemp(join(tmpdir(), "vf-conversation-bootstrap-"));
   try {
+    const repo = initializedTestRepo(root);
     const counters = new Map<string, number>();
     const revisions: string[] = [];
-    const bootstrap = createConversationBootstrap({
-      repoRoot: process.cwd(),
-      stateDir: join(root, "state"),
-      readiness: () => [{ engine: "codex", ready: true, admitted: true }],
-      bindingFactory: {
-        materialize: () => materializedBinding(),
-        preview: () => {
-          throw new Error("preview is not used by this execution test");
-        },
-      } as unknown as {
-        materialize: () => MaterializedAgentBinding;
-        preview: () => PreviewAgentBinding;
+    let spawnCount = 0;
+    const bindingFactory = {
+      materialize: (_binding, options) => materializedBinding(options),
+      preview: () => {
+        throw new Error("preview is not used by this execution test");
       },
+    } as ConversationBootstrapOptions["bindingFactory"];
+    const bootstrap = createConversationBootstrap({
+      repoRoot: repo,
+      stateDir: join(root, "state"),
+      phase: 3,
+      readiness: () => [{ engine: "codex", ready: true, admitted: true }],
+      bindingFactory,
+      isolationAuthority: defaultConversationIsolationAuthority,
       id: (kind) => {
         const next = (counters.get(kind) ?? 0) + 1;
         counters.set(kind, next);
         return `${kind}-${next}`;
       },
       schedule: (task) => task(),
+      session: {
+        sourceEnv: { PATH: process.env.PATH ?? "/usr/bin" },
+        spawn: () => {
+          spawnCount += 1;
+          return completedCodexProcess();
+        },
+      },
       reviewEvidenceAuthority: {
         currentHead: async () => "a".repeat(40),
         checkWorktree: cleanWorktree,
@@ -1388,16 +1524,40 @@ test("bootstrap creates one shared authority set and registers every built-in po
     const revised = await bootstrap.service.message(created.conversation_id, {
       content: "Revise the rollout section",
     });
-    if (!revised.child_conversation_id) throw new Error("revision child not created");
-    let childEvents = await bootstrap.service.events(revised.child_conversation_id, 0);
+    expect(revised.child_conversation_id).toBeUndefined();
+    const childConversationId = await waitForPublishedQueueChild(
+      bootstrap,
+      created.conversation_id,
+    );
+    let childEvents = await bootstrap.service.events(childConversationId, 0);
     for (let index = 0; index < 100; index += 1) {
       if (childEvents?.some(({ event }) => event.type === "approval_requested")) break;
       await Bun.sleep(2);
-      childEvents = await bootstrap.service.events(revised.child_conversation_id, 0);
+      childEvents = await bootstrap.service.events(childConversationId, 0);
     }
     expect(revisions).toEqual(["Revise the rollout section"]);
+    expect(spawnCount).toBe(1);
     expect(childEvents?.some(({ event }) => event.type === "artifact_updated")).toBe(true);
     expect(childEvents?.some(({ event }) => event.type === "approval_requested")).toBe(true);
+    const childApproval = childEvents?.find(({ event }) => event.type === "approval_requested");
+    if (childApproval?.event.type !== "approval_requested")
+      throw new Error("child approval was not requested");
+    await expect(
+      bootstrap.service.resolveApproval(childConversationId, {
+        ...childApproval.event.payload.token,
+        outcome: "approve",
+        reason: null,
+      }),
+    ).resolves.toMatchObject({ status: 202 });
+    expect(
+      await waitForQueuedChild(
+        bootstrap.authorities.messageQueue,
+        created.conversation_id,
+        revised.message_id,
+      ),
+    ).toBe(childConversationId);
+    expect((await bootstrap.service.snapshot(childConversationId))?.lifecycle).toBe("COMPLETED");
+    await new Promise((resolve) => setTimeout(resolve, 0));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

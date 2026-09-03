@@ -101,7 +101,7 @@
       </span>
       <span v-if="anyRunning" class="ml-auto flex items-center gap-1.5 text-neutral-500">
         <span class="inline-block w-1.5 h-1.5 rounded-full bg-white/50 animate-pulse"></span>
-        {{ units.filter(u=>u.status==='running').length }} running
+        {{ units.filter(u => u.status === WORK_UNIT_STATUS.RUNNING).length }} running
       </span>
     </div>
 
@@ -149,14 +149,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { AGENT_ENGINE, ENGINES, type Engine, isAgentEngine } from "../../../core/agent-contract.js";
+import { WORK_UNIT_STATUS } from "../../../core/workflow-contract.js";
 
 import { api } from "../api.js";
 import { usePoller } from "../composables/usePoller.js";
 import { useVfStore } from "../store.js";
-import type { Engine } from "../types.js";
-/** All engine tools in canonical priority order — mirrors ENGINES in
- *  src/core/types.ts (kept in sync; the UI bundle can't import backend types). */
-const ALL_ENGINES: Engine[] = ["claude", "copilot", "codex", "opencode", "antigravity"];
 import HookApprovalModal from "./HookApprovalModal.vue";
 import InfoTip from "./InfoTip.vue";
 import SkillAcquisitionModal from "./SkillAcquisitionModal.vue";
@@ -184,9 +182,7 @@ const store = useVfStore();
 const engine = computed<Engine>(() => {
   const agents = store.state?.work_units?.map((u) => u.owner_agent).filter(Boolean) ?? [];
   const first = agents[0];
-  if (first === "codex" || first === "copilot" || first === "opencode" || first === "antigravity")
-    return first;
-  return "claude";
+  return isAgentEngine(first) ? first : AGENT_ENGINE.CLAUDE;
 });
 const orchestrating = ref(false);
 const orchestrated = ref(false); // brief confirmation flash
@@ -211,7 +207,7 @@ const reviewerEngine = computed<string>(() => {
 });
 const reviewerWarning = computed<string | null>(() => {
   if (reviewerEngine.value !== engine.value) return null;
-  const others = ALL_ENGINES.filter((e) => e !== engine.value).join("/");
+  const others = ENGINES.filter((candidate) => candidate !== engine.value).join("/");
   return `Reviewer engine "${engine.value}" is the same tool as the implementer — same-tool review has correlated blind spots. Install a 2nd engine (${others}) for cross-tool review.`;
 });
 
@@ -234,14 +230,16 @@ const units = computed(() => store.state?.work_units ?? []);
 const totals = computed(
   () => store.state?.totals ?? { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
 );
-const anyRunning = computed(() => units.value.some((u) => u.status === "running"));
+const anyRunning = computed(() => units.value.some((u) => u.status === WORK_UNIT_STATUS.RUNNING));
 const allDone = computed(
-  () => units.value.length > 0 && units.value.every((u) => u.status === "done"),
+  () => units.value.length > 0 && units.value.every((u) => u.status === WORK_UNIT_STATUS.DONE),
 );
 const canAdvance = computed(
   () =>
     units.value.length > 0 &&
-    units.value.every((u) => u.status === "done" || u.status === "blocked"),
+    units.value.every(
+      (u) => u.status === WORK_UNIT_STATUS.DONE || u.status === WORK_UNIT_STATUS.BLOCKED,
+    ),
 );
 
 // ── Live polling while any unit is running ─────────────────────────────────

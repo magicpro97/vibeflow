@@ -180,28 +180,29 @@ export function runSkillEval(
   return result;
 }
 
-export function runTaskEval(
+export async function runTaskEval(
   evals: EvalFile,
   skillContext: string,
-  runner: (prompt: string, skillContext?: string) => string,
+  runner: (prompt: string, skillContext?: string) => string | Promise<string>,
   previousTaskPassRate?: number,
-): TaskSummary | undefined {
+): Promise<TaskSummary | undefined> {
   const objectiveCases = evals.cases.filter((c) => c.expected !== undefined);
   if (!objectiveCases.length) return undefined;
-  const cases = objectiveCases.map((c) => {
-    const baselineOutput = runner(c.prompt);
-    const skillOutput = runner(c.prompt, skillContext);
+  const cases: TaskCaseResult[] = [];
+  for (const c of objectiveCases) {
+    const baselineOutput = await runner(c.prompt);
+    const skillOutput = await runner(c.prompt, skillContext);
     const expected = c.expected as string;
     const check = (output: string) =>
       c.matcher === "equals" ? output.trim() === expected : output.includes(expected);
-    return {
+    cases.push({
       id: c.id,
       baselineOutput,
       skillOutput,
       baselinePass: check(baselineOutput),
       skillPass: check(skillOutput),
-    };
-  });
+    });
+  }
   const rate = (key: "baselinePass" | "skillPass") =>
     cases.filter((c) => c[key]).length / cases.length;
   const baselinePassRate = rate("baselinePass");

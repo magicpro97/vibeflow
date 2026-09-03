@@ -56,6 +56,7 @@ function report(confidences: number[] = [1]) {
     waiver: pass,
     registryLock: pass,
     reviewEvidence: pass,
+    normativeMatrix: pass,
     advisoryE2e: pass,
     markerResult: gateResult("skipped", "read-only calculation"),
     journalResult: gateResult("skipped", "not requested"),
@@ -94,6 +95,7 @@ describe("authoritative verify core", () => {
       "waiver",
       "registry_lock",
       "review_evidence",
+      "normative_matrix",
       "advisory_e2e",
       "marker_result",
       "journal_result",
@@ -116,6 +118,7 @@ describe("authoritative verify core", () => {
       waiver: pass,
       registryLock: pass,
       reviewEvidence: pass,
+      normativeMatrix: pass,
     });
     expect(result.confidence).toBe(1);
     expect(result.gates.toolchain.status).toBe("fail");
@@ -151,6 +154,7 @@ describe("authoritative verify core", () => {
       waiver: pass,
       registryLock: pass,
       reviewEvidence: pass,
+      normativeMatrix: pass,
       policyReport: { ok: true, failures: [], warnings: [], passed: [] },
     } as Parameters<typeof evaluateVerifyCore>[0];
     const result = evaluateVerifyCore(input);
@@ -165,6 +169,7 @@ describe("authoritative verify core", () => {
       toolchain: [{ label: "bun test", pass: true }],
       waiver: pass,
       registryLock: pass,
+      normativeMatrix: pass,
     });
     expect(result.gates.review_evidence.status).toBe("fail");
     expect(result.ok).toBe(false);
@@ -176,6 +181,7 @@ describe("authoritative verify core", () => {
       state: state([1]),
       toolchain: [{ label: "bun test", pass: true }],
       reviewEvidence: pass,
+      normativeMatrix: pass,
     });
     expect(result.gates.waiver.status).toBe("fail");
     expect(result.gates.registry_lock.status).toBe("fail");
@@ -197,6 +203,7 @@ describe("authoritative verify core", () => {
       waiver: pass,
       registryLock: pass,
       reviewEvidence: pass,
+      normativeMatrix: pass,
     });
     expect(persistImplementationFingerprints("/tmp/verify-core", workflow, failed, inject)).toBe(
       false,
@@ -291,6 +298,7 @@ describe("authoritative verify core", () => {
           waiver: pass,
           registryLock: pass,
           reviewEvidence: gateResult("pass", "review-evidence(ok)"),
+          normativeMatrix: pass,
           advisoryE2e: pass,
         });
       const first = evaluate(workflow);
@@ -651,6 +659,7 @@ describe("confidence assertion oracle", () => {
       waiver: pass,
       registryLock: pass,
       reviewEvidence: pass,
+      normativeMatrix: pass,
     });
     expect(confidenceAssertionExitCode(result, 1)).toBe(1);
   });

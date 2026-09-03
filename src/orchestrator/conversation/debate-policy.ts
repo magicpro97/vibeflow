@@ -5,16 +5,34 @@ import {
   parseDebateEvaluatorOutput,
   parseDebateParticipantOutput,
 } from "../debate.js";
+import type { AgentActionCandidateOutput } from "../debate.js";
 import type { StoredTraceEvent } from "../trace/types.js";
-import { persistBaselineResult, projectBaselineComparison } from "./baseline.js";
-import { projectDecisionMatrix } from "./debate-projection.js";
-import { debateMessagePrompt } from "./message-delivery.js";
+import { persistBaselineResult } from "./baseline.js";
+import {
+  CONVERSATION_COMMAND_FAILURE_STATUS,
+  type ConversationCommandFailureStatus,
+} from "./conversation-command-result-contract.js";
+import type { AgentSocialIntentRequestV1 } from "./conversation-interaction-types.js";
+import {
+  CONVERSATION_ASSESSMENT_STAGE,
+  CONVERSATION_DECISION_OUTCOME,
+  CONVERSATION_INVALID_ASSESSMENT_REASON,
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_ROUND_PHASE,
+  CONVERSATION_TRACE_EVENT_KIND,
+  type ConversationAssessmentStageV1,
+} from "./conversation-public-wire-contract.js";
+import {
+  type DebateTranscriptRoundV1,
+  publishDebateArtifacts,
+} from "./debate-artifact-publication.js";
+import { publishDebateParticipantResponse } from "./debate-response-publication.js";
+import { CONVERSATION_TURN_INSTRUCTION_KIND } from "./turn-delivery-contract.js";
 import type {
   ConversationContext,
   ConversationOrchestrationResult,
   ConversationPolicy,
   DryRunResult,
-  MessageRequest,
   PolicyAttempt,
 } from "./types.js";
 
@@ -25,26 +43,13 @@ interface ParticipantRoundResult {
   content: string;
   claim: string | null;
   evidence: string[];
+  socialIntent: AgentSocialIntentRequestV1;
+  actionCandidate?: AgentActionCandidateOutput;
 }
-
-interface TranscriptRound {
-  round_id: string;
-  responses: Array<{
-    participant_id: string;
-    content: string;
-    claim: string | null;
-    evidence: string[];
-  }>;
-  blind: EvaluatorOutput;
-  full: EvaluatorOutput;
-  decision: ReturnType<typeof decideRound>;
-}
-
-const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 const failed = (
   context: ConversationContext,
-  status: "failed" | "aborted" = "failed",
+  status: ConversationCommandFailureStatus = CONVERSATION_COMMAND_FAILURE_STATUS.FAILED,
 ): ConversationOrchestrationResult => ({
   operation_id: context.correlation.operation_id,
   status,
@@ -58,7 +63,10 @@ async function coordinatorError(
 ): Promise<void> {
   await context.emit({
     idempotency_key: `debate:error:${code}`,
-    event: { type: "error", payload: { agent_id: null, code, message } },
+    event: {
+      type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
+      payload: { agent_id: null, code, message },
+    },
   });
 }
 
@@ -71,7 +79,10 @@ async function attemptFailure(
 ): Promise<void> {
   await attempt.emit({
     idempotency_key: key,
-    event: { type: "error", payload: { agent_id: participantId, code, message } },
+    event: {
+      type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
+      payload: { agent_id: participantId, code, message },
+    },
   });
 }
 
@@ -134,27 +145,34 @@ export class DebateConversationPolicy implements ConversationPolicy {
     }
     const journal: StoredTraceEvent[] = [];
     journal.push(await persistBaselineResult(context, responders[0] as number));
-    if (context.signal.aborted) return failed(context, "aborted");
+    if (context.signal.aborted) return failed(context, CONVERSATION_COMMAND_FAILURE_STATUS.ABORTED);
 
-    const transcript: TranscriptRound[] = [];
-    let prior: Array<{ claim: string | null; evidence: readonly string[] }> = [];
+    const transcript: DebateTranscriptRoundV1[] = [];
     for (let round = 1; round <= context.maxRounds; round += 1) {
       const roundId = `round-${round}`;
       journal.push(
         await context.emit({
           idempotency_key: `debate:round:${round}:start`,
-          event: { type: "round_boundary", payload: { round_id: roundId, phase: "start" } },
+          event: {
+            type: CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY,
+            payload: { round_id: roundId, phase: CONVERSATION_ROUND_PHASE.START },
+          },
         }),
       );
-      const messages = await context.messages();
-      const participants = await this.runParticipants(context, responders, round, prior, messages);
-      if (!participants) return failed(context, context.signal.aborted ? "aborted" : "failed");
+      const participants = await this.runParticipants(context, responders, round);
+      if (!participants)
+        return failed(
+          context,
+          context.signal.aborted
+            ? CONVERSATION_COMMAND_FAILURE_STATUS.ABORTED
+            : CONVERSATION_COMMAND_FAILURE_STATUS.FAILED,
+        );
       for (const participant of participants) {
         journal.push(
           await participant.attempt.emit({
             idempotency_key: `debate:round:${round}:participant:${participant.participantId}:precommit`,
             event: {
-              type: "precommit",
+              type: CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT,
               payload: {
                 round_id: roundId,
                 participant_id: participant.participantId,
@@ -170,30 +188,21 @@ export class DebateConversationPolicy implements ConversationPolicy {
         evaluatorIndex,
         evaluatorId,
         round,
-        "blind",
+        CONVERSATION_ASSESSMENT_STAGE.BLIND,
         debateBlindEvaluatorPrompt(
           participants.map(({ answer, evidence }) => ({ answer, evidence })),
         ),
         journal,
       );
-      if (!blind) return failed(context, context.signal.aborted ? "aborted" : "failed");
-      for (const participant of participants) {
-        journal.push(
-          await participant.attempt.emit({
-            idempotency_key: `debate:round:${round}:participant:${participant.participantId}:response`,
-            event: {
-              type: "agent_response_delta",
-              payload: {
-                round_id: roundId,
-                participant_id: participant.participantId,
-                content_delta: participant.content,
-                final_claim: participant.claim,
-                final_evidence: participant.evidence,
-                completes_response: true,
-              },
-            },
-          }),
+      if (!blind)
+        return failed(
+          context,
+          context.signal.aborted
+            ? CONVERSATION_COMMAND_FAILURE_STATUS.ABORTED
+            : CONVERSATION_COMMAND_FAILURE_STATUS.FAILED,
         );
+      for (const participant of participants) {
+        journal.push(await publishDebateParticipantResponse(context, round, participant));
       }
       const positions = participants.map(({ claim, evidence }) => ({ claim, evidence }));
       const full = await this.evaluate(
@@ -201,16 +210,22 @@ export class DebateConversationPolicy implements ConversationPolicy {
         evaluatorIndex,
         evaluatorId,
         round,
-        "full",
+        CONVERSATION_ASSESSMENT_STAGE.FULL,
         debateFullEvaluatorPrompt(blind, positions),
         journal,
       );
-      if (!full) return failed(context, context.signal.aborted ? "aborted" : "failed");
+      if (!full)
+        return failed(
+          context,
+          context.signal.aborted
+            ? CONVERSATION_COMMAND_FAILURE_STATUS.ABORTED
+            : CONVERSATION_COMMAND_FAILURE_STATUS.FAILED,
+        );
       const decision = decideRound(full, round, context.maxRounds);
-      if (decision.outcome === "abort") {
+      if (decision.outcome === CONVERSATION_DECISION_OUTCOME.ABORT) {
         await coordinatorError(
           context,
-          "invalid_assessment",
+          CONVERSATION_INVALID_ASSESSMENT_REASON,
           "evaluator returned an invalid full assessment",
         );
         return failed(context);
@@ -218,11 +233,17 @@ export class DebateConversationPolicy implements ConversationPolicy {
       journal.push(
         await context.emit({
           idempotency_key: `debate:round:${round}:consensus`,
-          event: { type: "consensus_update", payload: { round_id: roundId, decision } },
+          event: {
+            type: CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE,
+            payload: { round_id: roundId, decision },
+          },
         }),
         await context.emit({
           idempotency_key: `debate:round:${round}:end`,
-          event: { type: "round_boundary", payload: { round_id: roundId, phase: "end" } },
+          event: {
+            type: CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY,
+            payload: { round_id: roundId, phase: CONVERSATION_ROUND_PHASE.END },
+          },
         }),
       );
       transcript.push({
@@ -237,31 +258,46 @@ export class DebateConversationPolicy implements ConversationPolicy {
         full,
         decision,
       });
-      prior = positions;
-      if (decision.outcome !== "continue") break;
+      if (decision.outcome !== CONVERSATION_DECISION_OUTCOME.CONTINUE) break;
     }
-    return this.publishArtifacts(context, responders, journal, transcript);
+    return publishDebateArtifacts({
+      context,
+      responder_indices: responders,
+      journal,
+      transcript,
+    });
   }
 
   private async runParticipants(
     context: ConversationContext,
     indices: readonly number[],
     round: number,
-    prior: readonly { claim: string | null; evidence: readonly string[] }[],
-    messages: readonly MessageRequest[],
   ): Promise<ParticipantRoundResult[] | null> {
-    const launched = indices.map((bindingIndex) => {
-      const participantId = context.participantIds[bindingIndex] as string;
-      const attempt = context.launchAttempt({
-        participantId,
-        bindingIndex,
-        purpose: "participant",
-        promptInput: debateMessagePrompt(context.topic, round, prior, messages, participantId),
-      });
-      return { participantId, attempt };
-    });
+    const launched = await Promise.all(
+      indices.map(async (bindingIndex) => {
+        const participantId = context.participantIds[bindingIndex] as string;
+        const delivery = await context.prepareTurn({
+          participant_id: participantId,
+          instruction: {
+            kind: CONVERSATION_TURN_INSTRUCTION_KIND.DEBATE_PARTICIPANT,
+            topic: context.topic,
+            round,
+          },
+        });
+        const attempt = context.launchAttempt({
+          participantId,
+          bindingIndex,
+          purpose: "participant",
+          promptInput: delivery.prompt_input,
+          delivery,
+        });
+        return { participantId, attempt };
+      }),
+    );
     const results = await Promise.all(launched.map(({ attempt }) => attempt.completion));
-    const failedIndex = results.findIndex((result) => !result.ok || result.state !== "completed");
+    const failedIndex = results.findIndex(
+      (result) => !result.ok || result.state !== CONVERSATION_OPERATION_STATE.COMPLETED,
+    );
     if (failedIndex >= 0) {
       const failedAttempt = launched[failedIndex] as (typeof launched)[number];
       const result = results[failedIndex];
@@ -274,13 +310,21 @@ export class DebateConversationPolicy implements ConversationPolicy {
       );
       return null;
     }
-    return launched.map(({ participantId, attempt }, index) => ({
-      participantId,
-      attempt,
-      ...parseDebateParticipantOutput(
+    return launched.map(({ participantId, attempt }, index) => {
+      const parsed = parseDebateParticipantOutput(
         (results[index] as NonNullable<(typeof results)[number]>).output,
-      ),
-    }));
+      );
+      return {
+        participantId,
+        attempt,
+        answer: parsed.answer,
+        content: parsed.content,
+        claim: parsed.claim,
+        evidence: parsed.evidence,
+        socialIntent: parsed.social_intent,
+        ...(parsed.action_candidate ? { actionCandidate: parsed.action_candidate } : {}),
+      };
+    });
   }
 
   private async evaluate(
@@ -288,7 +332,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
     bindingIndex: number,
     participantId: string,
     round: number,
-    stage: "blind" | "full",
+    stage: ConversationAssessmentStageV1,
     promptInput: string,
     journal: StoredTraceEvent[],
   ): Promise<EvaluatorOutput | null> {
@@ -299,7 +343,7 @@ export class DebateConversationPolicy implements ConversationPolicy {
       promptInput,
     });
     const result = await attempt.completion;
-    if (!result.ok || result.state !== "completed") {
+    if (!result.ok || result.state !== CONVERSATION_OPERATION_STATE.COMPLETED) {
       await attemptFailure(
         attempt,
         `debate:round:${round}:evaluator:${stage}:error`,
@@ -311,13 +355,15 @@ export class DebateConversationPolicy implements ConversationPolicy {
     }
     const assessment = parseDebateEvaluatorOutput(
       result.output,
-      stage === "blind" ? 1 : round,
-      stage === "blind" ? Math.max(1, context.maxRounds) : context.maxRounds,
+      stage === CONVERSATION_ASSESSMENT_STAGE.BLIND ? 1 : round,
+      stage === CONVERSATION_ASSESSMENT_STAGE.BLIND
+        ? Math.max(1, context.maxRounds)
+        : context.maxRounds,
     );
     if (!assessment) {
       await coordinatorError(
         context,
-        "invalid_assessment",
+        CONVERSATION_INVALID_ASSESSMENT_REASON,
         `evaluator returned an invalid ${stage} assessment`,
       );
       return null;
@@ -326,73 +372,11 @@ export class DebateConversationPolicy implements ConversationPolicy {
       await attempt.emit({
         idempotency_key: `debate:round:${round}:evaluator:${stage}`,
         event: {
-          type: "evaluator_assessment",
+          type: CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT,
           payload: { round_id: `round-${round}`, stage, assessment },
         },
       }),
     );
     return assessment;
-  }
-
-  private async publishArtifacts(
-    context: ConversationContext,
-    responders: readonly number[],
-    journal: readonly StoredTraceEvent[],
-    transcript: readonly TranscriptRound[],
-  ): Promise<ConversationOrchestrationResult> {
-    const matrix = projectDecisionMatrix(journal);
-    const comparison = projectBaselineComparison({
-      enabled: context.baselineEnabled,
-      nonEvaluatorParticipantCount: responders.length,
-      selectedEngineAvailable:
-        context.bindingReadiness[responders[0] as number]?.engine_available ?? false,
-      decisionMatrix: matrix,
-      records: journal,
-    });
-    const matrixArtifact = await context.createArtifact({
-      artifact_type: "decision_matrix",
-      content: json(matrix),
-      idempotency_key: "debate:artifact:decision-matrix",
-    });
-    const baselineArtifact = await context.createArtifact({
-      artifact_type: "synthesis",
-      content: json(comparison),
-      idempotency_key: "debate:artifact:baseline-comparison",
-    });
-    const transcriptArtifact = await context.createArtifact({
-      artifact_type: "transcript",
-      content: json({ rounds: transcript }),
-      idempotency_key: "debate:artifact:transcript",
-    });
-    const lastDecision = transcript.at(-1)?.decision ?? null;
-    const synthesisArtifact = await context.createArtifact({
-      artifact_type: "synthesis",
-      content: json({
-        answer: matrix?.rows[0]?.option ?? null,
-        consensus_score: lastDecision?.score ?? null,
-        outcome: lastDecision?.outcome ?? "abort",
-      }),
-      idempotency_key: "debate:artifact:final-synthesis",
-    });
-    await context.emit({
-      idempotency_key: "debate:synthesis:completed",
-      event: {
-        type: "synthesis_completed",
-        payload: {
-          decision_matrix_ref: matrixArtifact.ref,
-          baseline_comparison_ref: baselineArtifact.ref,
-        },
-      },
-    });
-    return {
-      operation_id: context.correlation.operation_id,
-      status: "completed",
-      artifact_refs: [
-        matrixArtifact.ref,
-        baselineArtifact.ref,
-        transcriptArtifact.ref,
-        synthesisArtifact.ref,
-      ],
-    };
   }
 }

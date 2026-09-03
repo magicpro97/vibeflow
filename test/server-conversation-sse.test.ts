@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { PublicConversationMessageQueueInvalidationV1 } from "../src/orchestrator/conversation/conversation-message-queue-records.js";
 import type {
   ConversationService,
   ConversationSnapshot,
@@ -93,6 +94,77 @@ describe("conversation SSE stream", () => {
     expect(frame).not.toContain("stream_token");
   });
 
+  test("emits the exact queue invalidation DTO on the existing stream without an SSE id", async () => {
+    let queueListener: ((event: PublicConversationMessageQueueInvalidationV1) => void) | null =
+      null;
+    const service = {
+      snapshot: async () => snapshot,
+      subscribe: () => Object.assign(() => undefined, { replayReady: Promise.resolve() }),
+    } as unknown as ConversationService;
+    const url = new URL("http://local/api/conversations/conversation-a/events?stream_token=good");
+    const response = await handleConversationSse(
+      {
+        service,
+        tokens: { authorize: () => true },
+        heartbeatMs: 0,
+        messageQueue: {
+          rootSessionId: () => "conversation-root",
+          subscribe: (_root, listener) => {
+            queueListener = listener;
+            return () => undefined;
+          },
+        },
+      },
+      new Request(url.toString()),
+      url,
+      "conversation-a",
+    );
+    const emitQueue = queueListener as
+      | ((event: PublicConversationMessageQueueInvalidationV1) => void)
+      | null;
+    if (!emitQueue) throw new Error("queue listener was not installed");
+    const event: PublicConversationMessageQueueInvalidationV1 = {
+      schema_version: "1.0",
+      root_session_id: "conversation-root",
+      queue_item_id: `vf-queued-message-${"a".repeat(64)}`,
+      state: "queued",
+      item_digest: `sha256:${"b".repeat(64)}`,
+    };
+    emitQueue(event);
+    emitQueue({ ...event, root_session_id: "wrong-root" });
+    emitQueue({ ...event, queue_item_id: "private-claim-id" });
+    emitQueue({
+      ...event,
+      unexpected_field: true,
+    } as unknown as PublicConversationMessageQueueInvalidationV1);
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("missing SSE body");
+    let output = "";
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const part = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("queue invalidation was not emitted")), 100),
+          ),
+        ]);
+        if (part.done) break;
+        output += new TextDecoder().decode(part.value);
+      }
+    } finally {
+      await reader.cancel();
+    }
+    const queueFrames = output
+      .split("\n\n")
+      .filter((frame) => frame.includes("event: message-queue-invalidated"));
+    expect(queueFrames).toHaveLength(1);
+    expect(queueFrames[0]).not.toContain("id:");
+    const data = queueFrames[0]?.split("\ndata: ")[1];
+    expect(JSON.parse(data ?? "null")).toEqual(event);
+    expect(queueFrames[0]).not.toContain("private-claim-id");
+  });
+
   test("uses only a bound stream token and returns stable cursor/auth failures", async () => {
     const service = { snapshot: async () => snapshot } as unknown as ConversationService;
     const tokens = {
@@ -114,6 +186,36 @@ describe("conversation SSE stream", () => {
       "conversation-a",
     );
     expect(malformed.status).toBe(400);
+    expect((await malformed.json()) as object).toMatchObject({
+      schema_version: "1.0",
+      error: { code: "invalid_request" },
+    });
+  });
+
+  test("rejects future cursors before subscribing and uses exact no-store cache authority", async () => {
+    let subscriptions = 0;
+    const service = {
+      snapshot: async () => snapshot,
+      subscribe: () => {
+        subscriptions += 1;
+        return () => undefined;
+      },
+    } as unknown as ConversationService;
+    const url = new URL(
+      "http://local/api/conversations/conversation-a/events?stream_token=good&since=5",
+    );
+    const response = await handleConversationSse(
+      { service, tokens: { authorize: () => true }, heartbeatMs: 0 },
+      new Request(url.toString()),
+      url,
+      "conversation-a",
+    );
+    expect(response.status).toBe(409);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()) as object).toMatchObject({
+      error: { code: "future_event_cursor", details: { current_last_seq: 4 } },
+    });
+    expect(subscriptions).toBe(0);
   });
 
   test("replays after the cursor, deduplicates the live boundary, and cleans up on cancel", async () => {
@@ -223,7 +325,7 @@ describe("conversation SSE stream", () => {
       await reader.cancel();
     }
     expect(output).toContain("event: error");
-    expect(output).toContain('"code":"stream_unavailable"');
+    expect(output).toContain('"code":"service_unavailable"');
     expect(output).not.toContain("event: heartbeat");
     expect(unsubscribeCount).toBe(1);
   });
@@ -255,7 +357,7 @@ describe("conversation SSE stream", () => {
     await reader.cancel();
     const output = first.done ? "" : new TextDecoder().decode(first.value);
     expect(output).toContain("event: error");
-    expect(output).toContain('"code":"stream_unavailable"');
+    expect(output).toContain('"code":"service_unavailable"');
     expect(output).not.toContain("event: trace");
     expect(output).not.toContain("event: snapshot");
     expect(second.done).toBe(true);

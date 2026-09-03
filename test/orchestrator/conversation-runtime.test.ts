@@ -1,26 +1,62 @@
 import { expect, spyOn, test } from "bun:test";
+import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  ActionConflictError,
+  type ActionProposalRequestV1,
+  type BrowserHostActionRequestV1,
+  PUBLIC_OPERATION_PARTICIPANT_START_PHASE,
+} from "../../src/actions/index.js";
 import type { AgentBinding, MaterializedAgentBinding } from "../../src/agents/binding.js";
+import { AGENT_ENGINE } from "../../src/core/agent-contract.js";
+import {
+  ROLE_MODEL,
+  ROLE_SANDBOX,
+  ROLE_TOOL_INTENT,
+  ROLE_WORKFLOW_TOOL_INTENTS,
+} from "../../src/core/role-contract.js";
+import { CONVERSATION_ROLE_NAME } from "../../src/core/role-name-contract.js";
 import { conversationEnvPolicy } from "../../src/dispatch/env-filter.js";
 import {
+  type AttemptHandle,
+  type EngineProcess,
   type EngineSessionAdapter,
   type EngineSessionRequest,
   type HistoryReconcileRequest,
   createSpawnOptionsProjection,
 } from "../../src/dispatch/session-types.js";
 import type { EngineSessionResult } from "../../src/dispatch/session-types.js";
+import { createEngineSessionAdapter } from "../../src/dispatch/session.js";
+import {
+  AttemptStartAuthorityStore,
+  createDurableAttemptStartAuthorityReaderV1,
+} from "../../src/dispatch/start-authority.js";
 import { ConversationArtifactStore } from "../../src/orchestrator/conversation/artifact-store.js";
+import { conversationLockDigest } from "../../src/orchestrator/conversation/catalog-lock.js";
+import { ConversationRevisionActionDomainV1 } from "../../src/orchestrator/conversation/conversation-action-domain.js";
+import { CONVERSATION_BASELINE_SKIP_REASON } from "../../src/orchestrator/conversation/conversation-baseline-contract.js";
+import { createConversationBrowserAuthorities } from "../../src/orchestrator/conversation/conversation-browser-authorities.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "../../src/orchestrator/conversation/conversation-command-result-contract.js";
+import { ConversationHomeAuthorities } from "../../src/orchestrator/conversation/conversation-home-authorities.js";
+import { CONVERSATION_POLICY } from "../../src/orchestrator/conversation/conversation-policy-contract.js";
+import { isConversationTerminalLifecycle } from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
+import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
 import { DirectConversationPolicy } from "../../src/orchestrator/conversation/direct-policy.js";
 import { OperationTransitionReservedError } from "../../src/orchestrator/conversation/operation-registry.js";
 import {
   ConversationPolicyRegistry,
-  conversationChildId,
   terminalEmissions,
 } from "../../src/orchestrator/conversation/policy-registry.js";
+import { validateRevisionActionAuthorityChain } from "../../src/orchestrator/conversation/revision-action-authority.js";
+import { foldRevisionOperation } from "../../src/orchestrator/conversation/revision-fold.js";
+import {
+  defaultConversationActionAuthority,
+  resolveRevisionBase,
+} from "../../src/orchestrator/conversation/revision-source.js";
 import type {
   ConversationRuntime,
   ConversationRuntimeOptions,
@@ -31,6 +67,7 @@ import {
   ConversationNotFoundError,
   ConversationOrchestrator,
 } from "../../src/orchestrator/conversation/service.js";
+import { prepareConversationTurn } from "../../src/orchestrator/conversation/turn-delivery.js";
 import type {
   ConversationContext,
   ConversationCreateRequest,
@@ -47,20 +84,46 @@ import type {
 } from "../../src/orchestrator/trace/types.js";
 
 const input: AgentBinding = {
-  roleRef: "direct",
-  engine: "codex",
+  roleRef: CONVERSATION_ROLE_NAME.DIRECT,
+  engine: AGENT_ENGINE.CODEX,
   sessionMode: "fresh",
 };
 const ROLE_HASH = "a".repeat(64);
 const SKILL_HASH = "b".repeat(64);
 
+function treeBytes(root: string): Record<string, string> {
+  const output: Record<string, string> = {};
+  const visit = (directory: string, prefix: string): void => {
+    for (const entry of fs
+      .readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolute = join(directory, entry.name);
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) visit(absolute, relative);
+      else output[relative] = fs.readFileSync(absolute).toString("base64");
+    }
+  };
+  visit(root, "");
+  return output;
+}
+
 function materialized(
   withSkill = false,
-  options: { roleName?: string; sessionMode?: "exact" | "replay" | "fresh" } = {},
+  options: {
+    roleName?: string;
+    sessionMode?: "exact" | "replay" | "fresh";
+    engine?: AgentBinding["engine"];
+    model?: string;
+  } = {},
 ): MaterializedAgentBinding {
-  const roleName = options.roleName ?? "direct";
+  const roleName = options.roleName ?? CONVERSATION_ROLE_NAME.DIRECT;
   const sessionMode = options.sessionMode ?? "fresh";
-  const env_policy = conversationEnvPolicy("codex");
+  const engine = options.engine ?? AGENT_ENGINE.CODEX;
+  const model = options.model ?? ROLE_MODEL.GPT_5_4;
+  const executor = roleName === CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR;
+  const sandbox = executor ? ROLE_SANDBOX.WORKSPACE_WRITE : ROLE_SANDBOX.READ_ONLY;
+  const toolIntents = executor ? [...ROLE_WORKFLOW_TOOL_INTENTS] : [ROLE_TOOL_INTENT.READ];
+  const env_policy = conversationEnvPolicy(engine);
   const skills = withSkill
     ? [
         {
@@ -86,33 +149,48 @@ function materialized(
           name: roleName,
           description: "Direct",
           body: "Canonical role prompt",
-          tools: ["read"],
-          model: "gpt-5.4",
-          sandbox: "read-only",
+          tools: toolIntents,
+          model: ROLE_MODEL.GPT_5_4,
+          sandbox,
         },
       },
       skills,
-      engine: "codex",
-      model: "gpt-5.4",
+      engine,
+      model,
       sessionMode,
-      tool_intents: ["read"],
-      sandbox: "read-only",
+      tool_intents: toolIntents,
+      sandbox,
       env_policy,
       isolation: null,
       provenance,
       trace_metadata,
     },
     spawn: createSpawnOptionsProjection({
-      engine: "codex",
-      model: "gpt-5.4",
+      engine,
+      model,
       sessionMode,
       rendered_prompt: "Canonical role prompt\n\n## Assigned Topic\n\nTopic\n",
-      rendered_tools: ["read"],
-      sandbox: "read-only",
+      rendered_tools: toolIntents,
+      sandbox,
       env_policy,
       isolation: null,
       provenance,
       trace_metadata,
+    }),
+  };
+}
+
+function concreteCodexBinding(): MaterializedAgentBinding {
+  const binding = materialized();
+  const role = {
+    ...binding.resolved.role,
+    spec: { ...binding.resolved.role.spec, tools: [] },
+  };
+  return {
+    resolved: { ...binding.resolved, role, tool_intents: [] },
+    spawn: createSpawnOptionsProjection({
+      ...binding.spawn,
+      rendered_tools: [],
     }),
   };
 }
@@ -124,10 +202,13 @@ class FakeAdapter implements EngineSessionAdapter {
   ambiguous = false;
   evidenceRef: string | undefined;
   nativeSessionId: string | undefined;
+  nativeHistoryContinuity: "intact" | "compacted" | "unproved" = "unproved";
   chunks = ["delta:attempt"];
   output = "answer";
 
   start(request: EngineSessionRequest) {
+    const evidenceRef = this.evidenceRef;
+    const nativeSessionId = this.nativeSessionId;
     this.starts.push(request);
     request.onLifecycle?.("requested");
     request.onLifecycle?.("dispatched");
@@ -138,6 +219,7 @@ class FakeAdapter implements EngineSessionAdapter {
       attemptId: request.attemptId,
       completion: Promise.resolve({
         ...completed(request.attemptId),
+        engine: request.spawn.engine,
         output: this.output,
         state: this.ambiguous ? ("ambiguous" as const) : ("completed" as const),
         ok: !this.ambiguous,
@@ -146,29 +228,139 @@ class FakeAdapter implements EngineSessionAdapter {
         this.terminated.push(`${request.attemptId}:${reason ?? ""}`);
       },
       readResumeBinding: () =>
-        this.nativeSessionId
+        nativeSessionId
           ? {
               attemptId: request.attemptId,
-              engine: "codex" as const,
-              nativeSessionId: this.nativeSessionId,
+              engine: request.spawn.engine,
+              nativeSessionId,
             }
           : undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () =>
-        this.evidenceRef
-          ? { attemptId: request.attemptId, internalRef: this.evidenceRef }
-          : undefined,
+        evidenceRef ? { attemptId: request.attemptId, internalRef: evidenceRef } : undefined,
     };
   }
 
   async reconcileHistory(request: HistoryReconcileRequest) {
     this.reconciliations.push(request);
     return {
-      status: "unavailable" as const,
+      status:
+        this.nativeHistoryContinuity === "compacted"
+          ? ("partial" as const)
+          : ("unavailable" as const),
       imported_turn_count: 0,
       imported_tool_count: 0,
+      native_history_continuity: this.nativeHistoryContinuity,
       completeness_reason: "fake",
     };
   }
+}
+
+class DurableRevisionFakeAdapter extends FakeAdapter {
+  readonly nativeByAttempt = new Map<string, string>();
+  private store?: AttemptStartAuthorityStore;
+  private authorityRootPath?: string;
+  private nativeCounter = 0;
+  startAuthority?: EngineSessionAdapter["startAuthority"];
+
+  bindTestAuthority(root: string): void {
+    this.authorityRootPath = root;
+    this.store = new AttemptStartAuthorityStore(root);
+    this.startAuthority = createDurableAttemptStartAuthorityReaderV1(this.store);
+  }
+
+  override start(request: EngineSessionRequest) {
+    if (!this.store) throw new Error("test start authority is not bound");
+    const evidenceRef = join(this.authorityRoot(), `${request.attemptId}.json`);
+    fs.mkdirSync(this.authorityRoot(), { recursive: true });
+    fs.writeFileSync(
+      evidenceRef,
+      `${JSON.stringify({ attempt_id: request.attemptId, state: "completed", ok: true })}\n`,
+      { mode: 0o600 },
+    );
+    this.evidenceRef = evidenceRef;
+    this.nativeSessionId =
+      request.spawn.sessionMode === "exact" && request.nativeSessionId
+        ? request.nativeSessionId
+        : `00000000-0000-4000-8000-${String(++this.nativeCounter).padStart(12, "0")}`;
+    this.nativeByAttempt.set(request.attemptId, this.nativeSessionId);
+    const handle = super.start(request);
+    const recorded = this.store.record({
+      attempt_id: request.attemptId,
+      engine: request.spawn.engine,
+      outcome: "accepted",
+      native_session_id: this.nativeSessionId,
+      evidence_ref: evidenceRef,
+      recorded_at: "2026-08-22T00:00:00.000Z",
+    });
+    if (!recorded || !this.startAuthority?.read(request.attemptId))
+      throw new Error("test durable start authority was not persisted");
+    return handle;
+  }
+
+  private authorityRoot(): string {
+    if (!this.startAuthority || !this.store || !this.authorityRootPath)
+      throw new Error("test start authority is not bound");
+    return this.authorityRootPath;
+  }
+}
+
+const continueAssessment = JSON.stringify({
+  agreement: { value: false, evidence: "options still differ" },
+  conflict_resolution: { value: true, evidence: "tradeoffs are explicit" },
+  evidence_quality: { value: true, evidence: "evidence is sufficient" },
+  convergence: { value: "not_applicable", evidence: "first round" },
+});
+
+const consensusAssessment = JSON.stringify({
+  agreement: { value: true, evidence: "options converge" },
+  conflict_resolution: { value: true, evidence: "conflict resolved" },
+  evidence_quality: { value: true, evidence: "evidence is sufficient" },
+  convergence: { value: true, evidence: "second round converged" },
+});
+
+class DurableTwoRoundDebateAdapter extends DurableRevisionFakeAdapter {
+  private fullAssessment = 0;
+
+  override start(request: EngineSessionRequest) {
+    const prompt = request.spawn.rendered_prompt;
+    if (prompt.includes("Evaluate the blind assessment")) {
+      this.fullAssessment += 1;
+      this.output = this.fullAssessment === 1 ? continueAssessment : consensusAssessment;
+    } else if (prompt.includes("Evaluate only the immutable precommits")) {
+      this.output = consensusAssessment;
+    } else if (prompt.includes('"kind":"debate-participant"')) {
+      this.output = JSON.stringify({
+        answer: "Option",
+        content: "Evidence-backed option",
+        claim: "Option",
+        evidence: ["durable evidence"],
+      });
+    } else {
+      this.output = "revision barrier ready";
+    }
+    return super.start(request);
+  }
+}
+
+function processResult(output: string, exitCode: number): EngineProcess {
+  const bytes = new TextEncoder().encode(output);
+  return {
+    stdout: new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (bytes.length) controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
+    stderr: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    }),
+    stdin: { write: () => undefined, end: () => undefined },
+    exited: Promise.resolve(exitCode),
+    kill: () => undefined,
+  };
 }
 
 class TerminateLifecycleAdapter implements EngineSessionAdapter {
@@ -203,6 +395,7 @@ class TerminateLifecycleAdapter implements EngineSessionAdapter {
         });
       },
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
   }
@@ -233,6 +426,7 @@ class ManualChunkAdapter implements EngineSessionAdapter {
       completion,
       terminate: async () => complete({ ...completed(request.attemptId), ok: false }),
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     };
   }
@@ -260,6 +454,15 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
   readonly starts: EngineSessionRequest[] = [];
   readonly reconciliations: HistoryReconcileRequest[] = [];
   private readonly completions = new Map<string, (result: EngineSessionResult) => void>();
+  private startStore?: AttemptStartAuthorityStore;
+  private startRoot?: string;
+  startAuthority?: EngineSessionAdapter["startAuthority"];
+
+  bindTestAuthority(root: string): void {
+    this.startRoot = root;
+    this.startStore = new AttemptStartAuthorityStore(root);
+    this.startAuthority = createDurableAttemptStartAuthorityReaderV1(this.startStore);
+  }
 
   start(request: EngineSessionRequest) {
     this.starts.push(request);
@@ -267,6 +470,27 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
     const completion = new Promise<EngineSessionResult>((resolve) => {
       this.completions.set(request.attemptId, resolve);
     });
+    const nativeSessionId =
+      request.nativeSessionId ??
+      `00000000-0000-4000-8000-${request.attemptId.endsWith("2") ? "000000000002" : "000000000001"}`;
+    const authorityRoot = this.startRoot;
+    const evidenceRef = authorityRoot
+      ? join(authorityRoot, `${request.attemptId}.json`)
+      : undefined;
+    if (evidenceRef && this.startStore && authorityRoot) {
+      fs.mkdirSync(authorityRoot, { recursive: true });
+      fs.writeFileSync(evidenceRef, `${JSON.stringify({ attempt_id: request.attemptId })}\n`, {
+        mode: 0o600,
+      });
+      this.startStore.record({
+        attempt_id: request.attemptId,
+        engine: "codex",
+        outcome: "accepted",
+        native_session_id: nativeSessionId,
+        evidence_ref: evidenceRef,
+        recorded_at: "2026-08-22T00:00:00.000Z",
+      });
+    }
     return {
       attemptId: request.attemptId,
       completion,
@@ -276,9 +500,11 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
       readResumeBinding: () => ({
         attemptId: request.attemptId,
         engine: "codex" as const,
-        nativeSessionId: `00000000-0000-4000-8000-${request.attemptId.endsWith("2") ? "000000000002" : "000000000001"}`,
+        nativeSessionId,
       }),
-      readEvidenceBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
+      readEvidenceBinding: () =>
+        evidenceRef ? { attemptId: request.attemptId, internalRef: evidenceRef } : undefined,
     };
   }
 
@@ -299,11 +525,19 @@ class OrderedResumeAdapter implements EngineSessionAdapter {
 }
 
 const waitFor = async (check: () => boolean | Promise<boolean>) => {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
+  let lastError: unknown;
   while (Date.now() < deadline) {
-    if (await check()) return;
+    try {
+      if (await check()) return;
+    } catch (error) {
+      // A transient store/snapshot rejection must not abort the poll —
+      // restart recovery can briefly reject a read right before it settles.
+      lastError = error;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
+  if (lastError !== undefined) throw lastError;
   throw new Error("timed out waiting for test state");
 };
 
@@ -311,10 +545,12 @@ async function harness<T extends EngineSessionAdapter = FakeAdapter>(
   policy: ConversationPolicy,
   adapter: T = new FakeAdapter() as unknown as T,
   wrapTraceStore: (store: TraceStore) => TraceStore = (store) => store,
-  rehydrateBinding: () => Promise<MaterializedAgentBinding> = async () => materialized(),
+  rehydrateBinding: ConversationRuntimeOptions["rehydrateBinding"] = async () => materialized(),
   overrides: Partial<ConversationRuntimeOptions> = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "vf-conversation-runtime-"));
+  if (adapter instanceof DurableRevisionFakeAdapter)
+    adapter.bindTestAuthority(join(root, "adapter-evidence"));
   const artifacts = new DurableArtifactRegistry({ dir: join(root, "opaque") });
   let event = 0;
   const traceStore = new TraceStore({
@@ -324,10 +560,16 @@ async function harness<T extends EngineSessionAdapter = FakeAdapter>(
     now: () => "2026-08-22T00:00:00.000Z",
   });
   const counters = new Map<string, number>();
+  const artifactStore = new ConversationArtifactStore({ dir: join(root, "manifests") });
+  const now = () => "2026-08-22T00:00:00.000Z";
+  const homeAuthorities =
+    overrides.homeAuthorities ??
+    new ConversationHomeAuthorities({ artifactRoot: join(root, "manifests"), now });
   const runtime = new ConversationOrchestrator({
     traceStore: wrapTraceStore(traceStore),
     artifactRegistry: artifacts,
-    artifactStore: new ConversationArtifactStore({ dir: join(root, "manifests") }),
+    artifactStore,
+    homeAuthorities,
     sessionAdapter: adapter,
     policies: new ConversationPolicyRegistry([policy]),
     id: (kind) => {
@@ -335,11 +577,49 @@ async function harness<T extends EngineSessionAdapter = FakeAdapter>(
       counters.set(kind, next);
       return `${kind}-${next}`;
     },
-    now: () => "2026-08-22T00:00:00.000Z",
+    now,
     rehydrateBinding,
     ...overrides,
   });
-  return { root, runtime, traceStore, adapter, artifacts };
+  return { root, runtime, traceStore, adapter, artifacts, artifactStore, homeAuthorities };
+}
+
+function restartedRevisionHarness(root: string, label: string) {
+  const artifacts = new DurableArtifactRegistry({ dir: join(root, "opaque") });
+  const traceStore = new TraceStore({
+    dir: join(root, "trace"),
+    artifactRegistry: artifacts,
+    now: () => "2026-08-22T00:00:00.000Z",
+  });
+  const artifactStore = new ConversationArtifactStore({ dir: join(root, "manifests") });
+  const home = new ConversationHomeAuthorities({
+    artifactRoot: join(root, "manifests"),
+    now: () => "2026-08-22T00:00:00.000Z",
+  });
+  const adapter = new DurableRevisionFakeAdapter();
+  adapter.bindTestAuthority(join(root, `${label}-adapter-evidence`));
+  const tasks: Array<() => void> = [];
+  const runtime = new ConversationOrchestrator({
+    traceStore,
+    artifactRegistry: artifacts,
+    artifactStore,
+    homeAuthorities: home,
+    sessionAdapter: adapter,
+    policies: new ConversationPolicyRegistry([new DirectConversationPolicy()]),
+    id: (kind) => `${label}-${kind}`,
+    now: () => "2026-08-22T00:00:00.000Z",
+    schedule: (task) => tasks.push(task),
+    rehydrateBinding: async () => materialized(),
+  });
+  return {
+    runtime,
+    traceStore,
+    artifactStore,
+    home,
+    adapter,
+    tasks,
+    domain: new ConversationRevisionActionDomainV1(runtime, home.actions),
+  };
 }
 
 const createInput = (
@@ -396,6 +676,2135 @@ test("public conversation controls throw typed lookup and target errors", async 
     ).rejects.toBeInstanceOf(ConversationInvalidTargetParticipantError);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function deferredActionRequest(input: {
+  root: string;
+  runtime: ConversationOrchestrator;
+  home: ConversationHomeAuthorities;
+  conversationId: string;
+  candidate: BrowserHostActionRequestV1;
+  key: string;
+}) {
+  const base = resolveRevisionBase({
+    artifactRoot: join(input.root, "manifests"),
+    traceRoot: join(input.root, "trace"),
+    conversationId: input.conversationId,
+    home: input.home,
+  });
+  const events = await input.runtime.events(input.conversationId, 0);
+  const request: ActionProposalRequestV1 = {
+    schema_version: "1.0",
+    idempotency_key: input.key,
+    anchor_event_id: events?.at(-1)?.event_id ?? null,
+    expected: {
+      mode: "writable-revision",
+      conversation_id: input.conversationId,
+      revision_id: base.parent.node.revision_id,
+      last_seq: base.parent.source.journal_head.last_seq,
+      conversation_lock_digest: base.lock.lock_digest,
+    },
+    candidate: input.candidate,
+  };
+  return {
+    request,
+    authority: defaultConversationActionAuthority(base.lineage.root_session_id),
+  };
+}
+
+async function approvedDeferredRevision(input: {
+  root: string;
+  runtime: ConversationOrchestrator;
+  home: ConversationHomeAuthorities;
+  conversationId: string;
+  key: string;
+}) {
+  const domain = new ConversationRevisionActionDomainV1(input.runtime, input.home.actions);
+  const context = await deferredActionRequest({
+    ...input,
+    candidate: {
+      type: "conversation.continue_message",
+      content: `Recover ${input.key}.`,
+      target_participants: "all",
+    },
+  });
+  const proposed = await domain.propose({
+    conversation_id: input.conversationId,
+    request: context.request,
+    authority: context.authority,
+  });
+  const approved = await domain.approve({
+    conversation_id: input.conversationId,
+    proposal_id: proposed.response.proposal.proposal_id,
+    authority: context.authority,
+    request: {
+      schema_version: "1.0",
+      proposal_digest: proposed.response.proposal.proposal_digest,
+      decision: "approved",
+      challenge_id: null,
+      challenge_response: null,
+    },
+  });
+  return {
+    domain,
+    commitInput: {
+      conversation_id: input.conversationId,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0" as const,
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    },
+  };
+}
+
+test("the mutation controller rejects a changed actor without writing any byte", async () => {
+  const fixture = await harness(new DirectConversationPolicy(), new DurableRevisionFakeAdapter());
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const { domain, commitInput } = await approvedDeferredRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "wrong-requested-actor",
+    });
+    const before = treeBytes(fixture.root);
+    await expect(
+      domain.commit({
+        ...commitInput,
+        authority: {
+          ...commitInput.authority,
+          actor: { ...commitInput.authority.actor, public_actor_id: "different-cli-actor" },
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: ActionConflictError.name,
+      message: "Action mutation controller does not match the reviewed proposal.",
+      public_error: { error: { code: "stale_proposal" } },
+    });
+    expect(treeBytes(fixture.root)).toEqual(before);
+    expect(fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state).toBe("approved");
+    expect(fixture.homeAuthorities.publishedRevisionTransitions()).toHaveLength(0);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a deferred revision resumes an exact prepared publication before the head CAS", async () => {
+  let crash = true;
+  const fixture = await harness(
+    new DirectConversationPolicy(),
+    new DurableRevisionFakeAdapter(),
+    (store) => store,
+    async () => materialized(),
+    {
+      revisionFault(point) {
+        if (crash && point === "after-publication-prepared") {
+          crash = false;
+          throw new Error("injected prepared-publication crash");
+        }
+      },
+    },
+  );
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const { domain, commitInput } = await approvedDeferredRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "prepared-publication-resume",
+    });
+    await expect(domain.commit(commitInput)).rejects.toThrow("injected prepared-publication crash");
+    expect(fixture.homeAuthorities.publishedRevisionTransitions()).toHaveLength(0);
+    expect(fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state).toBe("committing");
+
+    expect(["committing", "succeeded"]).toContain(
+      (await domain.commit(commitInput)).operation.state,
+    );
+    await waitFor(
+      () => fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state === "succeeded",
+    );
+    expect(fixture.homeAuthorities.publishedRevisionTransitions()).toHaveLength(1);
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions()[0];
+    const operation = (
+      transition?.authority as {
+        operation?: { operation_id?: string; child?: { conversation_id?: string } };
+      }
+    )?.operation;
+    if (!operation?.operation_id || !operation.child?.conversation_id)
+      throw new Error("published revision operation is absent");
+    const operationId = operation.operation_id;
+    const childId = operation.child.conversation_id;
+    await waitFor(() => fixture.runtime.revisionOperationQuiescent(childId, operationId));
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+function publishedRevisionOperationForChild(
+  home: ConversationHomeAuthorities,
+  childId: string,
+): { operation_id: string; child: { conversation_id: string } } {
+  const matches = home
+    .publishedRevisionTransitions()
+    .map(
+      ({ authority }) =>
+        (
+          authority as {
+            operation?: { operation_id?: string; child?: { conversation_id?: string } };
+          }
+        ).operation,
+    )
+    .filter(
+      (operation): operation is { operation_id: string; child: { conversation_id: string } } =>
+        typeof operation?.operation_id === "string" && operation.child?.conversation_id === childId,
+    );
+  if (matches.length !== 1)
+    throw new Error(`expected one published revision operation for ${childId}`);
+  const operation = matches[0];
+  if (!operation) throw new Error(`published revision operation for ${childId} is absent`);
+  return operation;
+}
+
+async function waitForPublishedRevisionQuiescence(input: {
+  runtime: ConversationOrchestrator;
+  home: ConversationHomeAuthorities;
+  childId: string;
+}) {
+  const operation = publishedRevisionOperationForChild(input.home, input.childId);
+  await waitFor(() =>
+    input.runtime.revisionOperationQuiescent(input.childId, operation.operation_id),
+  );
+}
+
+async function approveAndCommitRevision(input: {
+  root: string;
+  runtime: ConversationOrchestrator;
+  home: ConversationHomeAuthorities;
+  conversationId: string;
+  candidate: BrowserHostActionRequestV1;
+  key: string;
+}) {
+  const domain = new ConversationRevisionActionDomainV1(input.runtime, input.home.actions);
+  const { request, authority } = await deferredActionRequest(input);
+  const rootSessionId = resolveRevisionBase({
+    artifactRoot: join(input.root, "manifests"),
+    traceRoot: join(input.root, "trace"),
+    conversationId: input.conversationId,
+    home: input.home,
+  }).lineage.root_session_id;
+  const publishedBefore = input.home.publishedRevisionTransitions().length;
+  const proposed = await domain.propose({
+    conversation_id: input.conversationId,
+    request,
+    authority,
+  });
+  expect(proposed.response.operation.state).toBe("pending_review");
+  expect(input.home.publishedRevisionTransitions()).toHaveLength(publishedBefore);
+  expect(input.home.lineage.readReservation(rootSessionId)?.status).not.toBe("active");
+  const approved = await domain.approve({
+    conversation_id: input.conversationId,
+    proposal_id: proposed.response.proposal.proposal_id,
+    authority,
+    request: {
+      schema_version: "1.0",
+      proposal_digest: proposed.response.proposal.proposal_digest,
+      decision: "approved",
+      challenge_id: null,
+      challenge_response: null,
+    },
+  });
+  const commitInput = {
+    conversation_id: input.conversationId,
+    proposal_id: proposed.response.proposal.proposal_id,
+    authority,
+    request: {
+      schema_version: "1.0" as const,
+      proposal_digest: proposed.response.proposal.proposal_digest,
+      approval_id: approved.approval.approval_id,
+    },
+  };
+  let committed: Awaited<ReturnType<typeof domain.commit>>;
+  try {
+    committed = await domain.commit(commitInput);
+  } catch (error) {
+    throw new Error(`deferred commit failed: ${(error as Error).message}`, { cause: error });
+  }
+  expect(["committing", "succeeded"]).toContain(committed.operation.state);
+  expect((await domain.commit(commitInput)).operation.operation_id).toBe(
+    committed.operation.operation_id,
+  );
+  const transition = input.home
+    .publishedRevisionTransitions()
+    .find(
+      ({ authority: row }) =>
+        (row as { proposal?: { proposal_id?: string } }).proposal?.proposal_id ===
+        proposed.response.proposal.proposal_id,
+    );
+  const operation = (
+    transition?.authority as {
+      operation?: { operation_id?: string; child?: { conversation_id?: string } };
+    }
+  )?.operation;
+  const childId = operation?.child?.conversation_id;
+  if (!operation?.operation_id || !childId)
+    throw new Error("deferred revision child was not published");
+  const operationId = operation.operation_id;
+  try {
+    await waitFor(
+      async () =>
+        (await domain.get(input.conversationId, proposed.response.proposal.proposal_id))?.operation
+          .state === "succeeded",
+    );
+  } catch (error) {
+    const current = await domain.get(input.conversationId, proposed.response.proposal.proposal_id);
+    const operationId = (
+      transition?.authority as { operation?: { operation_id?: string } } | undefined
+    )?.operation?.operation_id;
+    const revisionStates = operationId
+      ? input.home.revisions
+          .readEvents(operationId)
+          .map((event) =>
+            event.payload.kind === "participant-start"
+              ? `${event.payload.receipt.participant_id}:${event.payload.receipt.state}`
+              : `${event.payload.kind}:${"to" in event.payload ? event.payload.to : ""}`,
+          )
+      : [];
+    throw new Error(
+      `revision action stopped at ${current?.operation.state ?? "absent"}: ${revisionStates.join(",")}`,
+      {
+        cause: error,
+      },
+    );
+  }
+  try {
+    await waitFor(async () =>
+      isConversationTerminalLifecycle((await input.runtime.snapshot(childId))?.lifecycle),
+    );
+  } catch (error) {
+    throw new Error(
+      `revision child stayed ${JSON.stringify(await input.runtime.snapshot(childId))}`,
+      { cause: error },
+    );
+  }
+  await waitFor(() => input.runtime.revisionOperationQuiescent(childId, operationId));
+  return childId;
+}
+
+test("deferred participant and settings actions plan without effects then commit idempotent revisions", async () => {
+  const coordinatePolicy: ConversationPolicy = {
+    name: CONVERSATION_POLICY.COORDINATE,
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(context) {
+      return {
+        operation_id: context.correlation.operation_id,
+        status: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
+        artifact_refs: [],
+      };
+    },
+  };
+  const directPolicy = new DirectConversationPolicy();
+  const fixture = await harness(
+    directPolicy,
+    new DurableRevisionFakeAdapter(),
+    (store) => store,
+    async (binding) =>
+      materialized(Boolean(binding.input.additionalSkillRefs?.length), {
+        roleName: binding.input.roleRef,
+        sessionMode: binding.input.sessionMode,
+        engine: binding.input.engine,
+        model: binding.input.modelOverride,
+      }),
+    {
+      policies: new ConversationPolicyRegistry([directPolicy, coordinatePolicy]),
+    },
+  );
+  try {
+    const root = await fixture.runtime.create(createInput(CONVERSATION_POLICY.DIRECT));
+    let current = root.conversation_id;
+    current = await approveAndCommitRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: current,
+      key: "deferred-add",
+      candidate: {
+        type: "conversation.add_participant",
+        participant: {
+          role_ref: CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+          engine: AGENT_ENGINE.CLAUDE,
+          model: null,
+          skill_refs: [],
+        },
+      },
+    });
+    const coordinate = fixture.artifactStore.read(current);
+    expect(coordinate).toMatchObject({ policy: CONVERSATION_POLICY.COORDINATE });
+    expect(
+      coordinate?.bindings.map(({ input: binding }) => ({
+        role: binding.roleRef,
+        engine: binding.engine,
+      })),
+    ).toEqual([
+      {
+        role: CONVERSATION_ROLE_NAME.COORDINATION_COORDINATOR,
+        engine: AGENT_ENGINE.CODEX,
+      },
+      {
+        role: CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+        engine: AGENT_ENGINE.CLAUDE,
+      },
+    ]);
+    const executorId = coordinate?.bindings.find(
+      ({ input: binding }) => binding.roleRef === CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR,
+    )?.participant_id;
+    if (!executorId) throw new Error("coordinate executor binding was not published");
+    current = await approveAndCommitRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: current,
+      key: "deferred-remove",
+      candidate: { type: "conversation.remove_participant", participant_id: executorId },
+    });
+    expect(fixture.artifactStore.read(current)).toMatchObject({
+      policy: CONVERSATION_POLICY.DIRECT,
+      bindings: [
+        {
+          participant_id: "participant-1",
+          input: {
+            roleRef: CONVERSATION_ROLE_NAME.DIRECT,
+            engine: AGENT_ENGINE.CODEX,
+          },
+        },
+      ],
+    });
+    current = await approveAndCommitRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: current,
+      key: "deferred-update",
+      candidate: {
+        type: "conversation.update_participant",
+        participant_id: "participant-1",
+        changes: { skill_refs: ["runtime-portability"] },
+      },
+    });
+    expect(
+      fixture.artifactStore
+        .read(current)
+        ?.bindings.find((row) => row.participant_id === "participant-1")?.input.additionalSkillRefs,
+    ).toEqual(["runtime-portability"]);
+    current = await approveAndCommitRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: current,
+      key: "deferred-settings",
+      candidate: {
+        type: "conversation.update_settings",
+        changes: { max_rounds: 7, baseline_enabled: false },
+      },
+    });
+    expect(fixture.artifactStore.read(current)).toMatchObject({
+      max_rounds: 7,
+      baseline_enabled: false,
+    });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test("a deferred commit resumes the same active reservation after a process crash", async () => {
+  let crash = true;
+  const fixture = await harness(
+    new DirectConversationPolicy(),
+    new DurableRevisionFakeAdapter(),
+    (store) => store,
+    async () => materialized(),
+    {
+      revisionFault(point) {
+        if (crash && point === "after-reservation-active") {
+          crash = false;
+          throw new Error("injected revision commit crash");
+        }
+      },
+    },
+  );
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const domain = new ConversationRevisionActionDomainV1(
+      fixture.runtime,
+      fixture.homeAuthorities.actions,
+    );
+    const context = await deferredActionRequest({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "restart-deferred",
+      candidate: { type: "conversation.update_settings", changes: { max_rounds: 9 } },
+    });
+    const proposed = await domain.propose({
+      conversation_id: created.conversation_id,
+      request: context.request,
+      authority: context.authority,
+    });
+    const approved = await domain.approve({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    const commit = {
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0" as const,
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    };
+    await expect(domain.commit(commit)).rejects.toThrow("injected revision commit crash");
+    expect(fixture.homeAuthorities.lineage.readReservation(created.conversation_id)).toMatchObject({
+      status: "active",
+    });
+
+    const artifacts = new DurableArtifactRegistry({ dir: join(fixture.root, "opaque") });
+    const restartedHome = new ConversationHomeAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restartedAdapter = new DurableRevisionFakeAdapter();
+    restartedAdapter.bindTestAuthority(join(fixture.root, "restart-adapter-evidence"));
+    const restarted = new ConversationOrchestrator({
+      traceStore: new TraceStore({
+        dir: join(fixture.root, "trace"),
+        artifactRegistry: artifacts,
+        now: () => "2026-08-22T00:00:00.000Z",
+      }),
+      artifactRegistry: artifacts,
+      artifactStore: new ConversationArtifactStore({ dir: join(fixture.root, "manifests") }),
+      homeAuthorities: restartedHome,
+      sessionAdapter: restartedAdapter,
+      policies: new ConversationPolicyRegistry([new DirectConversationPolicy()]),
+      id: (kind) => `restart-${kind}`,
+      now: () => "2026-08-22T00:00:00.000Z",
+      rehydrateBinding: async () => materialized(),
+    });
+    const restartedDomain = new ConversationRevisionActionDomainV1(
+      restarted,
+      restartedHome.actions,
+    );
+    const recovered = await restartedDomain.commit(commit);
+    expect(["committing", "succeeded"]).toContain(recovered.operation.state);
+    await waitFor(
+      async () =>
+        (await restartedDomain.get(created.conversation_id, commit.proposal_id))?.operation
+          .state === "succeeded",
+    );
+    expect((await restartedDomain.commit(commit)).operation.state).toBe("succeeded");
+    expect(restartedHome.publishedRevisionTransitions()).toHaveLength(1);
+    const transition = restartedHome.publishedRevisionTransitions()[0];
+    const childId = (
+      transition?.authority as { operation?: { child?: { conversation_id?: string } } }
+    )?.operation?.child?.conversation_id;
+    if (!childId) throw new Error("restarted action did not publish its child revision");
+    await waitFor(async () =>
+      isConversationTerminalLifecycle((await restarted.snapshot(childId))?.lifecycle),
+    );
+    await waitForPublishedRevisionQuiescence({
+      runtime: restarted,
+      home: restartedHome,
+      childId,
+    });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("an approved conversation action remains actionable after process restart", async () => {
+  const fixture = await harness(new DirectConversationPolicy(), new DurableRevisionFakeAdapter());
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const firstDomain = new ConversationRevisionActionDomainV1(
+      fixture.runtime,
+      fixture.homeAuthorities.actions,
+    );
+    const context = await deferredActionRequest({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "restart-approved-action",
+      candidate: { type: "conversation.update_settings", changes: { max_rounds: 9 } },
+    });
+    const proposed = await firstDomain.propose({
+      conversation_id: created.conversation_id,
+      request: context.request,
+      authority: context.authority,
+    });
+    expect(await firstDomain.pending(created.conversation_id)).toEqual([
+      expect.objectContaining({
+        proposal: expect.objectContaining({
+          proposal_id: proposed.response.proposal.proposal_id,
+        }),
+        operation: expect.objectContaining({ state: "pending_review" }),
+      }),
+    ]);
+    const approved = await firstDomain.approve({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+
+    const artifacts = new DurableArtifactRegistry({ dir: join(fixture.root, "opaque") });
+    const restartedHome = new ConversationHomeAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restartedAdapter = new DurableRevisionFakeAdapter();
+    restartedAdapter.bindTestAuthority(join(fixture.root, "approved-restart-adapter-evidence"));
+    const restarted = new ConversationOrchestrator({
+      traceStore: new TraceStore({
+        dir: join(fixture.root, "trace"),
+        artifactRegistry: artifacts,
+        now: () => "2026-08-22T00:00:00.000Z",
+      }),
+      artifactRegistry: artifacts,
+      artifactStore: new ConversationArtifactStore({ dir: join(fixture.root, "manifests") }),
+      homeAuthorities: restartedHome,
+      sessionAdapter: restartedAdapter,
+      policies: new ConversationPolicyRegistry([new DirectConversationPolicy()]),
+      id: (kind) => `approved-restart-${kind}`,
+      now: () => "2026-08-22T00:00:00.000Z",
+      rehydrateBinding: async () => materialized(),
+    });
+    const restartedDomain = new ConversationRevisionActionDomainV1(
+      restarted,
+      restartedHome.actions,
+    );
+    expect(await restartedDomain.pending(created.conversation_id)).toEqual([
+      expect.objectContaining({
+        proposal: expect.objectContaining({
+          proposal_id: proposed.response.proposal.proposal_id,
+        }),
+        operation: expect.objectContaining({ state: "approved" }),
+      }),
+    ]);
+
+    const committed = await restartedDomain.commit({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    });
+    expect(["committing", "succeeded"]).toContain(committed.operation.state);
+    expect(await restartedDomain.pending(created.conversation_id)).toEqual([]);
+    await waitFor(
+      async () =>
+        (await restartedDomain.get(created.conversation_id, proposed.response.proposal.proposal_id))
+          ?.operation.state === "succeeded",
+    );
+    const transition = restartedHome
+      .publishedRevisionTransitions()
+      .find(
+        ({ authority }) =>
+          (authority as { proposal?: { proposal_id?: string } }).proposal?.proposal_id ===
+          proposed.response.proposal.proposal_id,
+      );
+    const childId = (
+      transition?.authority as { operation?: { child?: { conversation_id?: string } } }
+    )?.operation?.child?.conversation_id;
+    if (!childId) throw new Error("restarted action did not publish its child revision");
+    await waitFor(async () =>
+      isConversationTerminalLifecycle((await restarted.snapshot(childId))?.lifecycle),
+    );
+    await waitForPublishedRevisionQuiescence({
+      runtime: restarted,
+      home: restartedHome,
+      childId,
+    });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a reviewed abandon closes a prepared revision after process restart", async () => {
+  let crash = true;
+  const fixture = await harness(
+    new DirectConversationPolicy(),
+    new DurableRevisionFakeAdapter(),
+    (store) => store,
+    async () => materialized(),
+    {
+      revisionFault(point) {
+        if (crash && point === "after-prepared") {
+          crash = false;
+          throw new Error("injected prepared revision crash");
+        }
+      },
+    },
+  );
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const domain = new ConversationRevisionActionDomainV1(
+      fixture.runtime,
+      fixture.homeAuthorities.actions,
+    );
+    const context = await deferredActionRequest({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "prepared-abandon-source",
+      candidate: { type: "conversation.update_settings", changes: { max_rounds: 8 } },
+    });
+    const proposed = await domain.propose({
+      conversation_id: created.conversation_id,
+      request: context.request,
+      authority: context.authority,
+    });
+    const approved = await domain.approve({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    await expect(
+      domain.commit({
+        conversation_id: created.conversation_id,
+        proposal_id: proposed.response.proposal.proposal_id,
+        authority: context.authority,
+        request: {
+          schema_version: "1.0",
+          proposal_digest: proposed.response.proposal.proposal_digest,
+          approval_id: approved.approval.approval_id,
+        },
+      }),
+    ).rejects.toThrow("injected prepared revision crash");
+    const sourceSnapshot = fixture.homeAuthorities.actions.authority.get(
+      proposed.response.proposal.proposal_id,
+    );
+    const revisionOperationId = sourceSnapshot?.operation_id;
+    if (!revisionOperationId) throw new Error("prepared revision operation fixture is absent");
+    const preparedOperation = fixture.homeAuthorities.revisions.readOperation(revisionOperationId);
+    if (!preparedOperation) throw new Error("prepared revision header fixture is absent");
+    expect(
+      foldRevisionOperation(
+        preparedOperation,
+        fixture.homeAuthorities.revisions.readEvents(revisionOperationId),
+      ).state,
+    ).toBe("prepared");
+
+    const restartedHome = new ConversationHomeAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restartedArtifacts = new DurableArtifactRegistry({ dir: join(fixture.root, "opaque") });
+    const restartedArtifactStore = new ConversationArtifactStore({
+      dir: join(fixture.root, "manifests"),
+    });
+    const restartedAdapter = new DurableRevisionFakeAdapter();
+    restartedAdapter.bindTestAuthority(join(fixture.root, "abandon-adapter-evidence"));
+    const restartedTrace = new TraceStore({
+      dir: join(fixture.root, "trace"),
+      artifactRegistry: restartedArtifacts,
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restarted = new ConversationOrchestrator({
+      traceStore: restartedTrace,
+      artifactRegistry: restartedArtifacts,
+      artifactStore: restartedArtifactStore,
+      homeAuthorities: restartedHome,
+      sessionAdapter: restartedAdapter,
+      policies: new ConversationPolicyRegistry([new DirectConversationPolicy()]),
+      id: (kind) => `abandon-${kind}`,
+      now: () => "2026-08-22T00:00:00.000Z",
+      rehydrateBinding: async () => materialized(),
+    });
+    const browser = createConversationBrowserAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      traceRoot: join(fixture.root, "trace"),
+      traceStore: restartedTrace,
+      browserAuthorityKey: Buffer.alloc(32, 7),
+      artifactRegistry: restartedArtifacts,
+      artifactStore: restartedArtifactStore,
+      home: restartedHome,
+      service: restarted,
+    });
+    const recoverySource = browser.lineage.resolveRevisionRecovery(
+      created.conversation_id,
+      created.conversation_id,
+      revisionOperationId,
+    );
+    const abandonContext = {
+      request: {
+        schema_version: "1.0" as const,
+        idempotency_key: "prepared-abandon-control",
+        anchor_event_id:
+          (await restarted.events(created.conversation_id, 0))?.at(-1)?.event_id ?? null,
+        expected: {
+          mode: "writable-revision" as const,
+          conversation_id: recoverySource.requested.node.conversation_id,
+          revision_id: recoverySource.requested.node.revision_id,
+          last_seq: recoverySource.requested.source.journal_head.last_seq,
+          conversation_lock_digest: conversationLockDigest(
+            recoverySource.lineage.root_session_id,
+            recoverySource.requested.source,
+            recoverySource.revision_claim_epoch,
+          ),
+        },
+        candidate: {
+          type: "conversation.abandon_revision_operation" as const,
+          revision_operation_id: revisionOperationId,
+        },
+      },
+      authority: defaultConversationActionAuthority(recoverySource.lineage.root_session_id),
+    };
+    const abandon = await browser.actions.propose({
+      conversation_id: created.conversation_id,
+      request: abandonContext.request,
+      authority: abandonContext.authority,
+    });
+    const abandonApproval = await browser.actions.approve({
+      conversation_id: created.conversation_id,
+      proposal_id: abandon.response.proposal.proposal_id,
+      authority: abandonContext.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: abandon.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    const committed = await browser.actions.commit({
+      conversation_id: created.conversation_id,
+      proposal_id: abandon.response.proposal.proposal_id,
+      authority: abandonContext.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: abandon.response.proposal.proposal_digest,
+        approval_id: abandonApproval.approval.approval_id,
+      },
+    });
+    expect(committed.operation.state).toBe("succeeded");
+    expect(
+      foldRevisionOperation(
+        preparedOperation,
+        restartedHome.revisions.readEvents(revisionOperationId),
+      ).state,
+    ).toBe("abandoned");
+    expect(restartedHome.lineage.readReservation(created.conversation_id)?.status).toBe("released");
+    expect(restartedHome.actions.get(proposed.response.proposal.proposal_id)?.state).toBe("failed");
+    const beforeFailedReplay = treeBytes(fixture.root);
+    const replayedFailure = await browser.actions.commit({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    });
+    expect(replayedFailure.operation.state).toBe("failed");
+    expect(treeBytes(fixture.root)).toEqual(beforeFailedReplay);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a published revision retries its exact Action Authority terminal after two failures", async () => {
+  const fixture = await harness(new DirectConversationPolicy(), new DurableRevisionFakeAdapter());
+  type TerminalArgs = Parameters<ConversationHomeAuthorities["actions"]["terminal"]>;
+  let terminalSpy: ReturnType<typeof spyOn> | undefined;
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const originalTerminal = fixture.homeAuthorities.actions.terminal.bind(
+      fixture.homeAuthorities.actions,
+    );
+    const terminalCalls: TerminalArgs[] = [];
+    terminalSpy = spyOn(fixture.homeAuthorities.actions, "terminal").mockImplementation(
+      (...args: TerminalArgs) => {
+        terminalCalls.push(structuredClone(args));
+        if (terminalCalls.length <= 2) throw new Error("injected revision terminal failure");
+        originalTerminal(...args);
+      },
+    );
+
+    const childId = await approveAndCommitRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "terminal-reconcile",
+      candidate: {
+        type: "conversation.continue_message",
+        content: "Reconcile the published revision terminal.",
+        target_participants: "all",
+      },
+    });
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions().at(-1);
+    const operationId = (
+      transition?.authority as { operation?: { operation_id?: string } } | undefined
+    )?.operation?.operation_id;
+    if (!operationId) throw new Error("published revision operation is absent");
+    const operation = fixture.homeAuthorities.revisions.readOperation(operationId);
+    if (!operation) throw new Error("published revision header is absent");
+    const terminals = fixture.homeAuthorities.revisions
+      .readEvents(operationId)
+      .filter(
+        (event) =>
+          event.payload.kind === "state-transition" &&
+          event.payload.from === "starting" &&
+          event.payload.action_terminals.some(
+            (terminal) => terminal.action_operation_id === operationId,
+          ),
+      );
+    const durableTerminal = terminals[0];
+    if (!durableTerminal) throw new Error("published revision terminal is absent");
+    const action = fixture.homeAuthorities.actions.get(operation.proposal_id);
+
+    expect(await fixture.runtime.snapshot(childId)).toMatchObject({ lifecycle: "COMPLETED" });
+    expect(action?.state).toBe("succeeded");
+    expect(action?.domain_terminal_digest).toBe(durableTerminal.event_digest);
+    expect(action?.events.at(-1)?.recorded_at).toBe(durableTerminal.recorded_at);
+    expect(terminals).toHaveLength(1);
+    expect(terminalCalls).toHaveLength(3);
+    expect(
+      terminalCalls.every(
+        ([proposalId, receivedOperationId, terminal]) =>
+          proposalId === operation.proposal_id &&
+          receivedOperationId === operationId &&
+          terminal.digest === durableTerminal.event_digest &&
+          terminal.recorded_at === durableTerminal.recorded_at,
+      ),
+    ).toBeTrue();
+  } finally {
+    terminalSpy?.mockRestore();
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a fresh service reconciles a published revision terminal without replaying start effects", async () => {
+  const scheduled: Array<() => void> = [];
+  let captureRevisionStart = false;
+  const fixture = await harness(
+    new DirectConversationPolicy(),
+    new DurableRevisionFakeAdapter(),
+    (store) => store,
+    async () => materialized(),
+    { schedule: (task) => (captureRevisionStart ? scheduled.push(task) : task()) },
+  );
+  type TerminalArgs = Parameters<ConversationHomeAuthorities["actions"]["terminal"]>;
+  let terminalSpy: ReturnType<typeof spyOn> | undefined;
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    captureRevisionStart = true;
+    const domain = new ConversationRevisionActionDomainV1(
+      fixture.runtime,
+      fixture.homeAuthorities.actions,
+    );
+    const context = await deferredActionRequest({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "terminal-reconcile-after-restart",
+      candidate: {
+        type: "conversation.continue_message",
+        content: "Reconcile only the durable start terminal after restart.",
+        target_participants: "all",
+      },
+    });
+    const proposed = await domain.propose({
+      conversation_id: created.conversation_id,
+      request: context.request,
+      authority: context.authority,
+    });
+    const approved = await domain.approve({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    const commitInput = {
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0" as const,
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    };
+    const terminalCalls: TerminalArgs[] = [];
+    terminalSpy = spyOn(fixture.homeAuthorities.actions, "terminal").mockImplementation(
+      (...args: TerminalArgs) => {
+        terminalCalls.push(structuredClone(args));
+        throw new Error("simulated process loss before Action Authority mirror");
+      },
+    );
+
+    expect((await domain.commit(commitInput)).operation.state).toBe("committing");
+    expect(scheduled).toHaveLength(1);
+    scheduled.shift()?.();
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions().at(-1);
+    const operation = (
+      transition?.authority as {
+        operation?: { operation_id?: string; child?: { conversation_id?: string } };
+      }
+    )?.operation;
+    if (!operation?.operation_id || !operation.child?.conversation_id)
+      throw new Error("published revision operation is absent");
+    const operationId = operation.operation_id;
+    const childId = operation.child.conversation_id;
+    await waitFor(() => {
+      const events = fixture.homeAuthorities.revisions.readEvents(operation.operation_id as string);
+      return (
+        terminalCalls.length >= 3 &&
+        events.some(
+          (event) =>
+            event.payload.kind === "state-transition" &&
+            event.payload.from === "starting" &&
+            event.payload.action_terminals.some(
+              (terminal) => terminal.action_operation_id === operation.operation_id,
+            ),
+        )
+      );
+    });
+    const beforeEvents = fixture.homeAuthorities.revisions.readEvents(operation.operation_id);
+    const durableTerminal = beforeEvents.find(
+      (event) =>
+        event.payload.kind === "state-transition" &&
+        event.payload.from === "starting" &&
+        event.payload.action_terminals.some(
+          (terminal) => terminal.action_operation_id === operation.operation_id,
+        ),
+    );
+    if (!durableTerminal) throw new Error("durable revision terminal is absent");
+    await waitFor(async () => (await fixture.runtime.snapshot(childId))?.lifecycle === "COMPLETED");
+    expect(await fixture.runtime.snapshot(childId)).toMatchObject({ lifecycle: "COMPLETED" });
+    expect(fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state).toBe("committing");
+    const beforeTrace = await fixture.traceStore.readConversation(operation.child.conversation_id);
+    terminalSpy.mockRestore();
+    terminalSpy = undefined;
+
+    const restartedArtifacts = new DurableArtifactRegistry({ dir: join(fixture.root, "opaque") });
+    const restartedTrace = new TraceStore({
+      dir: join(fixture.root, "trace"),
+      artifactRegistry: restartedArtifacts,
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restartedHome = new ConversationHomeAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restartedAdapter = new DurableRevisionFakeAdapter();
+    restartedAdapter.bindTestAuthority(join(fixture.root, "restart-terminal-adapter-evidence"));
+    const restartedTasks: Array<() => void> = [];
+    const restarted = new ConversationOrchestrator({
+      traceStore: restartedTrace,
+      artifactRegistry: restartedArtifacts,
+      artifactStore: new ConversationArtifactStore({ dir: join(fixture.root, "manifests") }),
+      homeAuthorities: restartedHome,
+      sessionAdapter: restartedAdapter,
+      policies: new ConversationPolicyRegistry([new DirectConversationPolicy()]),
+      id: (kind) => `terminal-restart-${kind}`,
+      now: () => "2026-08-22T00:00:00.000Z",
+      schedule: (task) => restartedTasks.push(task),
+      rehydrateBinding: async () => materialized(),
+    });
+    const restartedDomain = new ConversationRevisionActionDomainV1(
+      restarted,
+      restartedHome.actions,
+    );
+
+    const replayed = await restartedDomain.commit(commitInput);
+    const reconciled = restartedHome.actions.get(commitInput.proposal_id);
+    expect(replayed.operation.state).toBe("succeeded");
+    expect(reconciled?.state).toBe("succeeded");
+    expect(reconciled?.domain_terminal_digest).toBe(durableTerminal.event_digest);
+    expect(reconciled?.events.at(-1)?.recorded_at).toBe(durableTerminal.recorded_at);
+    expect(restartedHome.revisions.readEvents(operation.operation_id)).toEqual(beforeEvents);
+    expect(await restartedTrace.readConversation(operation.child.conversation_id)).toEqual(
+      beforeTrace,
+    );
+    expect(restartedAdapter.starts).toHaveLength(0);
+    expect(restartedTasks).toHaveLength(0);
+    await waitForPublishedRevisionQuiescence({
+      runtime: fixture.runtime,
+      home: fixture.homeAuthorities,
+      childId,
+    });
+  } finally {
+    terminalSpy?.mockRestore();
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a fresh service leaves a live published revision start owner untouched", async () => {
+  const scheduled: Array<() => void> = [];
+  let captureRevisionStart = false;
+  const fixture = await harness(
+    new DirectConversationPolicy(),
+    new DurableRevisionFakeAdapter(),
+    (store) => store,
+    async () => materialized(),
+    { schedule: (task) => (captureRevisionStart ? scheduled.push(task) : task()) },
+  );
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    captureRevisionStart = true;
+    const startsBeforeRevision = fixture.adapter.starts.length;
+    const domain = new ConversationRevisionActionDomainV1(
+      fixture.runtime,
+      fixture.homeAuthorities.actions,
+    );
+    const context = await deferredActionRequest({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "starting-reconcile-after-restart",
+      candidate: {
+        type: "conversation.continue_message",
+        content: "Recover a published start interrupted before its durable terminal.",
+        target_participants: "all",
+      },
+    });
+    const proposed = await domain.propose({
+      conversation_id: created.conversation_id,
+      request: context.request,
+      authority: context.authority,
+    });
+    const approved = await domain.approve({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    const commitInput = {
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0" as const,
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    };
+
+    expect((await domain.commit(commitInput)).operation.state).toBe("committing");
+    expect(scheduled).toHaveLength(1);
+    expect(fixture.adapter.starts).toHaveLength(startsBeforeRevision);
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions().at(-1);
+    const authority = transition?.authority as
+      | {
+          operation?: {
+            operation_id?: string;
+            proposal_id?: string;
+            child?: { conversation_id?: string };
+          };
+          revision_plan?: { participant_starts?: Array<{ participant_id: string }> };
+        }
+      | undefined;
+    const operation = authority?.operation;
+    if (!operation?.operation_id || !operation.child?.conversation_id)
+      throw new Error("published revision operation is absent");
+    const operationId = operation.operation_id;
+    const childId = operation.child.conversation_id;
+    const durableOperation = fixture.homeAuthorities.revisions.readOperation(
+      operation.operation_id,
+    );
+    if (!durableOperation) throw new Error("published revision header is absent");
+    const beforeEvents = fixture.homeAuthorities.revisions.readEvents(operation.operation_id);
+    const beforeTrace = await fixture.traceStore.readConversation(operation.child.conversation_id);
+    expect(foldRevisionOperation(durableOperation, beforeEvents).state).toBe("starting");
+    expect(fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state).toBe("committing");
+    expect(await fixture.runtime.snapshot(childId)).toMatchObject({
+      lifecycle: "ACTIVE",
+    });
+
+    const restartedArtifacts = new DurableArtifactRegistry({ dir: join(fixture.root, "opaque") });
+    const restartedTrace = new TraceStore({
+      dir: join(fixture.root, "trace"),
+      artifactRegistry: restartedArtifacts,
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restartedHome = new ConversationHomeAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      now: () => "2026-08-22T00:00:00.000Z",
+    });
+    const restartedAdapter = new DurableRevisionFakeAdapter();
+    restartedAdapter.bindTestAuthority(join(fixture.root, "restart-starting-adapter-evidence"));
+    const restartedTasks: Array<() => void> = [];
+    const restarted = new ConversationOrchestrator({
+      traceStore: restartedTrace,
+      artifactRegistry: restartedArtifacts,
+      artifactStore: new ConversationArtifactStore({ dir: join(fixture.root, "manifests") }),
+      homeAuthorities: restartedHome,
+      sessionAdapter: restartedAdapter,
+      policies: new ConversationPolicyRegistry([new DirectConversationPolicy()]),
+      id: (kind) => `starting-restart-${kind}`,
+      now: () => "2026-08-22T00:00:00.000Z",
+      schedule: (task) => restartedTasks.push(task),
+      rehydrateBinding: async () => materialized(),
+    });
+    const restartedDomain = new ConversationRevisionActionDomainV1(
+      restarted,
+      restartedHome.actions,
+    );
+
+    const replayed = await restartedDomain.commit(commitInput);
+    const afterEvents = restartedHome.revisions.readEvents(operation.operation_id);
+    expect(replayed.operation.state).toBe("committing");
+    expect(afterEvents).toEqual(beforeEvents);
+    expect(foldRevisionOperation(durableOperation, afterEvents).state).toBe("starting");
+    expect(afterEvents.filter((event) => event.payload.kind === "participant-start")).toHaveLength(
+      0,
+    );
+    expect(restartedHome.actions.get(commitInput.proposal_id)?.state).toBe("committing");
+    expect(await fixture.runtime.snapshot(childId)).toMatchObject({
+      lifecycle: "ACTIVE",
+    });
+    expect(restartedAdapter.starts).toHaveLength(0);
+    expect(restartedTasks).toHaveLength(0);
+    expect(scheduled).toHaveLength(1);
+    const afterTrace = await restartedTrace.readConversation(childId);
+    expect(afterTrace).toEqual(beforeTrace);
+
+    scheduled.shift()?.();
+    await waitFor(async () =>
+      ["COMPLETED", "FAILED"].includes((await fixture.runtime.snapshot(childId))?.lifecycle ?? ""),
+    );
+    await waitFor(() => fixture.runtime.revisionOperationQuiescent(childId, operationId));
+    expect(fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.state).toBe("succeeded");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("the same service closes a published revision interrupted before starting without fake lanes", async () => {
+  const fixture = await harness(new DirectConversationPolicy(), new DurableRevisionFakeAdapter());
+  type AppendArgs = Parameters<ConversationHomeAuthorities["revisions"]["appendEvent"]>;
+  let appendSpy: ReturnType<typeof spyOn> | undefined;
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const { domain, commitInput } = await approvedDeferredRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "published-before-start",
+    });
+    const append = fixture.homeAuthorities.revisions.appendEvent.bind(
+      fixture.homeAuthorities.revisions,
+    );
+    appendSpy = spyOn(fixture.homeAuthorities.revisions, "appendEvent").mockImplementation(
+      (...args: AppendArgs) => {
+        const event = args[1];
+        if (
+          event.payload.kind === "state-transition" &&
+          event.payload.from === "published" &&
+          event.payload.to === "starting"
+        )
+          throw new Error("simulated process loss before revision start publication");
+        return append(...args);
+      },
+    );
+
+    expect((await domain.commit(commitInput)).operation.state).toBe("needs_recovery");
+    appendSpy.mockRestore();
+    appendSpy = undefined;
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions().at(-1);
+    const operation = (
+      transition?.authority as {
+        operation?: { operation_id?: string; child?: { conversation_id?: string } };
+      }
+    )?.operation;
+    if (!operation?.operation_id || !operation.child?.conversation_id)
+      throw new Error("published revision operation is absent");
+    const header = fixture.homeAuthorities.revisions.readOperation(operation.operation_id);
+    if (!header) throw new Error("published revision header is absent");
+    expect(
+      foldRevisionOperation(
+        header,
+        fixture.homeAuthorities.revisions.readEvents(operation.operation_id),
+      ).state,
+    ).toBe("needs_recovery");
+    expect(fixture.artifactStore.revisionVisibility(operation.child.conversation_id)?.state).toBe(
+      "published",
+    );
+
+    const restarted = restartedRevisionHarness(fixture.root, "published-before-start-restart");
+    const recovered = await restarted.domain.commit(commitInput);
+    const afterEvents = restarted.home.revisions.readEvents(operation.operation_id);
+    const terminal = afterEvents.filter(
+      (event) =>
+        event.payload.kind === "state-transition" &&
+        event.payload.from === "published" &&
+        event.payload.to === "needs_recovery",
+    );
+    expect(recovered.operation.state).toBe("needs_recovery");
+    expect(foldRevisionOperation(header, afterEvents).state).toBe("needs_recovery");
+    expect(terminal).toHaveLength(1);
+    expect(afterEvents.filter((event) => event.payload.kind === "participant-start")).toHaveLength(
+      0,
+    );
+    expect(restarted.home.actions.get(commitInput.proposal_id)).toMatchObject({
+      state: "needs_recovery",
+      domain_terminal_digest: terminal[0]?.event_digest,
+    });
+    expect(await restarted.runtime.snapshot(operation.child.conversation_id)).toMatchObject({
+      lifecycle: "ACTIVE",
+    });
+    expect(restarted.adapter.starts).toHaveLength(0);
+    expect(restarted.tasks).toHaveLength(0);
+    expect((await restarted.domain.commit(commitInput)).operation.state).toBe("needs_recovery");
+    expect(restarted.home.revisions.readEvents(operation.operation_id)).toEqual(afterEvents);
+  } finally {
+    appendSpy?.mockRestore();
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a fresh service publishes the exact hidden child before closing an interrupted revision", async () => {
+  const fixture = await harness(new DirectConversationPolicy(), new DurableRevisionFakeAdapter());
+  type PublishArgs = Parameters<ConversationArtifactStore["publishRevision"]>;
+  let publishSpy: ReturnType<typeof spyOn> | undefined;
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const { domain, commitInput } = await approvedDeferredRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "between-revision-and-artifact-publish",
+    });
+    publishSpy = spyOn(fixture.artifactStore, "publishRevision").mockImplementation(
+      (..._args: PublishArgs) => {
+        throw new Error("simulated process loss before child visibility publication");
+      },
+    );
+
+    await expect(domain.commit(commitInput)).rejects.toThrow(
+      "simulated process loss before child visibility publication",
+    );
+    publishSpy.mockRestore();
+    publishSpy = undefined;
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions().at(-1);
+    const operation = (
+      transition?.authority as {
+        operation?: { operation_id?: string; child?: { conversation_id?: string } };
+      }
+    )?.operation;
+    if (!operation?.operation_id || !operation.child?.conversation_id)
+      throw new Error("published revision operation is absent");
+    const header = fixture.homeAuthorities.revisions.readOperation(operation.operation_id);
+    if (!header) throw new Error("published revision header is absent");
+    expect(fixture.artifactStore.revisionVisibility(operation.child.conversation_id)).toMatchObject(
+      {
+        operation_id: operation.operation_id,
+        state: "hidden",
+      },
+    );
+    expect(
+      foldRevisionOperation(
+        header,
+        fixture.homeAuthorities.revisions.readEvents(operation.operation_id),
+      ).state,
+    ).toBe("needs_recovery");
+
+    const restarted = restartedRevisionHarness(fixture.root, "hidden-child-restart");
+    const recovered = await restarted.domain.commit(commitInput);
+    const afterEvents = restarted.home.revisions.readEvents(operation.operation_id);
+    const terminal = afterEvents.find(
+      (event) =>
+        event.payload.kind === "state-transition" &&
+        event.payload.from === "published" &&
+        event.payload.to === "needs_recovery",
+    );
+    if (!terminal) throw new Error("published recovery terminal is absent");
+    expect(recovered.operation.state).toBe("needs_recovery");
+    expect(
+      restarted.artifactStore.revisionVisibility(operation.child.conversation_id),
+    ).toMatchObject({
+      operation_id: operation.operation_id,
+      state: "published",
+    });
+    expect(afterEvents.filter((event) => event.payload.kind === "participant-start")).toHaveLength(
+      0,
+    );
+    expect(restarted.home.actions.get(commitInput.proposal_id)).toMatchObject({
+      state: "needs_recovery",
+      domain_terminal_digest: terminal.event_digest,
+    });
+    expect(restarted.home.lineage.readReservation(header.root_session_id)?.status).toBe("consumed");
+    expect(await restarted.runtime.snapshot(operation.child.conversation_id)).toMatchObject({
+      lifecycle: "ACTIVE",
+    });
+    expect(restarted.adapter.starts).toHaveLength(0);
+    expect(restarted.tasks).toHaveLength(0);
+  } finally {
+    publishSpy?.mockRestore();
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("one fresh retry converges after the exact head committed before revision publication", async () => {
+  const fixture = await harness(new DirectConversationPolicy(), new DurableRevisionFakeAdapter());
+  type PublishArgs = Parameters<ConversationHomeAuthorities["revisions"]["publish"]>;
+  let publishSpy: ReturnType<typeof spyOn> | undefined;
+  try {
+    const created = await fixture.runtime.create(createInput("direct"));
+    const { domain, commitInput } = await approvedDeferredRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "head-before-revision-publish",
+    });
+    publishSpy = spyOn(fixture.homeAuthorities.revisions, "publish").mockImplementation(
+      (..._args: PublishArgs) => {
+        throw new Error("simulated process loss before revision publication");
+      },
+    );
+
+    await expect(domain.commit(commitInput)).rejects.toThrow(
+      "simulated process loss before revision publication",
+    );
+    publishSpy.mockRestore();
+    publishSpy = undefined;
+    const operationId = fixture.homeAuthorities.actions.get(commitInput.proposal_id)?.operation_id;
+    if (!operationId) throw new Error("committing revision operation is absent");
+    const operation = fixture.homeAuthorities.revisions.readOperation(operationId);
+    if (!operation) throw new Error("committing revision header is absent");
+    expect(fixture.homeAuthorities.publishedRevisionTransitions()).toHaveLength(0);
+    expect(
+      foldRevisionOperation(
+        operation,
+        fixture.homeAuthorities.revisions.readEvents(operation.operation_id),
+      ).state,
+    ).toBe("needs_recovery");
+    expect(fixture.artifactStore.revisionVisibility(operation.child.conversation_id)?.state).toBe(
+      "hidden",
+    );
+
+    const restarted = restartedRevisionHarness(fixture.root, "head-before-publish-restart");
+    const recovered = await restarted.domain.commit(commitInput);
+    const afterEvents = restarted.home.revisions.readEvents(operation.operation_id);
+    const terminal = afterEvents.find(
+      (event) =>
+        event.payload.kind === "state-transition" &&
+        event.payload.from === "published" &&
+        event.payload.to === "needs_recovery",
+    );
+    if (!terminal) throw new Error("resumed publication terminal is absent");
+    expect(recovered.operation.state).toBe("needs_recovery");
+    expect(restarted.home.publishedRevisionTransitions()).toHaveLength(1);
+    expect(
+      restarted.artifactStore.revisionVisibility(operation.child.conversation_id),
+    ).toMatchObject({
+      operation_id: operation.operation_id,
+      state: "published",
+    });
+    expect(foldRevisionOperation(operation, afterEvents).state).toBe("needs_recovery");
+    expect(afterEvents.filter((event) => event.payload.kind === "participant-start")).toHaveLength(
+      0,
+    );
+    expect(restarted.home.actions.get(commitInput.proposal_id)).toMatchObject({
+      state: "needs_recovery",
+      domain_terminal_digest: terminal.event_digest,
+    });
+    expect(restarted.home.lineage.readReservation(operation.root_session_id)?.status).toBe(
+      "consumed",
+    );
+    expect(await restarted.runtime.snapshot(operation.child.conversation_id)).toMatchObject({
+      lifecycle: "ACTIVE",
+    });
+    expect(restarted.adapter.starts).toHaveLength(0);
+    expect(restarted.tasks).toHaveLength(0);
+    expect((await restarted.domain.commit(commitInput)).operation.state).toBe("needs_recovery");
+    expect(restarted.home.revisions.readEvents(operation.operation_id)).toEqual(afterEvents);
+  } finally {
+    publishSpy?.mockRestore();
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a real generation-zero start failure is retried with fresh durable adapter authority", async () => {
+  const adapterRoot = await mkdtemp(join(tmpdir(), "vf-revision-real-adapter-"));
+  const retryNative = "00000000-0000-4000-8000-000000000202";
+  const processes = [
+    processResult("", 1),
+    processResult(`${JSON.stringify({ type: "thread.started", thread_id: retryNative })}\n`, 0),
+  ];
+  const launched: Array<{ attempt_id: string; argv: string[] }> = [];
+  const adapter = createEngineSessionAdapter({
+    evidenceRoot: join(adapterRoot, "evidence"),
+    sourceEnv: { PATH: "/usr/bin:/bin" },
+    spawn(argv, options) {
+      launched.push({ attempt_id: options.env.VF_ATTEMPT_ID ?? "missing", argv: [...argv] });
+      const process = processes.shift();
+      if (!process) throw new Error("unexpected extra engine process");
+      return process;
+    },
+  });
+  const launchBinding = concreteCodexBinding();
+  const noAttemptPolicy = {
+    name: "no-attempt",
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(context: ConversationContext) {
+      return {
+        operation_id: context.correlation.operation_id,
+        status: "completed" as const,
+        artifact_refs: [],
+      };
+    },
+  } satisfies ConversationPolicy;
+  const fixture = await harness(
+    noAttemptPolicy,
+    adapter,
+    (store) => store,
+    async () => launchBinding,
+  );
+  try {
+    const launchInput = createInput("no-attempt");
+    const first = launchInput.bindings[0];
+    if (!first) throw new Error("launchable concrete binding is absent");
+    first.materialized = launchBinding;
+    const created = await fixture.runtime.create(launchInput);
+    const browser = createConversationBrowserAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      traceRoot: join(fixture.root, "trace"),
+      traceStore: fixture.traceStore,
+      browserAuthorityKey: new Uint8Array(32).fill(7),
+      artifactRegistry: fixture.artifacts,
+      artifactStore: fixture.artifactStore,
+      home: fixture.homeAuthorities,
+      service: fixture.runtime,
+    });
+    const revisionContext = await deferredActionRequest({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: created.conversation_id,
+      key: "real-start-failure",
+      candidate: {
+        type: "conversation.continue_message",
+        content: "Exercise the real revision start barrier.",
+        target_participants: "all",
+      },
+    });
+    const proposed = await browser.actions.propose({
+      conversation_id: created.conversation_id,
+      request: revisionContext.request,
+      authority: revisionContext.authority,
+    });
+    const approved = await browser.actions.approve({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: revisionContext.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    await browser.actions.commit({
+      conversation_id: created.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: revisionContext.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    });
+    try {
+      await waitFor(
+        async () =>
+          (
+            await browser.actions.get(
+              created.conversation_id,
+              proposed.response.proposal.proposal_id,
+            )
+          )?.operation.state === "failed",
+      );
+    } catch (error) {
+      const candidate = fixture.homeAuthorities.publishedRevisionTransitions().at(-1);
+      const candidateOperation = (
+        candidate?.authority as { operation?: { operation_id?: string } } | undefined
+      )?.operation?.operation_id;
+      const candidateHeader = candidateOperation
+        ? fixture.homeAuthorities.revisions.readOperation(candidateOperation)
+        : null;
+      const candidateEvents = candidateOperation
+        ? fixture.homeAuthorities.revisions.readEvents(candidateOperation)
+        : [];
+      const rootStart = adapter.startAuthority?.read("attempt-1");
+      const rootEvidence = rootStart
+        ? (JSON.parse(fs.readFileSync(rootStart.evidence_ref, "utf8")) as { reason?: string })
+        : null;
+      throw new Error(
+        `real revision did not fail: action=${
+          (
+            await browser.actions.get(
+              created.conversation_id,
+              proposed.response.proposal.proposal_id,
+            )
+          )?.operation.state
+        }; revision=${
+          candidateOperation && candidateHeader
+            ? foldRevisionOperation(candidateHeader, candidateEvents).state
+            : "absent"
+        }; receipts=${candidateEvents
+          .filter((event) => event.payload.kind === "participant-start")
+          .map((event) =>
+            event.payload.kind === "participant-start"
+              ? `${event.payload.receipt.state}:${
+                  adapter.startAuthority?.read(event.payload.receipt.attempt_key)?.outcome ??
+                  "missing"
+                }:${
+                  adapter.startAuthority?.read(event.payload.receipt.attempt_key)
+                    ?.native_session_id ?? "none"
+                }`
+              : "",
+          )
+          .join(
+            ",",
+          )}; root=${rootStart?.outcome ?? "missing"}:${rootEvidence?.reason ?? "none"}; launches=${launched.map(({ attempt_id }) => attempt_id).join(",")}; remaining=${processes.length}`,
+        { cause: error },
+      );
+    }
+    const transition = fixture.homeAuthorities.publishedRevisionTransitions().at(-1);
+    const operation = (transition?.authority as { operation?: unknown }).operation;
+    if (!operation || typeof operation !== "object" || !("operation_id" in operation))
+      throw new Error("real failed revision operation is absent");
+    const target = fixture.homeAuthorities.revisions.readOperation(
+      operation.operation_id as string,
+    );
+    if (!target) throw new Error("real failed revision operation header is absent");
+    let events = fixture.homeAuthorities.revisions.readEvents(target.operation_id);
+    const targetPlan = fixture.homeAuthorities.revisions.readPlan(target.operation_id);
+    if (!targetPlan) throw new Error("real failed revision preparation plan is absent");
+    expect(foldRevisionOperation(target, events, { preparationPlan: targetPlan }).state).toBe(
+      "start_failed",
+    );
+    const failed = events.filter((event) => event.payload.kind === "participant-start").at(-1);
+    if (failed?.payload.kind !== "participant-start")
+      throw new Error("real generation-zero receipt is absent");
+    const failedReceipt = failed.payload.receipt;
+    expect(failedReceipt).toMatchObject({ start_generation: 0, state: "failed" });
+    expect(adapter.startAuthority?.read(failedReceipt.attempt_key)).toMatchObject({
+      outcome: "proved-absent",
+      native_session_id: null,
+      process_quiescent: true,
+    });
+    try {
+      await waitFor(
+        async () =>
+          (await fixture.runtime.snapshot(target.child.conversation_id))?.lifecycle === "FAILED",
+      );
+    } catch (error) {
+      const internal = fixture.runtime as unknown as {
+        runtime: {
+          live: Map<string, unknown>;
+          terminalRuns: Map<string, unknown>;
+          operations: { operations: Map<string, { effects: Set<unknown>; state: string }> };
+          effects: { tails: Map<string, unknown> };
+          emissions: {
+            entries: Map<string, { state: string; terminal: string | null; pending?: unknown }>;
+          };
+        };
+      };
+      const runtimeState = internal.runtime.operations.operations.get(target.operation_id);
+      const emissionState = internal.runtime.emissions.entries.get(target.child.conversation_id);
+      throw new Error(
+        `failed revision child did not become terminal: ${JSON.stringify(
+          await fixture.runtime.snapshot(target.child.conversation_id),
+        )}; events=${JSON.stringify(
+          (await fixture.traceStore.readConversation(target.child.conversation_id)).map(
+            ({ stored_event }) => stored_event.event.type,
+          ),
+        )}; internal=${JSON.stringify({
+          operation_state: runtimeState?.state,
+          operation_effects: runtimeState?.effects.size,
+          effect_tail: internal.runtime.effects.tails.has(target.child.conversation_id),
+          emission_state: emissionState?.state,
+          emission_terminal: emissionState?.terminal,
+          emission_pending: Boolean(emissionState?.pending),
+          live: internal.runtime.live.has(target.child.conversation_id),
+          terminal_run: internal.runtime.terminalRuns.has(target.child.conversation_id),
+          action_state: fixture.homeAuthorities.actions.authority.get(
+            proposed.response.proposal.proposal_id,
+          )?.state,
+        })}`,
+        { cause: error },
+      );
+    }
+
+    const retryContext = await deferredActionRequest({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: target.child.conversation_id,
+      key: "real-start-retry",
+      candidate: {
+        type: "conversation.retry_revision_operation",
+        revision_operation_id: target.operation_id,
+      },
+    });
+    const participant = fixture.homeAuthorities.revisions
+      .readPlan(target.operation_id)
+      ?.participant_starts.find(
+        ({ participant_id }) => participant_id === failedReceipt.participant_id,
+      );
+    if (!participant) throw new Error("real failed revision participant plan is absent");
+    const hiddenHandle: AttemptHandle = {
+      attemptId: failedReceipt.attempt_key,
+      completion: new Promise(() => undefined),
+      terminate: async () => undefined,
+      readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
+      readEvidenceBinding: () => undefined,
+    };
+    const hiddenToken = {
+      operation: target,
+      participant,
+      attempt_key: failedReceipt.attempt_key,
+      prepared_at: failedReceipt.prepared_at,
+      effect_action_operation_id: foldRevisionOperation(target, events, {
+        preparationPlan: targetPlan,
+      }).effect_action_operation_id,
+    };
+    const liveRuntime = fixture.runtime as unknown as {
+      runtime: { operationId(conversationId: string): string | null };
+    };
+    expect(liveRuntime.runtime.operationId(target.child.conversation_id)).toBeNull();
+    fixture.homeAuthorities.revisionLanes.attach(hiddenToken, hiddenHandle);
+    await expect(
+      browser.actions.propose({
+        conversation_id: target.child.conversation_id,
+        request: retryContext.request,
+        authority: retryContext.authority,
+      }),
+    ).rejects.toThrow(/quiescent/i);
+    fixture.homeAuthorities.revisionLanes.effectUnknown(
+      hiddenToken,
+      hiddenHandle,
+      adapter.startAuthority,
+    );
+    const retry = await browser.actions.propose({
+      conversation_id: target.child.conversation_id,
+      request: retryContext.request,
+      authority: retryContext.authority,
+    });
+    const retryApproval = await browser.actions.approve({
+      conversation_id: target.child.conversation_id,
+      proposal_id: retry.response.proposal.proposal_id,
+      authority: retryContext.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: retry.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    const retried = await browser.actions.commit({
+      conversation_id: target.child.conversation_id,
+      proposal_id: retry.response.proposal.proposal_id,
+      authority: retryContext.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: retry.response.proposal.proposal_digest,
+        approval_id: retryApproval.approval.approval_id,
+      },
+    });
+    events = fixture.homeAuthorities.revisions.readEvents(target.operation_id);
+    if (retried.operation.state !== "succeeded")
+      throw new Error(
+        `real revision retry ended ${retried.operation.state}: ${events
+          .map((event) =>
+            event.payload.kind === "participant-start"
+              ? `${event.payload.receipt.start_generation}:${event.payload.receipt.state}:${
+                  adapter.startAuthority?.read(event.payload.receipt.attempt_key)?.outcome ??
+                  "missing"
+                }`
+              : `${event.payload.kind}:${"to" in event.payload ? event.payload.to : ""}`,
+          )
+          .join(",")}; launches=${launched.length}; remaining=${processes.length}`,
+      );
+    expect(foldRevisionOperation(target, events, { preparationPlan: targetPlan }).state).toBe(
+      "started",
+    );
+    const accepted = events.filter((event) => event.payload.kind === "participant-start").at(-1);
+    if (accepted?.payload.kind !== "participant-start")
+      throw new Error("real generation-one receipt is absent");
+    expect(accepted.payload.receipt).toMatchObject({ start_generation: 1, state: "accepted" });
+    expect(adapter.startAuthority?.read(accepted.payload.receipt.attempt_key)).toMatchObject({
+      outcome: "accepted",
+      native_session_id: retryNative,
+      process_quiescent: true,
+    });
+    expect(accepted.payload.receipt.attempt_key).not.toBe(failedReceipt.attempt_key);
+    expect(launched).toHaveLength(2);
+    expect(processes).toHaveLength(0);
+    expect(() =>
+      validateRevisionActionAuthorityChain({
+        operation: target,
+        events,
+        reader: fixture.homeAuthorities.actions.authority.reader,
+      }),
+    ).not.toThrow();
+    const forgedRetry = structuredClone(events);
+    const retryTransition = forgedRetry.find(
+      (event) =>
+        event.payload.kind === "state-transition" &&
+        event.payload.from === "start_failed" &&
+        event.payload.to === "starting",
+    );
+    if (retryTransition?.payload.kind !== "state-transition")
+      throw new Error("real retry transition is absent");
+    retryTransition.payload.authorized_by_action_operation_id = target.operation_id;
+    retryTransition.payload.effect_action_operation_id = target.operation_id;
+    expect(() =>
+      validateRevisionActionAuthorityChain({
+        operation: target,
+        events: forgedRetry,
+        reader: fixture.homeAuthorities.actions.authority.reader,
+      }),
+    ).toThrow(/retry action/i);
+    const missingTerminal = structuredClone(events);
+    const terminalTransition = missingTerminal.at(-1);
+    if (terminalTransition?.payload.kind !== "state-transition")
+      throw new Error("real retry terminal transition is absent");
+    terminalTransition.payload.action_terminals = [];
+    expect(() =>
+      validateRevisionActionAuthorityChain({
+        operation: target,
+        events: missingTerminal,
+        reader: fixture.homeAuthorities.actions.authority.reader,
+      }),
+    ).toThrow(/terminal mirror/i);
+    await waitForPublishedRevisionQuiescence({
+      runtime: fixture.runtime,
+      home: fixture.homeAuthorities,
+      childId: target.child.conversation_id,
+    });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+    await rm(adapterRoot, { recursive: true, force: true });
+  }
+});
+
+test("a real two-round debate resumes only after the complete revision start barrier", async () => {
+  const debate = new DebateConversationPolicy();
+  const seed: ConversationPolicy = {
+    name: "seed",
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(context) {
+      return {
+        operation_id: context.correlation.operation_id,
+        status: "completed",
+        artifact_refs: [],
+      };
+    },
+  };
+  const adapter = new DurableTwoRoundDebateAdapter();
+  const fixture = await harness(
+    seed,
+    adapter,
+    (store) => store,
+    async (binding) =>
+      materialized(false, {
+        roleName: binding.input.roleRef,
+        sessionMode: binding.input.sessionMode,
+      }),
+    { policies: new ConversationPolicyRegistry([seed, debate]) },
+  );
+  try {
+    const create = createInput("seed", 3, false, {
+      roles: ["brainstorm-participant", "brainstorm-skeptic", "brainstorm-evaluator"],
+    });
+    for (const binding of create.bindings)
+      binding.input.roleRef = binding.materialized.resolved.role.spec.name;
+    const root = await fixture.runtime.create(create);
+    expect(root.result.status).toBe("completed");
+    const childId = await approveAndCommitRevision({
+      ...fixture,
+      home: fixture.homeAuthorities,
+      conversationId: root.conversation_id,
+      key: "real-two-round-debate",
+      candidate: {
+        type: "conversation.update_settings",
+        changes: { policy: "debate", max_rounds: 2, baseline_enabled: false },
+      },
+    });
+    expect((await fixture.runtime.snapshot(childId))?.lifecycle).toBe("COMPLETED");
+    expect(adapter.starts).toHaveLength(11);
+    const barrier = adapter.starts.slice(0, 3);
+    expect(barrier.map(({ spawn }) => spawn.sessionMode)).toEqual(["fresh", "fresh", "fresh"]);
+    const sharedHandoffs = barrier.map(({ spawn }) => {
+      const offset = spawn.rendered_prompt.indexOf("VF-HANDOFF/1\n");
+      if (offset < 0) throw new Error("revision barrier handoff is absent");
+      return spawn.rendered_prompt.slice(offset).trimEnd();
+    });
+    expect(new Set(sharedHandoffs).size).toBe(1);
+    const revision = publishedRevisionOperationForChild(fixture.homeAuthorities, childId);
+    const acceptedReceipts = fixture.homeAuthorities.revisions
+      .readEvents(revision.operation_id)
+      .flatMap((event) =>
+        event.payload.kind === "participant-start" &&
+        event.payload.receipt.state === PUBLIC_OPERATION_PARTICIPANT_START_PHASE.ACCEPTED
+          ? [event.payload.receipt]
+          : [],
+      );
+    expect(acceptedReceipts).toHaveLength(3);
+    expect(acceptedReceipts.map(({ attempt_key }) => attempt_key).sort()).toEqual(
+      barrier.map(({ attemptId }) => attemptId).sort(),
+    );
+    const nativeByParticipant = new Map(
+      acceptedReceipts.map(({ attempt_key, participant_id }) => [
+        participant_id,
+        adapter.nativeByAttempt.get(attempt_key),
+      ]),
+    );
+    expect(adapter.starts.findIndex(({ spawn }) => spawn.sessionMode === "exact")).toBe(
+      barrier.length,
+    );
+    const responderStarts = adapter.starts
+      .slice(barrier.length)
+      .filter(({ spawn }) => spawn.sessionMode === "exact");
+    expect(responderStarts).toHaveLength(4);
+    const turn = (request: EngineSessionRequest) => {
+      const prompt = request.spawn.rendered_prompt;
+      const offset = prompt.lastIndexOf("VF-TURN/1\n");
+      if (offset < 0) throw new Error("structured turn is absent");
+      return JSON.parse(prompt.slice(offset + "VF-TURN/1\n".length).trim()) as {
+        delivery_mode: string;
+        recipient_participant_id: string;
+        instruction: { kind: string; round: number };
+        public_responses: Array<{ author_public_id: string; answer: string }>;
+      };
+    };
+    const startsByTurn = new Map(
+      responderStarts.map((request) => {
+        const envelope = turn(request);
+        return [
+          `${envelope.instruction.round}:${envelope.recipient_participant_id}`,
+          {
+            envelope,
+            request,
+          },
+        ];
+      }),
+    );
+    expect([...startsByTurn.keys()].sort()).toEqual([
+      "1:participant-1",
+      "1:participant-2",
+      "2:participant-1",
+      "2:participant-2",
+    ]);
+    for (const participantId of ["participant-1", "participant-2"]) {
+      const nativeSessionId = nativeByParticipant.get(participantId);
+      if (!nativeSessionId)
+        throw new Error(`barrier native binding is absent for ${participantId}`);
+      for (const round of [1, 2]) {
+        const started = startsByTurn.get(`${round}:${participantId}`);
+        if (!started)
+          throw new Error(`responder start is absent for ${participantId} round ${round}`);
+        expect(started.request.nativeSessionId).toBe(nativeSessionId);
+        expect(started.envelope).toMatchObject({
+          delivery_mode: "exact-delta",
+          recipient_participant_id: participantId,
+          instruction: { kind: "debate-participant", round },
+        });
+      }
+    }
+    const firstResponderNative = nativeByParticipant.get("participant-1");
+    const secondResponderNative = nativeByParticipant.get("participant-2");
+    if (!firstResponderNative || !secondResponderNative)
+      throw new Error("responder barrier native bindings are incomplete");
+    expect(firstResponderNative).not.toBe(secondResponderNative);
+    const firstRoundTwo = startsByTurn.get("2:participant-1")?.envelope;
+    const secondRoundTwo = startsByTurn.get("2:participant-2")?.envelope;
+    expect(firstRoundTwo).toMatchObject({
+      delivery_mode: "exact-delta",
+      recipient_participant_id: "participant-1",
+      public_responses: [{ author_public_id: "participant-2", answer: "Option" }],
+    });
+    expect(secondRoundTwo).toMatchObject({
+      delivery_mode: "exact-delta",
+      recipient_participant_id: "participant-2",
+      public_responses: [{ author_public_id: "participant-1", answer: "Option" }],
+    });
+    expect(JSON.stringify(firstRoundTwo)).not.toContain(firstResponderNative);
+    expect(JSON.stringify(secondRoundTwo)).not.toContain(secondResponderNative);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a receipt action re-observes a published effect before writing its terminal receipt", async () => {
+  const policy: ConversationPolicy = {
+    name: "abort-aware",
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(context) {
+      if (!context.signal.aborted)
+        await new Promise<void>((resolve) =>
+          context.signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      return {
+        operation_id: context.correlation.operation_id,
+        status: "aborted",
+        artifact_refs: [],
+      };
+    },
+  };
+  const fixture = await harness(policy);
+  let inject = true;
+  try {
+    const started = await fixture.runtime.start(createInput("abort-aware"));
+    const browser = createConversationBrowserAuthorities({
+      artifactRoot: join(fixture.root, "manifests"),
+      traceRoot: join(fixture.root, "trace"),
+      traceStore: fixture.traceStore,
+      browserAuthorityKey: new Uint8Array(32).fill(9),
+      artifactRegistry: fixture.artifacts,
+      artifactStore: fixture.artifactStore,
+      home: fixture.homeAuthorities,
+      service: fixture.runtime,
+      receiptEffectFault(point) {
+        if (inject && point === "after-effect-publish") {
+          inject = false;
+          throw new Error("injected post-publish receipt crash");
+        }
+      },
+    });
+    const resolved = browser.lineage.resolve(started.conversation_id);
+    const context = {
+      request: {
+        schema_version: "1.0" as const,
+        idempotency_key: "receipt-post-publish-recovery",
+        anchor_event_id:
+          (await fixture.runtime.events(started.conversation_id, 0))?.at(-1)?.event_id ?? null,
+        expected: {
+          mode: "writable-revision" as const,
+          conversation_id: resolved.requested.node.conversation_id,
+          revision_id: resolved.requested.node.revision_id,
+          last_seq: resolved.requested.source.journal_head.last_seq,
+          conversation_lock_digest: conversationLockDigest(
+            resolved.lineage.root_session_id,
+            resolved.requested.source,
+            resolved.revision_claim_epoch,
+          ),
+        },
+        candidate: {
+          type: "conversation.stop_operation" as const,
+          operation_id: started.operation_id,
+        },
+      },
+      authority: defaultConversationActionAuthority(resolved.lineage.root_session_id),
+    };
+    const proposed = await browser.actions.propose({
+      conversation_id: started.conversation_id,
+      request: context.request,
+      authority: context.authority,
+    });
+    const approved = await browser.actions.approve({
+      conversation_id: started.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        decision: "approved",
+        challenge_id: null,
+        challenge_response: null,
+      },
+    });
+    const committed = await browser.actions.commit({
+      conversation_id: started.conversation_id,
+      proposal_id: proposed.response.proposal.proposal_id,
+      authority: context.authority,
+      request: {
+        schema_version: "1.0",
+        proposal_digest: proposed.response.proposal.proposal_digest,
+        approval_id: approved.approval.approval_id,
+      },
+    });
+    expect(committed.operation.state).toBe("succeeded");
+    const receipt = fixture.homeAuthorities.actionReceipts.read(
+      proposed.response.proposal.proposal_id,
+    );
+    expect(receipt).toMatchObject({ outcome: "succeeded", reason_code: null });
+    expect(receipt?.observed_authority_binding_digest).not.toBe(
+      receipt?.expected_authority_binding_digest,
+    );
+    expect(inject).toBe(false);
+    expect((await started.completion).result.status).toBe("aborted");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
   }
 });
 
@@ -459,6 +2868,21 @@ test("direct policy uses the canonical participant id and launchAttempt exactly 
     bindingReadiness: Object.freeze([{ engine_available: true, model_valid: true }]),
     signal: new AbortController().signal,
     messages: () => Promise.resolve(Object.freeze([])),
+    prepareTurn: (request: Parameters<ConversationContext["prepareTurn"]>[0]) =>
+      Promise.resolve(
+        prepareConversationTurn({
+          conversation_id: "conversation",
+          revision_id: "revision",
+          recipient_engine: "codex",
+          request,
+          events: [],
+          resume: null,
+          prior_delivery: undefined,
+          observed_after_public_seq: 0,
+          shared_handoff: null,
+        }),
+      ),
+    publishSocialIntent: () => ({ accepted: true, diagnostic_code: null }),
     async emit() {
       throw new Error("direct policy should not append raw response events");
     },
@@ -482,14 +2906,13 @@ test("direct policy uses the canonical participant id and launchAttempt exactly 
   const policy = new DirectConversationPolicy();
   expect((await policy.dryRun(context)).participants[0]?.participant_id).toBe("custom-participant");
   const output = await policy.execute(context);
-  expect(requests).toEqual([
-    {
-      participantId: "custom-participant",
-      bindingIndex: 0,
-      purpose: "direct",
-      promptInput: "Explain the tradeoff",
-    },
-  ]);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({
+    participantId: "custom-participant",
+    bindingIndex: 0,
+    purpose: "direct",
+    delivery: { envelope: { instruction: { kind: "direct", topic: "Explain the tradeoff" } } },
+  });
   expect(output).toEqual({ operation_id: "operation", status: "completed", artifact_refs: [] });
   expect(emissions).toEqual([
     {
@@ -1373,7 +3796,7 @@ test("failed PAUSED cancellation preserves deferred work and buffered active chu
             status: "skipped",
             answer: null,
             confidence: null,
-            skip_reason: "cancel rollback",
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
           },
         },
       })
@@ -2785,7 +5208,12 @@ test("STOPPED gate rejects every deferred approval continuation effect", async (
         idempotency_key: "stopped-continuation:late",
         event: {
           type: "baseline_result",
-          payload: { status: "skipped", answer: null, confidence: null, skip_reason: "late" },
+          payload: {
+            status: "skipped",
+            answer: null,
+            confidence: null,
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.ENGINE_UNAVAILABLE,
+          },
         },
       });
       continued = true;
@@ -2921,7 +5349,7 @@ test("terminal publication never exposes or notifies a half-terminal prefix", as
   });
   const { root, runtime } = await harness(
     new DirectConversationPolicy(),
-    new FakeAdapter(),
+    new DurableRevisionFakeAdapter(),
     (store) => ({
       readConversation: (id) => store.readConversation(id),
       append: async (correlation, emission, native) => {
@@ -4064,8 +6492,8 @@ test("repeat durable approval does not require provider rehydration", async () =
     releaseContinuation();
     if (conversationId) {
       await waitFor(async () =>
-        ["COMPLETED", "FAILED", "ABORTED"].includes(
-          (await runtime.snapshot(conversationId as string))?.lifecycle ?? "",
+        isConversationTerminalLifecycle(
+          (await runtime.snapshot(conversationId as string))?.lifecycle,
         ),
       ).catch(() => undefined);
     }
@@ -4420,7 +6848,12 @@ test("remote PAUSE suspends every live member and drains owner effects before it
       idempotency_key: "owner:effect-before-pause",
       event: {
         type: "baseline_result",
-        payload: { status: "skipped", answer: null, confidence: null, skip_reason: "barrier" },
+        payload: {
+          status: "skipped",
+          answer: null,
+          confidence: null,
+          skip_reason: CONVERSATION_BASELINE_SKIP_REASON.SINGLE_PARTICIPANT,
+        },
       },
     });
     await started;
@@ -4458,7 +6891,12 @@ test("remote PAUSE suspends every live member and drains owner effects before it
       idempotency_key: "owner:effect-after-prepare",
       event: {
         type: "baseline_result",
-        payload: { status: "skipped", answer: null, confidence: null, skip_reason: "deferred" },
+        payload: {
+          status: "skipped",
+          answer: null,
+          confidence: null,
+          skip_reason: CONVERSATION_BASELINE_SKIP_REASON.ENGINE_UNAVAILABLE,
+        },
       },
     });
     const deferredAttempt = context.launchAttempt({
@@ -4475,7 +6913,9 @@ test("remote PAUSE suspends every live member and drains owner effects before it
     await Promise.all([ownerEffect, ownerArtifact, pausing]);
     const pausedEvents = await runtime.events(accepted.conversation_id, 0);
     const effectIndex = pausedEvents?.findIndex(
-      ({ event }) => event.type === "baseline_result" && event.payload.skip_reason === "barrier",
+      ({ event }) =>
+        event.type === "baseline_result" &&
+        event.payload.skip_reason === CONVERSATION_BASELINE_SKIP_REASON.SINGLE_PARTICIPANT,
     );
     const artifactIndex = pausedEvents?.findIndex(({ event }) => event.type === "artifact_created");
     const pauseIndex = pausedEvents?.findIndex(
@@ -4879,7 +7319,12 @@ test("pause preserves attempts; restart resume rehydrates exact binding and neve
         idempotency_key: "paused:forged-effect",
         event: {
           type: "baseline_result",
-          payload: { status: "skipped", answer: null, confidence: null, skip_reason: "paused" },
+          payload: {
+            status: "skipped",
+            answer: null,
+            confidence: null,
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
+          },
         },
       })
       .then(
@@ -4960,7 +7405,7 @@ test("policy effects suspend while PAUSED and continue only after durable resume
             status: "skipped" as const,
             answer: null,
             confidence: null,
-            skip_reason: "test",
+            skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
           },
         },
       };
@@ -4994,7 +7439,10 @@ test("policy effects suspend while PAUSED and continue only after durable resume
       (await runtime.events(accepted.conversation_id, 0))?.find(
         (event) => event.event.type === "baseline_result",
       )?.event,
-    ).toMatchObject({ type: "baseline_result", payload: { skip_reason: "test" } });
+    ).toMatchObject({
+      type: "baseline_result",
+      payload: { skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED },
+    });
   } finally {
     release();
     await rm(root, { recursive: true, force: true });
@@ -5407,6 +7855,7 @@ test("health mutation cannot steal or reopen an in-flight PAUSE authority", asyn
     });
     await runtime.resume(accepted.conversation_id);
     await runtime.stop(accepted.conversation_id);
+    await accepted.completion;
   } finally {
     releasePause();
     await rm(root, { recursive: true, force: true });
@@ -5587,6 +8036,125 @@ test("explicit resume reconciles one persisted native binding and exact attempts
       true,
     );
   } finally {
+    await runtime.stop("conversation-1").catch(() => undefined);
+    await creating.catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("native compaction revokes exact resume and replays bounded own history on a fresh turn", async () => {
+  const nativeSessionId = "00000000-0000-4000-8000-000000000124";
+  let context!: ConversationContext;
+  const policy: ConversationPolicy = {
+    name: "compacted-resume",
+    async dryRun() {
+      return {
+        participants: [],
+        evaluator_auto_added: false,
+        engines_available: [],
+        models_valid: true,
+      };
+    },
+    async execute(value) {
+      context = value;
+      value.launchAttempt({
+        participantId: "participant-1",
+        bindingIndex: 0,
+        purpose: "direct",
+        promptInput: "capture before compaction",
+      });
+      await new Promise<void>((resolve) =>
+        value.signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      return { operation_id: value.correlation.operation_id, status: "aborted", artifact_refs: [] };
+    },
+  };
+  const adapter = new FakeAdapter();
+  adapter.nativeSessionId = nativeSessionId;
+  const { root, runtime, traceStore } = await harness(policy, adapter);
+  const creating = runtime.create(createInput(policy.name));
+  let restarted: ConversationOrchestrator | undefined;
+  try {
+    await waitFor(() => context !== undefined);
+    expect(context).toBeDefined();
+    const store = new ConversationArtifactStore({ dir: join(root, "manifests") });
+    await waitFor(() => store.readRecord("conversation-1")?.resume_bindings.length === 1);
+    expect(store.readRecord("conversation-1")?.resume_bindings).toHaveLength(1);
+    await runtime.pause("conversation-1");
+    expect((await runtime.snapshot("conversation-1"))?.lifecycle).toBe("PAUSED");
+
+    const restartAdapter = new FakeAdapter();
+    restartAdapter.nativeHistoryContinuity = "compacted";
+    const restartCounters = new Map<string, number>();
+    let failReconcileAppend = true;
+    restarted = new ConversationOrchestrator({
+      traceStore: {
+        readConversation: (id) => traceStore.readConversation(id),
+        append: async (correlation, emission, native) => {
+          if (failReconcileAppend && emission.event.type === "native_history_reconciled") {
+            failReconcileAppend = false;
+            throw new Error("injected compaction reconciliation append failure");
+          }
+          return traceStore.append(correlation, emission, native);
+        },
+      },
+      artifactRegistry: new DurableArtifactRegistry({ dir: join(root, "opaque") }),
+      artifactStore: store,
+      sessionAdapter: restartAdapter,
+      policies: new ConversationPolicyRegistry([policy]),
+      id: (kind) => {
+        const next = (restartCounters.get(kind) ?? 0) + 1;
+        restartCounters.set(kind, next);
+        return `compacted-${kind}-${next}`;
+      },
+      now: () => "2026-08-22T00:00:00.000Z",
+      rehydrateBinding: async () => materialized(),
+    });
+
+    await expect(restarted.resume("conversation-1")).rejects.toThrow(
+      "injected compaction reconciliation append failure",
+    );
+    expect(store.readRecord("conversation-1")?.resume_bindings).toHaveLength(1);
+    await restarted.resume("conversation-1");
+    expect(store.readRecord("conversation-1")?.resume_bindings).toEqual([]);
+    const restoredAuthority = (
+      restarted as unknown as { runtime: { context(id: string): Promise<ConversationContext> } }
+    ).runtime;
+    const restoredContext = await restoredAuthority.context("conversation-1");
+    const delivery = await restoredContext.prepareTurn({
+      participant_id: "participant-1",
+      instruction: { kind: "direct", topic: "continue after compaction" },
+    });
+    expect(delivery.envelope).toMatchObject({
+      delivery_mode: "full-history",
+      native_session_use: "not-used",
+      recipient_history: {
+        source: "bounded-public-replay",
+        source_response_count: 0,
+        replayed_response_count: 0,
+      },
+    });
+
+    const resumedAttempt = restoredContext.launchAttempt({
+      participantId: "participant-1",
+      bindingIndex: 0,
+      purpose: "direct",
+      promptInput: delivery.prompt_input,
+      delivery,
+    });
+    await resumedAttempt.completion;
+    expect(restartAdapter.starts[0]).toMatchObject({ spawn: { sessionMode: "fresh" } });
+    expect(restartAdapter.starts[0]?.nativeSessionId).toBeUndefined();
+    const history = (await restarted.events("conversation-1", 0))?.find(
+      (event) => event.event.type === "native_history_reconciled",
+    );
+    expect(history?.event).toMatchObject({
+      type: "native_history_reconciled",
+      payload: { status: "partial", completeness_reason: "fake" },
+    });
+    expect(JSON.stringify(history)).not.toContain(nativeSessionId);
+  } finally {
+    await restarted?.stop("conversation-1").catch(() => undefined);
     await runtime.stop("conversation-1").catch(() => undefined);
     await creating.catch(() => undefined);
     await rm(root, { recursive: true, force: true });
@@ -5918,7 +8486,7 @@ test("ACTIVE message injects; COMPLETED message creates one idempotent child rev
   };
   const activeHarness = await harness(
     held,
-    new FakeAdapter(),
+    new DurableRevisionFakeAdapter(),
     (store) => store,
     async () => {
       childRehydrateCalls += 1;
@@ -5949,11 +8517,9 @@ test("ACTIVE message injects; COMPLETED message creates one idempotent child rev
 
     const request = { content: "revise it", target_participants: "all" as const };
     const unknownRequest = { content: "unknown target", target_participants: ["missing"] };
-    const unknownChild = conversationChildId("conversation-1", unknownRequest);
     await expect(activeHarness.runtime.message("conversation-1", unknownRequest)).rejects.toThrow(
       "unknown target participant",
     );
-    expect(await activeHarness.runtime.events(unknownChild, 0)).toBeNull();
     expect(
       new ConversationArtifactStore({ dir: join(activeHarness.root, "manifests") }).readRecord(
         "conversation-1",
@@ -6005,12 +8571,12 @@ test("ACTIVE message injects; COMPLETED message creates one idempotent child rev
     expect(await activeHarness.runtime.message("conversation-1", { content: "revise it" })).toEqual(
       first,
     );
-    const targeted = await activeHarness.runtime.message("conversation-1", {
+    const targeted = await activeHarness.runtime.message(childId, {
       content: "targeted revision",
       target_participants: ["participant-1", "participant-1"],
     });
     expect(
-      await activeHarness.runtime.message("conversation-1", {
+      await activeHarness.runtime.message(childId, {
         content: "targeted revision",
         target_participants: ["participant-1"],
       }),
@@ -6022,6 +8588,20 @@ test("ACTIVE message injects; COMPLETED message creates one idempotent child rev
       targetedEvents?.find((event) => event.event.type === "user_message")?.event
         .payload as unknown,
     ).toEqual({ content: "targeted revision", target_participants: ["participant-1"] });
+    await waitFor(
+      async () =>
+        (await activeHarness.runtime.snapshot(targetedChildId))?.lifecycle === "COMPLETED",
+    );
+    await waitForPublishedRevisionQuiescence({
+      runtime: activeHarness.runtime,
+      home: activeHarness.homeAuthorities,
+      childId,
+    });
+    await waitForPublishedRevisionQuiescence({
+      runtime: activeHarness.runtime,
+      home: activeHarness.homeAuthorities,
+      childId: targetedChildId,
+    });
   } finally {
     await rm(activeHarness.root, { recursive: true, force: true });
   }
@@ -6032,9 +8612,9 @@ test("a failed child configuration is never linked and a retry completes the sam
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => unhandled.push(reason);
   process.on("unhandledRejection", onUnhandled);
-  const { root, runtime } = await harness(
+  const { root, runtime, homeAuthorities } = await harness(
     new DirectConversationPolicy(),
-    new FakeAdapter(),
+    new DurableRevisionFakeAdapter(),
     (store) => ({
       readConversation: (id) => store.readConversation(id),
       append: (correlation, emission, native) => {
@@ -6068,8 +8648,13 @@ test("a failed child configuration is never linked and a retry completes the sam
     expect(events?.some((event) => event.event.type === "state_change")).toBe(true);
     expect(events?.some((event) => event.event.type === "user_message")).toBe(true);
     await waitFor(async () => (await runtime.snapshot(childId))?.lifecycle === "COMPLETED");
+    await waitForPublishedRevisionQuiescence({
+      runtime,
+      home: homeAuthorities,
+      childId,
+    });
   } finally {
-    process.off("unhandledRejection", onUnhandled);
+    EventEmitter.prototype.off.call(process, "unhandledRejection", onUnhandled);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -6110,6 +8695,8 @@ test("two services converge on one durable child execution for the same complete
         }
       : store;
     const counters = new Map<string, number>();
+    if (adapter instanceof DurableRevisionFakeAdapter)
+      adapter.bindTestAuthority(join(root, `adapter-evidence-${label}`));
     return new ConversationOrchestrator({
       traceStore,
       artifactRegistry: artifacts,
@@ -6125,8 +8712,8 @@ test("two services converge on one durable child execution for the same complete
       rehydrateBinding: async () => materialized(),
     });
   };
-  const firstAdapter = new FakeAdapter();
-  const secondAdapter = new FakeAdapter();
+  const firstAdapter = new DurableRevisionFakeAdapter();
+  const secondAdapter = new DurableRevisionFakeAdapter();
   const firstService = makeService("first", firstAdapter, true);
   const secondService = makeService("second", secondAdapter);
   let firstPending: ReturnType<typeof firstService.message> | undefined;
@@ -6142,14 +8729,20 @@ test("two services converge on one durable child execution for the same complete
     const second = await secondService.message("conversation-1", right);
     const childId = second.child_conversation_id;
     if (!childId) throw new Error("shared child conversation was not created");
-    await waitFor(async () => (await secondService.snapshot(childId))?.lifecycle === "COMPLETED");
     releaseChildActive();
     const first = await firstPending;
+    await waitFor(async () => (await secondService.snapshot(childId))?.lifecycle === "COMPLETED");
     expect(second).toEqual(first);
+    await waitFor(
+      () =>
+        (firstService as unknown as { runtime: ConversationRuntime }).runtime.operationId(
+          childId,
+        ) === null,
+    );
     expect(
       (firstService as unknown as { runtime: ConversationRuntime }).runtime.operationId(childId),
     ).toBeNull();
-    expect(firstAdapter.starts.length + secondAdapter.starts.length).toBe(2);
+    expect(firstAdapter.starts.length + secondAdapter.starts.length).toBe(3);
     const events = await firstService.events(childId, 0);
     expect(events?.filter((item) => item.event.type === "user_message")).toHaveLength(1);
     expect(
@@ -6216,6 +8809,7 @@ test("racing child revisions keep one durable operation chain and cancellable ow
   };
   const first = makeService("first-race", new FakeAdapter(), true);
   const winningAdapter = new OrderedResumeAdapter();
+  winningAdapter.bindTestAuthority(join(root, "adapter-evidence-winning"));
   const second = makeService("second-race", winningAdapter);
   let childId: string | undefined;
   try {
@@ -6227,10 +8821,14 @@ test("racing child revisions keep one durable operation chain and cancellable ow
     childId = winner.child_conversation_id;
     if (!childId) throw new Error("child conversation was not created");
     await waitFor(() => winningAdapter.starts.length === 1);
+    const barrierAttempt = winningAdapter.starts[0]?.attemptId;
+    if (!barrierAttempt) throw new Error("child revision barrier attempt was not started");
+    winningAdapter.complete(barrierAttempt);
+    await waitFor(() => winningAdapter.starts.length === 2);
     releaseActive();
     await expect(losing).resolves.toEqual(winner);
     const events = await second.events(childId, 0);
-    const attemptId = winningAdapter.starts[0]?.attemptId;
+    const attemptId = winningAdapter.starts[1]?.attemptId;
     const operationId = events?.find((item) => item.attempt_id === attemptId)?.operation_id;
     expect(operationId).toBeTruthy();
     if (!operationId) throw new Error("child attempt operation was not recorded");
@@ -6252,9 +8850,7 @@ test("racing child revisions keep one durable operation chain and cancellable ow
     for (const started of winningAdapter.starts) winningAdapter.complete(started.attemptId);
     if (childId) {
       await waitFor(async () =>
-        ["COMPLETED", "FAILED", "ABORTED"].includes(
-          (await second.snapshot(childId as string))?.lifecycle ?? "",
-        ),
+        isConversationTerminalLifecycle((await second.snapshot(childId as string))?.lifecycle),
       ).catch(() => undefined);
     }
     await rm(root, { recursive: true, force: true });
@@ -6310,7 +8906,7 @@ test("subscriber replay failure deactivates the cursor instead of delivering a g
     release();
     await accepted.completion;
   } finally {
-    process.off("unhandledRejection", onUnhandled);
+    EventEmitter.prototype.off.call(process, "unhandledRejection", onUnhandled);
     release();
     await rm(root, { recursive: true, force: true });
   }
@@ -6415,7 +9011,12 @@ test("policy and artifact keys cannot poison reserved terminal authority", async
           idempotency_key: "conversation:terminal-state",
           event: {
             type: "baseline_result",
-            payload: { status: "skipped", answer: null, confidence: null, skip_reason: "poison" },
+            payload: {
+              status: "skipped",
+              answer: null,
+              confidence: null,
+              skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
+            },
           },
         });
       } catch (error) {
@@ -6719,6 +9320,29 @@ test("direct policy persists ordered engine chunks once before an empty completi
   }
 });
 
+test("direct policy publishes a structured answer without leaking its social sidecar", async () => {
+  const adapter = new FakeAdapter();
+  adapter.chunks = ['{"answer":"visible answer",', '"quote_refs":[],"reactions":[]}'];
+  adapter.output = adapter.chunks.join("");
+  const { root, runtime } = await harness(new DirectConversationPolicy(), adapter);
+  try {
+    await runtime.create(createInput("direct"));
+    const deltas = (await runtime.events("conversation-1", 0))?.flatMap((event) =>
+      event.event.type === "agent_response_delta" ? [event.event.payload] : [],
+    );
+    expect(deltas?.map(({ content_delta }) => String(content_delta))).toEqual([
+      "visible answer",
+      "",
+    ]);
+    expect(JSON.stringify(deltas)).not.toContain("quote_refs");
+    expect(
+      (await runtime.snapshot("conversation-1"))?.rounds[0]?.participant_responses[0]?.content,
+    ).toBe("visible answer");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("forged policy operation result fails closed and terminal controls reject illegal lifecycle", async () => {
   const policy: ConversationPolicy = {
     name: "forged-result",
@@ -6833,6 +9457,7 @@ test("a deferred start failure cannot authorize a child attempt parent", async (
         completion: Promise.resolve(completed(request.attemptId)),
         terminate: async () => {},
         readResumeBinding: () => undefined,
+        readModelOutputBinding: () => undefined,
         readEvidenceBinding: () => undefined,
       };
     },

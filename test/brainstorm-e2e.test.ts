@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { MaterializedAgentBinding } from "../src/agents/binding.js";
 import { previewAgentBinding } from "../src/agents/binding.js";
 import { conversationEnvPolicy } from "../src/dispatch/env-filter.js";
@@ -16,7 +16,10 @@ import type {
   ConversationBootstrap,
   ConversationBootstrapOptions,
 } from "../src/orchestrator/conversation/bootstrap.js";
-import type { ConversationContext } from "../src/orchestrator/conversation/types.js";
+import type {
+  ConversationContext,
+  ConversationCreateRequest,
+} from "../src/orchestrator/conversation/types.js";
 import {
   cleanupMarker,
   createMarker,
@@ -39,6 +42,9 @@ const PRIVATE_PROMPT = "private acceptance prompt: do not project";
 const PRIVATE_TOOL_INPUT = "artifact://private/tool-input";
 const PRIVATE_TOOL_OUTPUT = "artifact://private/tool-output";
 const OPAQUE_ARTIFACT = /^artifact_[A-Za-z0-9_-]{43}$/;
+const REPO_TEST_TIMEOUT_MS = 30_000;
+const PRODUCTION_ACCEPTANCE_EVIDENCE_TEST =
+  "production adapters, routing, and recovery suites remain executable acceptance evidence";
 const ALL_TRUE = {
   agreement: { value: true, evidence: "the proposals agree" },
   conflict_resolution: { value: true, evidence: "risks are resolved" },
@@ -219,7 +225,7 @@ function httpAuthority(bootstrap: ConversationBootstrap) {
       now: () => streamNow,
     }),
     artifacts: {
-      registry: bootstrap.authorities.artifactRegistry,
+      ancestry: bootstrap.authorities.browser.artifactResolver,
       store: bootstrap.authorities.artifactStore,
     },
     csrf: (request) => request.headers.get("x-vibeflow-token") === "acceptance-csrf",
@@ -248,6 +254,10 @@ function httpAuthority(bootstrap: ConversationBootstrap) {
     cookie,
     request,
     route,
+    artifactSha(conversationId: string, artifactId: string) {
+      return bootstrap.authorities.browser.artifactResolver.resolve(conversationId, artifactId)
+        ?.reference.content_sha256;
+    },
     advanceStreamClock(ms: number) {
       streamNow += ms;
     },
@@ -274,10 +284,12 @@ async function artifactText(
   conversationId: string,
   opaqueId: string,
 ): Promise<string> {
+  const expected = http.artifactSha(conversationId, opaqueId);
+  if (!expected) throw new Error("published artifact ancestry is absent");
   const response = await http.route(
     http.request(
       "GET",
-      `/api/conversations/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(opaqueId)}`,
+      `/api/conversations/${encodeURIComponent(conversationId)}/artifacts/${encodeURIComponent(opaqueId)}?expected_sha256=${expected}`,
     ),
   );
   expect(response.status).toBe(200);
@@ -315,7 +327,7 @@ async function runHermeticAcceptanceSuite(file: string, pattern?: string): Promi
   await mkdir(home, { recursive: true });
   await mkdir(skills, { recursive: true });
   await mkdir(temp, { recursive: true });
-  const argv = ["test", file];
+  const argv = ["test", "--timeout", String(REPO_TEST_TIMEOUT_MS), file];
   if (pattern) argv.push("-t", pattern);
   const env: NodeJS.ProcessEnv = {
     HOME: home,
@@ -366,7 +378,7 @@ async function runHermeticAcceptanceSuite(file: string, pattern?: string): Promi
 }
 
 describe("brainstorm Phase 3 acceptance", () => {
-  test("production adapters, routing, and recovery suites remain executable acceptance evidence", async () => {
+  const productionAcceptanceEvidence = async () => {
     const adapters = await runHermeticAcceptanceSuite(
       "test/dispatch-session.test.ts",
       [
@@ -394,9 +406,9 @@ describe("brainstorm Phase 3 acceptance", () => {
     expect(adapters).toContain("claude exact mode consumes the exact native id and model override");
     expect(adapters).toContain("codex exact mode consumes the exact native id and model override");
     expect(adapters).toContain(
-      "antigravity exact mode consumes the exact native id and model override",
+      "opencode exact mode consumes the exact native id and model override",
     );
-    for (const engine of ["copilot", "opencode"]) {
+    for (const engine of ["copilot", "antigravity"]) {
       expect(adapters).toContain(`${engine} exact mode fails closed`);
     }
     for (const engine of ["copilot", "opencode", "antigravity"]) {
@@ -416,6 +428,13 @@ describe("brainstorm Phase 3 acceptance", () => {
     );
     expect(adapters).toContain(
       "OpenCode releases both streams after close when no session id is captured",
+    );
+    const delivery = await runHermeticAcceptanceSuite(
+      "test/orchestrator/conversation-turn-delivery.test.ts",
+      "projects a production handoff peer-only for exact recovery and replays fallback self once",
+    );
+    expect(delivery).toContain(
+      "projects a production handoff peer-only for exact recovery and replays fallback self once",
     );
 
     const binding = await runHermeticAcceptanceSuite(
@@ -531,7 +550,8 @@ describe("brainstorm Phase 3 acceptance", () => {
     );
     expect(brainstormCli).toContain("--json emits the exact 1.0 executed contract");
     expect(brainstormCli).toContain("without leaking details");
-  }, 30_000);
+  };
+  test(PRODUCTION_ACCEPTANCE_EVIDENCE_TEST, productionAcceptanceEvidence, REPO_TEST_TIMEOUT_MS);
 
   test("production bootstrap, services, auth, routes, trace and artifacts stay hermetic", async () => {
     const root = await mkdtemp(join(tmpdir(), "vf-brainstorm-e2e-"));
@@ -656,6 +676,10 @@ describe("brainstorm Phase 3 acceptance", () => {
         }),
       );
       expect(message.status).toBe(202);
+      expect(await message.json()).toEqual({
+        accepted: true,
+        message_id: expect.stringMatching(/^vf-queued-message-[a-f0-9]{64}$/),
+      });
       expect(
         await (
           await http.route(
@@ -671,8 +695,9 @@ describe("brainstorm Phase 3 acceptance", () => {
         ).json(),
       ).toEqual({ resumed: true, active_state: "ACTIVE" });
 
-      expect(scheduled).toHaveLength(1);
+      expect(scheduled).toHaveLength(2);
       scheduled.shift()?.();
+      expect(scheduled).toHaveLength(1);
       const approval = await waitForEvent(bootstrap, created.conversation_id, "approval_requested");
       if (approval.event.type !== "approval_requested") throw new Error("approval unavailable");
       const decision = {
@@ -735,7 +760,6 @@ describe("brainstorm Phase 3 acceptance", () => {
         "participant_bound",
         "skill_injected",
         "state_change",
-        "user_message",
         "operation_lifecycle",
         "tool_action",
         "artifact_created",
@@ -857,7 +881,7 @@ describe("brainstorm Phase 3 acceptance", () => {
           "Write,Edit,Bash",
         ]),
       );
-      expect(launches[0]?.options.stdinText).toBe(PRIVATE_PROMPT);
+      expect(launches[0]?.options.stdinText).toBe(`${PRIVATE_PROMPT}\n`);
       expect(launches[0]?.options.cwd).toBeUndefined();
       expect(launches[0]?.options.env.ANTHROPIC_API_KEY).toBe(privateEnv.ANTHROPIC_API_KEY);
       expect(launches[0]?.options.env.OPENAI_API_KEY).toBeUndefined();
@@ -906,8 +930,9 @@ describe("brainstorm Phase 3 acceptance", () => {
       ]) {
         expect(publicSurface).not.toContain(`\"${key}\"`);
       }
-      const attemptFiles = (await filesBelow(join(root, "state", "attempts"))).filter((path) =>
-        path.endsWith(".json"),
+      const attemptRoot = join(root, "state", "attempts");
+      const attemptFiles = (await filesBelow(attemptRoot)).filter(
+        (path) => dirname(path) === attemptRoot && path.endsWith(".json"),
       );
       expect(attemptFiles).toHaveLength(1);
       const evidence = await readFile(attemptFiles[0] as string, "utf8");
@@ -985,7 +1010,7 @@ describe("brainstorm Phase 3 acceptance", () => {
         },
         libraries: libraries(async () => ({ content: "unused" })),
       });
-      const request = {
+      const request: ConversationCreateRequest = {
         topic: "Choose the conversation source of truth",
         policy: "debate",
         participants: [

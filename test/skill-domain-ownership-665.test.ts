@@ -293,13 +293,13 @@ describe("checkDomainOwnership", () => {
 
 // ── CLI ──
 describe("vf skills domain list", () => {
-  function run(rest: string[]): number {
+  async function run(rest: string[]): Promise<number> {
     const orig = process.cwd();
     const origHome = process.env.VF_SKILLS_HOME;
     process.env.VF_SKILLS_HOME = base;
     process.chdir(base);
     try {
-      return skills("domain", rest);
+      return await skills("domain", rest);
     } finally {
       process.chdir(orig);
       if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -311,16 +311,16 @@ describe("vf skills domain list", () => {
     scaffold(name, fm(lines));
   }
 
-  test("no skills discovered returns 0", () => {
-    expect(run(["list"])).toBe(0);
+  test("no skills discovered returns 0", async () => {
+    expect(await run(["list"])).toBe(0);
   });
 
-  test("no domain.id skills returns 0", () => {
+  test("no domain.id skills returns 0", async () => {
     mkSkill("plain", ["name: plain", "description: d"]);
-    expect(run(["list"])).toBe(0);
+    expect(await run(["list"])).toBe(0);
   });
 
-  test("prints hierarchy for canonical + child", () => {
+  test("prints hierarchy for canonical + child", async () => {
     mkSkill("canon-auth", [
       "name: canon-auth",
       "description: d",
@@ -338,10 +338,10 @@ describe("vf skills domain list", () => {
       "dependsOn:",
       "  - auth",
     ]);
-    expect(run(["list"])).toBe(0);
+    expect(await run(["list"])).toBe(0);
   });
 
-  test("duplicate canonical returns 1", () => {
+  test("duplicate canonical returns 1", async () => {
     mkSkill("canon-a1", [
       "name: canon-a1",
       "description: d",
@@ -354,18 +354,18 @@ describe("vf skills domain list", () => {
       "domain.id: dup",
       "domain.role: canonical",
     ]);
-    expect(run(["list"])).toBe(1);
+    expect(await run(["list"])).toBe(1);
   });
 
-  test("missing subcommand returns 2", () => {
-    expect(run([])).toBe(2);
+  test("missing subcommand returns 2", async () => {
+    expect(await run([])).toBe(2);
   });
 
-  test("unknown subsubcommand returns 2", () => {
-    expect(run(["unknown"])).toBe(2);
+  test("unknown subsubcommand returns 2", async () => {
+    expect(await run(["unknown"])).toBe(2);
   });
 
-  test("prints noDomain footer when mixing domain and plain skills", () => {
+  test("prints noDomain footer when mixing domain and plain skills", async () => {
     mkSkill("canon-auth", [
       "name: canon-auth",
       "description: d",
@@ -373,7 +373,7 @@ describe("vf skills domain list", () => {
       "domain.role: canonical",
     ]);
     mkSkill("plain-one", ["name: plain-one", "description: d"]);
-    expect(run(["list"])).toBe(0);
+    expect(await run(["list"])).toBe(0);
   });
 });
 

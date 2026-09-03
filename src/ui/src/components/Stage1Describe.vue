@@ -337,6 +337,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { ENGINES } from "../../../core/agent-contract.js";
+import { SKILL_STATUS, type SkillStatus } from "../../../core/skill-contract.js";
 import { api } from "../api.js";
 import { engineReason } from "../lib/engine-reason.js";
 import { useVfStore } from "../store.js";
@@ -356,24 +358,25 @@ const ENGINE_HINTS: Record<string, string> = {
 
 const store = useVfStore();
 
-const BADGE_CLASS: Record<string, string> = {
-  verified: "border-green-800/40 text-green-500",
-  enriched: "border-blue-800/40 text-blue-400",
-  experimental: "border-yellow-800/40 text-yellow-400",
-  baseline: "border-neutral-800/40 text-neutral-400",
-  template: "border-neutral-800/40 text-neutral-400",
-  draft: "border-amber-800/40 text-amber-400",
-  unverified: "border-neutral-800/40 text-neutral-500",
-};
+const BADGE_CLASS = Object.freeze({
+  [SKILL_STATUS.VERIFIED]: "border-green-800/40 text-green-500",
+  [SKILL_STATUS.ENRICHED]: "border-blue-800/40 text-blue-400",
+  [SKILL_STATUS.EXPERIMENTAL]: "border-yellow-800/40 text-yellow-400",
+  [SKILL_STATUS.BASELINE]: "border-neutral-800/40 text-neutral-400",
+  [SKILL_STATUS.TEMPLATE]: "border-neutral-800/40 text-neutral-400",
+  [SKILL_STATUS.DRAFT]: "border-amber-800/40 text-amber-400",
+  [SKILL_STATUS.UNVERIFIED]: "border-neutral-800/40 text-neutral-500",
+  [SKILL_STATUS.DEPRECATED]: "border-neutral-800/40 text-neutral-500",
+} satisfies Readonly<Record<SkillStatus, string>>);
 
-function skillStatus(skillName: string): string | null {
+function skillStatus(skillName: string): SkillStatus | null {
   const match = store.skills.find((s) => s.name === skillName);
   return match ? match.status : null;
 }
 
 function skillBadgeClass(skillName: string): string {
   const match = store.skills.find((s) => s.name === skillName);
-  return BADGE_CLASS[match?.status ?? ""] ?? "border-neutral-800/40 text-neutral-500";
+  return match ? BADGE_CLASS[match.status] : "border-neutral-800/40 text-neutral-500";
 }
 
 // Show when project was inited with an older vf version
@@ -636,7 +639,6 @@ async function runDetect() {
       }
       // Populate readyEngines + recommendedEngine from preflight results
       const readinessArr = pf?.readiness ?? [];
-      const ENGINE_PRIORITY = ["claude", "copilot", "codex", "opencode", "antigravity"] as const;
       const readyKeys = readinessArr
         .filter((r: { level: string }) => r.level === "ready")
         .map((r: { engine: string }) => r.engine);
@@ -644,7 +646,7 @@ async function runDetect() {
       engineLevels.value = new Map(
         readinessArr.map((r: { engine: string; level: string }) => [r.engine, r.level]),
       );
-      const first = ENGINE_PRIORITY.find((e) => readyEngines.value.has(e));
+      const first = ENGINES.find((engine) => readyEngines.value.has(engine));
       if (first) {
         recommendedEngine.value = first;
         selectedEngine.value = first;

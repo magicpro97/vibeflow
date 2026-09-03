@@ -1,5 +1,6 @@
 import { ENGINES, type Engine } from "../core.js";
 import { requireSafeEngineSessionId } from "../dispatch/public-redaction.js";
+import { MARKER_STATUS } from "./marker-contract.js";
 
 interface ResumeIdentity {
   agent?: string;
@@ -26,7 +27,9 @@ export function resumeMarkerFields<S extends string>(
   binding?: { engineSessionId?: string; engineSessionEngine?: Engine; status: S },
 ): { resumeStatus?: S; engineSessionId?: string; engineSessionEngine?: Engine } {
   const resumable =
-    binding?.engineSessionId && binding.status !== "done" && binding.status !== "pending";
+    binding?.engineSessionId &&
+    binding.status !== MARKER_STATUS.DONE &&
+    binding.status !== MARKER_STATUS.PENDING;
   if (!resumable) return binding ? { resumeStatus: binding.status } : {};
   assertEngineAgreement({ agent }, binding.engineSessionEngine);
   requireSafeEngineSessionId(

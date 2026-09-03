@@ -29,7 +29,7 @@ describe("commands.workflow subcommand", () => {
     expect(workflow("import", [], {})).toBe(2);
   });
 
-  test("skills import: returns 2 on missing target (line 1840-1844)", () => {
-    expect(skills("import", [])).toBe(2);
+  test("skills import: returns 2 on missing target (line 1840-1844)", async () => {
+    expect(await skills("import", [])).toBe(2);
   });
 });

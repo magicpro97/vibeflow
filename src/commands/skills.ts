@@ -3,6 +3,10 @@ import { handleCuratorSubcommand } from "../skills/curator-scan.js";
 import { showSkill } from "../skills/lifecycle.js";
 import { handleSemanticFilterSubcommand } from "../skills/semantic-filter.js";
 import {
+  handleSkillsSyncSubcommand,
+  handleSkillsVerifySyncSubcommand,
+} from "../skills/sync-command.js";
+import {
   CTX_DIR,
   c,
   crystallize,
@@ -45,17 +49,16 @@ import {
   skillTemplate,
   skillsEvalCmd,
   skillsUpdateDependentCmd,
-  syncSkillMirrors,
   validateSkillRoots,
   verifyLockMarketplaceSchemas,
   verifyLockMirrorCompleteness,
   verifyRegistryLockIntegrity,
   verifySkillCommand,
-  verifySkillSync,
   writeFileSafe,
 } from "./_shared.js";
 import { handleDraftSkill } from "./skills-draft.js";
-export function skills(sub: string | undefined, rest: string[] = []): number {
+
+export async function skills(sub: string | undefined, rest: string[] = []): Promise<number> {
   const repo = cwd();
   const found = discoverSkills(repo);
   if (sub === undefined || sub === "list") {
@@ -109,7 +112,6 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
     return 0;
   }
   if (sub === "resolve") {
-    // Derive needs from repo scan and intake; report local versus on-demand skills.
     const state = readState(repo);
     const needs = resolveSkillNeeds({
       repo,
@@ -124,74 +126,8 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "telemetry") return handleTelemetrySubcommand();
   if (sub === "audit-log") return handleSkillAuditLog(repo, rest);
   if (sub === "audit-duplicates") return handleAuditDuplicatesSubcommand(repo, rest);
-  if (sub === "sync") {
-    // Parse sync flags; default pointer mode targets copilot.
-    let mode: "pointer" | "full" = "pointer";
-    let fromRegistry = false;
-    for (let i = 0; i < rest.length; i++) {
-      const tok = rest[i];
-      if (tok === "--mode") {
-        const v = rest[i + 1];
-        if (v !== "full" && v !== "pointer") {
-          out("vf", c.red(`✗ --mode must be 'pointer' or 'full', got '${v ?? "(missing)"}'`), {
-            level: "error",
-          });
-          return 2;
-        }
-        mode = v;
-      }
-      if (typeof tok === "string" && tok.startsWith("--mode=")) {
-        const v = tok.slice("--mode=".length);
-        if (v !== "full" && v !== "pointer") {
-          out("vf", c.red(`✗ --mode must be 'pointer' or 'full', got '${v}'`), {
-            level: "error",
-          });
-          return 2;
-        }
-        mode = v;
-      }
-      if (tok === "--from-registry") fromRegistry = true;
-    }
-    const result = syncSkillMirrors(repo, { mode, fromRegistry });
-    for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
-    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
-    if (result.ok) {
-      out(
-        "vf",
-        c.green(
-          `✔ synced ${result.synced.length} skill mirror(s) (mode=${result.mode})${result.synced.length > 0 ? ` → ${result.synced.slice(0, 3).join(", ")}${result.synced.length > 3 ? "…" : ""}` : ""}`,
-        ),
-      );
-      return 0;
-    }
-    out("vf", c.red(`✗ ${result.errors.length} sync error(s)`), { level: "error" });
-    return 1;
-  }
-  if (sub === "verify-sync") {
-    // Parse --engine flag; --from-registry checks all engine mirrors.
-    let fromRegistry = false;
-    const engines: string[] = [];
-    for (let i = 0; i < rest.length; i++) {
-      const tok = rest[i];
-      if (tok === "--from-registry") fromRegistry = true;
-      if (tok === "--engine") {
-        const v = rest[i + 1];
-        if (v) {
-          engines.push(v);
-        }
-      }
-    }
-    const result = verifySkillSync(repo, engines.length ? (engines as any) : undefined, {
-      fromRegistry,
-    });
-    for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
-    if (result.ok) {
-      out("vf", c.green(`✔ all ${result.synced.length} mirror(s) in sync`));
-      return 0;
-    }
-    out("vf", c.red(`✗ ${result.errors.length} mirror(s) out of sync`), { level: "error" });
-    return 1;
-  }
+  if (sub === "sync") return handleSkillsSyncSubcommand(repo, rest);
+  if (sub === "verify-sync") return handleSkillsVerifySyncSubcommand(repo, rest);
   if (sub === "import") {
     const target = rest.join(" ").trim();
     if (!target) {
@@ -341,7 +277,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "impact-evidence") return handleImpactEvidenceSubcommand(repo, rest);
   if (sub === "impact") return handleImpactSubcommand(repo, rest);
   if (sub === "policy-checks") return handlePolicyChecksSubcommand(repo, rest);
-  if (sub === "eval") return skillsEvalCmd(repo, rest);
+  if (sub === "eval") return await skillsEvalCmd(repo, rest);
   if (sub === "update-dependent") return skillsUpdateDependentCmd(repo, rest);
   if (sub === "verify-lock") {
     const allErrors: string[] = [];
@@ -387,7 +323,7 @@ export function skills(sub: string | undefined, rest: string[] = []): number {
   if (sub === "ci-domain-integrity") return handleCiDomainIntegrity(repo, rest);
   if (sub === "verify-freshness") return verifyFreshnessCommand(found, repo);
   if (sub === "curator") return handleCuratorSubcommand(repo, rest);
-  if (sub === "semantic-filter") return handleSemanticFilterSubcommand(repo, rest);
+  if (sub === "semantic-filter") return await handleSemanticFilterSubcommand(repo, rest);
   if (sub === "propose-merge") return handleProposeMergeSubcommand(repo, rest);
   if (sub === "propose-split") return handleProposeSplitSubcommand(repo, rest);
   out("vf", c.dim(`vf skills ${sub} — unrecognized subcommand.`));

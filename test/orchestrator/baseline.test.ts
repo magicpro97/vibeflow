@@ -3,6 +3,14 @@ import {
   computeTokenSetDivergence,
   projectBaselineComparison,
 } from "../../src/orchestrator/conversation/baseline.js";
+import {
+  CONVERSATION_BASELINE_FAILURE_REASON,
+  CONVERSATION_BASELINE_SKIP_REASON,
+  CONVERSATION_BASELINE_STATUS,
+  CONVERSATION_TRACE_EVENT_KIND,
+  type ConversationBaselineReasonV1,
+  type ConversationBaselineStatusV1,
+} from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
 import type { DecisionMatrix } from "../../src/orchestrator/conversation/debate-projection.js";
 import type { StoredTraceEvent, TraceEvent } from "../../src/orchestrator/trace/types.js";
 
@@ -42,12 +50,12 @@ const stored = (seq: number, event: TraceEvent): StoredTraceEvent => ({
 });
 
 const baseline = (
-  status: "success" | "failed" | "skipped",
+  status: ConversationBaselineStatusV1,
   answer: string | null,
-  reason: string | null,
+  reason: ConversationBaselineReasonV1 | null,
 ) =>
   stored(1, {
-    type: "baseline_result",
+    type: CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT,
     payload: { status, answer, confidence: null, skip_reason: reason },
   });
 
@@ -75,7 +83,7 @@ test("baseline skip precedence is disabled, single participant, then engine unav
     baseline_answer: null,
     debate_answer: null,
     divergence: null,
-    skip_reason: "disabled",
+    skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
   });
   expect(
     project({
@@ -83,9 +91,9 @@ test("baseline skip precedence is disabled, single participant, then engine unav
       selectedEngineAvailable: false,
       records: [],
     }).skip_reason,
-  ).toBe("single_participant");
+  ).toBe(CONVERSATION_BASELINE_SKIP_REASON.SINGLE_PARTICIPANT);
   expect(project({ selectedEngineAvailable: false, records: [] }).skip_reason).toBe(
-    "engine_unavailable",
+    CONVERSATION_BASELINE_SKIP_REASON.ENGINE_UNAVAILABLE,
   );
 });
 
@@ -95,14 +103,14 @@ test("no completed debate answer wins over baseline missing or persisted results
     baseline_answer: null,
     debate_answer: null,
     divergence: null,
-    skip_reason: "no_debate_answer",
+    skip_reason: CONVERSATION_BASELINE_FAILURE_REASON.NO_DEBATE_ANSWER,
   });
   expect(
     project({
       decisionMatrix: null,
       records: [baseline("success", "orphan baseline", null)],
     }).skip_reason,
-  ).toBe("no_debate_answer");
+  ).toBe(CONVERSATION_BASELINE_FAILURE_REASON.NO_DEBATE_ANSWER);
 });
 
 test("missing and failed persisted baseline results preserve frozen failure reasons", () => {
@@ -111,14 +119,24 @@ test("missing and failed persisted baseline results preserve frozen failure reas
     baseline_answer: null,
     debate_answer: "Debate answer",
     divergence: null,
-    skip_reason: "baseline_missing",
+    skip_reason: CONVERSATION_BASELINE_FAILURE_REASON.BASELINE_MISSING,
   });
-  expect(project({ records: [baseline("failed", null, "engine_timeout")] })).toEqual({
+  expect(
+    project({
+      records: [
+        baseline(
+          CONVERSATION_BASELINE_STATUS.FAILED,
+          null,
+          CONVERSATION_BASELINE_FAILURE_REASON.ENGINE_TIMEOUT,
+        ),
+      ],
+    }),
+  ).toEqual({
     status: "failed",
     baseline_answer: null,
     debate_answer: "Debate answer",
     divergence: null,
-    skip_reason: "engine_timeout",
+    skip_reason: CONVERSATION_BASELINE_FAILURE_REASON.ENGINE_TIMEOUT,
   });
   expect(project({ records: [baseline("failed", null, null)] }).skip_reason).toBeNull();
 });
@@ -146,7 +164,11 @@ test("divergence normalizes NFKC/case and handles empty token sets exactly", () 
 });
 
 test("only the latest persisted baseline event in journal order is projected deterministically", () => {
-  const first = baseline("failed", null, "old_failure");
+  const first = baseline(
+    CONVERSATION_BASELINE_STATUS.FAILED,
+    null,
+    CONVERSATION_BASELINE_FAILURE_REASON.BASELINE_FAILED,
+  );
   const second = {
     ...baseline("success", "Debate answer", null),
     event_id: "event-2",

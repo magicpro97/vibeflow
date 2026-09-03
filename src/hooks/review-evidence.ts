@@ -1,9 +1,17 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { sanitizedGitEnvironment } from "../git-environment.js";
 
 export const EVIDENCE_DIR = ".vibeflow/review-evidence/v1";
-export const MAX_RECORD_BYTES = 64 * 1024;
+const MAX_RECORD_MEBIBYTES = 4;
+export const MAX_RECORD_BYTES = MAX_RECORD_MEBIBYTES * 1024 * 1024;
+export const REVIEWER_RESULT_AUTHORITY = Object.freeze({
+  schemaVersion: 1,
+  digestAlgorithm: "sha256",
+  passedStatus: "passed",
+} as const);
 const IDS = [
   "api-mutation-owned-fields",
   "input-bound-parser-allocation",
@@ -15,6 +23,14 @@ type Id = (typeof IDS)[number];
 export type Changed = { status: string; path: string };
 export type GitRead = (repo: string, args: string[]) => { status: number; stdout: string };
 export type Check = { required: boolean; ok: boolean; reason: string };
+
+/** Digest of the canonical name-status manifest supplied to a reviewer. */
+export function changedManifestDigest(changed: readonly Changed[]): string {
+  const canonical = changed.map(({ status, path }) => ({ status, path }));
+  return createHash(REVIEWER_RESULT_AUTHORITY.digestAlgorithm)
+    .update(JSON.stringify(canonical))
+    .digest("hex");
+}
 
 type RecordV1 = {
   schemaVersion: 1;
@@ -52,6 +68,7 @@ export function defaultGit(repo: string, args: string[]): { status: number; stdo
   const result = spawnSync("git", args, {
     cwd: repo,
     encoding: "utf8",
+    env: sanitizedGitEnvironment(),
     timeout: 10_000,
     maxBuffer: MAX_RECORD_BYTES,
   });
@@ -108,7 +125,7 @@ export function parseRecord(
   changed: Changed[],
 ): { ok: true; value: RecordV1 } | { ok: false; reason: string } {
   if (Buffer.byteLength(raw, "utf8") > MAX_RECORD_BYTES)
-    return { ok: false, reason: "record exceeds 64 KiB" };
+    return { ok: false, reason: `record exceeds ${MAX_RECORD_MEBIBYTES} MiB` };
   let value: unknown;
   try {
     value = JSON.parse(raw);

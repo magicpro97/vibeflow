@@ -1,6 +1,8 @@
 // `vf verify` + `detectToolchain` — engine/toolchain detection. Pure detection: no MCP, no installs.
 
 import { spawnSync as _spawnSync } from "node:child_process";
+import { ENGINES, type Engine } from "../core.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { checkReviewEvidence, defaultGit } from "../hooks/review-evidence.js";
 import {
   verifyLockMirrorCompleteness,
@@ -13,6 +15,15 @@ import {
   gateResult,
   persistImplementationFingerprints,
 } from "../verify/core.js";
+import { CAPABILITY_DESIGN_PATH } from "../verify/normative-matrix-source.js";
+import { checkNormativeMatrix } from "../verify/normative-matrix.js";
+import {
+  type NormativeAsyncSpawner,
+  defaultNormativeAsyncSpawner,
+  runNormativeProofsAsync,
+} from "../verify/normative-proof-run-async.js";
+import type { NormativeProofRunV2 } from "../verify/normative-proof-run.js";
+import { VERIFY_RUNTIME_AUTHORITY } from "../verify/runtime-authority.js";
 import {
   e2eEvaluateDynamicImportWarning,
   e2eUnicodeSelectorWarning,
@@ -21,7 +32,6 @@ import {
   join,
   readFileSync,
   readState,
-  spawn,
   writeFileSafe,
 } from "./_shared.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
@@ -91,13 +101,20 @@ export function parseGoalScore(raw: string): number | undefined {
 /** ADR-003 phase 2: real LLM eval via VIBEFLOW_AI bridge. Fail-open when bridge not set. */
 export async function defaultGoalEvalFn(
   goal: string,
-  _spawn = _spawnSync,
+  inject: {
+    gitSpawn?: typeof _spawnSync;
+    ownedRoute?: OwnedAiRouteRunner;
+    engine?: Engine;
+    cwd?: string;
+  } = {},
 ): Promise<{ covered: boolean; uncovered: string[]; score?: number }> {
+  const gitSpawn = inject.gitSpawn ?? _spawnSync;
+  const cwd = inject.cwd ?? process.cwd();
   const diff = (() => {
     try {
-      const r = _spawn("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
+      const r = gitSpawn("git", ["diff", "HEAD~1", "HEAD", "--stat"], {
         encoding: "utf8",
-        cwd: process.cwd(),
+        cwd,
       });
       return (r.stdout ?? "").slice(0, 3000);
     } catch {
@@ -108,12 +125,22 @@ export async function defaultGoalEvalFn(
   const bridge = process.env.VIBEFLOW_AI;
   if (!bridge) return { covered: true, uncovered: [] };
   try {
-    const parts = bridge.split(" ");
-    const r = _spawn(parts[0] ?? "", [...parts.slice(1), prompt], {
-      encoding: "utf8",
-      timeout: 30000,
+    const configured = process.env.VF_REVIEW_ENGINE;
+    const engine =
+      inject.engine ??
+      ((configured && (ENGINES as readonly string[]).includes(configured)
+        ? configured
+        : ENGINES[0]) as Engine);
+    const r = await (inject.ownedRoute ?? runOwnedAiRoute)({
+      engine,
+      command: bridge,
+      input: prompt,
+      cwd,
+      shell: true,
+      timeoutMs: 30_000,
     });
-    const raw = (r.stdout ?? "").trim();
+    if (r.status !== 0) return { covered: true, uncovered: [] };
+    const raw = r.stdout.trim();
     const covered = /^COVERED/i.test(raw);
     return { covered, uncovered: covered ? [] : [raw.slice(0, 500)], score: parseGoalScore(raw) };
   } catch {
@@ -182,7 +209,7 @@ export type VerifyReport = VerifyCoreReport;
 export async function collectVerifyReportAsync(
   base: string,
   inject: {
-    spawner?: (cmd: string, args: string[], opts: object) => Promise<{ status: number | null }>;
+    spawner?: NormativeAsyncSpawner;
     coverage?: boolean;
     goal?: string; // ADR-003
     goalEvalFn?: (
@@ -192,20 +219,18 @@ export async function collectVerifyReportAsync(
     requireReviewEvidence?: boolean;
     reviewBase?: string; // #748: pushed-range fallback base
     catalogDir?: string;
+    normativeProofRun?: NormativeProofRunV2;
   } = {},
 ): Promise<VerifyReport> {
   const toolchain: { label: string; pass: boolean }[] = [];
-  const run =
-    inject.spawner ??
-    ((cmd: string, args: string[], opts: object): Promise<{ status: number | null }> =>
-      new Promise((resolve) => {
-        const child = spawn(cmd, args, opts as object);
-        child.on("close", (code: number | null) => resolve({ status: code }));
-        child.on("error", () => resolve({ status: 1 }));
-      }));
+  const run: NormativeAsyncSpawner = inject.spawner ?? defaultNormativeAsyncSpawner;
 
   const runGate = async (label: string, cmd: string, args: string[], dir = base) => {
-    const r = await run(cmd, args, { stdio: "ignore", cwd: dir });
+    const r = await run(cmd, args, {
+      stdio: "ignore",
+      cwd: dir,
+      timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
+    });
     const result = { label, pass: r.status === 0 };
     toolchain.push(result);
     return result;
@@ -236,7 +261,7 @@ export async function collectVerifyReportAsync(
         legacyCoverage.pass ? "pass" : "fail",
         legacyCoverage.pass ? "coverage gate passed" : "coverage gate failed",
       );
-    } else coverageResult = gateResult("skipped", "coverage/lcov.info not found");
+    } else coverageResult = gateResult("fail", "coverage/lcov.info not found");
   }
 
   const rawState = readState(base);
@@ -245,14 +270,18 @@ export async function collectVerifyReportAsync(
     inject.goal &&
     inject.goalEvalFn &&
     toolchain.every((gate) => gate.pass) &&
-    (!legacyCoverage || legacyCoverage.pass)
+    coverageResult.status !== "fail"
   ) {
     const result = await inject.goalEvalFn(inject.goal);
     goalEval = { pass: result.covered, uncovered: result.uncovered, score: result.score };
   }
   let waiverResult = gateResult("skipped", "waiver-policy.cjs not found");
   if (existsSync(join(base, "scripts", "waiver-policy.cjs"))) {
-    const result = await run("node", ["scripts/waiver-policy.cjs"], { stdio: "ignore", cwd: base });
+    const result = await run("node", ["scripts/waiver-policy.cjs"], {
+      stdio: "ignore",
+      cwd: base,
+      timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
+    });
     waiverResult = gateResult(
       result.status === 0 ? "pass" : "fail",
       result.status === 0 ? "waiver policy passed" : "waiver policy failed",
@@ -277,6 +306,11 @@ export async function collectVerifyReportAsync(
     review.ok ? (review.reason.includes("(warn)") ? "warn" : "pass") : "fail",
     review.reason,
   );
+  let normativeProofRun = inject.normativeProofRun;
+  if (!normativeProofRun && existsSync(join(base, CAPABILITY_DESIGN_PATH))) {
+    normativeProofRun = await runNormativeProofsAsync(base, { spawner: run });
+  }
+  const normative = checkNormativeMatrix(base, { proofRun: normativeProofRun });
   const e2eWarnings = [
     ...e2eUnicodeSelectorWarning(base),
     ...e2eEvaluateDynamicImportWarning(base),
@@ -290,6 +324,11 @@ export async function collectVerifyReportAsync(
     waiver: waiverResult,
     registryLock: registryResult,
     reviewEvidence: reviewResult,
+    normativeMatrix: gateResult(
+      !normative.applicable ? "skipped" : normative.ok ? "pass" : "fail",
+      normative.details,
+      normative.evidence_refs,
+    ),
     advisoryE2e: e2eWarnings.length
       ? gateResult("warn", e2eWarnings.join("\n"))
       : gateResult("pass", "advisory E2E scan passed"),

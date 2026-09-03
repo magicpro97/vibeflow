@@ -4,6 +4,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import {
+  UI_LAN_BOOTSTRAP_QUERY,
+  UI_LAN_EVENT_SOURCE_TOKEN_QUERY,
+  UI_LAN_SESSION_COOKIE,
+  UI_LAN_TOKEN_HEADER,
+} from "../src/core/ui-cli-contract.js";
 import { startServer as startProductionServer } from "../src/server";
 
 const suiteRepoDir = mkdtempSync(join(tmpdir(), "vf-server-suite-"));
@@ -455,9 +461,10 @@ describe("server HTTP API handlers", () => {
     }
   });
 
-  test("POST /api/ask returns 400 on path escaping the repo (#562 Stage B, no engine spawned)", async () => {
-    // Route glue in routes.ts calls askResponse with real deps. A path-traversal
-    // body is rejected by the pure guard BEFORE any engine spawn — hermetic 400.
+  test("POST /api/ask returns queue-style 400 on path escaping the repo (#562 Stage B, no engine spawned)", async () => {
+    // Compatibility Ask now routes through the durable queue/home admission path,
+    // so invalid requests surface the shared queue error envelope instead of the
+    // legacy {error} body.
     const { server, url } = (await startServer()) as {
       server: { stop: () => void };
       url: string;
@@ -475,7 +482,13 @@ describe("server HTTP API handlers", () => {
         }),
       });
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { error: string }).error).toMatch(/escapes repo/);
+      expect(await res.json()).toMatchObject({
+        schema_version: "1.0",
+        error: {
+          code: "invalid_request",
+          message: expect.stringMatching(/message queue request is invalid/i),
+        },
+      });
     } finally {
       server.stop();
     }
@@ -2661,24 +2674,34 @@ test("GET /ui/assets/*.js returns 200 with immutable cache-control (lines 313-33
   }
 });
 
-describe("bindAll security (#561)", () => {
-  async function bindAllServer(): Promise<{
+describe("non-loopback UI authority (#561)", () => {
+  async function lanServer(): Promise<{
     server: { stop: () => void };
     url: string;
+    ownerUrl: string;
+    cookie: string;
     token: string;
   }> {
     const s = (await startServer(0, { host: "0.0.0.0" })) as {
       server: { stop: () => void };
       url: string;
     };
-    const html = await (await fetch(s.url)).text();
+    const ownerUrl = s.url;
+    const url = new URL("/", ownerUrl).origin;
+    const bootstrap = await fetch(ownerUrl, { redirect: "manual" });
+    expect(bootstrap.status).toBe(303);
+    expect(bootstrap.headers.get("location")).toBe("/");
+    const cookie = bootstrap.headers.get("set-cookie")?.split(";")[0] ?? "";
+    expect(cookie).toStartWith(`${UI_LAN_SESSION_COOKIE}=`);
+    const page = await fetch(url, { headers: { cookie } });
+    const html = await page.text();
     const m = html.match(/<meta\s+name="vf-token"\s+content="([^"]+)"\s*\/?>/i);
     const token = m?.[1] ?? "";
-    return { ...s, token };
+    return { server: s.server, url, ownerUrl, cookie, token };
   }
 
   test("valid token → 200 on /state", async () => {
-    const { server, url, token } = await bindAllServer();
+    const { server, url, token } = await lanServer();
     try {
       const res = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": token } });
       expect(res.status).toBe(200);
@@ -2687,18 +2710,75 @@ describe("bindAll security (#561)", () => {
     }
   });
 
+  test("all legacy streams accept only the canonical LAN token transport", async () => {
+    const { server, url, token } = await lanServer();
+    try {
+      const missingFetch = await fetch(`${url}/api/logs/session`);
+      expect(missingFetch.status).toBe(403);
+      const protectedFetch = await fetch(`${url}/api/logs/session`, {
+        headers: { [UI_LAN_TOKEN_HEADER]: token },
+      });
+      expect(protectedFetch.status).toBe(200);
+
+      const missing = await fetch(`${url}/api/logs/stream`);
+      expect(missing.status).toBe(403);
+      expect(
+        (await fetch(`${url}/api/logs/stream?${UI_LAN_TOKEN_HEADER}=${encodeURIComponent(token)}`))
+          .status,
+      ).toBe(403);
+
+      const query = new URLSearchParams({ [UI_LAN_EVENT_SOURCE_TOKEN_QUERY]: token });
+      const duplicateQuery = new URLSearchParams(query);
+      duplicateQuery.append(UI_LAN_EVENT_SOURCE_TOKEN_QUERY, token);
+      expect((await fetch(`${url}/api/logs/stream?${duplicateQuery}`)).status).toBe(403);
+      const streamed = await fetch(`${url}/api/logs/stream?${query}`);
+      expect(streamed.status).toBe(200);
+      expect(streamed.headers.get("content-type")).toContain("text/event-stream");
+      await streamed.body?.cancel();
+
+      const dashboardBase = `${url}/api/dashboard/logs/stream?repoPath=missing&workflowId=missing`;
+      expect((await fetch(dashboardBase)).status).toBe(403);
+      const dashboardQuery = new URLSearchParams({
+        repoPath: "missing",
+        workflowId: "missing",
+        [UI_LAN_EVENT_SOURCE_TOKEN_QUERY]: token,
+      });
+      expect((await fetch(`${url}/api/dashboard/logs/stream?${dashboardQuery}`)).status).not.toBe(
+        403,
+      );
+
+      expect((await fetch(`${url}/events`)).status).toBe(403);
+      const legacy = await fetch(`${url}/events?${query}`);
+      expect(legacy.status).toBe(200);
+      expect(legacy.headers.get("content-type")).toContain("text/event-stream");
+      await legacy.body?.cancel();
+
+      expect((await fetch(`${url}/api/hook/response/missing`)).status).toBe(403);
+      expect((await fetch(`${url}/api/hook/response/missing?${query}`)).status).toBe(403);
+      const hook = await fetch(`${url}/api/hook/response/missing`, {
+        headers: { [UI_LAN_TOKEN_HEADER]: token },
+      });
+      expect(hook.status).toBe(200);
+      expect(await hook.json()).toEqual({ decision: "block" });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("missing token → 403 on /state", async () => {
-    const { server, url } = await bindAllServer();
+    const { server, url, token } = await lanServer();
     try {
       const res = await fetch(`${url}/state`);
       expect(res.status).toBe(403);
+      const query = new URLSearchParams({ [UI_LAN_EVENT_SOURCE_TOKEN_QUERY]: token });
+      expect((await fetch(`${url}/state?${query}`)).status).toBe(403);
     } finally {
       server.stop();
     }
   });
 
   test("wrong token → 403 on /state", async () => {
-    const { server, url } = await bindAllServer();
+    const { server, url } = await lanServer();
     try {
       const res = await fetch(`${url}/state`, { headers: { "x-vibeflow-token": "wrong" } });
       expect(res.status).toBe(403);
@@ -2708,7 +2788,7 @@ describe("bindAll security (#561)", () => {
   });
 
   test("spoofed Host header → 403 (no token)", async () => {
-    const { server, url } = await bindAllServer();
+    const { server, url } = await lanServer();
     try {
       const res = await fetch(`${url}/state`, { headers: { host: "127.0.0.1" } });
       expect(res.status).toBe(403);
@@ -2718,7 +2798,7 @@ describe("bindAll security (#561)", () => {
   });
 
   test("valid token + spoofed host → 200 (auth beats host)", async () => {
-    const { server, url, token } = await bindAllServer();
+    const { server, url, token } = await lanServer();
     try {
       const res = await fetch(`${url}/state`, {
         headers: { host: "evil.com", "x-vibeflow-token": token },
@@ -2729,21 +2809,74 @@ describe("bindAll security (#561)", () => {
     }
   });
 
-  test("public HTML page is accessible without token", async () => {
-    const { server, url } = await bindAllServer();
+  test("root requires a one-time bootstrap and never discloses page authority to a scraper", async () => {
+    const running = await startServer(0, { host: "0.0.0.0" });
+    const ownerUrl = running.url;
+    const url = new URL("/", ownerUrl).origin;
     try {
-      const res = await fetch(url);
-      expect(res.status).toBe(200);
-      const html = await res.text();
-      expect(html).toContain("vf-token");
+      const bootstrapToken = new URL(ownerUrl).searchParams.get(UI_LAN_BOOTSTRAP_QUERY) ?? "";
+      expect(bootstrapToken).not.toBe("");
+      const scrape = await fetch(url);
+      expect(scrape.status).toBe(401);
+      expect(await scrape.text()).not.toContain("vf-token");
+
+      const exchange = await fetch(ownerUrl, { redirect: "manual" });
+      expect(exchange.status).toBe(303);
+      expect(exchange.headers.get("location")).toBe("/");
+      expect(await exchange.text()).not.toContain(bootstrapToken);
+      const cookie = exchange.headers.get("set-cookie")?.split(";")[0] ?? "";
+      expect(cookie).toStartWith(`${UI_LAN_SESSION_COOKIE}=`);
+
+      const replay = await fetch(ownerUrl, { redirect: "manual" });
+      expect(replay.status).toBe(401);
+      expect(await replay.text()).not.toContain(bootstrapToken);
+      const page = await fetch(url, { headers: { cookie } });
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("vf-token");
     } finally {
-      server.stop();
+      running.server.stop();
+    }
+  });
+
+  test("LAN page authority never substitutes for conversation session or stream authority", async () => {
+    const conversation = {
+      service: {},
+      sessions: { loopback: false, authorize: () => false, issueCookie: () => null },
+      streamTokens: {
+        authorize: () => false,
+        issue: () => ({ stream_token: "never", stream_token_expires_at: "never" }),
+      },
+    } as never;
+    const running = await startServer(0, { host: "0.0.0.0", conversation });
+    const ownerUrl = running.url;
+    const url = new URL("/", ownerUrl).origin;
+    try {
+      const exchange = await fetch(ownerUrl, { redirect: "manual" });
+      const cookie = exchange.headers.get("set-cookie")?.split(";")[0] ?? "";
+      const page = await fetch(url, { headers: { cookie } });
+      const html = await page.text();
+      const token = html.match(/name="vf-token" content="([^"]+)"/)?.[1] ?? "";
+      expect(token).not.toBe("");
+      expect(
+        (
+          await fetch(`${url}/api/conversations`, {
+            headers: { [UI_LAN_TOKEN_HEADER]: token },
+          })
+        ).status,
+      ).toBe(401);
+      const query = new URLSearchParams({ [UI_LAN_EVENT_SOURCE_TOKEN_QUERY]: token });
+      expect((await fetch(`${url}/api/conversations/conversation-a/events?${query}`)).status).toBe(
+        401,
+      );
+    } finally {
+      running.server.stop();
     }
   });
 
   test("loopback default (127.0.0.1) unchanged — no token on GET / returns HTML", async () => {
     const s = (await startServer()) as { server: { stop: () => void }; url: string };
     try {
+      expect(Number(new URL(s.url).port)).toBeGreaterThan(0);
       const res = await fetch(s.url);
       expect(res.status).toBe(200);
     } finally {
@@ -2751,17 +2884,23 @@ describe("bindAll security (#561)", () => {
     }
   });
 
-  test("LAN warning fires for bindAll (0.0.0.0) on console.error", async () => {
+  test("LAN warning fires once for a non-loopback bind without exposing authority", async () => {
     const stderr: string[] = [];
     const orig = console.error;
     console.error = (...a: unknown[]) => stderr.push(a.join(" "));
     try {
-      const { server } = await bindAllServer();
+      const { server } = await lanServer();
       server.stop();
     } finally {
       console.error = orig;
     }
-    expect(stderr.some((l) => l.includes("server exposed to LAN"))).toBe(true);
+    const warnings = stderr.filter((line) => line.includes("server exposed on a non-loopback"));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("unauthenticated root loads are denied");
+    expect(warnings[0]).toContain("single-use browser bootstrap");
+    expect(warnings[0]).toContain("x-vibeflow-token header");
+    expect(warnings[0]).toContain("token query parameter");
+    expect(warnings[0]).toContain("never authenticates Conversation Home");
   });
 
   test("no LAN warning for default loopback (127.0.0.1)", async () => {
@@ -2774,7 +2913,7 @@ describe("bindAll security (#561)", () => {
     } finally {
       console.error = orig;
     }
-    expect(stderr.some((l) => l.includes("server exposed to LAN"))).toBe(false);
+    expect(stderr.some((l) => l.includes("server exposed on a non-loopback"))).toBe(false);
   });
 });
 

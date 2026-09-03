@@ -1,19 +1,20 @@
 import type { DebatePosition, DebateResult, InvestigationRound, WorkUnit } from "../core.js";
+import { WORK_UNIT_RISK_CLASS, type WorkUnitRiskClass } from "../core/workflow-contract.js";
 
 /**
  * Risk classes map to required-confidence thresholds (AGENT_ORCHESTRATION_POLICY.md).
  * A decision below its threshold must trigger bounded investigation before it is acted on.
  */
-export type RiskClass = "docs" | "simple-code" | "feature" | "architecture" | "security" | "deploy";
+export type RiskClass = WorkUnitRiskClass;
 
-const THRESHOLDS: Record<RiskClass, number> = {
-  docs: 0.7,
-  "simple-code": 0.8,
-  feature: 0.85,
-  architecture: 0.9,
-  security: 0.95,
-  deploy: 0.95,
-};
+const THRESHOLDS = Object.freeze({
+  [WORK_UNIT_RISK_CLASS.DOCS]: 0.7,
+  [WORK_UNIT_RISK_CLASS.SIMPLE_CODE]: 0.8,
+  [WORK_UNIT_RISK_CLASS.FEATURE]: 0.85,
+  [WORK_UNIT_RISK_CLASS.ARCHITECTURE]: 0.9,
+  [WORK_UNIT_RISK_CLASS.SECURITY]: 0.95,
+  [WORK_UNIT_RISK_CLASS.DEPLOY]: 0.95,
+} satisfies Record<RiskClass, number>);
 
 /** Bounded by default so investigation can never loop indefinitely. */
 export const DEFAULT_MAX_ROUNDS = 4;
@@ -148,7 +149,7 @@ export async function investigateUnit(
   unit: Pick<WorkUnit, "name" | "confidence" | "owner_agent">,
   opts: InvestigateUnitOptions,
 ): Promise<UnitInvestigationOutcome> {
-  const riskClass = opts.riskClass ?? "feature";
+  const riskClass = opts.riskClass ?? WORK_UNIT_RISK_CLASS.FEATURE;
   const threshold = thresholdFor(riskClass);
   const maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
   const question = `Raise confidence for work unit "${unit.name}" to ${threshold}`;

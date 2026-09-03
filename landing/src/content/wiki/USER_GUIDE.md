@@ -1,8 +1,8 @@
 ---
 title: User Guide
-description: Verifiable end-to-end user guide — install, mental model, web UI, CLI walkthrough, generated files, and troubleshooting.
+description: Verifiable end-to-end user guide for the AI-first Home, workflows, traced conversations, the web UI, CLI, generated files, and troubleshooting.
 category: tutorial
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # VibeFlow User Guide
@@ -17,14 +17,28 @@ last_updated: 2026-06-24
 - [6. Generated Files](#6-generated-files)
 - [7. Troubleshooting](#7-troubleshooting)
 
-VibeFlow is a local-first CLI (`vf`) that opens a web UI and orchestrates Claude Code,
-Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI (`agy`) through shared context, Anthropic-style skills, hooks,
-and verification. It never lets an engine work blindly: it scans your repo, resolves the
-skills a task needs **on demand**, plans non-overlapping work units, dispatches them in
-parallel, and refuses to "complete" anything without recorded evidence.
+VibeFlow is a local-first CLI (`vf`) that opens a web UI and coordinates Claude Code,
+Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI (`agy`) through shared context,
+Anthropic-style skills, hooks, and verification. It never lets an engine work blindly: it
+scans your repo, resolves the skills a task needs **on demand**, plans non-overlapping work
+units, dispatches them in parallel, and refuses to "complete" anything without recorded
+evidence.
 
 This guide is verifiable end to end — every section ends with a command whose output you
 can check.
+
+## Engine matrix
+
+The runtime names in this tree are Claude, Codex, Copilot, OpenCode, and Antigravity. The
+conversation/runtime matrix is:
+
+| Engine | Fresh execution | Tool/sandbox enforcement | Exact native resume | Own-history policy | Phase/admission |
+|--------|-----------------|--------------------------|---------------------|--------------------|-----------------|
+| Claude | yes | full | yes (`-p -r <session_id>`) | native history when exact; bounded public replay otherwise | Phase 1 built-in read-only yes; phase 2+ yes |
+| Codex | yes | partial: sandbox yes, rendered tools denied | yes (`exec resume <thread_id>`) | native history when exact; bounded public replay otherwise | Phase 1 built-in read-only yes; phase 2+ yes |
+| Copilot | yes | full | unavailable; no proved by-id path | bounded public replay | Phase 1 no; phase 2+ yes when ready/admitted |
+| OpenCode | yes | no: conversation launches reject requested tools or sandbox | yes (`run --session <validated ses_...> --format json`) | native history when exact; bounded public replay otherwise | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
+| Antigravity | yes | no: conversation launches reject requested tools or sandbox | unavailable; no evidenced exact binding | bounded public replay | Phase 1 no; phase 2+ only when the binding does not need tool/sandbox enforcement |
 
 ---
 
@@ -65,9 +79,28 @@ intake + scan  →  resolve skill NEEDS  →  plan work units  →  dispatch (pa
 - **Orchestrator** — the main agent. Plans, splits, judges. Never writes code itself.
 - **Work unit** — a scoped slice of the task (`.vibeflow/workunits/<name>/`) with its own
   gates, evidence, and resource counters. Scopes must not overlap so units run in parallel.
+- **Coordinator route** — when a task needs more than one participant, typed add-participant
+  actions promote a direct route into coordinate through proposal/review/commit. The
+  coordinator is the only authority; the executor is a different admitted engine that only
+  carries out the committed work. Executor clarifications go to the coordinator first. The
+  coordinator resolves ambiguity by checking the task spec, then the live conversation
+  context, then repo evidence, then a safe default, and asks the user only as a last resort.
+  Bare coordinate topology currently admits Claude and Codex because both prove the role
+  sandbox and authenticated structured coordination output; other workflow engines fail
+  closed until their adapters prove both contracts.
+  VibeFlow keeps each CLI's native session history separate; when supported native history
+  reconciliation detects compaction or exact proof is unavailable, it revokes exact authority
+  and falls back to bounded replay. Removing the last executor collapses the route back to direct.
+- **Worktree isolation** — with `vf orchestrate --isolate`, each unit runs in its own linked
+  git worktree, which keeps clarification and recovery scoped to that unit's filesystem state.
+  Executors must commit there, and the host only fast-forwards a clean, quiescent HEAD after
+  verification. Divergence and failure stay preserved for recovery.
 - **Skill** — an Anthropic skill-creator folder (`SKILL.md` + optional `scripts/`,
   `references/`). VibeFlow **discovers, validates, and matches** skills; the engine runs
   them. Nothing is pre-installed — skills are acquired on demand and start `unverified`.
+- **Capability package** — a reviewed extension for an installed CLI: skills, MCP servers,
+  tools, hooks, roles, or engine settings. The Fabric owns install, configure, retarget,
+  update, repair, rollback, and removal; VibeFlow remains the harness, not the coding engine.
 - **Confidence gate** — any decision below `1.0` triggers bounded investigation/debate;
   no merge or close on a guess.
 
@@ -76,27 +109,82 @@ intake + scan  →  resolve skill NEEDS  →  plan work units  →  dispatch (pa
 ## 3. The web UI (recommended)
 
 ```bash
-vf            # or: vf ui
+vf                  # AI-first Home on 127.0.0.1:7799
+vf ui               # same stable default
+vf ui --port 0      # explicitly choose an OS-assigned free port
 ```
 
-Opens `http://127.0.0.1:<port>` (loopback only). The dashboard has:
+Both default commands open `http://127.0.0.1:7799` (loopback only). If a requested fixed
+port is busy, the TTY flow offers a free-port fallback; a non-interactive launch stops.
+The default surface is AI-first Home:
 
-1. **New workflow** — repository path (with **Detect**), goal, engines, doc/task sources,
-   file types, sample attachments, and the Definition of Done. Click **Generate workflow**.
-2. **Resource meter** — units done, tokens, estimated cost, elapsed time (live via SSE).
-3. **Triage banner** — any blocked unit is surfaced at the top, before everything else.
-4. **Dispatch** — pick an engine, **Write dispatch prompt**, or **Orchestrate (dry)** to
-   plan + dispatch work units (browser orchestration is always dry — it never shells out).
-5. **Work units** — a board you can add/edit/delete; each card shows status, the
-   build/lint/test/review gate strip, confidence, resources, and recorded evidence.
-6. **Skills** — locally discovered skills and the demand-driven NEEDS (satisfied vs. must
-   acquire).
-7. **Discovery** — Context7 docs/skill lookup. The network is only touched after you tick
-   **approve network**.
+1. **Searchable session rail** — recent conversations, search, and **New conversation**.
+2. **Central conversation pane** — topic, lifecycle state, participant avatars, and live stream status.
+3. **Composer** — durable FIFO queue, ArrowUp edit of the latest queued human message, private file range, and capability chooser.
+4. **Details inspector** — participants, continuity, lineage, and health.
+5. **Trace / capabilities drawers** — ordered public trace, evidence, and typed CLI capability actions.
+6. **Repository intake stays separate** — `vf init` asks its setup questionnaire when stdin is a TTY; `--no-ask` skips it. `vf ui` never switches Home into an intake wizard.
 
 Security: the server binds to `127.0.0.1`, every write carries a per-process CSRF token,
 the Host/Origin must be loopback, uploads are sanitized and size-capped, and the page ships
-no third-party JavaScript under a strict CSP.
+no third-party JavaScript under a strict CSP. Any non-loopback `--host` instead requires the
+owner's single-use browser bootstrap before `/` reveals that CSRF token; bootstrap replay and
+unauthenticated root scraping return `401`. `--no-open` prints the owner-only URL once.
+
+### Conversation workspace
+
+Choose a session in the rail and use it immediately, or select **New conversation**. Search
+filters the rail without changing the active session. The center timeline remains the source
+of truth while details, trace, and capability drawers open alongside it.
+
+The composer keeps collaboration inside the conversation:
+
+1. Send another message while agents are working; it joins the durable FIFO queue instead of
+   interrupting or replacing an earlier send.
+   Only a transport-ambiguous request, or a typed failure with `retryable: true` and
+   `recovery_action: retry`, creates a Retry action that reuses the exact request and
+   idempotency key. Typed failures wait for that explicit action. If browser offline interrupts
+   an in-flight admission, the row stays **Reconciling** and Home automatically replays the
+   exact request only after refreshing authoritative queue state. If a non-retryable failure arrives
+   after you have started a newer draft, Home keeps the rejected payload as **Needs action**.
+   Choose its typed recovery or confirm Dismiss; Home never auto-resends or overwrites the newer
+   composer state. The rejected row belongs to current Home UI state; it is not stored in
+   `localStorage` and does not promise browser-restart recovery.
+2. Press ArrowUp with an empty composer to edit the latest queued human message. Press Escape
+   to cancel. If dispatch wins the race before the edit commits, the draft is preserved and
+   the UI offers an explicit send-as-new action.
+3. Select **Agent** or type `+@participant` to start a participant-add proposal. Review and
+   commit the proposal to promote a direct route into coordinate; if you remove the last
+   executor, the route collapses back to direct. Select **Remove** or the `−` action beside a
+   participant in **Details** to prepare `-@participant`; submit it in chat so the removal is
+   visible and auditable. `@` mentions target participants without leaving the composer.
+4. Quote one through eight visible messages, including messages from different sources.
+   Quote chips preserve order and can be moved, removed, or used to jump to their source.
+5. React with the small supported set: 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, or ❗. Reactions are
+   typed conversation data, not prompt text; agents are capped at three distinct non-self
+   reactions so the social layer stays useful.
+6. Resolve approval, cancellation, installation, repair, and other capability cards inline.
+   A `409` means another operation won the race; reload the current state instead of retrying
+   blindly.
+
+If a stream disconnects, Home renews its short-lived token and resumes after its last
+confirmed sequence. Duplicate replay/live events are ignored by `seq`. Sending to an active
+conversation steers it; sending to a completed conversation creates a child revision and
+shows the parent link. **Trace** exposes sanitized public correlation fields. Public result
+and approval `artifact_refs` remain distinct from the opaque `ref` used to preview bytes.
+
+Conversation credentials have separate jobs. The browser receives an `HttpOnly`,
+`SameSite=Strict` session cookie for JSON and artifact requests; loopback writes also carry
+the page's per-process CSRF token. SSE uses a different, 15-minute token scoped to one
+conversation. Neither token is stored in `localStorage` or `sessionStorage`, and provider
+credentials, native session ids, internal/provider prompts, environment values, and local
+artifact paths are not public DTO fields. LAN page authority is not conversation authority:
+the conversation workspace fails closed on every non-loopback bind, even after browser
+bootstrap. Use the loopback UI for conversations.
+
+The public trace does contain the user's topic and messages plus engine responses after
+redaction. “Prompts are private” refers specifically to internal role/provider templates and
+the rendered provider prompt; those implementation inputs never become public trace fields.
 
 ### Typed evidence
 
@@ -128,9 +216,9 @@ transitions yet simply shows nothing.
 ### Generate context
 
 ```bash
-vf init                       # scan repo + generate canonical context for all engines
+vf init                       # TTY: ask intake questions, then generate context
 vf init --engine claude       # only Claude Code files
-vf init --interactive         # ask the intake questions in the terminal
+vf init --no-ask              # skip the questionnaire
 vf init --memory              # force the claude-mem install (skip the prompt)
 vf init --no-memory           # skip the claude-mem install (skip the prompt)
 vf init --dry-run             # show what would be written
@@ -197,6 +285,66 @@ skips the gate). Verify:
 ```bash
 cat .vibeflow/PROJECT_CONTEXT.md     # contains a "## Detected stack" section
 ```
+
+### Ask, chat, and brainstorm
+
+Use `ask` for a file-range question, `chat` for the canonical persisted conversation, and
+`brainstorm` when you explicitly want the debate policy:
+
+```bash
+vf ask src/server.ts:130-180 "what protects these routes?"
+vf ask --conversation conversation-123 "which failure is fail-closed?"
+vf ask --conversation conversation-123 --resume "keep going"
+vf ask --conversation conversation-123 src/server.ts:130-180 "revise this explanation"
+
+vf chat "Explain the release flow"
+vf chat --policy plan --participant planner@codex --max-rounds 2 "Plan the migration"
+vf chat --resume conversation-123 "Revise step two"
+
+vf brainstorm "Compare two storage designs"             # deterministic dry run
+vf brainstorm --yes --max-rounds 3 "Compare two storage designs"
+vf brainstorm --yes --no-baseline --json "Compare designs"
+```
+
+`ask` stages the selected file range as private context and then routes the follow-up through
+the durable conversation runtime. Public turns use the canonical `VF-TURN/1` JSON envelope;
+private file ranges use a separate `VF-PRIVATE-FILE-RANGES/1` JSON payload that is cleared
+after the turn. The private payload is not written into public trace or browser persistence.
+`--conversation <id>` is the explicit persisted path and `--resume` is compatibility-only:
+it requires `--conversation` and never targets a native latest-session shortcut. Exact
+by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode's conversation
+adapter invokes `opencode run --session <validated-ses-id> --format json`; Copilot and
+Antigravity fail closed instead of silently starting fresh under an exact claim.
+
+For an exact proved native resume, the CLI retains its own history and VibeFlow supplies only new applicable user messages plus peer-agent responses and reactions. The recipient's own prior output is not repeated. When supported native history reconciliation detects compaction or valid exact authority is missing, VibeFlow revokes exact authority and the canonical turn includes applicable user/peer context plus a bounded structured replay of the recipient's last eight public responses. Each replay summary is capped at 2 KiB UTF-8 and carries its source digest, provenance, source/replayed counts, and truncation counts, so the recipient's own context is never silently omitted. Claude, Codex, and OpenCode receive prompts on stdin; Copilot and Antigravity receive native prompt argv. A large Copilot work-unit prompt may be written to `.vibeflow/dispatch/<unit>.md` and replaced on argv by a short absolute read pointer. That prompt file is a transport fallback, not a resumable session or memory store. Antigravity rejects prompts at or above 30 KiB because its print mode has no supported file/stdin replacement.
+
+`chat` accepts `--policy`, repeated `--participant <role@engine[:model]>`,
+`--max-rounds`, `--resume`, `--no-baseline`, and `--json`. `brainstorm` accepts repeated
+participants, `--max-rounds`, `--resume`, `--no-baseline`, `--json`, and `--yes`. A new
+brainstorm is dry-run by default; only `--yes` dispatches engines. A resumed brainstorm
+continues immediately. `--max-rounds` is bounded to `1..100`.
+
+Resume does not reuse creation settings. `chat --resume` rejects `--policy`, `--participant`,
+`--max-rounds`, and `--no-baseline`; `brainstorm --resume` rejects `--participant`,
+`--max-rounds`, and `--no-baseline`. This is a validation error, not silent option dropping.
+
+For scripts, `--json` emits exactly one JSON document on stdout and suppresses streamed
+deltas. Brainstorm dry runs report resolved participants, whether the evaluator was added,
+engine availability, and model validity. Executed brainstorms report every completed round,
+consensus, deterministic decision matrix, baseline comparison, and an authenticated opaque
+transcript URL derived from `artifact_created.payload.ref`; that URL is fetchable through the
+authenticated artifact route. Exit codes are `0` success/dry-run/stopped, `1` validation,
+`2` engine start, `3` transport, `4` failed, and `5` aborted. See the
+[Command Reference](./COMMAND_REFERENCE.md#conversations) for the exact JSON fields and HTTP
+contract.
+
+A plan paused at its approval gate is accepted, not failed: JSON reports
+`status: "awaiting_approval"` with its current artifact references and the command exits `0`.
+Resolve it from the inline Home action card or HTTP API before the workflow continues.
+
+Those stable codes apply to `chat`, `brainstorm`, and persisted asks. `ask --resume` passes
+through the engine process status, while legacy local ask/readiness errors return `2`;
+`ask` does not offer JSON output.
 
 ### Resolve which skills a task needs (demand-driven)
 
@@ -269,6 +417,14 @@ vf orchestrate --yes          # real dispatch through the engine CLI
 `orchestrate` dispatches every work unit through a bounded parallel pool, runs an
 independent reviewer (a unit only passes at confidence `1.0` with evidence), then the
 orchestrator-only goal-eval prints `met | partial | blocked`.
+
+For explicit multi-participant routes, VibeFlow uses the coordinator/executor policy above: the coordinator is the sole authority, the executor is a different admitted engine that writes only in its assigned worktree, clarifications route back to the coordinator first, and incremental context stays limited to the user and the other agents in the route. The coordinator resolves ambiguity by checking the task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort. Pure brainstorm/debate routes stay on the debate path instead of this coordinator path. `vf orchestrate --isolate` keeps the unit in its own linked git worktree, so follow-up clarification and recovery keep the same filesystem context. `vf ask --conversation <id> --resume` uses the same conversation turn authority: an exact resume sends only the new follow-up, while detected compaction or missing proof revokes exact authority and triggers bounded public replay.
+
+Bare coordinate routing requires two distinct engines with enforceable native role authority
+and authenticated structured coordination output. Claude and Codex currently qualify. Copilot,
+OpenCode, and Antigravity remain available to the workflow transport, but conversation
+coordination rejects them until their adapters prove both contracts instead of silently
+weakening either one.
 
 Before `run` or `orchestrate` launches an agent, an exact verified match in a configured
 pinned registry cache appears as an approval card with security scan status. Card creation
@@ -368,6 +524,27 @@ canonical context. Work units and skills appear only when a task actually needs 
 - **`vf discover` failed / offline** — Context7 runs over HTTP; check connectivity. Set
   `CONTEXT7_API_KEY` to raise the rate limit (keyless works but is throttled).
 - **An engine CLI isn't launched on `vf run`** — install it; `vf doctor` shows what's missing.
+- **Conversation request returns `401`** — open the loopback page first so it can issue the
+  process-local session cookie. Conversation routes intentionally do not work from any
+  non-loopback page; its LAN bootstrap/page token is a separate authority.
+- **Conversation write returns `403`** — reload the page; its per-process CSRF token no
+  longer matches the running server.
+- **Conversation control returns `409`** — the lifecycle changed, the approval was already
+  resolved, or the route/body operation ids disagree. Resume the latest snapshot and use the
+  current control card.
+- **The conversation says it is reconnecting** — token renewal and cursor replay are
+  automatic. If it persists, verify that the original process is still running; sessions,
+  stream-token digests, and the live runtime are process-local.
+- **`vf doctor` reports an uncertain or orphaned CLI** — inspect the recorded owner first.
+  `vf doctor --fix` repairs only an exact proved orphan; a live or identity-unprovable owner
+  stays fail-closed. Every owned launch records supervisor and CLI PIDs plus exact process
+  start identity, and terminal release waits for exit/quiescence plus `streams-drained`.
+  Windows uses a kill-on-close Job Object (`kernel-contained`); Linux and macOS use an
+  isolated process group (`cooperative-lineage`, because descendants can escape it). The
+  injected suite covers the Windows contract. Accept live Windows evidence only from a green,
+  exact-SHA `windows-latest` CI smoke job; a local macOS/Linux run is not a Windows canary.
+- **An artifact preview is unavailable** — only opaque ids emitted by that conversation's
+  public trace can be fetched. Raw paths and ids from a different conversation are rejected.
 - **`vf verify` fails on confidence** — raise the unit to `1.0` with evidence, or keep
   investigating; this is the anti-hallucination gate working as designed.
 

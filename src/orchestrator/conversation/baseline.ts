@@ -1,19 +1,31 @@
 import type { StoredTraceEvent } from "../trace/types.js";
 import {
+  CONVERSATION_BASELINE_FAILURE_REASON,
+  CONVERSATION_BASELINE_SKIP_REASON,
+  CONVERSATION_BASELINE_STATUS,
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_TRACE_EVENT_KIND,
+  type ConversationBaselineFailureReasonV1,
+  type ConversationBaselineReasonV1,
+  type ConversationBaselineSkipReasonV1,
+  type ConversationBaselineStatusV1,
+  isConversationBaselineFailureReason,
+} from "./conversation-public-wire-contract.js";
+import {
   type DecisionMatrix,
   normalizeDebateOption,
   roundRatioHalfUpSix,
 } from "./debate-projection.js";
 import type { ConversationContext } from "./types.js";
 
-export type BaselineSkipReason = "disabled" | "single_participant" | "engine_unavailable";
+export type BaselineSkipReason = ConversationBaselineSkipReasonV1;
 
 export interface BaselineComparison {
-  status: "success" | "failed" | "skipped";
+  status: ConversationBaselineStatusV1;
   baseline_answer: string | null;
   debate_answer: string | null;
   divergence: number | null;
-  skip_reason: string | null;
+  skip_reason: ConversationBaselineReasonV1 | null;
 }
 
 export interface BaselineProjectionInput {
@@ -42,15 +54,18 @@ export function computeTokenSetDivergence(left: string, right: string): number {
 }
 
 const skipped = (reason: BaselineSkipReason, debateAnswer: string | null): BaselineComparison => ({
-  status: "skipped",
+  status: CONVERSATION_BASELINE_STATUS.SKIPPED,
   baseline_answer: null,
   debate_answer: debateAnswer,
   divergence: null,
   skip_reason: reason,
 });
 
-const failed = (reason: string | null, debateAnswer: string | null): BaselineComparison => ({
-  status: "failed",
+const failed = (
+  reason: ConversationBaselineFailureReasonV1 | null,
+  debateAnswer: string | null,
+): BaselineComparison => ({
+  status: CONVERSATION_BASELINE_STATUS.FAILED,
   baseline_answer: null,
   debate_answer: debateAnswer,
   divergence: null,
@@ -60,34 +75,43 @@ const failed = (reason: string | null, debateAnswer: string | null): BaselineCom
 /** Apply the frozen skip/failure precedence to one ordered conversation journal. */
 export function projectBaselineComparison(input: BaselineProjectionInput): BaselineComparison {
   const debateAnswer = input.decisionMatrix?.rows.find((row) => row.rank === 1)?.option ?? null;
-  if (!input.enabled) return skipped("disabled", debateAnswer);
+  if (!input.enabled) return skipped(CONVERSATION_BASELINE_SKIP_REASON.DISABLED, debateAnswer);
   if (input.nonEvaluatorParticipantCount <= 1) {
-    return skipped("single_participant", debateAnswer);
+    return skipped(CONVERSATION_BASELINE_SKIP_REASON.SINGLE_PARTICIPANT, debateAnswer);
   }
-  if (!input.selectedEngineAvailable) return skipped("engine_unavailable", debateAnswer);
-  if (debateAnswer === null) return failed("no_debate_answer", null);
+  if (!input.selectedEngineAvailable)
+    return skipped(CONVERSATION_BASELINE_SKIP_REASON.ENGINE_UNAVAILABLE, debateAnswer);
+  if (debateAnswer === null)
+    return failed(CONVERSATION_BASELINE_FAILURE_REASON.NO_DEBATE_ANSWER, null);
   const baseline = input.records
-    .filter(({ event }) => event.type === "baseline_result")
+    .filter(({ event }) => event.type === CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT)
     .sort((left, right) => left.seq - right.seq)
     .at(-1)?.event;
-  if (!baseline || baseline.type !== "baseline_result") {
-    return failed("baseline_missing", debateAnswer);
+  if (!baseline || baseline.type !== CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT) {
+    return failed(CONVERSATION_BASELINE_FAILURE_REASON.BASELINE_MISSING, debateAnswer);
   }
-  if (baseline.payload.status === "failed") {
-    return failed(baseline.payload.skip_reason, debateAnswer);
+  if (baseline.payload.status === CONVERSATION_BASELINE_STATUS.FAILED) {
+    return failed(
+      baseline.payload.skip_reason === null ||
+        isConversationBaselineFailureReason(baseline.payload.skip_reason)
+        ? baseline.payload.skip_reason
+        : CONVERSATION_BASELINE_FAILURE_REASON.BASELINE_FAILED,
+      debateAnswer,
+    );
   }
-  if (baseline.payload.status === "skipped") {
+  if (baseline.payload.status === CONVERSATION_BASELINE_STATUS.SKIPPED) {
     return {
-      status: "skipped",
+      status: CONVERSATION_BASELINE_STATUS.SKIPPED,
       baseline_answer: null,
       debate_answer: debateAnswer,
       divergence: null,
       skip_reason: baseline.payload.skip_reason,
     };
   }
-  if (baseline.payload.answer === null) return failed("baseline_missing", debateAnswer);
+  if (baseline.payload.answer === null)
+    return failed(CONVERSATION_BASELINE_FAILURE_REASON.BASELINE_MISSING, debateAnswer);
   return {
-    status: "success",
+    status: CONVERSATION_BASELINE_STATUS.SUCCESS,
     baseline_answer: baseline.payload.answer,
     debate_answer: debateAnswer,
     divergence: computeTokenSetDivergence(baseline.payload.answer, debateAnswer),
@@ -101,25 +125,33 @@ export async function persistBaselineResult(
   firstResponderIndex: number,
 ): Promise<StoredTraceEvent> {
   const firstId = context.participantIds[firstResponderIndex] as string;
-  let payload: Extract<StoredTraceEvent["event"], { type: "baseline_result" }>["payload"];
+  let payload: Extract<
+    StoredTraceEvent["event"],
+    { type: typeof CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT }
+  >["payload"];
   if (!context.baselineEnabled) {
-    payload = { status: "skipped", answer: null, confidence: null, skip_reason: "disabled" };
+    payload = {
+      status: CONVERSATION_BASELINE_STATUS.SKIPPED,
+      answer: null,
+      confidence: null,
+      skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
+    };
   } else if (
     context.bindings.filter((binding) => binding.role.spec.name !== "brainstorm-evaluator")
       .length <= 1
   ) {
     payload = {
-      status: "skipped",
+      status: CONVERSATION_BASELINE_STATUS.SKIPPED,
       answer: null,
       confidence: null,
-      skip_reason: "single_participant",
+      skip_reason: CONVERSATION_BASELINE_SKIP_REASON.SINGLE_PARTICIPANT,
     };
   } else if (!context.bindingReadiness[firstResponderIndex]?.engine_available) {
     payload = {
-      status: "skipped",
+      status: CONVERSATION_BASELINE_STATUS.SKIPPED,
       answer: null,
       confidence: null,
-      skip_reason: "engine_unavailable",
+      skip_reason: CONVERSATION_BASELINE_SKIP_REASON.ENGINE_UNAVAILABLE,
     };
   } else {
     try {
@@ -130,25 +162,32 @@ export async function persistBaselineResult(
         promptInput: context.topic,
       }).completion;
       payload =
-        result.ok && result.state === "completed"
-          ? { status: "success", answer: result.output, confidence: null, skip_reason: null }
+        result.ok && result.state === CONVERSATION_OPERATION_STATE.COMPLETED
+          ? {
+              status: CONVERSATION_BASELINE_STATUS.SUCCESS,
+              answer: result.output,
+              confidence: null,
+              skip_reason: null,
+            }
           : {
-              status: "failed",
+              status: CONVERSATION_BASELINE_STATUS.FAILED,
               answer: null,
               confidence: null,
-              skip_reason: result.reason ?? "baseline_failed",
+              skip_reason: isConversationBaselineFailureReason(result.reason)
+                ? result.reason
+                : CONVERSATION_BASELINE_FAILURE_REASON.BASELINE_FAILED,
             };
     } catch {
       payload = {
-        status: "failed",
+        status: CONVERSATION_BASELINE_STATUS.FAILED,
         answer: null,
         confidence: null,
-        skip_reason: "baseline_start_failed",
+        skip_reason: CONVERSATION_BASELINE_FAILURE_REASON.BASELINE_START_FAILED,
       };
     }
   }
   return context.emit({
     idempotency_key: "debate:baseline:result",
-    event: { type: "baseline_result", payload },
+    event: { type: CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT, payload },
   });
 }

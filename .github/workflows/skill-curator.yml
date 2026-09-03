@@ -25,11 +25,9 @@ jobs:
         with:
           clean: true
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
       - run: |
           set -euo pipefail
-          bun install --frozen-lockfile
+          bun ci
       - run: |
           set -euo pipefail
           bun run build

@@ -1,13 +1,5 @@
-import { ConversationRoutingError } from "../orchestrator/conversation/router.js";
-import {
-  ConversationControlConflictError,
-  ConversationInvalidTargetParticipantError,
-  ConversationNotFoundError,
-} from "../orchestrator/conversation/service.js";
 import type {
   ApprovalDecision,
-  ConversationCreateParticipant,
-  ConversationCreateRequest,
   ConversationService,
   MessageRequest,
   OperationCancelCommand,
@@ -16,30 +8,34 @@ import {
   type ConversationArtifactAuthority,
   handleConversationArtifact,
 } from "./conversation-artifact.js";
+import type { ConversationAskCompatibilityHttpAuthorityV1 } from "./conversation-ask-compatibility-route.js";
 import type {
   ConversationSessionAuthority,
   ConversationStreamTokenAuthority,
 } from "./conversation-auth.js";
+import {
+  type ConversationBrowserHttpAuthorityV1,
+  handleOptionalConversationBrowserRoute,
+} from "./conversation-browser-route.js";
+import {
+  type ConversationCompatibilityMessageAuthorityV1,
+  handleConversationCompatibilityMessageRoute,
+} from "./conversation-compatibility-message-route.js";
+import {
+  type ConversationHomeCreateHttpAuthorityV1,
+  handleConversationHomeCreateRoute,
+} from "./conversation-home-create-route.js";
+import { createLegacyConversationRequest } from "./conversation-legacy-create-request.js";
+import { decodeConversationMessageRequest } from "./conversation-message-request.js";
+import { conversationRouteError } from "./conversation-route-error.js";
 import { handleConversationSse } from "./conversation-sse.js";
 
 const PREFIX = "/api/conversations";
 const BODY_LIMIT = 64 * 1024;
-const TEXT_LIMIT = 32 * 1024;
 const SHORT_LIMIT = 256;
 const REASON_LIMIT = 4 * 1024;
-const PARTICIPANT_LIMIT = 64;
-const ROUND_LIMIT = 100;
-const ENGINES = new Set(["claude", "codex", "copilot", "opencode", "antigravity"]);
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
 const APPROVAL_TOKEN_PATTERN = /^approval:[0-9a-f]{64}$/;
-const CLIENT_ROUTING_ERRORS = new Set<ConversationRoutingError["code"]>([
-  "invalid_routing_input",
-  "unknown_explicit_policy",
-  "unknown_explicit_role",
-  "explicit_engine_unavailable",
-  "policy_unavailable",
-  "role_unavailable",
-]);
 
 type JsonObject = Record<string, unknown>;
 type ParsedBody = { ok: true; body: JsonObject } | { ok: false };
@@ -48,14 +44,28 @@ export interface ConversationHttpAuthority {
   service: ConversationService;
   sessions: Pick<ConversationSessionAuthority, "authorize" | "issueCookie" | "loopback">;
   streamTokens: Pick<ConversationStreamTokenAuthority, "authorize" | "issue">;
+  privateFileRanges?: {
+    createId(): string;
+    stage(input: {
+      handoff_id: string;
+      repo_relative_path: string;
+      start_line: number;
+      end_line: number;
+      content: string;
+      staged_at: string;
+    }): unknown;
+  };
   artifacts?: ConversationArtifactAuthority;
   csrf?(request: Request): boolean;
   heartbeatMs?: number;
+  browser?: Omit<ConversationBrowserHttpAuthorityV1, "sessions" | "csrf">;
+  homeCreate?: Omit<ConversationHomeCreateHttpAuthorityV1, "sessions" | "streamTokens" | "csrf">;
+  compatibilityMessages?: ConversationCompatibilityMessageAuthorityV1;
+  askCompatibility?: Omit<ConversationAskCompatibilityHttpAuthorityV1, "sessions" | "csrf">;
+  messageQueueEvents?: import("./conversation-sse.js").ConversationSseAuthority["messageQueue"];
 }
 
-export function isConversationNamespace(path: string): boolean {
-  return path === PREFIX || path.startsWith(`${PREFIX}/`);
-}
+export { isConversationNamespace } from "./conversation-browser-route.js";
 
 const response = (status: number, code: string): Response =>
   Response.json({ code }, { status, headers: { "cache-control": "no-store" } });
@@ -123,73 +133,6 @@ async function readBoundedJson(request: Request): Promise<ParsedBody> {
   return { ok: true, body: value as JsonObject };
 }
 
-function createRequest(body: JsonObject): ConversationCreateRequest | null {
-  if (!exactKeys(body, ["topic", "policy", "participants", "max_rounds"])) return null;
-  if (!boundedString(body.topic, TEXT_LIMIT)) return null;
-  if (body.policy !== undefined && !boundedString(body.policy, SHORT_LIMIT)) return null;
-  if (
-    body.max_rounds !== undefined &&
-    (typeof body.max_rounds !== "number" ||
-      !Number.isSafeInteger(body.max_rounds) ||
-      body.max_rounds < 1 ||
-      body.max_rounds > ROUND_LIMIT)
-  )
-    return null;
-  let participants: ConversationCreateParticipant[] | undefined;
-  if (body.participants !== undefined) {
-    if (
-      !Array.isArray(body.participants) ||
-      body.participants.length < 1 ||
-      body.participants.length > PARTICIPANT_LIMIT
-    )
-      return null;
-    participants = [];
-    for (const value of body.participants) {
-      if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-      const participant = value as JsonObject;
-      if (!exactKeys(participant, ["role_ref", "engine", "model"])) return null;
-      if (
-        !boundedString(participant.role_ref, SHORT_LIMIT) ||
-        !boundedString(participant.engine, SHORT_LIMIT) ||
-        !ENGINES.has(participant.engine)
-      )
-        return null;
-      if (participant.model !== undefined && !boundedString(participant.model, SHORT_LIMIT))
-        return null;
-      participants.push({
-        role_ref: participant.role_ref,
-        engine: participant.engine,
-        ...(participant.model === undefined ? {} : { model: participant.model as string }),
-      });
-    }
-  }
-  return {
-    topic: body.topic,
-    ...(body.policy === undefined ? {} : { policy: body.policy as string }),
-    ...(participants === undefined ? {} : { participants }),
-    ...(body.max_rounds === undefined ? {} : { max_rounds: body.max_rounds as number }),
-  };
-}
-
-function messageRequest(body: JsonObject): MessageRequest | null {
-  if (!exactKeys(body, ["content", "target_participants"])) return null;
-  if (!boundedString(body.content, TEXT_LIMIT)) return null;
-  const targets = body.target_participants;
-  if (targets !== undefined && targets !== "all") {
-    if (!Array.isArray(targets) || targets.length < 1 || targets.length > PARTICIPANT_LIMIT)
-      return null;
-    if (
-      targets.some((target) => !boundedString(target, SHORT_LIMIT)) ||
-      new Set(targets).size !== targets.length
-    )
-      return null;
-  }
-  return {
-    content: body.content,
-    ...(targets === undefined ? {} : { target_participants: targets as string[] | "all" }),
-  };
-}
-
 function emptyRequest(body: JsonObject): boolean {
   return exactKeys(body, []) && Object.keys(body).length === 0;
 }
@@ -255,29 +198,25 @@ function approvalRouteId(value: unknown): value is string {
   return routeId(value) || (typeof value === "string" && APPROVAL_TOKEN_PATTERN.test(value));
 }
 
-function mapError(error: unknown): Response {
-  if (error instanceof ConversationNotFoundError) return response(404, "conversation_not_found");
-  if (error instanceof ConversationControlConflictError)
-    return response(409, "conversation_conflict");
-  if (
-    error instanceof ConversationInvalidTargetParticipantError ||
-    (error instanceof ConversationRoutingError && CLIENT_ROUTING_ERRORS.has(error.code))
-  )
-    return response(400, "invalid_request");
-  return response(500, "conversation_failed");
-}
-
 async function parsedBody(request: Request): Promise<JsonObject | Response> {
   const parsed = await readBoundedJson(request);
   return parsed.ok ? parsed.body : response(400, "invalid_request");
 }
 
-/** Sole owner of `/api/conversations`; callers must delegate before legacy routers. */
 export async function handleConversationRoute(
   authority: ConversationHttpAuthority,
   request: Request,
   url: URL,
 ): Promise<Response> {
+  const browser = await handleOptionalConversationBrowserRoute(
+    authority.browser,
+    authority.sessions,
+    authority.csrf,
+    request,
+    url,
+  );
+  if (browser) return browser;
+  if (!url.pathname.startsWith(PREFIX)) return response(404, "route_not_found");
   const path = segments(url);
   if (path === null) return response(400, "invalid_request");
   const [conversationId, action, identity, tail] = path;
@@ -291,6 +230,7 @@ export async function handleConversationRoute(
       {
         service: authority.service,
         tokens: authority.streamTokens,
+        ...(authority.messageQueueEvents ? { messageQueue: authority.messageQueueEvents } : {}),
         ...(authority.heartbeatMs === undefined ? {} : { heartbeatMs: authority.heartbeatMs }),
       },
       request,
@@ -304,9 +244,19 @@ export async function handleConversationRoute(
 
   try {
     if (request.method === "POST" && path.length === 0) {
+      if (authority.homeCreate)
+        return handleConversationHomeCreateRoute(
+          {
+            ...authority.homeCreate,
+            sessions: authority.sessions,
+            streamTokens: authority.streamTokens,
+            ...(authority.csrf ? { csrf: authority.csrf } : {}),
+          },
+          request,
+        );
       const body = await parsedBody(request);
       if (body instanceof Response) return body;
-      const input = createRequest(body);
+      const input = createLegacyConversationRequest(body);
       if (!input) return response(400, "invalid_request");
       const started = await authority.service.start(input);
       const token = authority.streamTokens.issue(started.conversation_id);
@@ -328,13 +278,25 @@ export async function handleConversationRoute(
       // trace repopulates it before resolution without accepting a client-supplied path.
       if (!(await authority.service.snapshot(conversationId)))
         return response(404, "conversation_not_found");
-      return handleConversationArtifact(authority.artifacts, conversationId, identity);
+      return handleConversationArtifact(
+        authority.artifacts,
+        request,
+        url,
+        conversationId,
+        identity,
+      );
     }
     if (request.method !== "POST") return response(404, "route_not_found");
+    if (path.length === 2 && action === "messages" && authority.compatibilityMessages)
+      return handleConversationCompatibilityMessageRoute(
+        authority.compatibilityMessages,
+        request,
+        conversationId,
+      );
     const body = await parsedBody(request);
     if (body instanceof Response) return body;
     if (path.length === 2 && action === "messages") {
-      const input = messageRequest(body);
+      const input = decodeConversationMessageRequest(body);
       if (!input) return response(400, "invalid_request");
       const value = await authority.service.message(conversationId, input);
       return accepted(value, value.location ? { location: value.location } : undefined);
@@ -384,6 +346,6 @@ export async function handleConversationRoute(
     }
     return response(404, "route_not_found");
   } catch (error) {
-    return mapError(error);
+    return conversationRouteError(error);
   }
 }

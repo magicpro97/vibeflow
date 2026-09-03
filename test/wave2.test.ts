@@ -99,29 +99,39 @@ describe("dispatch", () => {
     expect(s?.files_changed).toEqual(["a.ts"]);
   });
 
-  test("runDispatch uses an injected spawner and parses the result", () => {
-    const spawner = () => ({ status: 0, stdout: '```json\n{"confidence":1}\n```' });
-    const r = runDispatch({ engine: "claude", prompt: "p", mode: "cli", spawner });
+  test("runDispatch uses an injected spawner and parses the result", async () => {
+    const spawner = async () => ({ status: 0, stdout: '```json\n{"confidence":1}\n```' });
+    const r = await runDispatch({ engine: "claude", prompt: "p", mode: "cli", spawner });
     expect(r.ok).toBe(true);
     expect(r.summary?.confidence).toBe(1);
   });
 
-  test("bridge mode reports a clear reason when VIBEFLOW_AI is unset", () => {
-    const r = runDispatch({ engine: "codex", prompt: "p", mode: "bridge", bridgeCmd: "" });
+  test("bridge mode reports a clear reason when VIBEFLOW_AI is unset", async () => {
+    const r = await runDispatch({ engine: "codex", prompt: "p", mode: "bridge", bridgeCmd: "" });
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("VIBEFLOW_AI");
   });
 
-  test("bridge spawns VIBEFLOW_AI as a shell command (args parse, not a bare binary)", () => {
+  test("bridge passes VIBEFLOW_AI as one shell command", async () => {
     // A bridge command WITH args must run via the shell. `printf` emits a valid JSON summary;
     // before the shell fix this failed because spawn treated the whole string as one binary.
     // Windows: no `printf` builtin in cmd.exe; skip the bridge-shell-parse check on Windows
     // (the spawner still runs the command, but the test uses POSIX-style printf).
-    if (process.platform === "win32") return;
     const cmd = `printf '%s' '${'```json\n{"confidence":1}\n```'}'`;
-    const r = runDispatch({ engine: "claude", prompt: "ignored", mode: "bridge", bridgeCmd: cmd });
+    const calls: string[] = [];
+    const r = await runDispatch({
+      engine: "claude",
+      prompt: "ignored",
+      mode: "bridge",
+      bridgeCmd: cmd,
+      spawner: async (command) => {
+        calls.push(command);
+        return { status: 0, stdout: '```json\n{"confidence":1}\n```' };
+      },
+    });
     expect(r.ok).toBe(true);
     expect(r.summary?.confidence).toBe(1);
+    expect(calls).toEqual([cmd]);
   });
 });
 

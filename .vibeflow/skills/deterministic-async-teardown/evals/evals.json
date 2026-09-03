@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "skill": "deterministic-async-teardown",
+  "cases": [
+    {
+      "id": "teardown-positive-background",
+      "type": "positive",
+      "prompt": "Fix this async teardown race where a background callback writes after the test deletes its fixture."
+    },
+    {
+      "id": "teardown-positive-stream",
+      "type": "positive",
+      "prompt": "Add a real stream-drain completion barrier before restoring the mocked transport."
+    },
+    {
+      "id": "teardown-positive-process",
+      "type": "positive",
+      "prompt": "The child exited but its output and owned handles are still live; make process teardown deterministic."
+    },
+    {
+      "id": "teardown-positive-listener",
+      "type": "positive",
+      "prompt": "Remove this timer and listener leak without adding sleeps or flaky retries."
+    },
+    {
+      "id": "teardown-negative-sync",
+      "type": "negative",
+      "prompt": "Rename a synchronous local variable and update its unit assertion."
+    },
+    {
+      "id": "teardown-negative-performance",
+      "type": "negative",
+      "prompt": "Benchmark how long the production build takes; do not change cleanup behavior."
+    },
+    {
+      "id": "teardown-negative-copy",
+      "type": "negative",
+      "prompt": "Rewrite the landing page copy about reliable automation."
+    },
+    {
+      "id": "teardown-negative-status",
+      "type": "negative",
+      "prompt": "Report whether the current test suite passed without editing code."
+    }
+  ]
+}

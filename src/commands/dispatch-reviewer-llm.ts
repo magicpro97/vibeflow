@@ -2,6 +2,8 @@
 //
 // ADR-001 phase 2: LLM review layer that fires after the local makeReviewer gate passes.
 import { spawnSync } from "node:child_process";
+import { ENGINES, type Engine } from "../core.js";
+import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { resolveReviewerEngine } from "../review-engine.js";
 import { buildReviewerPrompt } from "./orchestrate-reviewer.js";
 import { parseGoalScore } from "./tools-detect.js";
@@ -10,7 +12,9 @@ export interface LLMReviewOpts {
   goal: string;
   spec?: string;
   diff: string;
-  llmFn: (prompt: string) => Promise<string>;
+  llmFn?: (prompt: string) => Promise<string>;
+  ownedRoute?: OwnedAiRouteRunner;
+  cwd?: string;
   /** The engine that implemented the unit — the reviewer auto-picks a DIFFERENT
    *  tool than this (ADR-001 cross-tool review). */
   implementer?: string;
@@ -42,8 +46,19 @@ export async function runLLMReview(opts: LLMReviewOpts): Promise<LLMReviewResult
     implementer: opts.implementer,
     available: opts.available,
   });
+  if (!(ENGINES as readonly string[]).includes(reviewerEngine)) {
+    throw new Error(`unsupported reviewer engine: ${reviewerEngine}`);
+  }
   const prompt = buildReviewerPrompt({ goal: opts.goal, spec: opts.spec, diff: opts.diff });
-  const raw = await opts.llmFn(prompt);
+  const llmFn =
+    opts.llmFn ??
+    makeVibflowLLMFn(
+      reviewerEngine as Engine,
+      opts.ownedRoute ?? runOwnedAiRoute,
+      opts.cwd ?? process.cwd(),
+    );
+  if (!llmFn) throw new Error("VIBEFLOW_AI is not set");
+  const raw = await llmFn(prompt);
   const pass = /^COVERED/i.test(raw.trim());
   const reason = pass ? "LLM reviewer: COVERED" : `LLM reviewer: ${raw.trim().slice(0, 300)}`;
   const score = parseGoalScore(raw);
@@ -90,16 +105,22 @@ export function getUnitDiff(cwd: string, scope: string[], _spawn = spawnSync): s
  * Returns undefined when VIBEFLOW_AI is not set — caller skips LLM review.
  * ponytail: only bridge mode; add cli-engine path when needed.
  */
-export function makeVibflowLLMFn(): ((prompt: string) => Promise<string>) | undefined {
+export function makeVibflowLLMFn(
+  engine: Engine,
+  ownedRoute: OwnedAiRouteRunner = runOwnedAiRoute,
+  cwd = process.cwd(),
+): ((prompt: string) => Promise<string>) | undefined {
   const cmd = process.env.VIBEFLOW_AI;
   if (!cmd) return undefined;
   return async (prompt: string): Promise<string> => {
-    const shell = process.platform === "win32" ? ["cmd.exe", "/c", cmd] : ["/bin/sh", "-c", cmd];
-    const r = Bun.spawnSync(shell as [string, ...string[]], {
-      stdin: Buffer.from(prompt, "utf8"),
-      stdout: "pipe",
-      stderr: "pipe",
+    const result = await ownedRoute({
+      engine,
+      command: cmd,
+      input: prompt,
+      cwd,
+      shell: true,
+      timeoutMs: 30_000,
     });
-    return r.stdout.toString();
+    return result.stdout;
   };
 }

@@ -1,6 +1,11 @@
 import { basename, join } from "node:path";
 import { CTX_DIR, readState } from "../core.js";
 import type { WorkUnit, WorkflowState } from "../core/types.js";
+import {
+  WORKFLOW_DASHBOARD_STATUS,
+  WORK_UNIT_STATUS,
+  type WorkflowDashboardStatus,
+} from "../core/workflow-contract.js";
 import type { LogEvent } from "../logbus/types.js";
 import type { ProjectEntry } from "../registry.js";
 import { replayFromLog } from "./handlers.js";
@@ -17,7 +22,7 @@ export {
   type DiffResponse,
 } from "./dashboard-diff.js";
 
-export type WorkflowDashboardStatus = "running" | "blocked" | "pending" | "done";
+export type { WorkflowDashboardStatus } from "../core/workflow-contract.js";
 
 export interface WorkflowDashboardItem {
   key: string;
@@ -44,11 +49,25 @@ export function dashboardKey(repoPath: string, taskId: string): string {
 }
 
 export function workflowStatus(units: WorkUnit[]): WorkflowDashboardStatus {
-  if (units.some((u) => u.status === "running" || u.status === "verifying")) return "running";
-  if (units.some((u) => u.status === "blocked")) return "blocked";
-  if (units.length > 0 && units.every((u) => u.status === "done")) return "done";
-  return "pending";
+  if (
+    units.some(
+      (u) => u.status === WORK_UNIT_STATUS.RUNNING || u.status === WORK_UNIT_STATUS.VERIFYING,
+    )
+  )
+    return WORKFLOW_DASHBOARD_STATUS.RUNNING;
+  if (units.some((u) => u.status === WORK_UNIT_STATUS.BLOCKED))
+    return WORKFLOW_DASHBOARD_STATUS.BLOCKED;
+  if (units.length > 0 && units.every((u) => u.status === WORK_UNIT_STATUS.DONE))
+    return WORKFLOW_DASHBOARD_STATUS.DONE;
+  return WORKFLOW_DASHBOARD_STATUS.PENDING;
 }
+
+const DASHBOARD_STATUS_ORDER = Object.freeze({
+  [WORKFLOW_DASHBOARD_STATUS.RUNNING]: 0,
+  [WORKFLOW_DASHBOARD_STATUS.BLOCKED]: 1,
+  [WORKFLOW_DASHBOARD_STATUS.PENDING]: 2,
+  [WORKFLOW_DASHBOARD_STATUS.DONE]: 3,
+} satisfies Record<WorkflowDashboardStatus, number>);
 
 function scheduleWaves(units: Pick<WorkUnit, "name" | "scope" | "depends_on">[]): string[][] {
   const remaining = new Map(units.map((p) => [p.name, new Set(p.depends_on ?? [])]));
@@ -104,13 +123,7 @@ export function buildDashboardItems(entries: ProjectEntry[]): WorkflowDashboardI
     });
   }
   items.sort((a, b) => {
-    const order: Record<WorkflowDashboardStatus, number> = {
-      running: 0,
-      blocked: 1,
-      pending: 2,
-      done: 3,
-    };
-    const diff = (order[a.status] ?? 99) - (order[b.status] ?? 99);
+    const diff = DASHBOARD_STATUS_ORDER[a.status] - DASHBOARD_STATUS_ORDER[b.status];
     if (diff !== 0) return diff;
     return b.updatedAt - a.updatedAt;
   });

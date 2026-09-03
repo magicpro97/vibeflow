@@ -3,6 +3,8 @@ import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { CTX_DIR, type Skill } from "../core.js";
+import { SKILL_SOURCE, SKILL_SOURCES, type SkillSource } from "../core/skill-contract.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { SKILL_MIRRORS } from "../workflow-artifacts.js";
 import { resolveAllAdapters } from "./adapter.js";
 import { sharedCatalogDir } from "./catalog.js";
@@ -22,13 +24,9 @@ import { type ParseSkillOpts, trustedIdentityForSharedSkill } from "./review-pro
  * `discoverSkills` also scans the SHARED catalog (~/.vibeflow/skills/) AFTER
  * project-local roots, so a project-local skill always shadows the shared one.
  */
-export type SkillSource = "repo" | "shared" | "builtin";
+export type { SkillSource } from "../core/skill-contract.js";
 
-export interface SkillDiscoveryRoots {
-  repo: string[];
-  shared: string[];
-  builtin: string[];
-}
+export type SkillDiscoveryRoots = Record<SkillSource, string[]>;
 
 export const REPO_SKILL_ROOT = join(CTX_DIR, "skills");
 export const REPO_SKILL_ROOTS: readonly string[] = [
@@ -46,9 +44,9 @@ export function skillDiscoveryRoots(
   shared = join(process.env.VF_SKILLS_HOME ?? homedir(), ".vibeflow", "skills"),
 ): SkillDiscoveryRoots {
   return {
-    repo: REPO_SKILL_ROOTS.map((root) => join(repo, root)),
-    shared: [shared],
-    builtin: BUILTIN_SKILL_ROOTS.map((root) => join(repo, root)),
+    [SKILL_SOURCE.REPO]: REPO_SKILL_ROOTS.map((root) => join(repo, root)),
+    [SKILL_SOURCE.SHARED]: [shared],
+    [SKILL_SOURCE.BUILTIN]: BUILTIN_SKILL_ROOTS.map((root) => join(repo, root)),
   };
 }
 
@@ -67,13 +65,13 @@ function inside(root: string, candidate: string): boolean {
     rel === "" ||
     (!isAbsolute(rel) &&
       rel !== ".." &&
-      !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+      !rel.startsWith(`..${process.platform === RUNTIME_PLATFORM.WINDOWS ? "\\" : "/"}`))
   );
 }
 
 /** Map a discovered SKILL.md to exactly one canonical source class. */
 export function classifySkillSource(path: string, roots: SkillDiscoveryRoots): SkillSource {
-  for (const source of ["repo", "shared", "builtin"] as const) {
+  for (const source of SKILL_SOURCES) {
     for (const root of roots[source]) {
       const absoluteRoot = resolve(root);
       const absolutePath = resolve(path);

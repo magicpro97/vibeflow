@@ -34,6 +34,7 @@ export interface OperationCancellationAuthority {
   readonly scopeKey: string;
   commitCancellation(conversationId: string, operationId: string): boolean;
   isCancellationClaimed(conversationId: string, operationId: string): boolean;
+  owner?(operationId: string): string | null;
 }
 
 export function conversationManifestPath(dir: string, conversationId: string): string {

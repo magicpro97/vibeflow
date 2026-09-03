@@ -71,7 +71,10 @@ export interface AiInitOpts {
    */
   autopilot?: boolean;
   /** Inject preflight for tests (avoids live engine probes). */
-  preflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+  preflight?: (
+    engines: Engine[],
+    opts: { probe: boolean },
+  ) => EngineReadiness[] | Promise<EngineReadiness[]>;
   /** CLI-side ctx7 auth state. false means use fallback without prompting login. */
   ctx7Auth?: boolean;
   /** Streaming callbacks forwarded to internal spawners (shell pipe path). */
@@ -135,7 +138,10 @@ export interface AiInitWorkflowOpts {
   forceEngine?: Engine;
   /** Test seam: same surface as `runAiInit`'s preflight (avoids live
    *  engine probes). */
-  preflight?: (engines: Engine[], opts: { probe: boolean }) => EngineReadiness[];
+  preflight?: (
+    engines: Engine[],
+    opts: { probe: boolean },
+  ) => EngineReadiness[] | Promise<EngineReadiness[]>;
   /** Injected dispatcher so unit tests can drive the orchestrator
    *  without spawning real engines. Production callers omit this and
    *  `runAiInitWorkflow` constructs `defaultAiInitDispatcher(engine)`

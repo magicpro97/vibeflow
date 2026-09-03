@@ -4,6 +4,7 @@ import { sanitizePublicText } from "../trace/public-sanitize.js";
 import type { InternalTraceStoreRecord, PolicyEmission, TraceEvent } from "../trace/types.js";
 import { isValidParticipantModel } from "../trace/validation.js";
 import type { ConversationDurableRecord } from "./artifact-store.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 
 export function configurationEnvelope(
   record: ConversationDurableRecord,
@@ -14,13 +15,13 @@ export function configurationEnvelope(
     ({ stored_event: stored }) => stored.idempotency_key === "conversation:configured",
   )?.stored_event;
   if (existing) {
-    if (existing.event.type !== "conversation_configured") {
+    if (existing.event.type !== CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED) {
       throw new Error("invalid durable configuration authority");
     }
     return { idempotency_key: existing.idempotency_key, event: existing.event };
   }
   const event = {
-    type: "conversation_configured",
+    type: CONVERSATION_TRACE_EVENT_KIND.CONVERSATION_CONFIGURED,
     payload: {
       topic: sanitizePublicText(record.manifest.topic, undefined, []),
       policy: sanitizePublicText(record.manifest.policy, undefined, []),
@@ -52,12 +53,14 @@ export function unresolvedApprovalOperation(
 ): string | null {
   const resolved = new Set(
     records.flatMap(({ stored_event: stored }) =>
-      stored.event.type === "approval_resolved" ? [stored.event.payload.decision.approval_id] : [],
+      stored.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_RESOLVED
+        ? [stored.event.payload.decision.approval_id]
+        : [],
     ),
   );
   const operations = new Set(
     records.flatMap(({ stored_event: stored }) =>
-      stored.event.type === "approval_requested" &&
+      stored.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED &&
       !resolved.has(stored.event.payload.token.approval_id)
         ? [stored.event.payload.token.operation_id]
         : [],
@@ -74,7 +77,10 @@ export function operationOwnsDurableLifecycle(
 ): boolean {
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const stored = records[index]?.stored_event;
-    if (stored?.event.type === "state_change" && !stored.event.payload.terminal) {
+    if (
+      stored?.event.type === CONVERSATION_TRACE_EVENT_KIND.STATE_CHANGE &&
+      !stored.event.payload.terminal
+    ) {
       return stored.operation_id === operationId;
     }
   }

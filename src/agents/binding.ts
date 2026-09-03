@@ -1,8 +1,11 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { ENGINES, type Engine } from "../core.js";
+import { AGENT_ENGINE, AGENT_ROLE_SOURCE } from "../core/agent-contract.js";
+import { SKILL_SOURCE } from "../core/skill-contract.js";
 import { type EnvPolicy, conversationEnvPolicy } from "../dispatch/env-filter.js";
 import { type ValidatedIsolationLease, validateIsolationLease } from "../dispatch/isolation.js";
+import { isEngineSessionMode } from "../dispatch/session-contract.js";
 import type {
   IsolationLeaseProjection,
   SessionMode,
@@ -12,7 +15,7 @@ import type {
   SpawnOptionsProjection,
 } from "../dispatch/session-types.js";
 import { createSpawnOptionsProjection } from "../dispatch/session-types.js";
-import { type PreflightOpts, preflightAll } from "../preflight.js";
+import { preflightAll, preflightAllAsync } from "../preflight.js";
 import {
   type ResolvedSkill,
   materializeDiscoveredDispatchSkills,
@@ -64,11 +67,10 @@ const canonicalPreviewBindings = new WeakSet<object>();
 export const isCanonicalPreviewAgentBinding = (value: PreviewAgentBinding): boolean =>
   canonicalPreviewBindings.has(value);
 
-const SESSION_MODES = new Set<SessionMode>(["exact", "replay", "fresh"]);
-
 function assertBindingInput(binding: AgentBinding): void {
   if (!ENGINES.includes(binding.engine)) throw new Error("unsupported conversation engine");
-  if (!SESSION_MODES.has(binding.sessionMode)) throw new Error("invalid conversation session mode");
+  if (!isEngineSessionMode(binding.sessionMode))
+    throw new Error("invalid conversation session mode");
 }
 
 function renderPrompt(
@@ -113,12 +115,12 @@ function assertAdmission(
     throw new Error("conversation phase must be a positive integer");
   }
   if (options.phase === 1) {
-    if (binding.engine !== "claude" && binding.engine !== "codex") {
+    if (binding.engine !== AGENT_ENGINE.CLAUDE && binding.engine !== AGENT_ENGINE.CODEX) {
       throw new Error("Phase 1 admits only built-in read-only Claude/Codex bindings");
     }
     if (
-      resolvedRole.source !== "builtin" ||
-      resolvedSkills.some((skill) => skill.source !== "builtin")
+      resolvedRole.source !== AGENT_ROLE_SOURCE.BUILTIN ||
+      resolvedSkills.some((skill) => skill.source !== SKILL_SOURCE.BUILTIN)
     ) {
       throw new Error("Phase 1 admits only built-in read-only bindings");
     }
@@ -129,7 +131,8 @@ function assertAdmission(
   }
 
   const projectMaterial =
-    resolvedRole.source === "repo" || resolvedSkills.some((skill) => skill.source === "repo");
+    resolvedRole.source === AGENT_ROLE_SOURCE.REPO ||
+    resolvedSkills.some((skill) => skill.source === SKILL_SOURCE.REPO);
   if (validatedIsolation && validatedIsolation.repoRoot !== canonicalRepoRoot) {
     throw new Error("isolation lacks the associated canonical repository");
   }
@@ -138,11 +141,18 @@ function assertAdmission(
   }
 }
 
-function engineReady(engine: Engine, repoRoot: string, execution = true): boolean {
-  const probeOptions: PreflightOpts = execution
-    ? { probe: true, skipCache: true, cacheKey: repoRoot }
-    : { probe: false, cacheKey: repoRoot };
-  const readiness = preflightAll([engine], probeOptions);
+function engineAvailable(engine: Engine, repoRoot: string): boolean {
+  const readiness = preflightAll([engine], { probe: false, cacheKey: repoRoot });
+  const exact = readiness.length === 1 ? readiness[0] : undefined;
+  return exact?.engine === engine && exact.level === "ready";
+}
+
+async function engineReady(engine: Engine, repoRoot: string): Promise<boolean> {
+  const readiness = await preflightAllAsync([engine], {
+    probe: true,
+    skipCache: true,
+    cacheKey: repoRoot,
+  });
   const exact = readiness.length === 1 ? readiness[0] : undefined;
   return exact?.engine === engine && exact.level === "ready";
 }
@@ -267,7 +277,7 @@ export function previewAgentBinding(
   const authority = resolveBindingAuthority(binding, options, "preview");
   const preview = Object.freeze({
     resolved: authority.resolved,
-    engineAvailable: engineReady(binding.engine, realpathSync(resolve(options.repoRoot)), false),
+    engineAvailable: engineAvailable(binding.engine, realpathSync(resolve(options.repoRoot))),
     modelValid: modelValidForPreview(authority.resolved.model),
   });
   canonicalPreviewBindings.add(preview);
@@ -275,12 +285,12 @@ export function previewAgentBinding(
 }
 
 /** Resolve all role/skill authority before a conversation attempt can be spawned. */
-export function materializeAgentBinding(
+export async function materializeAgentBinding(
   binding: AgentBinding,
   options: MaterializeAgentBindingOptions,
-): MaterializedAgentBinding {
+): Promise<MaterializedAgentBinding> {
   const canonicalRepoRoot = realpathSync(resolve(options.repoRoot));
-  if (!engineReady(binding.engine, canonicalRepoRoot)) {
+  if (!(await engineReady(binding.engine, canonicalRepoRoot))) {
     throw new Error(`conversation binding requires a verified engine: ${binding.engine}`);
   }
   const authority = resolveBindingAuthority(binding, options);

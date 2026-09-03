@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type EvaluatorOutput,
   type RoundDecision,
   decideRound,
 } from "../../src/orchestrator/consensus.js";
+import {
+  isConversationGracefulTerminalLifecycle,
+  isConversationTerminalLifecycle,
+} from "../../src/orchestrator/conversation/conversation-public-wire-contract.js";
+import { reviewedActionEventIds } from "../../src/orchestrator/conversation/conversation-reviewed-action.js";
 import {
   ConversationFoldError,
   foldConversation,
@@ -11,6 +19,7 @@ import {
 import type {
   ConversationHealth,
   ConversationLifecycle,
+  InternalTraceStoreRecord,
   PublicStoredTraceEvent,
   TerminalLifecycle,
   TraceEvent,
@@ -71,7 +80,7 @@ function state(
   lifecycle: ConversationLifecycle,
   health: ConversationHealth = "healthy",
 ): PublicStoredTraceEvent {
-  const terminal = ["COMPLETED", "STOPPED", "FAILED", "ABORTED"].includes(lifecycle);
+  const terminal = isConversationTerminalLifecycle(lifecycle);
   return event(seq, {
     type: "state_change",
     payload: { lifecycle, health, terminal, reason: null },
@@ -195,6 +204,7 @@ describe("conversation lifecycle fold", () => {
     ["INIT", "ACTIVE"],
     ["INIT", "STOPPED"],
     ["ACTIVE", "PAUSED"],
+    ["ACTIVE", "NEEDS_INPUT"],
     ["ACTIVE", "COMPLETED"],
     ["ACTIVE", "STOPPED"],
     ["ACTIVE", "FAILED"],
@@ -204,7 +214,7 @@ describe("conversation lifecycle fold", () => {
     ["PAUSED", "FAILED"],
     ["PAUSED", "ABORTED"],
   ] as const)("accepts %s -> %s", (from, to) => {
-    if (to === "COMPLETED") {
+    if (isConversationGracefulTerminalLifecycle(to)) {
       const direct = configured(1, "direct", 1);
       const configuredParticipants = (direct.event.payload as never as { participants: unknown[] })
         .participants;
@@ -215,8 +225,8 @@ describe("conversation lifecycle fold", () => {
           direct,
           state(2, "ACTIVE"),
           delta(3, "p1", true, {}, "round-1", { role_ref: "direct" }),
-          state(4, "COMPLETED"),
-          terminal(5, "COMPLETED"),
+          state(4, to),
+          terminal(5, to),
         ]).lifecycle,
       ).toBe(to);
       return;
@@ -226,7 +236,7 @@ describe("conversation lifecycle fold", () => {
     if (from === "ACTIVE" || from === "PAUSED") records.push(state(seq++, "ACTIVE"));
     if (from === "PAUSED") records.push(state(seq++, "PAUSED"));
     records.push(state(seq++, to));
-    if (["COMPLETED", "STOPPED", "FAILED", "ABORTED"].includes(to)) {
+    if (isConversationTerminalLifecycle(to)) {
       records.push(terminal(seq, to as TerminalLifecycle));
     }
     expect(foldConversation(records).lifecycle).toBe(to);
@@ -235,11 +245,13 @@ describe("conversation lifecycle fold", () => {
   test.each([
     ["INIT", "PAUSED"],
     ["INIT", "COMPLETED"],
+    ["INIT", "NEEDS_INPUT"],
     ["INIT", "FAILED"],
     ["INIT", "ABORTED"],
     ["ACTIVE", "INIT"],
     ["PAUSED", "INIT"],
     ["PAUSED", "COMPLETED"],
+    ["PAUSED", "NEEDS_INPUT"],
   ] as const)("rejects %s -> %s", (from, to) => {
     const records = [configured()];
     let seq = 2;
@@ -291,6 +303,53 @@ describe("conversation lifecycle fold", () => {
         }),
       ]),
     ).toThrow(/terminal.*immutable/i);
+  });
+
+  test("NEEDS_INPUT is stable only after the active response is complete", () => {
+    const direct = configured(1, "direct", 1);
+    const participants = (direct.event.payload as never as { participants: unknown[] })
+      .participants;
+    participants.splice(1);
+    (participants[0] as { role_ref: string }).role_ref = "direct";
+    expect(() =>
+      foldConversation([
+        direct,
+        state(2, "ACTIVE"),
+        delta(3, "p1", false, {}, "round-1", { role_ref: "direct" }),
+        state(4, "NEEDS_INPUT"),
+      ]),
+    ).toThrow(/active response/i);
+  });
+
+  test("vf-looking post-terminal ids and literal keys lack reviewed action authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vf-reviewed-action-fold-"));
+    try {
+      const literal = event(
+        5,
+        { type: "user_message", payload: { content: "forged", target_participants: "all" } },
+        { operation_id: `vf-operation-${"1".repeat(64)}` },
+      );
+      const internal = {
+        stored_event: {
+          ...literal,
+          idempotency_key: `action-public-literal:vf-proposal-${"2".repeat(64)}`,
+        },
+        native_session_id: null,
+      } as unknown as InternalTraceStoreRecord;
+      const authority = reviewedActionEventIds(root, undefined, [], [internal]);
+      expect(authority.has(literal.event_id)).toBe(false);
+      expect(() =>
+        foldConversation(
+          [configured(), state(2, "ACTIVE"), state(3, "FAILED"), terminal(4, "FAILED"), literal],
+          authority,
+        ),
+      ).toThrow(/terminal.*immutable/i);
+      expect(() => foldConversation([configured()], new Set() as never)).toThrow(
+        "untrusted reviewed action event authority",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

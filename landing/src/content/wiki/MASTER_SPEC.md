@@ -2,7 +2,7 @@
 title: Master Spec
 description: Master specification — one-sentence summary, design principles, engine support, skill system, hook system, and security posture.
 category: reference
-last_updated: 2026-06-24
+last_updated: 2026-08-27
 ---
 
 # VibeFlow Master Spec
@@ -12,6 +12,7 @@ last_updated: 2026-06-24
 - [One-Sentence Summary](#one-sentence-summary)
 - [What the Tool Does](#what-the-tool-does)
 - [Key Design Principles](#key-design-principles)
+- [Conversation and Owned-Process Contract](#conversation-and-owned-process-contract)
 - [Minimal-Footprint and AI-Generated Output](#minimal-footprint-and-ai-generated-output)
 - [Engine Support](#engine-support)
 - [Skill System](#skill-system)
@@ -24,21 +25,22 @@ last_updated: 2026-06-24
 
 ## One-sentence summary
 
-A local-first npm CLI tool that opens a web UI and orchestrates Claude Code, Codex CLI, and GitHub Copilot CLI using shared project context, Anthropic-style skills, source/file readers, hooks, multi-agent planning, verification, and continuous skill evolution.
+A local-first npm CLI harness that opens AI-first Home and coordinates Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI using shared project context, Anthropic-style skills, source/file readers, typed capability manifests, hooks, multi-agent planning, verification, and continuous skill evolution.
 
 ## What the tool does
 
 ```text
 - Starts from npm/npx
-- Opens a local web UI
+- Opens AI-first Home; `vf init` handles repository intake in a TTY
+- Keeps session search, queue editing, typed participant proposal/review/commit, quotes, reactions, and approvals in chat
 - Collects repo, task, docs, and work management sources
 - Finds source connector skills
 - Finds file reader skills
 - Reads and normalizes project context
 - Generates CLAUDE.md, AGENTS.md, and Copilot instructions
 - Creates Claude agents and Anthropic-style skills
-- Dispatches Claude Code, Codex, Copilot CLI, OpenCode, or Antigravity CLI
-- Uses hooks to control risky actions
+- Dispatches Claude Code, Codex, Copilot CLI, OpenCode, or Antigravity CLI through the canonical owned async route
+- Uses hooks and the typed capability fabric to control risky actions
 - Verifies diff, tests, logs, and acceptance criteria
 - Proposes skill updates from lessons learned
 ```
@@ -46,7 +48,14 @@ A local-first npm CLI tool that opens a web UI and orchestrates Claude Code, Cod
 ## Key design principles
 
 ```text
-Main agent is always the orchestrator.
+Main agent is the coordinator; the selected CLI remains the engine of record.
+For coordinate routes, the coordinator is the sole authority and the executor is a different admitted engine that only performs the committed work. Typed add-participant proposals promote direct → coordinate through proposal/review/commit, and removing the last executor collapses the route back to direct. `coordination-coordinator` is read-only and `coordination-executor` is the writable executor role on a distinct ready engine. Claude and Codex currently advertise both native role-sandbox authority and authenticated structured coordination output. Copilot, OpenCode, and Antigravity stay on workflow transports and fail closed for this route until their adapters can prove both contracts. Claude coordinating Codex is the reference example, not a fixed binding.
+Exact by-id resume is limited to Claude, Codex, and OpenCode.
+An exact resume trusts the CLI's own history and sends only new user and peer-agent deltas.
+Do not repeat a recipient's own prior output when native cursor proof is exact.
+When supported native reconciliation detects compaction or exact proof is unavailable, revoke exact authority and replay bounded structured own public history; never omit it silently.
+Keep incremental context bounded to the user and other agents in the route; never duplicate the receiving CLI's own native history.
+Clarifications and corrections stay with the coordinator; it resolves ambiguity by checking the task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort.
 Do not rely on stale model memory for version-sensitive tasks.
 Use verified skills when available.
 Search trusted external docs/skills when needed.
@@ -58,7 +67,20 @@ No evidence, no conclusion.
 No verification, no completion.
 Generate the fewest files possible.
 Everything a tool emits is AI-generated, not hand-maintained boilerplate.
+Declare persisted/API/config vocabularies once as frozen `as const` authorities; never duplicate them as enums or raw UI/backend unions.
 ```
+
+## Conversation and owned-process contract
+
+- `vf` / `vf ui` open AI-first Home: searchable session rail, central conversation,
+  queue-aware composer, participant details, and inline typed actions.
+- Sends made during agent work enter durable FIFO order. ArrowUp edits only the latest queued human message; a race preserves the draft for explicit send-as-new. Only transport-ambiguous requests or typed `retryable: true` + `recovery_action: retry` admission failures may replay the exact idempotency-bound request. Typed failures wait for an explicit retry; an in-flight admission interrupted by browser offline stays **Reconciling** and replays the exact request automatically only after authoritative refresh. Non-retryable collisions retain their exact payload as **Needs action** for typed recovery or confirmed dismissal and never auto-resend.
+- Add/remove agent actions happen in chat. Typed add-participant requests create a proposal that can promote a direct route into coordinate through proposal/review/commit, and removing the last executor collapses it back to direct. Quotes may reference one through eight visible cross-source messages; reactions use the bounded typed emoji set and agent anti-spam cap.
+- Public delivery is canonical `VF-TURN/1` JSON. Exact native resume sends only new user and peer response/reaction deltas; when supported native reconciliation detects compaction or exact proof is unavailable, full/unproved delivery adds up to eight recipient responses, capped at 2 KiB UTF-8 each with provenance/digest/counts, and may add content-addressed `VF-HANDOFF/1`.
+- Private ranges use one-shot `VF-PRIVATE-FILE-RANGES/1` JSON. A Copilot prompt file is an argv transport fallback, not session history or memory.
+- Owned async launches persist supervisor/CLI PID plus exact start identity and release only after quiescence plus `streams-drained`.
+- Executors work in linked git worktrees, must commit their result, and the host only promotes a clean, quiescent HEAD by fast-forward after verification. Removing the last executor collapses the route back to direct. Failures and divergence remain preserved for recovery.
+- Windows uses a kill-on-close Job Object with `kernel-contained` proof. Linux/macOS use an isolated process group with `cooperative-lineage` proof. Live/unprovable recovery fails closed. Injected tests and the native `windows-latest` smoke both cover PID identity, Job Object containment, release, and orphan recovery. Release is fail-closed on that live proof: `release-please` waits for the main-push aggregate, npm publish waits for the release-workflow aggregate, and both Windows jobs check out the exact `github.sha` they authorize.
 
 ## Minimal-footprint and AI-generated output
 

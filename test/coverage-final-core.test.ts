@@ -386,9 +386,20 @@ describe("final command and compatibility coverage", () => {
     );
     expect(
       parseDebateParticipantOutput(
+        '{"answer":"visible","claim":"claim","evidence":[],"quote_refs":[]}',
+      ),
+    ).toMatchObject({ content: "visible", social_intent: { present: true } });
+    expect(
+      parseDebateParticipantOutput(
         '{"answer":"answer","content":"content","claim":"claim","evidence":["a","a"]}',
       ),
-    ).toEqual({ answer: "answer", content: "content", claim: "claim", evidence: ["a"] });
+    ).toEqual({
+      answer: "answer",
+      content: "content",
+      claim: "claim",
+      evidence: ["a"],
+      social_intent: { present: false, quote_refs: undefined, reactions: undefined },
+    });
     const assessment = {
       agreement: { value: true, evidence: "a" },
       conflict_resolution: { value: true, evidence: "b" },
@@ -542,6 +553,7 @@ describe("final command and compatibility coverage", () => {
       signal: new AbortController().signal,
       terminate: () => undefined,
       readResumeBinding: () => undefined,
+      readModelOutputBinding: () => undefined,
       readEvidenceBinding: () => undefined,
     });
     await expect(handle.completion).rejects.toThrow("completion rejected");

@@ -8,10 +8,14 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "test": "node --test tests/*.test.mjs",
+    "test:a11y": "playwright test --config playwright.config.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@astrojs/sitemap": "^3.2.0",
+    "@playwright/test": "^1.60.0",
     "astro": "^5.0.0"
   }
 }

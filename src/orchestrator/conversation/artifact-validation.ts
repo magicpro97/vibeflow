@@ -1,8 +1,19 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import { AGENT_HOST_TOOLS, isAgentHostTool } from "../../core/agent-contract.js";
 import { ENGINES, type Engine } from "../../core/types.js";
-import { isSafeNativeSessionId } from "../../dispatch/public-redaction.js";
-import type { InternalResumeBinding } from "../../dispatch/session-types.js";
+import {
+  type EngineRoleSource,
+  type EngineSessionMode,
+  isEngineRoleSource,
+  isEngineSessionMode,
+} from "../../dispatch/session-contract.js";
+import {
+  type PersistedResumeBinding,
+  assertPersistedResumeBinding,
+} from "./artifact-resume-validation.js";
+export type { PersistedResumeBinding } from "./artifact-resume-validation.js";
+import { CONVERSATION_ARTIFACT_TYPES } from "./conversation-public-wire-contract.js";
 import type {
   ArtifactCreateRequest,
   ArtifactUpdateRequest,
@@ -21,13 +32,10 @@ export interface BindingAuthoritySnapshot {
   participant_id: string;
   engine: Engine;
   model: string | null;
-  session_mode: "exact" | "replay" | "fresh";
-  role_source: "builtin" | "repo";
+  session_mode: EngineSessionMode;
+  role_source: EngineRoleSource;
   role_hash: string;
   skill_hashes: string[];
-}
-export interface PersistedResumeBinding extends InternalResumeBinding {
-  participant_id: string;
 }
 export interface ConversationDurableRecord {
   manifest: ConversationManifest;
@@ -44,15 +52,7 @@ const MAX_ITEMS = 512;
 const HASH = /^[0-9a-f]{64}$/;
 const ARTIFACT_REF = /^vf-artifact-[0-9a-f]{64}$/;
 const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-const ARTIFACT_TYPES = new Set([
-  "decision_matrix",
-  "plan",
-  "diff",
-  "tests",
-  "synthesis",
-  "transcript",
-]);
-const SESSION_MODES = new Set(["exact", "replay", "fresh"]);
+const ARTIFACT_TYPES = new Set<string>(CONVERSATION_ARTIFACT_TYPES);
 
 const fail: () => never = () => {
   throw new Error("invalid manifest");
@@ -142,7 +142,7 @@ const assertBindingInput = (value: unknown): void => {
     keys.some((key) => !required.includes(key) && !optional.includes(key)) ||
     !ref(value.roleRef) ||
     !ENGINES.includes(value.engine as Engine) ||
-    !SESSION_MODES.has(value.sessionMode as string) ||
+    !isEngineSessionMode(value.sessionMode) ||
     (value.modelOverride !== undefined && !ref(value.modelOverride)) ||
     (value.additionalSkillRefs !== undefined && !list(value.additionalSkillRefs, ref))
   )
@@ -150,9 +150,20 @@ const assertBindingInput = (value: unknown): void => {
 };
 
 const assertManifestBinding = (value: unknown): void => {
-  if (!plain(value) || !exact(value, ["input", "participant_id"]) || !ref(value.participant_id))
-    fail();
+  if (!plain(value)) fail();
+  const keys = Object.hasOwn(value, "host_tools")
+    ? ["input", "participant_id", "host_tools"]
+    : ["input", "participant_id"];
+  if (!exact(value, keys) || !ref(value.participant_id)) fail();
   assertBindingInput(value.input);
+  if (
+    value.host_tools !== undefined &&
+    (!Array.isArray(value.host_tools) ||
+      value.host_tools.length > AGENT_HOST_TOOLS.length ||
+      new Set(value.host_tools).size !== value.host_tools.length ||
+      value.host_tools.some((tool) => !isAgentHostTool(tool)))
+  )
+    fail();
 };
 
 export function assertConversationManifest(
@@ -237,24 +248,11 @@ const assertAuthority: (value: unknown) => asserts value is BindingAuthoritySnap
     !ref(value.participant_id) ||
     !ENGINES.includes(value.engine as Engine) ||
     (value.model !== null && !ref(value.model)) ||
-    !SESSION_MODES.has(value.session_mode as string) ||
-    (value.role_source !== "builtin" && value.role_source !== "repo") ||
+    !isEngineSessionMode(value.session_mode) ||
+    !isEngineRoleSource(value.role_source) ||
     typeof value.role_hash !== "string" ||
     !HASH.test(value.role_hash) ||
     !list(value.skill_hashes, (item): item is string => typeof item === "string" && HASH.test(item))
-  )
-    fail();
-};
-
-const assertResume: (value: unknown) => asserts value is PersistedResumeBinding = (value) => {
-  if (
-    !plain(value) ||
-    !exact(value, ["attemptId", "engine", "nativeSessionId", "participant_id"]) ||
-    !ref(value.participant_id) ||
-    !ref(value.attemptId) ||
-    !ENGINES.includes(value.engine as Engine) ||
-    typeof value.nativeSessionId !== "string" ||
-    !isSafeNativeSessionId(value.engine as Engine, value.nativeSessionId)
   )
     fail();
 };
@@ -325,7 +323,7 @@ export function assertConversationDurableRecord(value: unknown, expectedId?: str
   if (
     !list(resumeBindings, (item): item is PersistedResumeBinding => {
       try {
-        assertResume(item);
+        assertPersistedResumeBinding(item);
         return true;
       } catch {
         return false;

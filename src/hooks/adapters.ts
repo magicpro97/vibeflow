@@ -13,6 +13,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Engine } from "../core.js";
+import { AGENT_ENGINE } from "../core/agent-contract.js";
+import { HOOK_ENFORCEMENT_MODE, type HookEnforcementMode } from "../core/hook-contract.js";
 import { antigravityHookConfig } from "./antigravity.js";
 import { cliPath, gitPostCheckout, gitPostMerge, gitPreCommit, gitPrePush } from "./git-hooks.js";
 
@@ -58,19 +60,23 @@ export function opencodePluginStale(
 
 /** Whether an engine can veto an action before it runs, or only detect after the fact. */
 export interface EngineEnforcementCapability {
-  preActionBlocking: "native" | "native-bash-only" | "post-hoc-only";
+  preActionBlocking: HookEnforcementMode;
 }
 
-const ENFORCEMENT: Record<Engine, EngineEnforcementCapability> = {
-  claude: { preActionBlocking: "native" },
-  codex: { preActionBlocking: "native-bash-only" },
-  copilot: { preActionBlocking: "native" },
+const ENFORCEMENT = Object.freeze({
+  [AGENT_ENGINE.CLAUDE]: Object.freeze({ preActionBlocking: HOOK_ENFORCEMENT_MODE.NATIVE }),
+  [AGENT_ENGINE.CODEX]: Object.freeze({
+    preActionBlocking: HOOK_ENFORCEMENT_MODE.NATIVE_BASH_ONLY,
+  }),
+  [AGENT_ENGINE.COPILOT]: Object.freeze({ preActionBlocking: HOOK_ENFORCEMENT_MODE.NATIVE }),
   // opencode exposes a plugin system with `tool.execute.before` that can
   // throw to block a tool call before it runs — semantically equivalent to
   // Claude Code's PreToolUse and Copilot CLI's preToolUse.
-  opencode: { preActionBlocking: "native" },
-  antigravity: { preActionBlocking: "post-hoc-only" },
-};
+  [AGENT_ENGINE.OPENCODE]: Object.freeze({ preActionBlocking: HOOK_ENFORCEMENT_MODE.NATIVE }),
+  [AGENT_ENGINE.ANTIGRAVITY]: Object.freeze({
+    preActionBlocking: HOOK_ENFORCEMENT_MODE.POST_HOC_ONLY,
+  }),
+} satisfies Record<Engine, EngineEnforcementCapability>);
 
 /** Report whether an engine enforces guardrails natively or post-hoc only. */
 export function engineEnforcement(engine: Engine): EngineEnforcementCapability {
@@ -83,8 +89,8 @@ export function engineEnforcement(engine: Engine): EngineEnforcementCapability {
  */
 export function downgradeBannerText(engine: Engine): string {
   const cap = engineEnforcement(engine).preActionBlocking;
-  if (cap === "native") return "";
-  if (cap === "post-hoc-only") {
+  if (cap === HOOK_ENFORCEMENT_MODE.NATIVE) return "";
+  if (cap === HOOK_ENFORCEMENT_MODE.POST_HOC_ONLY) {
     return `! ${engine}: detection-only guardrails. This engine has no vetoing pre-action hook, so VibeFlow can only flag risky actions after they happen (post-command/post-write/verify-result), not block them beforehand. Use Claude Code for native blocking.`;
   }
   return `! ${engine}: native blocking for Bash/shell only; non-Bash tool calls are unguarded. Use Claude Code for full native blocking.`;
@@ -93,8 +99,8 @@ export function downgradeBannerText(engine: Engine): string {
 /** Per-command warning for detection-only engines. Empty for native engines. */
 export function perCommandWarning(engine: Engine): string {
   const cap = engineEnforcement(engine).preActionBlocking;
-  if (cap === "native") return "";
-  if (cap === "post-hoc-only") {
+  if (cap === HOOK_ENFORCEMENT_MODE.NATIVE) return "";
+  if (cap === HOOK_ENFORCEMENT_MODE.POST_HOC_ONLY) {
     return `! ${engine}: detection-only — this action was flagged but NOT blocked. Use Claude Code for native blocking.`;
   }
   return `! ${engine}: this action was detected but may NOT be natively blocked (only Bash/shell has native blocking). Use Claude Code for full native blocking.`;
@@ -330,17 +336,19 @@ export default VfGuard;
 
 export function engineHookFiles(engines?: Engine[]): Record<string, string> {
   return {
-    ...(!engines || engines.includes("claude")
+    ...(!engines || engines.includes(AGENT_ENGINE.CLAUDE)
       ? { ".claude/settings.json": claudeHookConfig() }
       : {}),
-    ...(!engines || engines.includes("codex") ? { ".codex/hooks.json": codexHookConfig() } : {}),
-    ...(!engines || engines.includes("copilot")
+    ...(!engines || engines.includes(AGENT_ENGINE.CODEX)
+      ? { ".codex/hooks.json": codexHookConfig() }
+      : {}),
+    ...(!engines || engines.includes(AGENT_ENGINE.COPILOT)
       ? { ".github/hooks/copilot.json": copilotHookConfig() }
       : {}),
-    ...(!engines || engines.includes("opencode")
+    ...(!engines || engines.includes(AGENT_ENGINE.OPENCODE)
       ? { ".opencode/plugins/vf-guard.ts": opencodePluginSource() }
       : {}),
-    ...(!engines || engines.includes("antigravity")
+    ...(!engines || engines.includes(AGENT_ENGINE.ANTIGRAVITY)
       ? { ".agents/hooks.json": antigravityHookConfig(cliPath()) }
       : {}),
     ".githooks/pre-commit": gitPreCommit(),

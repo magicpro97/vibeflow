@@ -70,9 +70,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useSSE } from "../composables/useSSE.js";
+import { logChannelClass, logChannelLabel, logLevelClass } from "../lib/log-presentation.js";
 import { unitColor } from "../lib/unit-color.js";
 import { useVfStore } from "../store.js";
-import type { LogEvent, LogLevel } from "../types.js";
+import type { LogEvent } from "../types.js";
 
 const store = useVfStore();
 const { logs, error: sseError, clearLogs } = useSSE("/api/logs/stream");
@@ -134,35 +135,7 @@ function unitDotClass(unit: string) {
   return unitColor(unit).split(" ")[1] as string;
 }
 
-function levelClass(level: LogLevel) {
-  return (
-    {
-      info: "text-neutral-400",
-      warn: "text-amber-400/70",
-      error: "text-red-400/80",
-      debug: "text-neutral-600",
-    }[level] ?? "text-neutral-500"
-  );
-}
-
-function channelLabel(channel: string) {
-  const labels: Record<string, string> = {
-    vf: "vf",
-    "engine-stdout": "agent",
-    "engine-stderr": "agent:err",
-    hook: "hook",
-    user: "user",
-  };
-  return labels[channel] ?? channel;
-}
-
-function channelTextClass(channel: string) {
-  const map: Record<string, string> = {
-    vf: "text-neutral-300",
-    "engine-stdout": "text-neutral-500",
-    "engine-stderr": "text-red-400/70",
-    hook: "text-amber-400/70",
-  };
-  return map[channel] ?? "text-neutral-600";
-}
+const levelClass = logLevelClass;
+const channelLabel = logChannelLabel;
+const channelTextClass = logChannelClass;
 </script>

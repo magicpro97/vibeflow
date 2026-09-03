@@ -103,25 +103,36 @@ describe("makeVibflowLLMFn (ADR-001)", () => {
     const orig = process.env.VIBEFLOW_AI;
     // biome-ignore lint/performance/noDelete: Bun 1.3 assigns undefined as string "undefined"
     delete process.env.VIBEFLOW_AI;
-    expect(makeVibflowLLMFn()).toBeUndefined();
+    expect(makeVibflowLLMFn("claude")).toBeUndefined();
     if (orig !== undefined) process.env.VIBEFLOW_AI = orig;
   });
 
   test("returns a function when VIBEFLOW_AI is set", () => {
     const orig = process.env.VIBEFLOW_AI;
     process.env.VIBEFLOW_AI = "echo COVERED";
-    const fn = makeVibflowLLMFn();
+    const fn = makeVibflowLLMFn("claude");
     expect(typeof fn).toBe("function");
     if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
     else process.env.VIBEFLOW_AI = orig;
   });
 
-  test("returned fn calls VIBEFLOW_AI bridge and returns stdout", async () => {
+  test("returned fn calls VIBEFLOW_AI through the exact owned route", async () => {
     const orig = process.env.VIBEFLOW_AI;
     process.env.VIBEFLOW_AI = "echo COVERED";
-    const fn = makeVibflowLLMFn();
+    const requests: Array<{ engine: string; command: string; input: string }> = [];
+    const fn = makeVibflowLLMFn("codex", async (request) => {
+      requests.push({ engine: request.engine, command: request.command, input: request.input });
+      return {
+        attemptId: "reviewer",
+        status: 0,
+        stdout: "COVERED\n",
+        stderr: "",
+        timedOut: false,
+      };
+    });
     const result = (await fn?.("test prompt")) ?? "";
     expect(result.trim()).toBe("COVERED");
+    expect(requests).toEqual([{ engine: "codex", command: "echo COVERED", input: "test prompt" }]);
     if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
     else process.env.VIBEFLOW_AI = orig;
   });

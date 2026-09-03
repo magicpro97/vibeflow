@@ -13,6 +13,7 @@
 // vf worktree's runCommandSync) so the routing is unit-testable offline.
 
 import { canaryForUnit, defaultCanaryCheck, discoverCanaries, isCanaryFile } from "../canary.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { c, out, readState, resolveRepo, spawnSync, writeState } from "./_shared.js";
 
 /** Inject seam: the git-blame author lookup and the link timestamp. */
@@ -105,7 +106,8 @@ function canaryLink(
 function canaryCheckCmd(repo: string): number {
   const units = readState(repo)?.work_units ?? [];
   const missing = units.filter(
-    (u) => u.knowledge_heavy === true && u.status === "done" && !defaultCanaryCheck(u),
+    (u) =>
+      u.knowledge_heavy === true && u.status === WORK_UNIT_STATUS.DONE && !defaultCanaryCheck(u),
   );
   if (!missing.length) {
     out("vf", c.green("✓ every knowledge-heavy unit has a human canary."));

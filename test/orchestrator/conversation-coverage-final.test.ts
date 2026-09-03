@@ -21,13 +21,12 @@ import {
   defaultConversationReadiness,
 } from "../../src/orchestrator/conversation/bootstrap.js";
 import {
-  assertChildManifestAuthority,
-  createChildManifest,
   projectDryRunResult,
   projectOrchestrationResult,
   projectRuntimePreviewRequest,
 } from "../../src/orchestrator/conversation/boundary-projection.js";
 import { ControlRuntime } from "../../src/orchestrator/conversation/control-runtime.js";
+import { CONVERSATION_BASELINE_SKIP_REASON } from "../../src/orchestrator/conversation/conversation-baseline-contract.js";
 import { DebateConversationPolicy } from "../../src/orchestrator/conversation/debate-policy.js";
 import { projectDecisionMatrix } from "../../src/orchestrator/conversation/debate-projection.js";
 import {
@@ -46,6 +45,7 @@ import { registeredOperation } from "../../src/orchestrator/conversation/registe
 import { configurationEnvelope } from "../../src/orchestrator/conversation/restart-authority.js";
 import { ReviewConversationPolicy } from "../../src/orchestrator/conversation/review-policy.js";
 import { policyDryRun } from "../../src/orchestrator/conversation/services.js";
+import { prepareConversationTurn } from "../../src/orchestrator/conversation/turn-delivery.js";
 import type {
   AttemptRef,
   ConversationArtifactRef,
@@ -291,6 +291,20 @@ function policyContext(overrides: Record<string, unknown> = {}): ConversationCon
     ],
     signal: new AbortController().signal,
     messages: async () => [],
+    prepareTurn: (request: Parameters<ConversationContext["prepareTurn"]>[0]) =>
+      Promise.resolve(
+        prepareConversationTurn({
+          conversation_id: correlation.conversation_id,
+          revision_id: correlation.revision_id,
+          recipient_engine: "codex",
+          request,
+          events: [],
+          resume: null,
+          prior_delivery: undefined,
+          observed_after_public_seq: 0,
+          shared_handoff: null,
+        }),
+      ),
     emit: async (emission: PolicyEmission) => stored(1, emission.event),
     launchAttempt: () => {
       throw new Error("not used");
@@ -366,12 +380,15 @@ describe("conversation final validation and projection coverage", () => {
               status: "skipped",
               answer: null,
               confidence: null,
-              skip_reason: "maintenance",
+              skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
             },
           }),
         ],
       }),
-    ).toMatchObject({ status: "skipped", skip_reason: "maintenance" });
+    ).toMatchObject({
+      status: "skipped",
+      skip_reason: CONVERSATION_BASELINE_SKIP_REASON.DISABLED,
+    });
 
     const emitted: TraceEvent[] = [];
     const run = async (context: ConversationContext) => {
@@ -541,23 +558,6 @@ describe("conversation final validation and projection coverage", () => {
         {} as never,
       ),
     ).toEqual({ operation_id: "operation-a", status: "failed", artifact_refs: [] });
-  });
-
-  test("walks the full child authority comparison before rejecting changed bindings", () => {
-    const parent = manifest();
-    const childId = "conversation-child";
-    const child = createChildManifest(parent, childId, "run-child", "2026-08-23T00:01:00.000Z");
-    child.bindings = [
-      {
-        participant_id: "changed",
-        input: { roleRef: "brainstorm-participant", engine: "codex", sessionMode: "fresh" },
-      },
-    ];
-    expect(() => assertChildManifestAuthority(child, parent, childId)).toThrow(
-      "persisted child revision authority changed",
-    );
-    const valid = createChildManifest(parent, childId, "run-child", "2026-08-23T00:01:00.000Z");
-    expect(assertChildManifestAuthority(valid, parent, childId)).toBe(valid);
   });
 });
 
@@ -1123,6 +1123,12 @@ describe("conversation final restart and policy coverage", () => {
     expect(
       defaultConversationReadiness(process.cwd(), 1).every(
         ({ engine, admitted }) => admitted === (engine === "claude" || engine === "codex"),
+      ),
+    ).toBe(true);
+    expect(
+      defaultConversationReadiness(process.cwd(), 2).every(
+        ({ engine, admitted }) =>
+          admitted === (engine === "claude" || engine === "copilot" || engine === "codex"),
       ),
     ).toBe(true);
     const root = await mkdtemp(join(tmpdir(), "vf-conversation-coverage-final-"));

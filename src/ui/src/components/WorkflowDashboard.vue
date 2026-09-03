@@ -75,6 +75,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { decodeLogEvent } from "../../../logbus/types.js";
+import { LOG_SSE_EVENT } from "../../../orchestrator/conversation/conversation-sse-contract.js";
 import { api } from "../api.js";
 import { useWorkflowDashboard } from "../composables/useWorkflowDashboard.js";
 import { useVfStore } from "../store.js";
@@ -149,9 +151,10 @@ async function fetchDashboardLogs() {
       runId: dashboardLogRunId,
     });
     dashboardStream = new EventSource(url);
-    dashboardStream.addEventListener("log", (event) => {
+    dashboardStream.addEventListener(LOG_SSE_EVENT.LOG, (event) => {
       try {
-        const next = JSON.parse((event as MessageEvent).data) as LogEvent;
+        const next = decodeLogEvent(JSON.parse((event as MessageEvent).data));
+        if (!next) return;
         if (
           dashboardLogEvents.value.some(
             (existing) => existing.runId === next.runId && existing.seq === next.seq,

@@ -27,7 +27,7 @@ const ENGINE_MIRROR: Record<Engine, string> = {
   antigravity: join(".agents", "skills"),
 };
 
-function mirrorsFor(engines?: Engine[]): string[] {
+function mirrorsFor(engines?: readonly Engine[]): string[] {
   if (!engines || engines.length === 0) {
     // Default-engine scope: when no engines are passed we fall back to
     // copilot-only. Surface that loudly so the user knows other engines
@@ -44,7 +44,8 @@ export type SyncMode = "pointer" | "full";
 
 export interface SyncSkillOptions {
   mode?: SyncMode;
-  engines?: Engine[];
+  engines?: readonly Engine[];
+  skills?: readonly string[];
   /** When true, also mirror every skill pinned in the project's registry lock. */
   fromRegistry?: boolean;
 }
@@ -181,6 +182,10 @@ export function syncSkillMirrors(
       names = [...new Set([...names, ...reg.names])];
     }
     warnings.push(...reg.errors.map((e) => `registry-pinned: ${e}`));
+  }
+  if (opts.skills && opts.skills.length > 0) {
+    const selected = new Set(opts.skills);
+    names = names.filter((name) => selected.has(name));
   }
 
   for (const name of names) {

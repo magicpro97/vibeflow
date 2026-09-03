@@ -20,22 +20,19 @@
 //   - An invalid custom rule (empty/oversized match, unknown risk) is DROPPED,
 //     not fatal: scoring keeps running with the remaining rules.
 
-import type { HookInput, RiskLevel } from "../core.js";
+import type { HookInput } from "../core.js";
+import { RISK_LEVEL, type RiskLevel, isRiskLevel } from "../core/hook-contract.js";
 
 /** Stable IDs for the built-in guardrail groups. Array order = menu order. */
-export const HOOK_TEMPLATE_IDS = [
+export const HOOK_TEMPLATE_IDS = Object.freeze([
   "block-destructive",
   "flag-installs",
   "protect-secrets",
   "protect-config",
   "workspace-guard",
-] as const;
+] as const);
 
 export type HookTemplateId = (typeof HOOK_TEMPLATE_IDS)[number];
-
-const TEMPLATE_ID_SET = new Set<string>(HOOK_TEMPLATE_IDS);
-
-const RISK_LEVELS = new Set<string>(["none", "low", "medium", "high", "critical"]);
 
 /** A built-in guardrail group, as shown in the `vf init` hooks menu. */
 export interface HookTemplate {
@@ -51,41 +48,41 @@ export interface HookTemplate {
  * risk.ts; `scoreRisk` consults the resolved policy before applying a cluster,
  * so disabling a template here silences exactly that cluster and nothing else.
  */
-export const HOOK_TEMPLATES: HookTemplate[] = [
-  {
+export const HOOK_TEMPLATES: readonly HookTemplate[] = Object.freeze([
+  Object.freeze({
     id: "block-destructive",
     label: "Block destructive commands",
     description:
       "rm -rf, git reset --hard / clean -f / branch -D, force-push, mkfs/dd, chmod -R 777, curl | sh, sudo.",
-    maxRisk: "critical",
-  },
-  {
+    maxRisk: RISK_LEVEL.CRITICAL,
+  }),
+  Object.freeze({
     id: "flag-installs",
     label: "Flag package installs",
     description: "npm/pnpm/yarn/bun/pip/cargo/go/gem install — warn on supply-chain side effects.",
-    maxRisk: "medium",
-  },
-  {
+    maxRisk: RISK_LEVEL.MEDIUM,
+  }),
+  Object.freeze({
     id: "protect-secrets",
     label: "Protect secrets + .git",
     description:
       "Reads/writes of .env, id_rsa/id_ed25519, *.pem, .ssh/, secret*/credential*, and the .git/ directory.",
-    maxRisk: "critical",
-  },
-  {
+    maxRisk: RISK_LEVEL.CRITICAL,
+  }),
+  Object.freeze({
     id: "protect-config",
     label: "Protect build/lint/hook config",
     description: "Edits to tsconfig*.json, biome.json, .githooks/, .eslintrc*, .prettierrc*.",
-    maxRisk: "high",
-  },
-  {
+    maxRisk: RISK_LEVEL.HIGH,
+  }),
+  Object.freeze({
     id: "workspace-guard",
     label: "Guard workspace + scope",
     description:
       "Commands or writes that escape the workspace root or a work unit's declared scope.",
-    maxRisk: "high",
-  },
-];
+    maxRisk: RISK_LEVEL.HIGH,
+  }),
+]);
 
 /** Where a custom rule's pattern is tested: the command string, or file paths. */
 export type CustomHookKind = "command" | "file";
@@ -144,7 +141,13 @@ const MAX_STORED_CUSTOM_RULES = 32;
 function coerceTemplates(raw: unknown): HookTemplateId[] | null {
   if (!Array.isArray(raw)) return null;
   // Any unknown id makes the whole list untrustworthy → fall back to all-on.
-  if (!raw.every((t) => typeof t === "string" && TEMPLATE_ID_SET.has(t))) return null;
+  if (
+    !raw.every(
+      (value) =>
+        typeof value === "string" && HOOK_TEMPLATE_IDS.some((candidate) => candidate === value),
+    )
+  )
+    return null;
   // Dedupe, preserve canonical order.
   const seen = new Set(raw as HookTemplateId[]);
   return HOOK_TEMPLATE_IDS.filter((id) => seen.has(id));
@@ -166,8 +169,7 @@ export function coerceCustomRule(raw: unknown): CustomHookRule | null {
   const name = typeof obj.name === "string" ? obj.name.trim() : "";
   const pattern = typeof obj.pattern === "string" ? obj.pattern.trim() : "";
   const kind = obj.kind === "file" ? "file" : obj.kind === "command" ? "command" : null;
-  const risk =
-    typeof obj.risk === "string" && RISK_LEVELS.has(obj.risk) ? (obj.risk as RiskLevel) : null;
+  const risk = isRiskLevel(obj.risk) ? obj.risk : null;
   if (!name || !kind || !risk || !isValidCustomPattern(pattern)) return null;
   const reason =
     typeof obj.reason === "string" && obj.reason.trim() ? obj.reason.trim() : undefined;

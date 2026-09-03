@@ -24,6 +24,7 @@ import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ROLE_NAMES, type RoleName } from "./agents/role-templates.js";
 import type { WorkUnit } from "./core.js";
+import { PENDING_REQUIRED_WORK_UNIT_GATES, WORK_UNIT_STATUS } from "./core/workflow-contract.js";
 import type { ProjectProfile } from "./scanner.js";
 
 import { buildAdapterSpec, buildPhaseUnits } from "./ai-init-workflow/builders.js";
@@ -91,7 +92,7 @@ export function planAiInitUnits(
         : ADAPTER_SCOPE[name];
     return {
       name,
-      status: "pending",
+      status: WORK_UNIT_STATUS.PENDING,
       confidence: 0,
       owner_agent: ADAPTER_OWNER[name],
       spec,
@@ -103,7 +104,7 @@ export function planAiInitUnits(
       skills_injected: [...skills.injected],
       skills_required: [...skills.required],
       depends_on: [...(ADAPTER_DEPENDS_ON[name] ?? [])],
-      gates: { build: "pending", lint: "pending", test: "pending", review: "pending" },
+      gates: { ...PENDING_REQUIRED_WORK_UNIT_GATES },
       resources: { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
       evidence: [],
     };
@@ -127,7 +128,7 @@ export function aiInitReviewer(
   // existing tests (which chdir into a tmpdir before each case).
   base: string = process.cwd(),
 ): { pass: boolean; reason: string } {
-  if (outcome.status === "blocked") {
+  if (outcome.status === WORK_UNIT_STATUS.BLOCKED) {
     // Production dispatchers return "verifying" (per src/orchestrator/run.ts:96-99);
     // the reviewer is the gate, not the dispatcher. Only "blocked" is fatal.
     return { pass: false, reason: "dispatcher reported status=blocked" };

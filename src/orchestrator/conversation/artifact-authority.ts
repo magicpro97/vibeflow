@@ -1,5 +1,6 @@
 import type { TraceCorrelation } from "../trace/types.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
 import type { ConversationEffectWriter } from "./effect-writer.js";
 import { assertPolicyIdempotencyKey, snapshotRuntimeValue } from "./emission-authority.js";
 import type {
@@ -115,7 +116,7 @@ export class ConversationArtifactAuthority {
       (result) => ({
         idempotency_key: captured.idempotency_key,
         event: {
-          type: "artifact_created",
+          type: CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_CREATED,
           payload: { ...result, artifact_type: captured.artifact_type },
         },
       }),
@@ -136,7 +137,7 @@ export class ConversationArtifactAuthority {
       (result) => ({
         idempotency_key: captured.idempotency_key,
         event: {
-          type: "artifact_updated",
+          type: CONVERSATION_TRACE_EVENT_KIND.ARTIFACT_UPDATED,
           payload: { ...result, artifact_type: captured.artifact_type },
         },
       }),

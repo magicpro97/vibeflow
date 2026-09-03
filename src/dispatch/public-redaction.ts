@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Engine } from "../core.js";
+import { AGENT_ENGINE, isAgentEngine } from "../core/agent-contract.js";
 import { TRACE_LIMITS, utf8Bytes } from "../orchestrator/trace/limits.js";
 import {
   type PublicDenyValue,
   sanitizePublicText as sanitizeTraceText,
 } from "../orchestrator/trace/public-sanitize.js";
 import { parseEngineSessionId, parseEngineSummary } from "./prompt.js";
+import { ENGINE_NATIVE_SESSION_STATUS } from "./session-contract.js";
 import type { InternalResumeBinding } from "./session-types.js";
 import type { DispatchResult, EngineSummary } from "./types.js";
 
@@ -19,11 +21,11 @@ const SHORT_DENY_MAX_CODEPOINTS = 3;
 const TOKEN_CHARACTER = /[\p{L}\p{N}_]/u;
 const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/gu;
 const NATIVE_ID_PATTERNS: Record<Engine, RegExp> = {
-  claude: UUID,
-  codex: UUID,
-  copilot: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
-  opencode: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
-  antigravity: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
+  [AGENT_ENGINE.CLAUDE]: UUID,
+  [AGENT_ENGINE.CODEX]: UUID,
+  [AGENT_ENGINE.COPILOT]: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
+  [AGENT_ENGINE.OPENCODE]: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
+  [AGENT_ENGINE.ANTIGRAVITY]: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
 };
 
 const dispatchPrivateValues = new WeakMap<object, readonly string[]>();
@@ -40,13 +42,7 @@ export function requireSafeNativeSessionId(engine: Engine, value: string): void 
 }
 
 export function requireSafeEngineSessionId(engine: string | undefined, value: string): void {
-  if (
-    engine === "claude" ||
-    engine === "codex" ||
-    engine === "copilot" ||
-    engine === "opencode" ||
-    engine === "antigravity"
-  ) {
+  if (isAgentEngine(engine)) {
     requireSafeNativeSessionId(engine, value);
   } else if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
     throw new Error(`invalid ${engine ?? "engine"} native session id`);
@@ -367,7 +363,9 @@ export function persistPublicDispatchEvidence(unitDir: string, result: DispatchR
       ...publicResult,
       raw: result.raw,
       summary: result.summary,
-      nativeSessionStatus: resumeBinding ? "captured" : "unavailable",
+      nativeSessionStatus: resumeBinding
+        ? ENGINE_NATIVE_SESSION_STATUS.CAPTURED
+        : ENGINE_NATIVE_SESSION_STATUS.UNAVAILABLE,
     },
     nativeIds,
     privateValues,

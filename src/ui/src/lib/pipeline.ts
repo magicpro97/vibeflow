@@ -1,3 +1,4 @@
+import { GATE_STATE, WORK_UNIT_STATUS } from "../../../core/workflow-contract.js";
 import type { WorkUnit } from "../types.js";
 
 export function pipelineWaves(
@@ -40,15 +41,15 @@ export function pipelineEdges(
 export function waitingOn(unit: WorkUnit, byName: Map<string, WorkUnit>): string[] {
   return (unit.depends_on ?? []).filter((d) => {
     const dep = byName.get(d);
-    return !dep || dep.status !== "done";
+    return !dep || dep.status !== WORK_UNIT_STATUS.DONE;
   });
 }
 
 export function primaryNodeDetail(unit: WorkUnit, byName: Map<string, WorkUnit>): string {
   const wait = waitingOn(unit, byName);
   if (wait.length > 0) return `Waiting for: ${wait.join(", ")}`;
-  if (unit.status === "blocked") {
-    const failed = Object.entries(unit.gates).filter(([, v]) => v === "fail");
+  if (unit.status === WORK_UNIT_STATUS.BLOCKED) {
+    const failed = Object.entries(unit.gates).filter(([, v]) => v === GATE_STATE.FAIL);
     if (failed.length > 0) return `Failed: ${failed.map(([k]) => k).join(", ")}`;
     return "Blocked";
   }

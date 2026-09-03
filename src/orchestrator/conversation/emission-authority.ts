@@ -1,6 +1,13 @@
 import type { MaterializedAgentBinding, PreviewAgentBinding } from "../../agents/binding.js";
 import { createSpawnOptionsProjection } from "../../dispatch/session-types.js";
 import type { TraceCorrelation, TraceEvent } from "../trace/types.js";
+import {
+  CONVERSATION_COORDINATION_DIRECTIVE_KIND,
+  CONVERSATION_COORDINATION_TOOL,
+} from "./conversation-coordination-contract.js";
+import { emptyConversationCoordinationState } from "./conversation-coordination-fold.js";
+import { CONVERSATION_TRACE_EVENT_KIND } from "./conversation-public-wire-contract.js";
+import { CONVERSATION_TOOL_ACTION_STATUS } from "./conversation-public-wire-contract.js";
 import type {
   AttemptEmission,
   ConversationContext,
@@ -116,6 +123,37 @@ export function previewAgentPolicyContext(
     ),
     signal: new AbortController().signal,
     messages: () => Promise.resolve(Object.freeze([])),
+    coordinationState: () => Promise.resolve(emptyConversationCoordinationState()),
+    validateCoordinationRepoEvidence: () => false,
+    observeWorkspace: () => ({
+      workspace_key: "dry-run",
+      branch_ref: null,
+      head: null,
+      verified_head: null,
+      dirty: false,
+      quiescent: false,
+      evidence_refs: Object.freeze([]),
+    }),
+    verifyWorkspace: () =>
+      Promise.resolve({
+        workspace_key: "dry-run",
+        branch_ref: null,
+        head: null,
+        verified_head: null,
+        dirty: false,
+        quiescent: false,
+        evidence_refs: Object.freeze([]),
+      }),
+    settleWorkspace: () => Promise.reject(new Error("dry-run context is read-only")),
+    prepareTurn: () => Promise.reject(new Error("dry-run context is read-only")),
+    publishSocialIntent: () => ({
+      accepted: false,
+      diagnostic_code: "dry_run_context",
+    }),
+    stageActionCandidate: () => ({
+      accepted: false,
+      diagnostic_code: "dry_run_context",
+    }),
     emit: () => Promise.reject(new Error("dry-run context is read-only")),
     launchAttempt: denied,
     createArtifact: () => Promise.reject(new Error("dry-run context is read-only")),
@@ -136,6 +174,37 @@ export function previewPolicyContext(
     ...policyContextView(manifest, snapshotMaterializedBindings(bindings)),
     signal: new AbortController().signal,
     messages: () => Promise.resolve(Object.freeze([])),
+    coordinationState: () => Promise.resolve(emptyConversationCoordinationState()),
+    validateCoordinationRepoEvidence: () => false,
+    observeWorkspace: () => ({
+      workspace_key: "dry-run",
+      branch_ref: null,
+      head: null,
+      verified_head: null,
+      dirty: false,
+      quiescent: false,
+      evidence_refs: Object.freeze([]),
+    }),
+    verifyWorkspace: () =>
+      Promise.resolve({
+        workspace_key: "dry-run",
+        branch_ref: null,
+        head: null,
+        verified_head: null,
+        dirty: false,
+        quiescent: false,
+        evidence_refs: Object.freeze([]),
+      }),
+    settleWorkspace: () => Promise.reject(new Error("dry-run context is read-only")),
+    prepareTurn: () => Promise.reject(new Error("dry-run context is read-only")),
+    publishSocialIntent: () => ({
+      accepted: false,
+      diagnostic_code: "dry_run_context",
+    }),
+    stageActionCandidate: () => ({
+      accepted: false,
+      diagnostic_code: "dry_run_context",
+    }),
     emit: () => Promise.reject(new Error("dry-run context is read-only")),
     launchAttempt: denied,
     createArtifact: () => Promise.reject(new Error("dry-run context is read-only")),
@@ -154,31 +223,41 @@ export function previewBindingPolicyContext(
 }
 
 const coordinatorTypes = new Set<CoordinatorEmission["event"]["type"]>([
-  "round_boundary",
-  "consensus_update",
-  "baseline_result",
-  "synthesis_completed",
-  "dry_run_result",
-  "approval_requested",
-  "error",
+  CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY,
+  CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE,
+  CONVERSATION_TRACE_EVENT_KIND.BASELINE_RESULT,
+  CONVERSATION_TRACE_EVENT_KIND.SYNTHESIS_COMPLETED,
+  CONVERSATION_TRACE_EVENT_KIND.DRY_RUN_RESULT,
+  CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED,
+  CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION,
+  CONVERSATION_TRACE_EVENT_KIND.ERROR,
 ]);
 const attemptTypes = new Set<AttemptEmission["event"]["type"]>([
-  "precommit",
-  "agent_response_delta",
-  "tool_action",
-  "evaluator_assessment",
-  "error",
+  CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT,
+  CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
+  CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION,
+  CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT,
+  CONVERSATION_TRACE_EVENT_KIND.ERROR,
 ]);
-const responseTypes = ["agent_response_delta", "tool_action", "error"] as const;
+const responseTypes = Object.freeze([
+  CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
+  CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION,
+  CONVERSATION_TRACE_EVENT_KIND.ERROR,
+] as const);
 const purposeTypes: Record<PolicyAttemptPurpose, ReadonlySet<AttemptEmission["event"]["type"]>> = {
   baseline: new Set(),
-  participant: new Set(["precommit", ...responseTypes]),
-  evaluator: new Set(["evaluator_assessment", "tool_action", "error"]),
+  participant: new Set([CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT, ...responseTypes]),
+  evaluator: new Set([
+    CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT,
+    CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION,
+    CONVERSATION_TRACE_EVENT_KIND.ERROR,
+  ]),
   direct: new Set(responseTypes),
   plan: new Set(responseTypes),
   review: new Set(responseTypes),
   verify: new Set(responseTypes),
   orchestrate: new Set(responseTypes),
+  coordinate: new Set(responseTypes),
 };
 const reservedIdempotencyKey =
   /^(?:conversation|participant|attempt|native-history|approval|caller-cancelled|message):/;
@@ -198,12 +277,27 @@ export function assertCoordinatorEmission(
     throw new Error("policy coordinator event is not authorized");
   }
   if (
-    emission.event.type === "approval_requested" &&
+    emission.event.type === CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED &&
     emission.event.payload.token.operation_id !== operationId
   ) {
     throw new Error("approval operation lacks runtime authority");
   }
-  if (emission.event.type === "error" && emission.event.payload.agent_id !== null) {
+  if (emission.event.type === CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION) {
+    const payload = emission.event.payload;
+    if (
+      payload.tool !== CONVERSATION_COORDINATION_TOOL ||
+      payload.status !== CONVERSATION_TOOL_ACTION_STATUS.COMPLETED ||
+      payload.output_ref === null ||
+      !Object.values(CONVERSATION_COORDINATION_DIRECTIVE_KIND).some(
+        (kind) => kind === payload.action,
+      )
+    )
+      throw new Error("coordinator tool action lacks coordination authority");
+  }
+  if (
+    emission.event.type === CONVERSATION_TRACE_EVENT_KIND.ERROR &&
+    emission.event.payload.agent_id !== null
+  ) {
     throw new Error("coordinator error cannot forge participant identity");
   }
 }
@@ -222,15 +316,22 @@ export function assertAttemptEmission(
     throw new Error("attempt event is not authorized for purpose");
   }
   if (
-    (event.type === "precommit" || event.type === "agent_response_delta") &&
+    (event.type === CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT ||
+      event.type === CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) &&
     (purpose === "evaluator" || event.payload.participant_id !== participantId)
   ) {
     throw new Error("attempt participant correlation mismatch");
   }
-  if (event.type === "evaluator_assessment" && purpose !== "evaluator") {
+  if (
+    event.type === CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT &&
+    purpose !== "evaluator"
+  ) {
     throw new Error("assessment lacks evaluator authority");
   }
-  if (event.type === "error" && event.payload.agent_id !== participantId) {
+  if (
+    event.type === CONVERSATION_TRACE_EVENT_KIND.ERROR &&
+    event.payload.agent_id !== participantId
+  ) {
     throw new Error("attempt error participant mismatch");
   }
 }

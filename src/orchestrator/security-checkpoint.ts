@@ -15,12 +15,19 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { WorkUnit } from "../core.js";
+import {
+  SECURITY_CONSENT,
+  SECURITY_VERDICT,
+  type SecurityConsent,
+  type SecurityVerdict,
+  isSecurityVerdict,
+} from "../core/workflow-contract.js";
 
 /** Decision returned by the user-prompt step. */
-export type SecurityConsent = "run" | "skip" | "abstain";
+export type { SecurityConsent } from "../core/workflow-contract.js";
 
 /** Outcome of the skill itself. */
-export type SecurityVerdict = "pass" | "fail" | "needs-review" | "skipped" | "error";
+export type { SecurityVerdict } from "../core/workflow-contract.js";
 
 export interface SecurityCheckpointResult {
   consent: SecurityConsent;
@@ -37,15 +44,15 @@ export interface SecurityCheckpointResult {
 export function defaultSecurityAskFn(): (q: string) => Promise<SecurityConsent> {
   return (q: string) => {
     // Non-TTY: don't block CI, skip by default. Real users get a prompt.
-    if (!process.stdin.isTTY) return Promise.resolve("skip");
+    if (!process.stdin.isTTY) return Promise.resolve(SECURITY_CONSENT.SKIP);
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     return new Promise((res) =>
       rl.question(`${q} [y/n/skip] (default: skip): `, (a) => {
         rl.close();
         const v = a.trim().toLowerCase();
-        if (v === "y" || v === "yes") res("run");
-        else if (v === "n" || v === "no") res("abstain");
-        else res("skip");
+        if (v === "y" || v === "yes") res(SECURITY_CONSENT.RUN);
+        else if (v === "n" || v === "no") res(SECURITY_CONSENT.ABSTAIN);
+        else res(SECURITY_CONSENT.SKIP);
       }),
     );
   };
@@ -72,7 +79,7 @@ export async function defaultRunSkillFn(unit: WorkUnit, base: string): Promise<s
     return [
       "```",
       "SECURITY_CHECK_RESULT",
-      "verdict: skipped",
+      `verdict: ${SECURITY_VERDICT.SKIPPED}`,
       "items_checked: 0",
       "items_failed: none",
       "evidence: skill source not found; engine dispatch not implemented (see .vibeflow/skills/checklist-security/SKILL.md)",
@@ -86,7 +93,7 @@ export async function defaultRunSkillFn(unit: WorkUnit, base: string): Promise<s
   return [
     "```",
     "SECURITY_CHECK_RESULT",
-    "verdict: skipped",
+    `verdict: ${SECURITY_VERDICT.SKIPPED}`,
     "items_checked: 0",
     "items_failed: none",
     "evidence: defaultRunSkillFn is a no-op; real engine dispatch not wired in this PR. See .vibeflow/skills/checklist-security/SKILL.md",
@@ -103,24 +110,18 @@ export function parseSecurityVerdict(raw: string): {
 } {
   const m = raw.match(/SECURITY_CHECK_RESULT([\s\S]*?)(?:```|$)/);
   if (!m || !m[1]) {
-    return { verdict: "error", notes: "no SECURITY_CHECK_RESULT block in skill output" };
+    return {
+      verdict: SECURITY_VERDICT.ERROR,
+      notes: "no SECURITY_CHECK_RESULT block in skill output",
+    };
   }
   const body = m[1];
   // MUST-FIX (PR #160 review): validate verdict against the
   // SecurityVerdict union. A skill (or a planted SKILL.md) that says
   // `verdict: lol` previously passed the type system. Now: any
   // unknown value falls through to "error" (the catch-all).
-  const ALLOWED_VERDICTS = new Set<SecurityVerdict>([
-    "pass",
-    "fail",
-    "needs-review",
-    "skipped",
-    "error",
-  ]);
-  const rawVerdict = body.match(/verdict:\s*(\S+)/)?.[1] ?? "error";
-  const verdict: SecurityVerdict = (
-    ALLOWED_VERDICTS.has(rawVerdict as SecurityVerdict) ? rawVerdict : "error"
-  ) as SecurityVerdict;
+  const rawVerdict = body.match(/verdict:\s*(\S+)/)?.[1];
+  const verdict = isSecurityVerdict(rawVerdict) ? rawVerdict : SECURITY_VERDICT.ERROR;
   const ic = body.match(/items_checked:\s*(\d+)/);
   const failedRaw = body.match(/items_failed:\s*([^\n]+)/)?.[1]?.trim() ?? "";
   const items_failed =
@@ -163,12 +164,12 @@ export async function runSecurityCheckpoint(
     const consent = await ask(
       `Work unit "${unit.name}" finished coding. Run checklist-security skill?`,
     );
-    if (consent !== "run") return { consent, verdict: "skipped" };
+    if (consent !== SECURITY_CONSENT.RUN) return { consent, verdict: SECURITY_VERDICT.SKIPPED };
     const raw = await runSkill(unit, base);
     if (!raw) {
       return {
         consent,
-        verdict: "error",
+        verdict: SECURITY_VERDICT.ERROR,
         notes: "checklist-security skill not found at .vibeflow/skills/checklist-security/SKILL.md",
       };
     }
@@ -176,8 +177,8 @@ export async function runSecurityCheckpoint(
     return { consent, ...parsed };
   } catch (err) {
     return {
-      consent: "abstain",
-      verdict: "error",
+      consent: SECURITY_CONSENT.ABSTAIN,
+      verdict: SECURITY_VERDICT.ERROR,
       notes: err instanceof Error ? err.message : String(err),
     };
   }

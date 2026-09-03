@@ -1,20 +1,27 @@
-// Copied from src/core/types.ts and src/logbus/types.ts — keep in sync manually.
-// Only what the UI needs; no Node/Bun imports.
+// UI-only projections copied from backend contracts unless explicitly re-exported below.
+// Keep this module free of Node/Bun imports.
 
-export type Engine = "claude" | "codex" | "copilot" | "opencode" | "antigravity";
-export type GateState = "pass" | "fail" | "running" | "pending";
+import type * as HookContract from "../../core/hook-contract.js";
+import type * as LogContract from "../../core/log-contract.js";
+import type * as SkillContract from "../../core/skill-contract.js";
+import type * as WorkflowContract from "../../core/workflow-contract.js";
+import type { LogEvent as SharedLogEvent } from "../../logbus/types.js";
+
+export type { Engine } from "../../core/agent-contract.js";
+export type SkillStatus = SkillContract.SkillStatus;
+export type GateState = WorkflowContract.GateState;
 
 export interface WorkUnit {
   name: string;
-  status: "pending" | "running" | "verifying" | "done" | "blocked";
+  status: WorkflowContract.WorkUnitStatus;
   /** Agent's self-reported confidence 0.0–1.0. 0 = not yet reported (new unit). */
   confidence: number;
-  riskClass?: "docs" | "simple-code" | "feature" | "architecture" | "security" | "deploy";
+  riskClass?: WorkflowContract.WorkUnitRiskClass;
   owner_agent?: string;
   skills_used?: string[];
   scope?: string[];
   spec?: string;
-  gates: Record<"build" | "lint" | "test" | "review", GateState> & {
+  gates: Record<WorkflowContract.RequiredWorkUnitGateName, GateState> & {
     security?: GateState;
     goal_eval?: GateState; // ADR-003
   };
@@ -31,6 +38,7 @@ export interface WorkUnit {
     id: string;
     criterion: string;
     verification?: string;
+    priority?: WorkflowContract.AcceptancePriority;
     required?: boolean;
   }>;
 }
@@ -62,23 +70,12 @@ export interface WorkflowState {
   vibeflow_version?: string;
 }
 
-export type Channel = "vf" | "engine-stdout" | "engine-stderr" | "user" | "hook";
-export type LogLevel = "info" | "warn" | "error" | "debug";
+export type Channel = LogContract.LogChannel;
+export type LogLevel = LogContract.LogLevel;
 
-export interface LogEvent {
-  seq: number;
-  ts: number;
-  runId: string;
-  workflowId?: string;
-  repoPath?: string;
-  unit?: string;
-  channel: Channel;
-  level: LogLevel;
-  text: string;
-  meta?: Record<string, unknown>;
-}
+export type LogEvent = SharedLogEvent;
 
-export type WorkflowDashboardStatus = "running" | "blocked" | "pending" | "done";
+export type WorkflowDashboardStatus = WorkflowContract.WorkflowDashboardStatus;
 
 export interface WorkflowDashboardItem {
   key: string;
@@ -198,13 +195,13 @@ export interface VibeSettings {
 }
 
 export interface HookLogPayload {
-  decision: "warn" | "require_approval" | "block";
-  risk: "none" | "low" | "medium" | "high" | "critical";
+  decision: HookContract.AuditedHookDecision;
+  risk: HookContract.RiskLevel;
   reasons: string[];
   tool?: string;
   command?: string;
   files?: string[];
-  event?: string;
+  event?: HookContract.HookEvent;
 }
 
 // ── Diff preview types (#641) ──────────────────────────────────────────────
@@ -282,16 +279,6 @@ export interface PlanComment {
 }
 
 // ── #633: Skills catalog types ─────────────────────────────────────────────
-export type SkillStatus =
-  | "verified"
-  | "enriched"
-  | "experimental"
-  | "baseline"
-  | "template"
-  | "draft"
-  | "unverified"
-  | "deprecated";
-
 export type ScanStatus = "not-scanned" | "pass" | "warn" | "blocked";
 
 export interface SafeSkill {
@@ -302,8 +289,8 @@ export interface SafeSkill {
   origin: "project-local" | "shared";
   securityScan: ScanStatus;
   registry?: { id: string; version: string; pinned: boolean };
-  scope?: "common" | "project" | "adapter" | "organization";
-  domain?: { id?: string; role?: "canonical" | "child" };
+  scope?: SkillContract.SkillScope;
+  domain?: { id?: string; role?: SkillContract.SkillDomainRole };
   owners?: string[];
   stale?: boolean;
   staleReason?: string;

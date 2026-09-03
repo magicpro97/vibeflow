@@ -477,34 +477,6 @@ describe("runAiInit", () => {
     const { tmpdir } = await import("node:os");
     const dir = mkdtempSync(join(tmpdir(), "vf-copilot-fail-"));
     mkdirSync(join(dir, ".vibeflow", "ai-context"), { recursive: true });
-    const origSpawn = Bun.spawn;
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = (() => {
-      const enc = new TextEncoder();
-      return {
-        stdin: { write: () => {}, end: () => {} },
-        stdout: {
-          getReader: () => ({
-            read: async () => ({ done: true, value: undefined }),
-          }),
-        },
-        stderr: {
-          getReader: () => {
-            let yielded = false;
-            return {
-              read: async () => {
-                if (!yielded) {
-                  yielded = true;
-                  return { done: false, value: enc.encode("auth failed") };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
-        },
-        exited: Promise.resolve(2),
-        kill: () => {},
-      } as never;
-    }) as unknown as typeof Bun.spawn;
     try {
       const r = await runAiInit({
         base: dir,
@@ -523,12 +495,17 @@ describe("runAiInit", () => {
           promptMode: "arg" as const,
         }),
         buildPrompt: () => "x".repeat(20000),
+        spawner: async () => ({
+          status: 2,
+          stdout: "",
+          stderr: "auth failed",
+          timedOut: false,
+        }),
       });
       expect(r.ok).toBe(false);
       expect(r.reason).toContain("status 2");
       expect(r.reason).toContain("auth failed");
     } finally {
-      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
       rmSync(dir, { recursive: true, force: true });
     }
   });

@@ -1,10 +1,21 @@
 import {
+  type ObservedConversationResultV1,
+  durableCliIdempotencyKey,
+  durableCliPrincipalDigest,
+  executeDurableQueuedConversationMessageV1,
+} from "../orchestrator/conversation/conversation-command-compatibility.js";
+import {
+  type DurableConversationCreateV1,
+  executeDurableConversationCreateV1,
+} from "../orchestrator/conversation/conversation-command-create-compatibility.js";
+import {
   CONVERSATION_EXIT,
   type ConversationCommandDeps,
   assertNoResumeCreateFlags,
   c,
   classifyConversationError,
   classifyConversationResult,
+  conversationBootstrap,
   conversationJsonErrorCode,
   conversationService,
   executeConversationCreate,
@@ -17,7 +28,22 @@ import {
   parseParticipantSpec,
 } from "./_shared.js";
 
-export async function chat(argv: string[], deps: ConversationCommandDeps = {}): Promise<number> {
+interface ChatDeps extends ConversationCommandDeps {
+  durable?: {
+    create(
+      input: DurableConversationCreateV1,
+      onDelta?: (chunk: string) => void,
+      options?: { signal?: AbortSignal },
+    ): Promise<ObservedConversationResultV1>;
+    message(
+      input: Parameters<typeof executeDurableQueuedConversationMessageV1>[1],
+      onDelta?: (chunk: string) => void,
+      options?: { signal?: AbortSignal },
+    ): Promise<ObservedConversationResultV1>;
+  };
+}
+
+export async function chat(argv: string[], deps: ChatDeps = {}): Promise<number> {
   const parsed = parseConversationArgv(argv, [
     "json",
     "policy",
@@ -55,14 +81,47 @@ export async function chat(argv: string[], deps: ConversationCommandDeps = {}): 
     }
     const participants = parsed.participants.map(parseParticipantSpec);
     const maxRounds = parseMaxRounds(parsed.flags["max-rounds"]);
-    const service = conversationService(deps);
+    const bootstrap = deps.durable
+      ? null
+      : conversationBootstrap({ ...(deps.bootstrap ? { bootstrap: deps.bootstrap } : {}) });
+    const durable: NonNullable<ChatDeps["durable"]> = deps.durable ?? {
+      create(input, onDelta, createOptions) {
+        return executeDurableConversationCreateV1(
+          bootstrap as NonNullable<typeof bootstrap>,
+          input,
+          onDelta,
+          createOptions,
+        );
+      },
+      message(input, onDelta, messageOptions) {
+        return executeDurableQueuedConversationMessageV1(
+          bootstrap as NonNullable<typeof bootstrap>,
+          input,
+          onDelta,
+          messageOptions,
+        );
+      },
+    };
     if (resumeId) {
-      const resumed = await executeConversationMessage(
-        service,
-        resumeId,
-        content,
-        json ? undefined : (chunk) => process.stdout.write(chunk),
-      );
+      const resumed =
+        deps.service || deps.createService
+          ? await executeConversationMessage(
+              conversationService(deps),
+              resumeId,
+              content,
+              json ? undefined : (chunk) => process.stdout.write(chunk),
+            )
+          : await durable.message(
+              {
+                conversation_id: resumeId,
+                principal_digest: durableCliPrincipalDigest("vf.chat"),
+                idempotency_key: durableCliIdempotencyKey("vf.chat.message", {
+                  conversation_id: resumeId,
+                }),
+                content,
+              },
+              json ? undefined : (chunk) => process.stdout.write(chunk),
+            );
       const exit = classifyConversationResult(resumed.status, resumed.events);
       if (json) {
         jsonWrite({
@@ -76,17 +135,38 @@ export async function chat(argv: string[], deps: ConversationCommandDeps = {}): 
       }
       return exit;
     }
-    const execution = await executeConversationCreate(
-      service,
-      {
-        topic: content,
-        ...(typeof parsed.flags.policy === "string" ? { policy: parsed.flags.policy } : {}),
-        ...(participants.length ? { participants } : {}),
-        ...(maxRounds ? { max_rounds: maxRounds } : {}),
-      },
-      json ? undefined : (chunk) => process.stdout.write(chunk),
-      options,
-    );
+    const execution =
+      deps.service || deps.createService
+        ? await executeConversationCreate(
+            conversationService(deps),
+            {
+              topic: content,
+              ...(typeof parsed.flags.policy === "string" ? { policy: parsed.flags.policy } : {}),
+              ...(participants.length ? { participants } : {}),
+              ...(maxRounds ? { max_rounds: maxRounds } : {}),
+            },
+            json ? undefined : (chunk) => process.stdout.write(chunk),
+            options,
+          )
+        : await durable.create(
+            {
+              principal_digest: durableCliPrincipalDigest("vf.chat"),
+              idempotency_key: durableCliIdempotencyKey("vf.chat.create", {
+                topic: content,
+                ...(typeof parsed.flags.policy === "string" ? { policy: parsed.flags.policy } : {}),
+                ...(participants.length ? { participants } : {}),
+                ...(maxRounds ? { max_rounds: maxRounds } : {}),
+              }),
+              request: {
+                topic: content,
+                ...(typeof parsed.flags.policy === "string" ? { policy: parsed.flags.policy } : {}),
+                ...(participants.length ? { participants } : {}),
+                ...(maxRounds ? { max_rounds: maxRounds } : {}),
+              },
+              ...(options ? { options } : {}),
+            },
+            json ? undefined : (chunk) => process.stdout.write(chunk),
+          );
     const exit = classifyConversationResult(execution.status, execution.events);
     if (json) {
       jsonWrite({

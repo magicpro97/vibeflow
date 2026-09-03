@@ -1,5 +1,13 @@
 import type { EvaluatorOutput } from "../consensus.js";
 import type { StoredTraceEvent } from "../trace/types.js";
+import {
+  CONVERSATION_ASSESSMENT_STAGE,
+  CONVERSATION_CONVERGENCE_NOT_APPLICABLE,
+  CONVERSATION_DECISION_OUTCOME,
+  CONVERSATION_ROUND_PHASE,
+  CONVERSATION_TRACE_EVENT_KIND,
+  type ConversationDecisionOutcomeV1,
+} from "./conversation-public-wire-contract.js";
 
 export const DECISION_MATRIX_WEIGHTS = Object.freeze({
   responses: 20,
@@ -41,7 +49,7 @@ interface ResponseState {
 interface RoundState {
   responses: Map<string, ResponseState>;
   assessments: EvaluatorOutput[];
-  decision: "abort" | "complete" | null;
+  decision: ConversationDecisionOutcomeV1 | null;
   consumed: StoredTraceEvent[];
   ended: boolean;
 }
@@ -127,7 +135,10 @@ function completedRounds(records: readonly StoredTraceEvent[]): RoundState[] {
   const completed: RoundState[] = [];
   for (const record of records) {
     const event = record.event;
-    if (event.type === "round_boundary" && event.payload.phase === "start") {
+    if (
+      event.type === CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY &&
+      event.payload.phase === CONVERSATION_ROUND_PHASE.START
+    ) {
       if (!rounds.has(event.payload.round_id)) {
         rounds.set(event.payload.round_id, {
           responses: new Map(),
@@ -140,15 +151,15 @@ function completedRounds(records: readonly StoredTraceEvent[]): RoundState[] {
       continue;
     }
     const roundId =
-      event.type === "agent_response_delta" ||
-      event.type === "evaluator_assessment" ||
-      event.type === "consensus_update" ||
-      event.type === "round_boundary"
+      event.type === CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA ||
+      event.type === CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT ||
+      event.type === CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE ||
+      event.type === CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY
         ? event.payload.round_id
         : null;
     const round = roundId ? rounds.get(roundId) : undefined;
     if (!round || round.ended) continue;
-    if (event.type === "agent_response_delta") {
+    if (event.type === CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA) {
       round.consumed.push(record);
       const response = responseState(round, event.payload.participant_id);
       if (response.complete) {
@@ -162,22 +173,29 @@ function completedRounds(records: readonly StoredTraceEvent[]): RoundState[] {
       }
       continue;
     }
-    if (event.type === "evaluator_assessment" && event.payload.stage === "full") {
+    if (
+      event.type === CONVERSATION_TRACE_EVENT_KIND.EVALUATOR_ASSESSMENT &&
+      event.payload.stage === CONVERSATION_ASSESSMENT_STAGE.FULL
+    ) {
       round.consumed.push(record);
       round.assessments.push(event.payload.assessment);
       continue;
     }
-    if (event.type === "consensus_update") {
+    if (event.type === CONVERSATION_TRACE_EVENT_KIND.CONSENSUS_UPDATE) {
       round.consumed.push(record);
-      round.decision = event.payload.decision.outcome === "abort" ? "abort" : "complete";
+      round.decision = event.payload.decision.outcome;
       continue;
     }
-    if (event.type === "round_boundary" && event.payload.phase === "end") {
+    if (
+      event.type === CONVERSATION_TRACE_EVENT_KIND.ROUND_BOUNDARY &&
+      event.payload.phase === CONVERSATION_ROUND_PHASE.END
+    ) {
       round.consumed.push(record);
       round.ended = true;
       const responses = [...round.responses.values()];
       if (
-        round.decision === "complete" &&
+        round.decision !== null &&
+        round.decision !== CONVERSATION_DECISION_OUTCOME.ABORT &&
         responses.length > 0 &&
         responses.every((response) => response.complete && !response.invalid)
       ) {
@@ -201,7 +219,7 @@ const gateRatios = (rounds: readonly RoundState[]): Record<DecisionScoreName, Ra
     for (const round of rounds) {
       for (const assessment of round.assessments) {
         const value = assessment[name].value;
-        if (value === "not_applicable") continue;
+        if (value === CONVERSATION_CONVERGENCE_NOT_APPLICABLE) continue;
         applicable += 1;
         if (value) passed += 1;
       }

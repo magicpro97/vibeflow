@@ -1,4 +1,6 @@
 // #660: lifecycle validation helpers — returns string warnings
+import { SKILL_SCOPE, SKILL_STATUS } from "../core/skill-contract.js";
+
 export function validateLifecycleOwners(data: Record<string, unknown>): string[] {
   const w: string[] = [];
   if (data.owners !== undefined) {
@@ -13,7 +15,7 @@ export function validateLifecycleOwners(data: Record<string, unknown>): string[]
         }
       }
     }
-  } else if (data.scope === "organization") {
+  } else if (data.scope === SKILL_SCOPE.ORGANIZATION) {
     w.push("organization-scoped skill should declare frontmatter.owners for team accountability");
   }
   return w;
@@ -46,7 +48,7 @@ export function validateLifecycleSupersedes(data: Record<string, unknown>): stri
       );
     }
   }
-  if (data.status === "deprecated" && !data.supersedes) {
+  if (data.status === SKILL_STATUS.DEPRECATED && !data.supersedes) {
     w.push("deprecated skill should declare frontmatter.supersedes to name the replacement skill");
   }
   return w;

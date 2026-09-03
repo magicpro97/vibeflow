@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type { Engine } from "../core.js";
+import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import {
   type AsyncSpawner,
   type EngineCommandResult,
@@ -47,6 +50,7 @@ export function defaultAiInitDispatcher(
     backoffCapMs?: number;
     /** Test seam: inject a sleep fn to keep the suite deterministic. */
     sleep?: (ms: number) => Promise<void>;
+    evidenceRoot?: string;
   } = {},
 ): UnitDispatcher {
   const {
@@ -57,6 +61,7 @@ export function defaultAiInitDispatcher(
     backoffBaseMs = 2000,
     backoffCapMs = 60_000,
     sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+    evidenceRoot = join(process.cwd(), ".vibeflow", "attempts"),
   } = opts;
   const resolveInvocation = engineCommandFn ?? engineCommand;
   const asyncSpawn = spawner ?? makeAsyncSpawner({ timeoutMs });
@@ -76,7 +81,7 @@ export function defaultAiInitDispatcher(
       const reason = invocation.unavailable;
       process.stderr.write(`[ai-init-dispatcher] engine ${engine} unavailable: ${reason}\n`);
       return {
-        status: "blocked",
+        status: WORK_UNIT_STATUS.BLOCKED,
         confidence: 0,
         evidence: [`engine-unavailable:${engine}:${reason}`],
       };
@@ -91,19 +96,23 @@ export function defaultAiInitDispatcher(
     );
     let lastNonZero = 1;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input);
+      const result = await asyncSpawn(materialized.cmd, materialized.args, materialized.input, {
+        attemptId: randomUUID(),
+        engine,
+        evidenceRoot,
+      });
       if (result.timedOut) {
         const reason = `timed out after ${timeoutMs}ms`;
         process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
         return {
-          status: "blocked",
+          status: WORK_UNIT_STATUS.BLOCKED,
           confidence: 0,
           evidence: [`dispatcher-timeout:${unit.name}:${reason}`],
         };
       }
       if (result.status === 0) {
         return {
-          status: "verifying",
+          status: WORK_UNIT_STATUS.VERIFYING,
           confidence: 1,
           evidence: [...(unit.scope ?? [])],
         };
@@ -134,7 +143,7 @@ export function defaultAiInitDispatcher(
     const reason = `exit ${lastNonZero}`;
     process.stderr.write(`[ai-init-dispatcher] ${unit.name} ${reason}\n`);
     return {
-      status: "blocked",
+      status: WORK_UNIT_STATUS.BLOCKED,
       confidence: 0,
       evidence: [`dispatcher-nonzero:${unit.name}:${reason}`],
     };

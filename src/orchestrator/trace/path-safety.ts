@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import { isAbsolute, join, parse, resolve } from "node:path";
+import { RUNTIME_PLATFORM } from "../../durability/process-identity-contract.js";
 
 type Reject = (message: string) => never;
 
@@ -11,7 +12,7 @@ export const effectiveOwnerMatches = (stat: fs.Stats): boolean =>
   expectedOwner() === undefined || stat.uid === expectedOwner();
 
 const trustedAliasTarget = (path: string): string | null => {
-  if (process.platform !== "darwin") return null;
+  if (process.platform !== RUNTIME_PLATFORM.DARWIN) return null;
   const allowed: Record<string, string> = {
     "/etc": "/private/etc",
     "/tmp": "/private/tmp",

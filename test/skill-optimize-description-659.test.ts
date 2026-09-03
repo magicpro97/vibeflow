@@ -218,13 +218,13 @@ describe("vf skills optimize-description", () => {
     return ["---", ...lines, "---", ...VALID_BODY];
   }
 
-  function run(rest: string[]): number {
+  async function run(rest: string[]): Promise<number> {
     const orig = process.cwd();
     const origHome = process.env.VF_SKILLS_HOME;
     process.env.VF_SKILLS_HOME = base;
     process.chdir(base);
     try {
-      return skills("optimize-description", rest);
+      return await skills("optimize-description", rest);
     } finally {
       process.chdir(orig);
       if (origHome === undefined) process.env.VF_SKILLS_HOME = undefined;
@@ -232,13 +232,13 @@ describe("vf skills optimize-description", () => {
     }
   }
 
-  test("existing skill returns 0 and prints metrics", () => {
+  test("existing skill returns 0 and prints metrics", async () => {
     scaffold("test-skill", fm(["name: test-skill", "description: test skill for optimize"]));
-    const code = run(["test-skill"]);
+    const code = await run(["test-skill"]);
     expect(code).toBe(0);
   });
 
-  test("prints a proposal when the description can be improved", () => {
+  test("prints a proposal when the description can be improved", async () => {
     // triggers don't match name/description tokens → current f1 is 0, so
     // proposeDescription returns a candidate and the CLI prints it.
     scaffold("improvable", [
@@ -250,16 +250,16 @@ describe("vf skills optimize-description", () => {
       "---",
       ...VALID_BODY,
     ]);
-    const code = run(["improvable"]);
+    const code = await run(["improvable"]);
     expect(code).toBe(0);
   });
 
-  test("missing name returns 2", () => {
-    expect(run([])).toBe(2);
+  test("missing name returns 2", async () => {
+    expect(await run([])).toBe(2);
   });
 
-  test("unknown name returns 2", () => {
-    expect(run(["nope"])).toBe(2);
+  test("unknown name returns 2", async () => {
+    expect(await run(["nope"])).toBe(2);
   });
 });
 

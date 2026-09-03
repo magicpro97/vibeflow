@@ -5,6 +5,7 @@ import { agentFilePath, renderForEngine } from "./agents/render.js";
 import type { RoleSpec } from "./agents/role.js";
 import type { WorkflowPhase } from "./ai-init-workflow.js";
 import { CTX_DIR } from "./core.js";
+import { ROLE_MODEL, ROLE_WORKFLOW_TOOL_INTENTS } from "./core/role-contract.js";
 import {
   renderOrchestratorBody,
   renderPhaseAgentBody,
@@ -166,8 +167,8 @@ export function generateWorkflowArtifacts(
     name: "workflow-orchestrator",
     description: `Coordinate ${projectName} workflow phases and dispatch phase agents in order`,
     body: orchestratorBody,
-    tools: ["read", "write", "edit", "bash", "grep", "glob"],
-    model: "sonnet",
+    tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+    model: ROLE_MODEL.SONNET,
   };
   for (const engine of engines) {
     const relPath = orchestratorAgentPath(engine);
@@ -196,8 +197,8 @@ export function generateWorkflowArtifacts(
         name: phaseAgentName(phase),
         description: phase.description || `Execute ${phase.name} phase`,
         body: agentBody.replace(/\{\{SKILL_PATH\}\}/g, engineSkillPath),
-        tools: ["read", "write", "edit", "bash", "grep", "glob"],
-        model: "sonnet",
+        tools: [...ROLE_WORKFLOW_TOOL_INTENTS],
+        model: ROLE_MODEL.SONNET,
       };
       writeFileSync(absPath, renderForEngine(engine, spec));
       written.push(relPath);

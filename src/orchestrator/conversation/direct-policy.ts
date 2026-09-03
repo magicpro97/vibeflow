@@ -1,8 +1,18 @@
+import { isReadOnlyRole } from "../../agents/role.js";
+import { ROLE_SANDBOX } from "../../core/role-contract.js";
 import {
-  MAX_DIRECT_CONTINUATIONS,
-  appliesToParticipant,
-  directMessagePrompt,
-} from "./message-delivery.js";
+  ENGINE_OUTPUT_STREAM,
+  supportsConversationRoleAuthority,
+} from "../../dispatch/session-contract.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
+import { CONVERSATION_POLICY } from "./conversation-policy-contract.js";
+import {
+  CONVERSATION_OPERATION_STATE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
+import { DirectOutputStreamV1 } from "./direct-output-stream.js";
+import { MAX_DIRECT_CONTINUATIONS } from "./message-delivery.js";
+import { CONVERSATION_TURN_INSTRUCTION_KIND } from "./turn-delivery-contract.js";
 import type {
   ConversationContext,
   ConversationOrchestrationResult,
@@ -13,9 +23,28 @@ import type {
 
 /** One-participant compatibility policy; all execution still flows through launchAttempt. */
 export class DirectConversationPolicy implements ConversationPolicy {
-  readonly name = "direct";
+  readonly name = CONVERSATION_POLICY.DIRECT;
+
+  private canonical(context: ConversationContext): boolean {
+    const binding = context.bindings[0];
+    return (
+      context.policy === this.name &&
+      context.bindings.length === 1 &&
+      context.participantIds.length === 1 &&
+      binding !== undefined &&
+      binding.sandbox === ROLE_SANDBOX.READ_ONLY &&
+      isReadOnlyRole(binding.role.spec)
+    );
+  }
 
   async dryRun(context: ConversationContext): Promise<DryRunResult> {
+    if (!this.canonical(context))
+      return {
+        participants: [],
+        evaluator_auto_added: context.evaluatorAutoAdded,
+        engines_available: [],
+        models_valid: false,
+      };
     const binding = context.bindings[0];
     const participantId = context.participantIds[0];
     const readiness = context.bindingReadiness[0];
@@ -40,10 +69,15 @@ export class DirectConversationPolicy implements ConversationPolicy {
   }
 
   async execute(context: ConversationContext): Promise<ConversationOrchestrationResult> {
-    if (context.bindings.length !== 1) {
+    const binding = context.bindings[0];
+    if (
+      !this.canonical(context) ||
+      !binding ||
+      !supportsConversationRoleAuthority(binding.engine)
+    ) {
       return {
         operation_id: context.correlation.operation_id,
-        status: "failed",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
         artifact_refs: [],
       };
     }
@@ -51,16 +85,14 @@ export class DirectConversationPolicy implements ConversationPolicy {
     if (!participantId) {
       return {
         operation_id: context.correlation.operation_id,
-        status: "failed",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
         artifact_refs: [],
       };
     }
-    let messages = await context.messages();
-    let observedMessages = messages.length;
-    let promptInput = directMessagePrompt(
-      messages.filter((message) => appliesToParticipant(message, participantId)),
-    );
-    if (!promptInput) promptInput = context.topic;
+    let delivery = await context.prepareTurn({
+      participant_id: participantId,
+      instruction: { kind: CONVERSATION_TURN_INSTRUCTION_KIND.DIRECT, topic: context.topic },
+    });
     let continuation = 0;
     while (true) {
       const suffix = continuation === 0 ? "" : `:continuation:${continuation}`;
@@ -69,16 +101,17 @@ export class DirectConversationPolicy implements ConversationPolicy {
         participantId,
         bindingIndex: 0,
         purpose: "direct",
-        promptInput,
+        promptInput: delivery.prompt_input,
+        delivery,
       });
-      let stdoutChunks = 0;
+      let emittedChunks = 0;
       let emissionChain: Promise<unknown> = Promise.resolve();
       const queueDelta = (content: string) => {
-        const index = stdoutChunks++;
+        const index = emittedChunks++;
         const emitted = attempt.emit({
           idempotency_key: `${eventPrefix}:chunk:${index}`,
           event: {
-            type: "agent_response_delta",
+            type: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
             payload: {
               round_id: `direct:${context.correlation.operation_id}`,
               participant_id: participantId,
@@ -91,53 +124,85 @@ export class DirectConversationPolicy implements ConversationPolicy {
         });
         emissionChain = emissionChain.then(() => emitted);
       };
+      const outputStream = new DirectOutputStreamV1(queueDelta);
       const unsubscribe = attempt.onChunk((chunk) => {
-        if (chunk.stream === "stdout" && chunk.content) queueDelta(chunk.content);
+        if (chunk.stream === ENGINE_OUTPUT_STREAM.STDOUT && chunk.content)
+          outputStream.push(chunk.content);
       });
       const result = await attempt.completion;
       unsubscribe();
-      if (stdoutChunks === 0 && result.output) queueDelta(result.output);
+      const parsed = outputStream.finish(result.output);
       await emissionChain;
-      const complete = result.state === "completed";
+      const complete = result.state === CONVERSATION_OPERATION_STATE.COMPLETED;
       const failed = !result.ok || context.signal.aborted;
-      let pending: MessageRequest[] = [];
+      let pending = false;
       if (!failed) {
-        messages = await context.messages();
-        pending = messages
-          .slice(observedMessages)
-          .filter((message) => appliesToParticipant(message, participantId));
-        observedMessages = messages.length;
+        delivery = await context.prepareTurn({
+          participant_id: participantId,
+          instruction: { kind: CONVERSATION_TURN_INSTRUCTION_KIND.DIRECT, topic: null },
+        });
+        pending = delivery.applicable_user_message_count > 0;
       }
-      if (failed || !pending.length) {
-        await attempt.emit({
-          idempotency_key: `${eventPrefix}:complete`,
+      if (failed || !pending) {
+        const responseIdempotencyKey = `${eventPrefix}:complete`;
+        const stagedCandidate =
+          complete && result.ok && parsed.action_candidate?.present
+            ? context.stageActionCandidate({
+                participant_id: participantId,
+                response_idempotency_key: responseIdempotencyKey,
+                candidate: parsed.action_candidate.value,
+              })
+            : null;
+        const response = await attempt.emit({
+          idempotency_key: responseIdempotencyKey,
           event: {
-            type: "agent_response_delta",
+            type: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
             payload: {
               round_id: `direct:${context.correlation.operation_id}`,
               participant_id: participantId,
               content_delta: "",
-              final_claim: complete && result.ok ? result.output || null : null,
+              final_claim: complete && result.ok ? parsed.answer || null : null,
               final_evidence: [],
               completes_response: complete,
             },
           },
         });
+        if (complete && result.ok && parsed.social_intent.present)
+          context.publishSocialIntent({
+            participant_id: participantId,
+            response_event_id: response.event_id,
+            request: parsed.social_intent,
+          });
+        if (stagedCandidate && !stagedCandidate.accepted) {
+          await attempt.emit({
+            idempotency_key: `${eventPrefix}:action-candidate:${stagedCandidate.diagnostic_code ?? "rejected"}`,
+            event: {
+              type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
+              payload: {
+                agent_id: participantId,
+                code: stagedCandidate.diagnostic_code ?? "action_candidate_rejected",
+                message: "agent host-action candidate was rejected",
+              },
+            },
+          });
+        }
       }
       if (failed) {
         return {
           operation_id: context.correlation.operation_id,
-          status: context.signal.aborted ? "aborted" : "failed",
+          status: context.signal.aborted
+            ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+            : CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
           artifact_refs: [],
         };
       }
-      if (!pending.length) break;
+      if (!pending) break;
       continuation += 1;
       if (continuation > MAX_DIRECT_CONTINUATIONS) {
         await context.emit({
           idempotency_key: `direct:${context.correlation.operation_id}:continuation-limit`,
           event: {
-            type: "error",
+            type: CONVERSATION_TRACE_EVENT_KIND.ERROR,
             payload: {
               agent_id: null,
               code: "message_continuation_limit",
@@ -147,15 +212,14 @@ export class DirectConversationPolicy implements ConversationPolicy {
         });
         return {
           operation_id: context.correlation.operation_id,
-          status: "failed",
+          status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
           artifact_refs: [],
         };
       }
-      promptInput = directMessagePrompt(pending);
     }
     return {
       operation_id: context.correlation.operation_id,
-      status: "completed",
+      status: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
       artifact_refs: [],
     };
   }

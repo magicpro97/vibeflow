@@ -117,7 +117,7 @@ export function defaultPresenceCheck(
   // only do presencia + (if copilot) auth, no live probe. The full live probe
   // happens in applyDispatch's runProbe path.
   const has = opts.has ?? ((cmd: string) => cmd !== "missing");
-  return checkEngine(engine, { has });
+  return checkEngine(engine, { has, probe: false });
 }
 
 export function defaultPickFallback(
@@ -127,7 +127,7 @@ export function defaultPickFallback(
   const probe = has ?? ((cmd: string) => cmd !== "missing");
   for (const candidate of ENGINES) {
     if (candidate === exclude) continue;
-    const r = checkEngine(candidate, { has: probe });
+    const r = checkEngine(candidate, { has: probe, probe: false });
     if (r.level === "ready") return candidate;
   }
   return undefined;

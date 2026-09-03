@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { WORK_UNIT_STATUS } from "../../core/workflow-contract.js";
 import {
   type PolicyVerifyReport,
   VERIFY_GATE_ORDER,
@@ -6,6 +7,12 @@ import {
 } from "../../verify/core.js";
 import type { OrchestrationResult } from "../run.js";
 import { TRACE_LIMITS, utf8Bytes } from "../trace/limits.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
+import {
+  CONVERSATION_APPROVAL_OUTCOME,
+  CONVERSATION_ARTIFACT_TYPE,
+  CONVERSATION_TRACE_EVENT_KIND,
+} from "./conversation-public-wire-contract.js";
 import {
   type OrchestrationResultSnapshot,
   orchestrationArtifactSummary,
@@ -128,7 +135,7 @@ export class InjectedPlanService implements PlanService {
     const revisionId = context.correlation.revision_id;
     if (!revisionId) throw new Error("plan revision is missing");
     const created = await context.createArtifact({
-      artifact_type: "plan",
+      artifact_type: CONVERSATION_ARTIFACT_TYPE.PLAN,
       content: output.content,
       idempotency_key: hashKey("plan-policy:create", [
         context.correlation.operation_id,
@@ -154,7 +161,7 @@ export class InjectedPlanService implements PlanService {
     assertContent(output.content, "plan");
     const updated = await context.updateArtifact({
       artifact_id: previous.artifact_id,
-      artifact_type: "plan",
+      artifact_type: CONVERSATION_ARTIFACT_TYPE.PLAN,
       content: output.content,
       previous_ref: previous.ref as never,
       idempotency_key: hashKey("plan-policy:update", [
@@ -277,7 +284,7 @@ const orchestrationPassed = (output: OrchestrationResultSnapshot): boolean => {
   const reviews = new Map(output.reviews.map((review) => [review.unit, review]));
   if (units.size !== output.units.length || reviews.size !== output.reviews.length) return false;
   return [...units].every(
-    ([name, unit]) => unit.status === "done" && reviews.get(name)?.pass === true,
+    ([name, unit]) => unit.status === WORK_UNIT_STATUS.DONE && reviews.get(name)?.pass === true,
   );
 };
 
@@ -299,7 +306,7 @@ export class InjectedOrchestrateService implements OrchestrateService {
   ): Promise<ConversationOrchestrationResult> {
     const aborted = (): ConversationOrchestrationResult => ({
       operation_id: context.correlation.operation_id,
-      status: "aborted",
+      status: CONVERSATION_COMMAND_RESULT_STATUS.ABORTED,
       artifact_refs: [],
     });
     if (context.signal.aborted) return aborted();
@@ -308,14 +315,14 @@ export class InjectedOrchestrateService implements OrchestrateService {
       await context.emit({
         idempotency_key: hashKey("orchestrate-policy:approval", [token.approval_id]),
         event: {
-          type: "approval_requested",
+          type: CONVERSATION_TRACE_EVENT_KIND.APPROVAL_REQUESTED,
           payload: { token, description: "Execute the current VibeFlow work units" },
         },
       });
       if (context.signal.aborted) return aborted();
       return {
         operation_id: context.correlation.operation_id,
-        status: "awaiting_approval",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.AWAITING_APPROVAL,
         artifact_refs: [],
       };
     }
@@ -326,10 +333,10 @@ export class InjectedOrchestrateService implements OrchestrateService {
     ) {
       throw new Error("orchestration approval mismatch");
     }
-    if (approval.outcome === "reject") {
+    if (approval.outcome === CONVERSATION_APPROVAL_OUTCOME.REJECT) {
       return {
         operation_id: context.correlation.operation_id,
-        status: "aborted",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.ABORTED,
         artifact_refs: [],
       };
     }
@@ -343,7 +350,7 @@ export class InjectedOrchestrateService implements OrchestrateService {
     const output = snapshotOrchestrationResult(untrusted);
     if (context.signal.aborted) return aborted();
     const summary = await context.createArtifact({
-      artifact_type: "tests",
+      artifact_type: CONVERSATION_ARTIFACT_TYPE.TESTS,
       content: orchestrationArtifactSummary(output),
       idempotency_key: hashKey("orchestrate-policy:result", [
         context.correlation.operation_id,
@@ -351,11 +358,15 @@ export class InjectedOrchestrateService implements OrchestrateService {
       ]),
     });
     const passed = orchestrationPassed(output);
-    const status = context.signal.aborted ? "aborted" : passed ? "completed" : "failed";
+    const status = context.signal.aborted
+      ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+      : passed
+        ? CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED
+        : CONVERSATION_COMMAND_RESULT_STATUS.FAILED;
     return {
       operation_id: context.correlation.operation_id,
       status,
-      artifact_refs: status === "completed" ? [summary.ref] : [],
+      artifact_refs: status === CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED ? [summary.ref] : [],
     };
   }
 

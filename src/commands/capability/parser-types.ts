@@ -1,0 +1,131 @@
+import type {
+  CapabilityCliAuthorityMutationCommand,
+  CapabilityCliCapabilityMutationCommand,
+  CapabilityCliInspectionCommand,
+  CapabilityCliPrivateCommand,
+  CapabilityCliQueryCommand,
+} from "../../actions/capability-cli-contract.js";
+import type { CAPABILITY_CLI_COMMAND } from "../../actions/capability-cli-contract.js";
+import type { CapabilityPublicInputV1 } from "../../actions/request-types.js";
+import type { Engine } from "../../core/agent-contract.js";
+import type { CapabilityScope } from "../../core/capability-contract.js";
+
+export type Scope = CapabilityScope;
+export type EngineName = Engine;
+export type PrivateReferenceV1 = Extract<CapabilityPublicInputV1["value"], object>;
+
+export interface CapabilityParserIo {
+  stdinIsTTY: boolean;
+  stdinHasData: boolean;
+}
+
+export class CapabilityCliUsageError extends Error {
+  readonly exitCode = 2;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "CapabilityCliUsageError";
+  }
+}
+
+export interface ParsedCliCommonOptionsV1 {
+  scope?: Scope;
+  idempotencyKey?: string;
+  dryRun: boolean;
+  yes: boolean;
+  json: boolean;
+  offline: boolean;
+  allowNetworkRead: boolean;
+}
+
+export interface ParsedCapabilityQueryV1 extends ParsedCliCommonOptionsV1 {
+  kind: "query";
+  command: CapabilityCliQueryCommand;
+  query?: string;
+  packageId?: string;
+  engines: EngineName[];
+  refresh: boolean;
+}
+
+export interface ParsedCapabilityInspectionV1 extends ParsedCliCommonOptionsV1 {
+  kind: "inspection";
+  command: CapabilityCliInspectionCommand;
+  mode: "direct";
+  legacySources: string[];
+}
+
+export interface ParsedCapabilityDirectMutationV1 extends ParsedCliCommonOptionsV1 {
+  kind: "mutation";
+  command: CapabilityCliCapabilityMutationCommand;
+  mode: "direct";
+  packageId?: string;
+  query?: string;
+  generationId?: string;
+  packagePinDigest?: string;
+  fromGenerationId?: string;
+  candidateId?: string;
+  candidateDigest?: string;
+  engines: EngineName[];
+  publicInputs: Array<{
+    input_id: string;
+    value: Extract<CapabilityPublicInputV1["value"], string | number | boolean | null>;
+  }>;
+  privateInputs: Array<{ input_id: string; reference: PrivateReferenceV1 }>;
+  legacySources: string[];
+  cascade: boolean;
+}
+
+export interface ParsedCapabilityRequestFileMutationV1 extends ParsedCliCommonOptionsV1 {
+  kind: "mutation";
+  command: CapabilityCliCapabilityMutationCommand;
+  mode: "request-file";
+  requestFile: string;
+}
+
+export interface ParsedCapabilityPrivateInputBindV1 extends ParsedCliCommonOptionsV1 {
+  kind: "private-input";
+  command: CapabilityCliPrivateCommand;
+  mode: "direct";
+  packageId?: string;
+  packagePinDigest?: string;
+  inputIds: string[];
+  valuesStdin: boolean;
+}
+
+export type ParsedCapabilityCliArgvV1 =
+  | ParsedCapabilityQueryV1
+  | ParsedCapabilityInspectionV1
+  | ParsedCapabilityDirectMutationV1
+  | ParsedCapabilityRequestFileMutationV1
+  | ParsedCapabilityPrivateInputBindV1;
+
+export interface ParsedAuthorityDirectMutationV1 extends ParsedCliCommonOptionsV1 {
+  kind: "mutation";
+  command: CapabilityCliAuthorityMutationCommand;
+  mode: "direct";
+  grantFile?: string;
+  grantId?: string;
+  replacementFile?: string;
+  trustFile?: string;
+  packageId?: string;
+  inputId?: string;
+  candidateId?: string;
+  candidateDigest?: string;
+  conversationId?: string;
+  automationGrantFile?: string;
+}
+
+export interface ParsedAuthorityRequestFileMutationV1 extends ParsedCliCommonOptionsV1 {
+  kind: "mutation";
+  command: Exclude<
+    CapabilityCliAuthorityMutationCommand,
+    typeof CAPABILITY_CLI_COMMAND.AUTHORITY_REPAIR
+  >;
+  mode: "request-file";
+  requestFile: string;
+  automationGrantFile?: string;
+}
+
+export type ParsedAuthorityCliArgvV1 =
+  | ParsedAuthorityDirectMutationV1
+  | ParsedAuthorityRequestFileMutationV1;

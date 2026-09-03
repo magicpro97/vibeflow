@@ -5,6 +5,7 @@ import {
   defaultGit,
   isSha,
 } from "../../hooks/review-evidence.js";
+import { CONVERSATION_COMMAND_RESULT_STATUS } from "./conversation-command-result-contract.js";
 import {
   type PlanArtifactLocator,
   type ReviewEvidenceAuthority,
@@ -93,19 +94,21 @@ export class ReviewConversationPolicy implements ConversationPolicy {
       if (resolution.outcome !== "approved") {
         return {
           operation_id: context.correlation.operation_id,
-          status: "failed",
+          status: CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
           artifact_refs: [],
         };
       }
       return {
         operation_id: context.correlation.operation_id,
-        status: "completed",
+        status: CONVERSATION_COMMAND_RESULT_STATUS.COMPLETED,
         artifact_refs: [...resolution.evidence_refs],
       };
     } catch {
       return {
         operation_id: context.correlation.operation_id,
-        status: context.signal.aborted ? "aborted" : "failed",
+        status: context.signal.aborted
+          ? CONVERSATION_COMMAND_RESULT_STATUS.ABORTED
+          : CONVERSATION_COMMAND_RESULT_STATUS.FAILED,
         artifact_refs: [],
       };
     }

@@ -64,6 +64,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { GATE_STATE, WORK_UNIT_STATUS } from "../../../core/workflow-contract.js";
 import { pipelineEdges, pipelineWaves, waitingOn } from "../lib/pipeline.js";
 import type { WorkUnit } from "../types.js";
 
@@ -121,25 +122,28 @@ onUnmounted(() => {
   window.removeEventListener("resize", scheduleEdges);
 });
 
-function nodeStatus(name: string): string {
-  return byName.value.get(name)?.status ?? "pending";
+function nodeStatus(name: string): WorkUnit["status"] {
+  return byName.value.get(name)?.status ?? WORK_UNIT_STATUS.PENDING;
 }
 
 function nodeClass(name: string): string {
   const s = nodeStatus(name);
-  if (s === "running") return "border-blue-500/50 bg-blue-950/20 hover:border-blue-400";
-  if (s === "verifying") return "border-amber-500/50 bg-amber-950/20 hover:border-amber-400";
-  if (s === "done") return "border-emerald-700/50 bg-emerald-950/10 hover:border-emerald-500";
-  if (s === "blocked") return "border-red-700/50 bg-red-950/10 hover:border-red-500";
+  if (s === WORK_UNIT_STATUS.RUNNING)
+    return "border-blue-500/50 bg-blue-950/20 hover:border-blue-400";
+  if (s === WORK_UNIT_STATUS.VERIFYING)
+    return "border-amber-500/50 bg-amber-950/20 hover:border-amber-400";
+  if (s === WORK_UNIT_STATUS.DONE)
+    return "border-emerald-700/50 bg-emerald-950/10 hover:border-emerald-500";
+  if (s === WORK_UNIT_STATUS.BLOCKED) return "border-red-700/50 bg-red-950/10 hover:border-red-500";
   return "border-neutral-800 bg-neutral-900 hover:border-neutral-600";
 }
 
 function dotClass(name: string): string {
   const s = nodeStatus(name);
-  if (s === "running") return "bg-blue-400 animate-pulse";
-  if (s === "verifying") return "bg-amber-400 animate-pulse";
-  if (s === "done") return "bg-emerald-500";
-  if (s === "blocked") return "bg-red-500";
+  if (s === WORK_UNIT_STATUS.RUNNING) return "bg-blue-400 animate-pulse";
+  if (s === WORK_UNIT_STATUS.VERIFYING) return "bg-amber-400 animate-pulse";
+  if (s === WORK_UNIT_STATUS.DONE) return "bg-emerald-500";
+  if (s === WORK_UNIT_STATUS.BLOCKED) return "bg-red-500";
   return "bg-neutral-600";
 }
 
@@ -152,9 +156,9 @@ function nodeDetail(name: string): string {
   if (!u) return "";
   const wait = waitingOn(u, byName.value);
   if (wait.length > 0) return `Waiting for: ${wait.join(", ")}`;
-  if (u.status === "blocked") {
+  if (u.status === WORK_UNIT_STATUS.BLOCKED) {
     const failed = Object.entries(u.gates)
-      .filter(([, v]) => v === "fail")
+      .filter(([, v]) => v === GATE_STATE.FAIL)
       .map(([k]) => k);
     if (failed.length > 0) return `Failed: ${failed.join(", ")}`;
     return "Blocked";

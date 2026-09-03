@@ -1,8 +1,24 @@
-import { createHash, randomUUID } from "node:crypto";
-import * as fs from "node:fs";
+import {
+  constants,
+  type Stats,
+  closeSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+} from "node:fs";
 import { join, relative, resolve } from "node:path";
 import lockfile from "proper-lockfile";
-import type { ArtifactRegistry, RebuildableArtifactRegistry } from "./artifacts.js";
+import {
+  type CapturedTraceAppendV1,
+  TraceIdempotencyConflictError,
+  TraceRequestedEventConflictError,
+  planTraceAppend,
+  traceInputBytes,
+} from "./append-planner.js";
+import type { RebuildableArtifactRegistry } from "./artifacts.js";
 import {
   type JournalCursor,
   type JournalRefresh,
@@ -17,79 +33,55 @@ import { assertNoSymlinkPathComponents } from "./path-safety.js";
 import { projectPublicStoredTrace } from "./project.js";
 import { settleDurableRegistry } from "./registry-settlement.js";
 import type {
+  TraceBatchAppend,
+  TraceRequestedEventAppendV1,
+  TraceStore as TraceStoreContract,
+  TraceStoreOptions,
+} from "./store-contract.js";
+import { traceJournalPath } from "./trace-journal-path.js";
+import type {
   InternalTraceStoreRecord,
-  PublicStoredTraceEvent,
   StoredTraceEvent,
   TraceAppendInput,
   TraceCorrelation,
 } from "./types.js";
-import { fail, validGenerated, validInput } from "./validation.js";
-
-export class TraceIdempotencyConflictError extends Error {}
+import { fail, validInput } from "./validation.js";
+export type {
+  TraceBatchAppend,
+  TraceRequestedEventAppendV1,
+  TraceStoreOptions,
+} from "./store-contract.js";
+export { traceJournalPath } from "./trace-journal-path.js";
+export { TraceIdempotencyConflictError, TraceRequestedEventConflictError };
+export class TraceHeadConflictError extends Error {}
 export { TraceLifecycleConflictError };
-export interface TraceStoreOptions {
-  dir: string;
-  artifactRegistry?: ArtifactRegistry;
-  mirror?: { mirrorTrace(event: PublicStoredTraceEvent): void };
-  now?: () => string;
-  eventId?: () => string;
-}
-export interface TraceBatchAppend {
-  correlation: TraceCorrelation;
-  input: TraceAppendInput;
-  native?: string | null;
-}
-export interface TraceStore {
-  readConversation(id: string): Promise<InternalTraceStoreRecord[]>;
-  recoverConversation?(id: string): Promise<InternalTraceStoreRecord[]>;
-  append(
-    correlation: TraceCorrelation,
-    input: TraceAppendInput,
-    native?: string | null,
-  ): Promise<StoredTraceEvent>;
-  appendBatch?(entries: readonly TraceBatchAppend[]): Promise<StoredTraceEvent[]>;
-}
-
-const inputBytes = (input: TraceAppendInput) =>
-  JSON.stringify({ idempotency_key: input.idempotency_key, event: input.event });
+export interface TraceStore extends TraceStoreContract {}
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const expectedOwner = (): number | undefined =>
   typeof process.geteuid === "function" ? process.geteuid() : undefined;
-const ownerMatches = (stat: fs.Stats): boolean =>
+const ownerMatches = (stat: Stats): boolean =>
   expectedOwner() === undefined || stat.uid === expectedOwner();
-
-export function traceJournalPath(dir: string, id: string): string {
-  return join(
-    resolve(dir),
-    "conversations",
-    `${createHash("sha256").update("v1-trace-conversation\0").update(id).digest("hex")}.jsonl`,
-  );
-}
-
-export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class TraceStore {
+export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract = class TraceStore {
   private readonly cursors = new Map<string, JournalCursor>();
-
+  private requestedEventAuthority: ((input: TraceRequestedEventAppendV1) => void) | undefined;
   constructor(
     private readonly options: TraceStoreOptions,
     private readonly root: string = "",
   ) {
     const requested = assertNoSymlinkPathComponents(resolve(options.dir), fail);
     this.ensureDirectory(requested, resolve(requested, ".."), false);
-    this.root = fs.realpathSync(requested);
+    this.root = realpathSync(requested);
   }
   private directoryFd(path: string, privateMode = true): number {
     let fd: number;
     try {
-      fd = fs.openSync(
-        path,
-        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW,
-      );
+      fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     } catch {
       return fail("unsafe directory");
     }
     try {
-      const opened = fs.fstatSync(fd);
-      const entry = fs.lstatSync(path);
+      const opened = fstatSync(fd);
+      const entry = lstatSync(path);
       if (
         !opened.isDirectory() ||
         entry.isSymbolicLink() ||
@@ -103,49 +95,48 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
         fail("unsafe directory");
       return fd;
     } catch (error) {
-      fs.closeSync(fd);
+      closeSync(fd);
       throw error;
     }
   }
   private ensureDirectory(path: string, parent: string, privateParent = true): void {
     const canonical = assertNoSymlinkPathComponents(path, fail);
     try {
-      fs.mkdirSync(canonical, { mode: 0o700 });
+      mkdirSync(canonical, { mode: 0o700 });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     const fd = this.directoryFd(canonical);
-    fs.closeSync(fd);
+    closeSync(fd);
     assertNoSymlinkPathComponents(canonical, fail);
     const parentFd = this.directoryFd(parent, privateParent);
     try {
-      fs.fsyncSync(parentFd);
+      fsyncSync(parentFd);
     } finally {
-      fs.closeSync(parentFd);
+      closeSync(parentFd);
     }
   }
   private path(id: string): string {
     if (!id) fail("conversation id");
     const directory = join(this.root, "conversations");
     this.ensureDirectory(directory, this.root);
-    if (relative(this.root, fs.realpathSync(directory)).startsWith(".."))
-      fail("unsafe conversations");
+    if (relative(this.root, realpathSync(directory)).startsWith("..")) fail("unsafe conversations");
     return traceJournalPath(this.root, id);
   }
   private fd(path: string): number {
     const flags =
-      fs.constants.O_RDWR |
-      fs.constants.O_NOFOLLOW |
-      (fs.constants.O_NONBLOCK === undefined ? 0 : fs.constants.O_NONBLOCK);
+      constants.O_RDWR |
+      constants.O_NOFOLLOW |
+      (constants.O_NONBLOCK === undefined ? 0 : constants.O_NONBLOCK);
     let fd: number;
     try {
-      fd = fs.openSync(path, flags);
+      fd = openSync(path, flags);
     } catch {
       return fail("unsafe journal");
     }
     try {
-      const stat = fs.fstatSync(fd);
-      const entry = fs.lstatSync(path);
+      const stat = fstatSync(fd);
+      const entry = lstatSync(path);
       if (
         !stat.isFile() ||
         entry.isSymbolicLink() ||
@@ -160,19 +151,16 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
         fail("unsafe journal");
       return fd;
     } catch (error) {
-      fs.closeSync(fd);
+      closeSync(fd);
       throw error;
     }
   }
   private create(path: string): boolean {
     let fd: number;
     try {
-      fd = fs.openSync(
+      fd = openSync(
         path,
-        fs.constants.O_WRONLY |
-          fs.constants.O_CREAT |
-          fs.constants.O_EXCL |
-          fs.constants.O_NOFOLLOW,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
         0o600,
       );
     } catch (error) {
@@ -180,15 +168,15 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
       return false;
     }
     try {
-      fs.fsyncSync(fd);
+      fsyncSync(fd);
     } finally {
-      fs.closeSync(fd);
+      closeSync(fd);
     }
     const directoryFd = this.directoryFd(resolve(path, ".."));
     try {
-      fs.fsyncSync(directoryFd);
+      fsyncSync(directoryFd);
     } finally {
-      fs.closeSync(directoryFd);
+      closeSync(directoryFd);
     }
     return true;
   }
@@ -204,18 +192,18 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
       });
       fd = this.fd(path);
       if (!created) {
-        fs.fsyncSync(fd);
+        fsyncSync(fd);
         const directoryFd = this.directoryFd(resolve(path, ".."));
         try {
-          fs.fsyncSync(directoryFd);
+          fsyncSync(directoryFd);
         } finally {
-          fs.closeSync(directoryFd);
+          closeSync(directoryFd);
         }
       }
       return action(fd);
     } finally {
       try {
-        if (fd !== undefined) fs.closeSync(fd);
+        if (fd !== undefined) closeSync(fd);
       } finally {
         if (release) await release();
       }
@@ -259,13 +247,51 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
     correlation: TraceCorrelation,
     input: TraceAppendInput,
     native: string | null = null,
+    expectedLastSeq?: number,
   ): Promise<StoredTraceEvent> {
-    const stored = await this.appendBatch([{ correlation, input, native }]);
+    const stored = await this.appendBatch([{ correlation, input, native }], expectedLastSeq);
     return stored[0] ?? fail("invalid batch result");
   }
-  async appendBatch(entries: readonly TraceBatchAppend[]): Promise<StoredTraceEvent[]> {
+
+  bindRequestedEventAuthority(validate: (input: TraceRequestedEventAppendV1) => void): void {
+    if (this.requestedEventAuthority && this.requestedEventAuthority !== validate)
+      throw new Error("trace requested event authority is already bound");
+    this.requestedEventAuthority = validate;
+  }
+
+  async appendRequestedEvent(
+    correlation: TraceCorrelation,
+    input: TraceAppendInput,
+    requestedEventId: string,
+    native: string | null = null,
+    expectedLastSeq?: number,
+  ): Promise<StoredTraceEvent> {
+    const validate = this.requestedEventAuthority;
+    if (!validate) throw new Error("trace requested event authority is absent");
+    validate({ correlation, input, native, requested_event_id: requestedEventId });
+    const stored = await this.appendBatchInternal(
+      [{ correlation, input, native }],
+      expectedLastSeq,
+      [requestedEventId],
+    );
+    return stored[0] ?? fail("invalid requested event result");
+  }
+
+  async appendBatch(
+    entries: readonly TraceBatchAppend[],
+    expectedLastSeq?: number,
+  ): Promise<StoredTraceEvent[]> {
+    return this.appendBatchInternal(entries, expectedLastSeq);
+  }
+
+  private async appendBatchInternal(
+    entries: readonly TraceBatchAppend[],
+    expectedLastSeq?: number,
+    requestedEventIds?: readonly string[],
+  ): Promise<StoredTraceEvent[]> {
     if (!entries.length || entries.length > 64) fail("invalid batch");
-    let captured: Array<Required<TraceBatchAppend> & { bytes: string }>;
+    if (requestedEventIds && requestedEventIds.length !== entries.length) fail("invalid batch");
+    let captured: CapturedTraceAppendV1[];
     try {
       if (
         entries.some(
@@ -280,7 +306,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
       )
         return fail("invalid input");
       captured = entries.map(({ correlation, input, native = null }) => {
-        const bytes = inputBytes(input);
+        const bytes = traceInputBytes(input);
         return {
           correlation: JSON.parse(JSON.stringify(correlation)),
           input: JSON.parse(bytes),
@@ -305,49 +331,19 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
     return this.withLockedJournal(conversationId, (fd) => {
       const refresh = refreshJournal(fd, true, conversationId, this.cursors.get(conversationId));
       const cursor = refresh.cursor;
+      if (expectedLastSeq !== undefined && cursor.records.length !== expectedLastSeq)
+        throw new TraceHeadConflictError("trace journal head changed");
       this.cursors.set(conversationId, cursor);
       this.syncRegistry(conversationId, refresh);
-      const pending = new Map<string, InternalTraceStoreRecord>();
-      const generatedIds = new Set<string>();
-      const output: StoredTraceEvent[] = [];
-      for (const item of captured) {
-        const old =
-          cursor.idempotency.get(item.input.idempotency_key) ??
-          pending.get(item.input.idempotency_key);
-        if (old) {
-          if (
-            inputBytes({
-              idempotency_key: old.stored_event.idempotency_key,
-              event: old.stored_event.event,
-            }) !== item.bytes
-          )
-            throw new TraceIdempotencyConflictError("idempotency key conflict");
-          output.push(clone(old.stored_event));
-          continue;
-        }
-        const event_id = this.options.eventId?.() ?? randomUUID();
-        const ts = this.options.now?.() ?? new Date().toISOString();
-        if (
-          !validGenerated(event_id, ts) ||
-          cursor.eventIds.has(event_id) ||
-          generatedIds.has(event_id)
-        )
-          fail("invalid generated value");
-        generatedIds.add(event_id);
-        const stored_event = {
-          ...item.correlation,
-          event_id,
-          seq: cursor.records.length + pending.size + 1,
-          ts,
-          idempotency_key: item.input.idempotency_key,
-          event: item.input.event,
-        };
-        const record = { stored_event, native_session_id: item.native };
-        pending.set(item.input.idempotency_key, record);
-        output.push(stored_event);
-      }
-      if (!pending.size) return output;
-      const records = [...pending.values()];
+      const { output, records } = planTraceAppend({
+        captured,
+        durable: cursor.records,
+        idempotency: cursor.idempotency,
+        ...(requestedEventIds ? { requestedEventIds } : {}),
+        ...(this.options.eventId ? { eventId: this.options.eventId } : {}),
+        ...(this.options.now ? { now: this.options.now } : {}),
+      });
+      if (!records.length) return output;
       assertCanonicalLifecycleAppend(cursor.records, records);
       if (records.length > 1) {
         const batchId = records[0]?.stored_event.event_id as string;
@@ -371,7 +367,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStore = class 
       const prepared = registry?.prepare?.(records);
       try {
         writeFully(fd, batch, cursor.size);
-        fs.fsyncSync(fd);
+        fsyncSync(fd);
       } catch (error) {
         prepared?.rollback();
         throw error;

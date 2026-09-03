@@ -1,7 +1,13 @@
 import { join } from "node:path";
 import { appendFileSafe, writeFileSafe } from "../core.js";
+import {
+  KNOWLEDGE_HEAVY_SOURCE,
+  WORK_UNIT_RISK_CLASS,
+  WORK_UNIT_STATUS,
+} from "../core/workflow-contract.js";
 import { applyGuidance } from "../dispatch/guidance.js";
 import { readDispatchResumeBinding } from "../dispatch/public-redaction.js";
+import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import type { EngineProcessSpawner } from "../dispatch/session-types.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
@@ -65,7 +71,7 @@ export { makeReviewer } from "./dispatch-reviewer.js";
 export function makeResearcher(
   engine: Engine,
   ctx: ProjectContext,
-  mode: "cli" | "bridge" | "dry",
+  mode: DispatchMode,
   processSpawner?: EngineProcessSpawner,
   base?: string,
   sessionRuntime?: Pick<
@@ -133,10 +139,14 @@ export function computeKnowledgeHeavySource(
   unitText: string,
 ): WorkUnit["knowledge_heavy_source"] {
   const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
-  const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
+  const knowledgeHeavy =
+    riskClass === WORK_UNIT_RISK_CLASS.FEATURE ||
+    riskClass === WORK_UNIT_RISK_CLASS.ARCHITECTURE ||
+    looksUiUx;
   if (!knowledgeHeavy) return undefined;
-  if (riskClass === "feature" || riskClass === "architecture") return "risk";
-  if (looksUiUx) return "regex";
+  if (riskClass === WORK_UNIT_RISK_CLASS.FEATURE || riskClass === WORK_UNIT_RISK_CLASS.ARCHITECTURE)
+    return KNOWLEDGE_HEAVY_SOURCE.RISK;
+  if (looksUiUx) return KNOWLEDGE_HEAVY_SOURCE.REGEX;
   return undefined;
 }
 
@@ -147,7 +157,7 @@ export function makeDispatcher(
   engine: Engine,
   ctx: ProjectContext,
   base: string,
-  mode: "cli" | "bridge" | "dry",
+  mode: DispatchMode,
   riskClass: RiskClass,
   processSpawner?: EngineProcessSpawner,
   prot?: ProtectionRuntime,
@@ -177,7 +187,10 @@ export function makeDispatcher(
     const { skillNames, alwaysNames, matchedNames, skillsRequired } =
       materializeDiscoveredDispatchSkills(unitText, { repoRoot: base });
     const looksUiUx = /\b(ui|ux|screen|layout|design|component|theme|accessib)/i.test(unitText);
-    const knowledgeHeavy = riskClass === "feature" || riskClass === "architecture" || looksUiUx;
+    const knowledgeHeavy =
+      riskClass === WORK_UNIT_RISK_CLASS.FEATURE ||
+      riskClass === WORK_UNIT_RISK_CLASS.ARCHITECTURE ||
+      looksUiUx;
     const skillGap = knowledgeHeavy && matchedNames.length === 0;
     // The full mixed-trust list actually injected into the prompt vs the VERIFIED-only subset
     // that a downstream skills-first gate is allowed to count as satisfying the requirement.
@@ -209,7 +222,7 @@ export function makeDispatcher(
       // A dry run is a READ-ONLY preview (see :309): it must still READ + PREPEND the
       // queued guidance so CONTEXT.md shows it, but MUST NOT consume (delete) the file —
       // else the next REAL run loses its steering. No-op clearGuidance in dry mode.
-      { base, ...(mode === "dry" ? { clearGuidance: () => {} } : {}) },
+      { base, ...(mode === DISPATCH_MODE.DRY ? { clearGuidance: () => {} } : {}) },
     );
     writeFileSafe(join(unitDir, "CONTEXT.md"), prompt);
     const evidence: string[] = [];
@@ -230,7 +243,7 @@ export function makeDispatcher(
     // contaminate one shared working tree. The worktree is removed in the
     // finally block below, even if dispatch or investigation throws.
     let wtPath: string | undefined;
-    if (isolate && mode === "cli") {
+    if (isolate && mode === DISPATCH_MODE.CLI) {
       const wt = isolate.wt ?? defaultWorktreeOps;
       const unitBranch = `vf-unit-${u.name}`;
       wtPath = wt.create(unitBranch, isolate.base);
@@ -278,7 +291,7 @@ export function makeDispatcher(
       // A dry run is a READ-ONLY preview: the CONTEXT.md prompt above is its ONE intended
       // side-effect. It must never write result JSON nor append to the persisted evidence
       // ledger, so the dispatch outcome is reported in-memory only.
-      if (mode !== "dry") {
+      if (mode !== DISPATCH_MODE.DRY) {
         evidence.push(`${unitRel}/${persistDispatch(unitDir, result)}`);
         const resumeBinding = readDispatchResumeBinding(result);
         if (resumeBinding) {
@@ -291,12 +304,14 @@ export function makeDispatcher(
       }
       let confidence = result.summary?.confidence ?? 0;
       const status: WorkUnit["status"] =
-        mode === "dry" ? "verifying" : result.ok ? "verifying" : "blocked";
+        mode === DISPATCH_MODE.DRY || result.ok
+          ? WORK_UNIT_STATUS.VERIFYING
+          : WORK_UNIT_STATUS.BLOCKED;
 
       const threshold = thresholdFor(riskClass);
 
       // confidence<threshold on a real run → investigate before blocking (never silently close).
-      if (mode !== "dry" && confidence < threshold) {
+      if (mode !== DISPATCH_MODE.DRY && confidence < threshold) {
         out(
           "vf",
           c.dim(
@@ -328,9 +343,10 @@ export function makeDispatcher(
         );
       }
       // A failed real dispatch: surface the recovery hint and (optionally) roll back.
-      if (mode === "cli" && status === "blocked" && prot) handleUnitFailure(prot, base);
+      if (mode === DISPATCH_MODE.CLI && status === WORK_UNIT_STATUS.BLOCKED && prot)
+        handleUnitFailure(prot, base);
       const measured =
-        gate && mode === "cli" && u.scope?.length
+        gate && mode === DISPATCH_MODE.CLI && u.scope?.length
           ? gate({ scope: u.scope, cwd: wtPath ?? base })
           : undefined;
       const gates = mapGateResult(measured);

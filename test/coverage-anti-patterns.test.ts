@@ -78,11 +78,14 @@ describe("coverage anti-patterns (src/ only)", () => {
 });
 
 describe("coverage anti-patterns (test/ only)", () => {
-  const testFiles = walk("test", [], true)
-    .filter((p) => p.endsWith(".test.ts"))
+  const allTestTypescript = walk("test", [], true).filter((p) => p.endsWith(".ts"));
+  const spawnCheckedFiles = allTestTypescript
     // The anti-pattern test itself contains the strings it's looking for;
     // skip it so the linter-style assertions don't trip on their own source.
     .filter((p) => !p.endsWith("coverage-anti-patterns.test.ts"))
+    // Real abrupt-exit durability fixtures are centralized here. The helper
+    // enforces direct argv, shell:false, a bounded timeout, and exact outcomes.
+    .filter((p) => !p.replace(/\\/g, "/").endsWith("test/helpers/abrupt-process.ts"))
     // Terminal prompt tests intentionally spawn a subprocess to exercise
     // real stdin/stdout behavior across the process boundary.
     .filter((p) => !p.endsWith("terminal-prompts.test.ts"))
@@ -112,10 +115,14 @@ describe("coverage anti-patterns (test/ only)", () => {
     // The Superpowers cache-identity regression needs a real nested Git repo:
     // a fake spawner cannot prove `rev-parse --show-toplevel` rejects a child
     // directory that merely inherits its parent's HEAD.
-    .filter((p) => !p.endsWith("superpowers-sync-765.test.ts"));
+    .filter((p) => !p.endsWith("superpowers-sync-765.test.ts"))
+    // This CI-only win32 smoke deliberately crosses a real owner-process boundary:
+    // only an exited OS process can prove the persisted PID becomes an orphan and
+    // that Windows Job Object recovery reaps the exact live tree.
+    .filter((p) => !p.endsWith("dispatch-owned-process-windows-live.test.ts"));
 
   test("no test uses raw Bun.spawn or spawnSync without fakeSpawner", () => {
-    for (const f of testFiles) {
+    for (const f of spawnCheckedFiles) {
       const content = readFileSync(f, "utf8");
       // Tests should use makeFakeSpawner or inject.spawner, not
       // call the real subprocess API.
@@ -133,6 +140,6 @@ describe("coverage anti-patterns (test/ only)", () => {
   });
 
   test("no test file is empty", () => {
-    expect(testFiles.length).toBeGreaterThan(40);
+    expect(allTestTypescript.length).toBeGreaterThan(40);
   });
 });

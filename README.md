@@ -1,8 +1,8 @@
 # VibeFlow
 
 <p align="center">
-  <strong>The local-first orchestrator for AI coding agents.</strong><br>
-  Drive Claude Code, Codex, GitHub Copilot CLI, OpenCode & Antigravity CLI with a confidence gate, source protection, and verified completion.
+  <strong>The local-first harness connecting AI coding CLIs.</strong><br>
+  Coordinate Claude Code, Codex, GitHub Copilot CLI, OpenCode & Antigravity CLI with a confidence gate, source protection, and verified completion.
 </p>
 
 <p align="center">
@@ -23,9 +23,11 @@
 
 ## Purpose
 
-VibeFlow is a local-first npm CLI tool that opens a visual web UI and helps users run AI-assisted software development workflows using Claude Code, Codex CLI, and GitHub Copilot CLI out-of-the-box.
+VibeFlow is a local-first npm CLI tool that opens AI-first Home and helps users coordinate existing AI coding CLIs — Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI — instead of replacing them.
 
-The tool acts as the main orchestrator. It collects task context, reads project sources, selects skills, generates tool-specific instruction files, dispatches AI coding engines, verifies results, and continuously improves local skills based on lessons learned.
+It collects task context, reads project sources, selects skills, generates tool-specific instruction files, dispatches the canonical owned async route to the selected CLI, verifies results, and keeps the conversation and review surfaces inside VibeFlow.
+
+When a route needs more than one participant, typed add-participant actions promote a direct route into coordinate through proposal, review, and commit, and removing the last executor collapses it back to direct. The coordinator is the sole authority for the route; the executor is a different admitted engine that only carries out the committed work. Executor clarifications route back to the coordinator first, which resolves them by task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort. Exact native session resume stays engine-local; when exact proof is unavailable or supported native reconciliation detects compaction, VibeFlow revokes exact authority and falls back to bounded replay. Bare coordinate routes currently admit Claude and Codex because both can enforce the resolved role sandbox and return authenticated structured coordination output. Copilot, OpenCode, and Antigravity remain available on workflow transports and fail closed for coordinate authority until their adapters can prove the same contract.
 
 On a fresh clone, arm the guardrail before any human edit:
 
@@ -33,7 +35,7 @@ On a fresh clone, arm the guardrail before any human edit:
 ./scripts/guardrail-on.sh
 ```
 
-See issue #162 (orchestrator-first / F1) for the full rationale.
+See issue #162 for the original rationale.
 
 ## Recommended name and command
 
@@ -54,6 +56,42 @@ vf
 
 `vf` is the short command for day-to-day use.
 
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `vf` / `vf ui` | Open AI-first Home on stable port `7799` (`--port 0` chooses a free port) |
+| `vf doctor` | Check required and optional tools; `--probe` runs a live round-trip |
+| `vf init` | Scan the repo and generate canonical context + engine files |
+| `vf run <engine>` | Dispatch one engine: `claude`, `codex`, `copilot`, `opencode`, or `antigravity` |
+| `vf ask` | Inline file-range Q&A backed by the durable conversation runtime |
+| `vf chat` | Canonical persisted conversation entry |
+| `vf brainstorm` | Compatibility facade over the shared debate policy |
+| `vf orchestrate` | Plan and dispatch work units in parallel |
+| `vf review evidence\|check` | Create or validate local commit-anchored evidence |
+| `vf demo` | Run a fixed corpus through dry-run orchestration |
+| `vf workflow [sub]` | Manage workflow files and imported worktrees |
+| `vf canary [sub]` | List, link, or check human-authored canary tests |
+| `vf units [sub]` | Inspect and manage work-unit state |
+| `vf status` | Open the crash-recovery view for per-unit markers |
+| `vf config [sub]` | Read or toggle per-repo settings |
+| `vf capability [sub]` | Search, inspect, and mutate the typed capability fabric |
+| `vf authority [sub]` | Control capability-fabric authority and trust |
+| `vf skills [sub]` | Resolve, validate, sync, and curate skills |
+| `vf superpowers sync` | Install exact registry-locked Superpowers into supported CLIs |
+| `vf tools [sub]` | Inspect or install optional code-navigation tools |
+| `vf discover <kind>` | Run approval-gated Context7 docs or skill discovery |
+| `vf hook` | Evaluate a JSON hook event from stdin |
+| `vf hooks [sub]` | Inspect, install, or emit engine hook configs |
+| `vf pr [sub]` | Create, queue, or merge GitHub PRs |
+| `vf decision [sub]` | Record durable architecture decisions |
+| `vf state [sub]` | Read the coordinator brief |
+| `vf coord` | Consult the brief and enforce freshness before non-trivial actions |
+| `vf verify` | Run typecheck, lint, test, and confidence/evidence/scope gates |
+| `vf eval` | Report success rate and gate breakdown from telemetry |
+| `vf update-check` | Check npm for a newer VibeFlow release |
+| `vf help` / `vf --version` | Show help or version |
+
 ## Install and use
 
 ```bash
@@ -62,11 +100,12 @@ npm install -g @magicpro97/vibeflow # or install globally, then use `vf`
 ```
 
 ```bash
-vf                # open the local web UI — intake wizard + live dashboard
+vf                # open AI-first Home on 127.0.0.1:7799
+vf ui --port 0    # same Home on an OS-selected free port
 vf doctor         # check required and optional tools (--probe for a live engine round-trip)
 vf init           # scan repo + generate canonical context + engine files (--engine, --no-ask, --dry-run)
 vf run claude     # dispatch one engine: claude | codex | copilot | opencode | antigravity (--yes to launch)
-vf ask src/x.ts:10-20 "what does this do?"   # file-range Q&A (--engine, native --resume, --conversation)
+vf ask src/x.ts:10-20 "what does this do?"   # file-range Q&A (--engine, --conversation, compatibility-only --resume)
 vf chat "explain the release flow"           # persisted traced conversation (--policy, --participant, --json)
 vf brainstorm "compare API designs"          # debate preview; add --yes to dispatch (--resume, --no-baseline)
 vf orchestrate    # plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency)
@@ -81,17 +120,25 @@ vf pr merge-when-green   # poll CI and merge on green (queue + auto-merge)
 vf state brief    # durable cross-session coordinator brief
 ```
 
-The web UI is where you **initialize a workflow**: fill in goal, engines, doc/task sources,
-file types, and expected result, then **Generate workflow** (writes the canonical context +
-engine files) and **Write dispatch prompt** for the chosen engine. Prefer the terminal? Use
-`vf init --interactive` for the same questions, or `vf init` for a non-interactive scaffold.
+AI-first Home is the default workspace: a searchable conversation rail, a central conversation
+pane, ordered trace replay, details inspection, and drawers for capabilities and trace.
+Run `vf init` in a TTY for the repository intake questionnaire (`--no-ask` skips it).
+`vf` and `vf ui` both open Home on port `7799`; pass `--port 0` only when you want an
+OS-selected free port. If a requested fixed port is busy, the interactive CLI offers a
+free-port fallback and a non-interactive launch stops.
 
-The top-bar conversation workspace uses the same runtime as `vf chat` and `vf brainstorm`:
-create or resume a conversation, follow ordered trace replay and live deltas, resolve
-approvals, control operations, inspect decision matrices, and preview opaque artifacts.
-Public result ids stay distinct from the opaque fetch references carried by artifact trace events.
+Home uses the same durable runtime as `vf ask`, `vf chat`, and `vf brainstorm`. Add or remove an agent from the composer or participant details, send while agents are working, edit the latest queued human message with ArrowUp, quote one or more visible messages, and use restrained typed reactions. Typed add-participant actions promote a direct route into coordinate through proposal, review, and commit, and removing the last executor collapses it back to direct. Approval and capability actions stay inline with the chat. Only a transport-ambiguous request, or a typed admission error with `retryable: true` and `recovery_action: retry`, becomes an explicit retryable row. Typed failure retries are user-triggered and reuse the exact request and idempotency key. If the browser goes offline during an in-flight admission, Home retains that exact request as **Reconciling**; after an authoritative refresh it automatically replays the same idempotency key to learn whether the server already won. A non-retryable failure that collides with newer composer state retains its exact payload as **Needs action** for typed recovery or confirmed dismissal; it never auto-resends or overwrites the newer draft. Rejected rows are current Home UI state, not `localStorage` or a promise that they survive a browser restart.
+Public result ids remain distinct from the opaque fetch references carried by artifact
+trace events.
 See the [conversation guide](./docs/USER_GUIDE.md#conversation-workspace) and
 [exact CLI/API contract](./docs/COMMAND_REFERENCE.md#conversations).
+
+Exact by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode uses `opencode run --session <validated-ses-id> --format json`; Copilot and Antigravity never silently claim exact resume. With valid exact proof, the CLI keeps its own history and VibeFlow sends only new applicable user messages and peer-agent deltas, without echoing the recipient's prior output. When supported native reconciliation detects compacted context or exact proof is unavailable, turn delivery falls back to canonical user/peer context plus a bounded structured replay of the recipient's last eight public responses (at most 2 KiB UTF-8 each) with provenance, digest, and count fields. Own history is therefore never silently omitted. Private file ranges use a separate one-shot structured payload and never become public trace data. A large Copilot prompt may use a short pointer to `.vibeflow/dispatch/<unit>.md`; that file is transport, not memory.
+
+VibeFlow remains the harness, not another coding engine. Its dynamic capability fabric
+extends the selected CLI with reviewed skills, MCP servers, tools, hooks, roles, and engine
+settings, then keeps install, configure, retarget, update, repair, rollback, and removal on
+one typed authority path.
 
 ## Using VibeFlow as a skill
 
@@ -114,15 +161,30 @@ full reference.
 
 ## Develop
 
-Built with **Bun** + **TypeScript**, one runtime dependency (`proper-lockfile` for file locking; otherwise Node stdlib only, so the
-published CLI runs anywhere `node` does). The web UI applies the `taste-skill` design read
+Contributor setup and commit policy live in [CONTRIBUTING.md](./CONTRIBUTING.md); the full
+source standard is [Bun and TypeScript Coding Conventions](./docs/CODING_CONVENTIONS.md).
+
+Built with **Bun 1.4** + **TypeScript** and two runtime dependencies: `proper-lockfile` for
+file locking and `koffi` for native process identity and containment boundaries. The
+published CLI otherwise uses Node-compatible APIs. The web UI applies the `taste-skill` design read
 with a small inline motion layer (no third-party CDN script, since the page is same-origin
 with the write API).
+
+Closed persisted/API/config vocabularies follow one coding standard: declare a dependency-light
+`Object.freeze({ ... } as const)` authority, infer the TypeScript union and frozen values from
+it, validate external data with prototype-safe guards, and import that authority in backend and
+UI consumers. Do not introduce TypeScript `enum`, duplicate wire literals, mutable vocabulary
+sets, or blind casts. Ordinary prose and genuinely local one-off strings are not protocol
+vocabulary.
+
+Live Windows evidence is accepted only from a green exact-SHA `windows-latest` job; a local
+macOS/Linux run is not that evidence. Coverage likewise comes only from a fresh
+`bun run coverage:check` result, not from the Bun version or an ordinary test pass.
 
 ```bash
 bun install       # install dev tooling and set up git hooks (core.hooksPath)
 bun run dev       # run the CLI from source (src/cli.ts)
-bun run check     # typecheck + lint + test
+bun run check     # typecheck + lint + file-size + waiver + test + coverage
 bun run build     # bundle to dist/cli.js (Node-compatible, with shebang)
 ```
 
@@ -130,12 +192,12 @@ A `v*` git tag triggers the npm publish workflow (requires the `NPM_TOKEN` secre
 
 ## Core idea
 
-The system should not let an AI coding engine operate blindly. Instead, it should build a structured workflow:
+The system should not let an AI coding engine operate blindly. Instead, it should build a structured coordination flow:
 
 ```text
 User prompt
   ↓
-Main Orchestrator Agent
+VibeFlow Coordinator
   ↓
 Questionnaire / Context Intake
   ↓
@@ -157,7 +219,7 @@ Skill evolution proposal
 ## Main goals
 
 - Provide one npm command to start a local web UI.
-- Support Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI.
+- Open AI-first Home and support Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI without replacing them.
 - Generate `CLAUDE.md`, `AGENTS.md`, and Copilot instruction files automatically.
 - Use Anthropic-style Skills based on `SKILL.md`.
 - Manage a skill registry (git-backed, pinned) plus a curator that turns findings into reviewable proposals.
@@ -165,6 +227,7 @@ Skill evolution proposal
 - Read project documents from sources such as GitHub, Jira, Google Drive, Confluence, Notion, local folders, and others.
 - Process files such as Markdown, DOCX, XLSX, PPTX, PDF, OpenAPI, Postman, Mermaid, and Draw.io.
 - Use hooks as guardrails across all supported engines.
+- Keep coordinator/executor routes bounded: only fresh user and peer-agent context enters the turn, clarifications route to the coordinator first, and clarification/recovery stays in the linked worktree that produced it.
 - Avoid hallucination through evidence, verification, confidence thresholds, and reviewer agents.
 - Generate the fewest files possible, all produced by AI from canonical context rather than static templates.
 - Continuously improve internal skills from real execution lessons.

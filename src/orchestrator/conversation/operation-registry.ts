@@ -1,5 +1,13 @@
 import { ConversationAuthorityClosedError } from "./lifecycle-gate.js";
 import { reserveOperationCancellation } from "./operation-cancellation-reservation.js";
+import {
+  type OperationOwnerState,
+  brokeredOperation,
+  operationBrokerKey,
+  readOperationOwnerState,
+  registerBrokeredOperation,
+  releaseBrokeredOperation,
+} from "./operation-owner-broker.js";
 import type {
   CancelReservation,
   OperationEntry,
@@ -9,6 +17,7 @@ import type {
   SettledLifecycle,
   TransitionLifecycle,
 } from "./operation-registry-types.js";
+import { archiveLocalOperation } from "./operation-tombstone-state.js";
 import { registeredOperation } from "./registered-operation.js";
 export type {
   CancelReservation,
@@ -16,8 +25,7 @@ export type {
   RegisteredOperation,
 } from "./operation-registry-types.js";
 export class OperationTransitionReservedError extends ConversationAuthorityClosedError {}
-
-const broker = new Map<string, OperationEntry>();
+export type { OperationOwnerState } from "./operation-owner-broker.js";
 
 /** Runtime-owned controller/attempt registry. Cancellation is two-phase so journaling wins. */
 export const OperationRegistry = class OperationRegistry {
@@ -52,23 +60,13 @@ export const OperationRegistry = class OperationRegistry {
   }
 
   private archive(entry: OperationEntry, state: OperationTombstone["state"]): void {
-    if (entry.brokerKey && broker.get(entry.brokerKey) === entry) broker.delete(entry.brokerKey);
+    releaseBrokeredOperation(entry);
     for (const member of entry.members) member.archiveLocal(entry, state);
     entry.members.clear();
   }
 
   private archiveLocal(entry: OperationEntry, state: OperationTombstone["state"]): void {
-    if (this.operations.get(entry.operationId) !== entry) return;
-    this.operations.delete(entry.operationId);
-    this.tombstones.set(entry.operationId, {
-      conversationId: entry.conversationId,
-      state,
-    });
-    while (this.tombstones.size > this.tombstoneLimit) {
-      const oldest = this.tombstones.keys().next();
-      if (oldest.done) break;
-      this.tombstones.delete(oldest.value);
-    }
+    archiveLocalOperation(this.operations, this.tombstones, this.tombstoneLimit, entry, state);
   }
 
   private terminateEntry(
@@ -137,7 +135,7 @@ export const OperationRegistry = class OperationRegistry {
       await Promise.allSettled(attempts.map((attempt) => attempt.completion));
       await this.drain(entry);
       entry.state = "settled";
-      if (entry.brokerKey && broker.get(entry.brokerKey) === entry) broker.delete(entry.brokerKey);
+      releaseBrokeredOperation(entry);
       for (const member of entry.members) {
         if (member.operations.get(entry.operationId) === entry) {
           member.operations.delete(entry.operationId);
@@ -165,8 +163,8 @@ export const OperationRegistry = class OperationRegistry {
     if (this.operations.has(operationId) || this.tombstones.has(operationId)) {
       throw new Error("operation already exists");
     }
-    const brokerKey = this.authority ? `${this.authority.scopeKey}:${operationId}` : null;
-    const shared = brokerKey ? broker.get(brokerKey) : undefined;
+    const brokerKey = operationBrokerKey(this.authority, operationId);
+    const shared = brokeredOperation(brokerKey);
     if (shared) {
       if (shared.conversationId !== conversationId) throw new Error("operation already exists");
       if (shared.transitionReservation || (shared.cancelReserved && !allowCancelReservation)) {
@@ -192,7 +190,7 @@ export const OperationRegistry = class OperationRegistry {
       transitionReservation: null,
     };
     this.operations.set(operationId, entry);
-    if (brokerKey) broker.set(brokerKey, entry);
+    registerBrokeredOperation(brokerKey, entry);
     return this.registered(entry);
   }
 
@@ -200,6 +198,15 @@ export const OperationRegistry = class OperationRegistry {
     const entry = this.operations.get(operationId);
     if (!entry || entry.conversationId !== conversationId) return null;
     return this.registered(entry);
+  }
+
+  ownerState(conversationId: string, operationId: string): OperationOwnerState {
+    return readOperationOwnerState({
+      local: this.operations.get(operationId),
+      authority: this.authority,
+      conversationId,
+      operationId,
+    });
   }
 
   private transitionMembers(entry: OperationEntry): OperationRegistry[] {

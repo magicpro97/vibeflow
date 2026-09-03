@@ -1,3 +1,21 @@
+import { ENGINES } from "../../core/agent-contract.js";
+import {
+  CONVERSATION_APPROVAL_OUTCOMES,
+  CONVERSATION_ARTIFACT_TYPES,
+  CONVERSATION_ASSESSMENT_STAGES,
+  CONVERSATION_BASELINE_STATUSES,
+  CONVERSATION_DECISION_OUTCOMES,
+  CONVERSATION_HEALTH_VALUES,
+  CONVERSATION_LIFECYCLES,
+  CONVERSATION_OPERATION_STATES,
+  CONVERSATION_RECONCILIATION_STATUSES,
+  CONVERSATION_ROUND_PHASES,
+  CONVERSATION_SANDBOXES,
+  CONVERSATION_SKILL_SOURCES,
+  CONVERSATION_TOOL_ACTION_STATUSES,
+  CONVERSATION_TOOL_INTENTS,
+  CONVERSATION_TRACE_EVENT_KINDS,
+} from "../conversation/conversation-public-wire-contract.js";
 import { TRACE_LIMITS, utf8Bytes } from "./limits.js";
 import { isValidParticipantModel } from "./validation.js";
 
@@ -73,56 +91,29 @@ const correlationField = new Set([
   "resolved_hashes",
   "target_participants",
 ]);
-const structuralValues: Readonly<Record<string, readonly string[]>> = {
-  type: [
-    "conversation_configured",
-    "coordinator_decision",
-    "participant_bound",
-    "skill_injected",
-    "precommit",
-    "agent_response_delta",
-    "tool_action",
-    "evaluator_assessment",
-    "user_message",
-    "consensus_update",
-    "round_boundary",
-    "state_change",
-    "baseline_result",
-    "synthesis_completed",
-    "conversation_terminal",
-    "dry_run_result",
-    "error",
-    "operation_lifecycle",
-    "approval_requested",
-    "approval_resolved",
-    "caller_cancelled",
-    "artifact_created",
-    "artifact_updated",
-    "native_history_reconciled",
-  ],
-  engine: ["claude", "codex", "copilot", "opencode", "antigravity"],
-  engines_available: ["claude", "codex", "copilot", "opencode", "antigravity"],
-  tools: ["read", "write", "edit", "bash", "grep", "glob", "web"],
-  sandbox: ["read-only", "workspace-write", "danger-full-access"],
-  source: ["repo", "shared", "builtin"],
-  status: [
-    "started",
-    "completed",
-    "failed",
-    "success",
-    "skipped",
-    "reconciled",
-    "partial",
-    "unavailable",
-  ],
-  state: ["requested", "dispatched", "acknowledged", "completed", "ambiguous"],
-  stage: ["blind", "full"],
-  phase: ["start", "end"],
-  lifecycle: ["INIT", "ACTIVE", "PAUSED", "COMPLETED", "STOPPED", "FAILED", "ABORTED"],
-  health: ["healthy", "degraded"],
-  artifact_type: ["decision_matrix", "plan", "diff", "tests", "synthesis", "transcript"],
-  outcome: ["approve", "reject", "abort", "consensus", "continue", "exhausted"],
-};
+const frozenUnique = (...groups: readonly (readonly string[])[]): readonly string[] =>
+  Object.freeze([...new Set(groups.flat())]);
+
+const structuralValues: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  type: CONVERSATION_TRACE_EVENT_KINDS,
+  engine: ENGINES,
+  engines_available: ENGINES,
+  tools: CONVERSATION_TOOL_INTENTS,
+  sandbox: CONVERSATION_SANDBOXES,
+  source: CONVERSATION_SKILL_SOURCES,
+  status: frozenUnique(
+    CONVERSATION_TOOL_ACTION_STATUSES,
+    CONVERSATION_BASELINE_STATUSES,
+    CONVERSATION_RECONCILIATION_STATUSES,
+  ),
+  state: CONVERSATION_OPERATION_STATES,
+  stage: CONVERSATION_ASSESSMENT_STAGES,
+  phase: CONVERSATION_ROUND_PHASES,
+  lifecycle: CONVERSATION_LIFECYCLES,
+  health: CONVERSATION_HEALTH_VALUES,
+  artifact_type: CONVERSATION_ARTIFACT_TYPES,
+  outcome: frozenUnique(CONVERSATION_APPROVAL_OUTCOMES, CONVERSATION_DECISION_OUTCOMES),
+});
 const minEmbeddedDenyLength = 8;
 
 const normalizeControls = (value: string): string =>

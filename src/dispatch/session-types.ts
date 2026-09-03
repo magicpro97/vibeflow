@@ -1,18 +1,41 @@
 import type { RoleSandbox } from "../agents/role.js";
 import type { Engine } from "../core.js";
+import type {
+  CONVERSATION_OPERATION_STATE,
+  ConversationOperationStateV1,
+  ConversationReconciliationStatusV1,
+} from "../orchestrator/conversation/conversation-public-wire-contract.js";
 import { type EnvPolicy, isConversationEnvPolicy } from "./env-filter.js";
+import type { OwnedProcessPlatform } from "./owned-process-platform.js";
+import type { OwnedProcessController, OwnedProcessReleaseProof } from "./owned-process-runtime.js";
+import type { OwnedSupervisorExitOutcome } from "./owned-process-status.js";
+import {
+  type ENGINE_COORDINATION_WORKSPACE_ACCESS,
+  type ENGINE_SESSION_SCHEMA_VERSION,
+  type EngineAttemptStartOutcome,
+  type EngineEvidenceStatus,
+  type EngineIsolationKind,
+  type EngineNativeSessionStatus,
+  type EngineOutputStream,
+  type EngineRoleSource,
+  type EngineSessionMode,
+  type EngineSessionProtocol,
+  type NativeHistoryContinuity,
+  isEngineRoleSource,
+} from "./session-contract.js";
+import type { EngineTerminalObservation } from "./session-terminal.js";
 import type { EngineSummary } from "./types.js";
 
-export type SessionMode = "exact" | "replay" | "fresh";
+export type SessionMode = EngineSessionMode;
 
 export interface IsolationLeaseProjection {
-  kind: "worktree" | "container";
+  kind: EngineIsolationKind;
   cwd: string;
   evidence_ref: string;
 }
 
 export interface SessionProvenance {
-  roleSource: "builtin" | "repo";
+  roleSource: EngineRoleSource;
   roleHash: string;
   skillHashes: string[];
 }
@@ -71,7 +94,7 @@ export function createSpawnOptionsProjection(input: SpawnOptionsInput): SpawnOpt
   if (!isConversationEnvPolicy(input.env_policy, input.engine)) {
     throw new Error("spawn.env_policy must be canonical conversation authority");
   }
-  if (input.provenance.roleSource !== "builtin" && input.provenance.roleSource !== "repo") {
+  if (!isEngineRoleSource(input.provenance.roleSource)) {
     throw new Error("spawn provenance roleSource must be builtin or repo");
   }
   if (input.model !== null && !isSafeModelIdentifier(input.model)) {
@@ -108,15 +131,15 @@ export function isCanonicalSpawnOptionsProjection(projection: SpawnOptionsProjec
   return canonicalSpawnProjections.has(projection);
 }
 
-export type OperationLifecycleState =
-  | "requested"
-  | "dispatched"
-  | "acknowledged"
-  | "completed"
-  | "ambiguous";
+export type OperationLifecycleState = ConversationOperationStateV1;
+
+export interface AttemptProcessRelease {
+  proof: OwnedProcessReleaseProof | null;
+  terminal: EngineTerminalObservation | null;
+}
 
 export interface EngineChunk {
-  stream: "stdout" | "stderr";
+  stream: EngineOutputStream;
   /** Public-safe, newline-framed content. Incomplete control records stay buffered. */
   content: string;
 }
@@ -127,17 +150,30 @@ export interface InternalResumeBinding {
   nativeSessionId: string;
 }
 
+/**
+ * Private model-authored output released only after a native terminal record is authenticated.
+ * This binding must never be copied into public session results, evidence, traces, or DTOs.
+ */
+export interface InternalAuthenticatedModelOutputBinding {
+  attemptId: string;
+  engine: Engine;
+  nativeSessionId: string | null;
+  output: string;
+}
+
 export interface EngineSessionResult {
   attemptId: string;
   engine: Engine;
   ok: boolean;
-  state: "completed" | "ambiguous";
+  state:
+    | typeof CONVERSATION_OPERATION_STATE.COMPLETED
+    | typeof CONVERSATION_OPERATION_STATE.AMBIGUOUS;
   lifecycle: OperationLifecycleState[];
   output: string;
   summary?: EngineSummary;
   reason?: string;
-  evidenceStatus: "persisted";
-  nativeSessionStatus: "captured" | "unavailable";
+  evidenceStatus: EngineEvidenceStatus;
+  nativeSessionStatus: EngineNativeSessionStatus;
 }
 
 export interface AttemptHandle<T = EngineSessionResult> {
@@ -146,13 +182,56 @@ export interface AttemptHandle<T = EngineSessionResult> {
   terminate(reason?: string): Promise<void>;
   /** Internal-only resume channel. Public DTO/evidence must never serialize this binding. */
   readResumeBinding(): InternalResumeBinding | undefined;
+  /** Internal-only model output. Public DTO/evidence must never serialize this binding. */
+  readModelOutputBinding(): InternalAuthenticatedModelOutputBinding | undefined;
   /** Internal-only durable evidence channel. Public result never contains this path/ref. */
   readEvidenceBinding(): { attemptId: string; internalRef: string } | undefined;
+}
+
+export interface AttemptStartAuthorityRecordV1 {
+  schema_version: typeof ENGINE_SESSION_SCHEMA_VERSION;
+  attempt_id: string;
+  engine: Engine;
+  outcome: EngineAttemptStartOutcome;
+  native_session_id: string | null;
+  evidence_ref: string;
+  evidence_sha256: string;
+  process_quiescent: true;
+  recorded_at: string;
+  record_digest: string;
+}
+
+export interface EngineCoordinationWorkspaceTaskV1 {
+  task_id: string;
+  contract_digest: string;
+  scope: readonly string[];
+  forbidden: readonly string[];
+  verify_oracles: readonly string[];
+}
+
+export type EngineCoordinationWorkspaceBindingV1 =
+  | {
+      workflow_id: string;
+      workspace_key: string;
+      access: typeof ENGINE_COORDINATION_WORKSPACE_ACCESS.EXECUTOR;
+      task: EngineCoordinationWorkspaceTaskV1;
+    }
+  | {
+      workflow_id: string;
+      workspace_key: string;
+      access: typeof ENGINE_COORDINATION_WORKSPACE_ACCESS.REVIEW;
+    };
+
+/** Branded reader minted only from the concrete adapter-owned durable evidence store. */
+export interface DurableAttemptStartAuthorityReaderV1 {
+  read(attemptId: string): AttemptStartAuthorityRecordV1 | null;
 }
 
 export interface EngineSessionRequest {
   attemptId: string;
   spawn: SpawnOptionsProjection;
+  /** Internal-only durable workspace routing for coordinated executor attempts. */
+  coordinationWorkspace?: EngineCoordinationWorkspaceBindingV1;
   nativeSessionId?: string;
   signal: AbortSignal;
   /** Receives only public-safe EngineChunk values; raw process chunks remain adapter-internal. */
@@ -167,21 +246,27 @@ export interface HistoryReconcileRequest {
 }
 
 export interface HistoryReconcileResult {
-  status: "reconciled" | "partial" | "unavailable";
+  status: ConversationReconciliationStatusV1;
   imported_turn_count: number;
   imported_tool_count: number;
+  /** Optional for adapter compatibility; only an explicit compacted signal revokes exact resume. */
+  native_history_continuity?: NativeHistoryContinuity;
   completeness_reason: string;
 }
 
 export interface EngineSessionAdapter {
   start(request: EngineSessionRequest): AttemptHandle;
   reconcileHistory(request: HistoryReconcileRequest): Promise<HistoryReconcileResult>;
+  /** Absent means this adapter is ineligible for revision start/retry authority. */
+  readonly startAuthority?: DurableAttemptStartAuthorityReaderV1;
 }
 
 export interface EngineProcess {
   pid?: number;
   /** Startup I/O failed after spawn; the adapter still owns and must reap this process. */
   startupError?: Error;
+  /** Typed owned-supervisor terminal outcome, including whether stream drain was proved. */
+  rootExited?: Promise<OwnedSupervisorExitOutcome>;
   stdin?: { write(value: string | Uint8Array): unknown; end(): unknown } | null;
   stdout?: ReadableStream<Uint8Array> | null;
   stderr?: ReadableStream<Uint8Array> | null;
@@ -194,6 +279,7 @@ export interface EngineProcessSpawnOptions {
   env: NodeJS.ProcessEnv;
   stdinText: string;
   detached: boolean;
+  ownedRuntime?: OwnedProcessController;
 }
 
 export type EngineProcessSpawner = (
@@ -208,11 +294,14 @@ export interface EngineSessionAdapterOptions {
   idleTimeoutMs?: number;
   graceMs?: number;
   /** Bridge commands acknowledge at successful process exit rather than native session protocol. */
-  protocol?: "native" | "bridge";
+  protocol?: EngineSessionProtocol;
   /** The configured spawner creates a detached process group owned by this adapter. */
   ownsProcessGroup?: boolean;
   evidenceRoot?: string;
+  /** Trusted private root for bounded, lifecycle-owned Copilot argv prompt files. */
+  privatePromptFileRoot?: string;
   historyRoots?: Partial<Record<Engine, readonly string[]>>;
+  ownedProcessPlatform?: OwnedProcessPlatform;
   writeEvidence?: (
     attemptId: string,
     evidence: Readonly<Record<string, unknown>>,

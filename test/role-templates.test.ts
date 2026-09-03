@@ -11,7 +11,7 @@ import {
 } from "../src/agents/role-templates.js";
 
 describe("role-templates", () => {
-  test("preserves the 6 workflow roles and adds read-only conversation roles", () => {
+  test("preserves the 6 workflow roles and adds policy-specific conversation roles", () => {
     expect(ROLE_NAMES).toEqual([
       "cli-engine",
       "web-ui",
@@ -22,6 +22,8 @@ describe("role-templates", () => {
     ]);
     expect(CONVERSATION_ROLE_NAMES).toEqual([
       "direct",
+      "coordination-coordinator",
+      "coordination-executor",
       "brainstorm-participant",
       "brainstorm-skeptic",
       "brainstorm-domain-expert",
@@ -29,23 +31,41 @@ describe("role-templates", () => {
     ]);
     expect(ALL_ROLE_NAMES).toEqual([...ROLE_NAMES, ...CONVERSATION_ROLE_NAMES]);
     const specs = listRoleSpecs();
-    expect(specs).toHaveLength(11);
+    expect(specs).toHaveLength(13);
     for (const name of ALL_ROLE_NAMES) {
       expect(specs.find((s) => s.name === name)).toBeDefined();
     }
   });
 
-  test("conversation roles are built-in read-only without mutating workflow roles", () => {
+  test("coordination executor is the only writable conversation role", () => {
     for (const name of CONVERSATION_ROLE_NAMES) {
       const spec = getRoleSpec(name);
-      expect(spec?.sandbox).toBe("read-only");
-      expect(spec?.tools).not.toContain("write");
-      expect(spec?.tools).not.toContain("edit");
-      expect(spec?.tools).not.toContain("bash");
+      if (name === "coordination-executor") {
+        expect(spec?.sandbox).toBe("workspace-write");
+        expect(spec?.tools).toContain("write");
+        expect(spec?.tools).toContain("edit");
+        expect(spec?.tools).toContain("bash");
+      } else {
+        expect(spec?.sandbox).toBe("read-only");
+        expect(spec?.tools).not.toContain("write");
+        expect(spec?.tools).not.toContain("edit");
+        expect(spec?.tools).not.toContain("bash");
+      }
     }
     for (const name of ROLE_NAMES) {
       expect(getRoleSpec(name)?.sandbox).toBe("workspace-write");
     }
+  });
+
+  test("coordination roles encode coordinator-first clarification and scoped execution", () => {
+    const coordinator = getRoleSpec("coordination-coordinator");
+    const executor = getRoleSpec("coordination-executor");
+    expect(coordinator?.body).toContain("Ask the user only");
+    expect(coordinator?.body).toContain("safe reversible default");
+    expect(coordinator?.body).toContain("host-verified detached HEAD");
+    expect(executor?.body).toContain("Ask the coordinator");
+    expect(executor?.body).toContain("assigned worktree");
+    expect(executor?.body).toContain("leave the worktree clean");
   });
 
   test("every spec has a kebab-case name, non-empty description, body > 50 chars, and tools", () => {

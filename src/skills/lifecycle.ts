@@ -1,6 +1,7 @@
 // #660: lifecycle parse helpers + renderSkillDetail
 import type { Skill } from "../core.js";
 import { c } from "../core.js";
+import { SKILL_STATUS } from "../core/skill-contract.js";
 import { out } from "../logbus.js";
 
 export function parseLifecycleOwners(data: Record<string, unknown>): string[] | undefined {
@@ -52,7 +53,7 @@ export function renderSkillDetail(s: Skill): string {
   if (s.extends?.length) add("extends:", s.extends.join(", "));
   if (s.owns?.length) add("owns:", s.owns.join(", "));
   if (s.dependsOn?.length) add("dependsOn:", s.dependsOn.join(", "));
-  if (s.status === "deprecated") {
+  if (s.status === SKILL_STATUS.DEPRECATED) {
     L.push("", `  ⚠ DEPRECATED${s.supersedes ? ` — replaced by \`${s.supersedes}\`` : ""}`);
   }
   return `${L.join("\n")}\n`;

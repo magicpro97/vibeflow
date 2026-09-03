@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { WORK_UNIT_STATUS } from "../../core/workflow-contract.js";
 import { api } from "./api.js";
-import type { AskPrefill } from "./lib/ask-prefill.js";
 import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
 import { resolveRepoPath } from "./lib/resolve-repo-path.js";
 import { createReleaseProposalState } from "./store-release.js";
@@ -27,7 +27,12 @@ export function stageReachable(n: 1 | 2 | 3 | 4, state: WorkflowState | null): b
   if (n === 4) {
     const units = state?.work_units ?? [];
     // Allow verify even if all units blocked — user shouldn't be stuck forever
-    return units.length > 0 && units.every((u) => u.status === "done" || u.status === "blocked");
+    return (
+      units.length > 0 &&
+      units.every(
+        (u) => u.status === WORK_UNIT_STATUS.DONE || u.status === WORK_UNIT_STATUS.BLOCKED,
+      )
+    );
   }
   return false;
 }
@@ -54,8 +59,6 @@ export const useVfStore = defineStore("vf", () => {
   const domains = ref<DomainRootView[]>([]);
   const domainsLoading = ref(false);
   const domainsError = ref<string | null>(null);
-  const askOpen = ref(false);
-  const askPrefill = ref<AskPrefill | null>(null);
   const selectedWorkflowKey = ref<string | null>(null);
   const selectedUnit = ref<string | null>(null);
   const dashboardWorkflows = ref<WorkflowDashboardItem[]>([]);
@@ -184,15 +187,6 @@ export const useVfStore = defineStore("vf", () => {
     await loadRevisions();
   }
 
-  function openAsk(prefill: AskPrefill | null = null) {
-    askPrefill.value = prefill;
-    askOpen.value = true;
-  }
-  function closeAsk() {
-    askOpen.value = false;
-    askPrefill.value = null;
-  }
-
   async function loadSkills() {
     skillLoading.value = true;
     skillError.value = null;
@@ -304,7 +298,9 @@ export const useVfStore = defineStore("vf", () => {
         skills.value = [];
         skillError.value = null;
         state.value = s;
-        const pending = s.work_units.some((u) => u.status !== "done" && u.status !== "blocked");
+        const pending = s.work_units.some(
+          (u) => u.status !== WORK_UNIT_STATUS.DONE && u.status !== WORK_UNIT_STATUS.BLOCKED,
+        );
         setStage(pending ? 3 : 2);
       } else {
         reuseGoal.value = s.goal;
@@ -343,10 +339,6 @@ export const useVfStore = defineStore("vf", () => {
     version,
     projects,
     reuseGoal,
-    askOpen,
-    askPrefill,
-    openAsk,
-    closeAsk,
     loadState,
     loadSettings,
     loadProjects,

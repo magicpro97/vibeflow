@@ -7,8 +7,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { c, writeFileSafe } from "../core.js";
+import { SKILL_STATUS, SKILL_TYPE } from "../core/skill-contract.js";
 import { ENGINES, type Engine, type Skill } from "../core/types.js";
-import { type Spawner, runDispatch } from "../dispatch.js";
+import { type AsyncSpawner, runDispatchAsync } from "../dispatch.js";
+import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { out } from "../logbus.js";
 import {
@@ -41,10 +43,10 @@ function loadSingleSkill(skillDir: string): { skill: Skill; text: string } {
       name,
       description,
       version: typeof data.version === "string" ? data.version : undefined,
-      status: "unverified",
+      status: SKILL_STATUS.UNVERIFIED,
       capabilities: asStrArr(data.capabilities),
       triggers: asStrArr(data.triggers),
-      type: data.type === "repo" ? "repo" : undefined,
+      type: data.type === SKILL_TYPE.REPO ? SKILL_TYPE.REPO : undefined,
       dir: skillDir,
       path: skillMd,
     } as Skill,
@@ -141,11 +143,14 @@ function formatSummary(result: EvalResult): string {
 // Signature matches skills.ts pattern: (repo, rest) → number
 // where rest includes the skill dir and optional flags.
 
-export function skillsEvalCmd(
+export async function skillsEvalCmd(
   _repo: string,
   rest: string[] = [],
-  inject: { runner?: (prompt: string, skillContext?: string) => string; spawner?: Spawner } = {},
-): number {
+  inject: {
+    runner?: (prompt: string, skillContext?: string) => string | Promise<string>;
+    spawner?: AsyncSpawner;
+  } = {},
+): Promise<number> {
   let jsonFlag = false;
   let outFile = "";
   let previousFile = "";
@@ -239,20 +244,21 @@ export function skillsEvalCmd(
     );
     const runner =
       inject.runner ??
-      ((prompt: string, skillContext?: string) => {
+      (async (prompt: string, skillContext?: string) => {
         const fullPrompt = skillContext
           ? `${prompt}\n\nFollow this skill for the task:\n${skillContext}`
           : prompt;
-        const dispatched = runDispatch({
+        const dispatched = await runDispatchAsync({
           engine,
           prompt: fullPrompt,
-          mode: "cli",
+          mode: DISPATCH_MODE.CLI,
           spawner: inject.spawner,
+          base: _repo,
         });
         if (!dispatched.ok) throw new Error(dispatched.reason ?? `${engine} eval failed`);
         return engineText(dispatched.raw);
       });
-    result.task = runTaskEval(evalsFile, text, runner, previous?.taskPassRate);
+    result.task = await runTaskEval(evalsFile, text, runner, previous?.taskPassRate);
     if (previous) result.previousSummary = previous;
 
     if (jsonFlag) {

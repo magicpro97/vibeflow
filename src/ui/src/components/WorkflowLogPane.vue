@@ -37,6 +37,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { logChannelClass, logChannelLabel, logLevelClass } from "../lib/log-presentation.js";
 import type { LogEvent } from "../types.js";
 
 const props = defineProps<{
@@ -55,35 +56,7 @@ function fmtTime(ts: number) {
   return new Date(ts).toTimeString().slice(0, 8);
 }
 
-function channelLabel(channel: string) {
-  const labels: Record<string, string> = {
-    vf: "vf",
-    "engine-stdout": "agent",
-    "engine-stderr": "agent:err",
-    hook: "hook",
-    user: "user",
-  };
-  return labels[channel] ?? channel;
-}
-
-function channelClass(channel: string) {
-  const map: Record<string, string> = {
-    vf: "text-neutral-300",
-    "engine-stdout": "text-neutral-500",
-    "engine-stderr": "text-red-400/70",
-    hook: "text-amber-400/70",
-  };
-  return map[channel] ?? "text-neutral-600";
-}
-
-function levelClass(level: string) {
-  return (
-    {
-      info: "text-neutral-400",
-      warn: "text-amber-400/70",
-      error: "text-red-400/80",
-      debug: "text-neutral-600",
-    }[level] ?? "text-neutral-500"
-  );
-}
+const channelLabel = logChannelLabel;
+const channelClass = logChannelClass;
+const levelClass = logLevelClass;
 </script>

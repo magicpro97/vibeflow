@@ -9,13 +9,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
+import { CONVERSATION_OPERATION_STATE } from "../orchestrator/conversation/conversation-public-wire-contract.js";
+import { ATTEMPT_EVIDENCE_STATE } from "./attempt-evidence-contract.js";
 import type {
   AttemptHandle,
   EngineProcess,
   EngineSessionAdapterOptions,
+  InternalAuthenticatedModelOutputBinding,
   InternalResumeBinding,
   OperationLifecycleState,
 } from "./session-types.js";
+import { reserveWindowsAttemptEvidence } from "./windows-attempt-evidence.js";
 
 export function normalizedAttemptError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -122,6 +127,8 @@ export function reserveAttemptEvidence(
   root: string,
   attemptId: string,
 ): AttemptEvidenceReservation {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS)
+    return reserveWindowsAttemptEvidence(root, attemptId);
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const internalRef = join(root, `${attemptId}.json`);
   let reservation!: number;
@@ -131,7 +138,11 @@ export function reserveAttemptEvidence(
     created = true;
     writeFileSync(
       reservation,
-      `${JSON.stringify({ attempt_id: attemptId, lifecycle: ["requested"], state: "pending" })}\n`,
+      `${JSON.stringify({
+        attempt_id: attemptId,
+        lifecycle: [CONVERSATION_OPERATION_STATE.REQUESTED],
+        state: ATTEMPT_EVIDENCE_STATE.PENDING,
+      })}\n`,
     );
     fsyncSync(reservation);
   } catch (error) {
@@ -203,6 +214,7 @@ export interface AttemptHandleInput<T> {
   signal: AbortSignal;
   terminate: (reason?: string) => void | Promise<void>;
   readResumeBinding: () => InternalResumeBinding | undefined;
+  readModelOutputBinding: () => InternalAuthenticatedModelOutputBinding | undefined;
   readEvidenceBinding: () => { attemptId: string; internalRef: string } | undefined;
 }
 
@@ -241,6 +253,7 @@ export function createAttemptHandle<T>(input: AttemptHandleInput<T>): AttemptHan
     completion: input.completion,
     terminate,
     readResumeBinding: input.readResumeBinding,
+    readModelOutputBinding: input.readModelOutputBinding,
     readEvidenceBinding: input.readEvidenceBinding,
   };
 }

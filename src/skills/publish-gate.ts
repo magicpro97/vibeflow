@@ -1,10 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SkillScope } from "../core.js";
+import { SKILL_SCOPE, isSkillScope } from "../core/skill-contract.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { REQUIRED_SECTIONS, checkQualityContract } from "./validator.js";
-
-const VALID_SCOPES = new Set(["common", "organization", "project", "adapter"]);
 
 const HARDCODED_PATH_PAT = /\/Users\/\w+|C:\\Users\\\w+|\/home\/\w+/;
 
@@ -26,7 +25,7 @@ type ReadFileFn = (path: string, encoding: "utf8") => string;
 
 export function checkPublishGate(
   skillDir: string,
-  targetChannel: "common" | "organization" | "project" | "adapter",
+  targetChannel: SkillScope,
   inject: { existsSync?: (path: string) => boolean; readFileSync?: ReadFileFn } = {},
 ): PublishGateResult {
   const errors: string[] = [];
@@ -50,14 +49,12 @@ export function checkPublishGate(
 
   const { data, body } = parseFrontmatter(text);
   const rawScope = typeof data.scope === "string" ? data.scope.trim().toLowerCase() : "";
-  const scope: SkillScope | undefined = VALID_SCOPES.has(rawScope)
-    ? (rawScope as SkillScope)
-    : undefined;
+  const scope = isSkillScope(rawScope) ? rawScope : undefined;
 
   const projectId = typeof data["project.id"] === "string" ? data["project.id"].trim() : undefined;
 
   // Block: project-scoped skill cannot publish to common channel.
-  if (scope === "project" && targetChannel === "common") {
+  if (scope === SKILL_SCOPE.PROJECT && targetChannel === SKILL_SCOPE.COMMON) {
     errors.push(
       `scope=project skill "${data.name ?? "unknown"}"${projectId ? ` (project.id=${projectId})` : ""} cannot publish to common channel — project-scoped skills contain repo-specific conventions`,
     );
@@ -65,7 +62,7 @@ export function checkPublishGate(
   }
 
   // Block: adapter-scoped skill cannot publish to common channel.
-  if (scope === "adapter" && targetChannel === "common") {
+  if (scope === SKILL_SCOPE.ADAPTER && targetChannel === SKILL_SCOPE.COMMON) {
     errors.push(
       `scope=adapter skill "${data.name ?? "unknown"}" cannot publish to common channel — adapter skills are tool-specific`,
     );
@@ -73,14 +70,14 @@ export function checkPublishGate(
   }
 
   // Warn: organization-scoped skill publishing to common — allowed but worth flagging.
-  if (scope === "organization" && targetChannel === "common") {
+  if (scope === SKILL_SCOPE.ORGANIZATION && targetChannel === SKILL_SCOPE.COMMON) {
     warnings.push(
       `organization-scoped skill "${data.name ?? "unknown"}" publishing to common channel — verify it contains no org-specific conventions`,
     );
   }
 
   // Hardcoded path detection at trust boundary for common channel.
-  if (targetChannel === "common") {
+  if (targetChannel === SKILL_SCOPE.COMMON) {
     const fullText = `${text}`;
     const pathMatches = fullText.match(HARDCODED_PATH_PAT);
     if (pathMatches && pathMatches.length > 0) {
@@ -95,7 +92,7 @@ export function checkPublishGate(
   // when quality contract errors exist, warns on quality contract warnings.
   // Uses the `body` from parseFrontmatter (already available above) stripping
   // any leading/trailing whitespace for deterministic line-count.
-  if (targetChannel === "common" && body) {
+  if (targetChannel === SKILL_SCOPE.COMMON && body) {
     const qc = checkQualityContract(body);
     for (const e of qc.errors) {
       errors.push(`quality: ${e}`);

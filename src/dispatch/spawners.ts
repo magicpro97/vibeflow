@@ -1,15 +1,30 @@
 import { existsSync } from "node:fs";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import { resolveCommand } from "../core.js";
+import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { filterEnv } from "./env-filter.js";
+import {
+  assertOwnedProcessHealthClear,
+  inspectOwnedAttemptProcesses,
+} from "./owned-process-health.js";
+import { launchOwnedSupervisorProcess, markOwnedRuntimeSpawner } from "./owned-process-launch.js";
+import { createOwnedProcessPlatform } from "./owned-process-platform.js";
+import { OwnedProcessController, OwnedProcessRecordStore } from "./owned-process-runtime.js";
 import { projectPublicEngineFrames } from "./public-redaction.js";
+import { noteOwnedOutputDrainFailure } from "./session-owned-runtime.js";
 import type { EngineProcess, EngineProcessSpawner } from "./session-types.js";
 import type { AsyncSpawner, AsyncSpawnerOpts, SyncResult } from "./types.js";
 import { bunSpawn } from "./types.js";
 
 /** Canonical Bun process launcher for the conversation session adapter. */
 export function makeEngineProcessSpawner(spawn: typeof bunSpawn = bunSpawn): EngineProcessSpawner {
-  return (argv, options): EngineProcess => {
+  const spawner = (argv: string[], options: Parameters<EngineProcessSpawner>[1]): EngineProcess => {
+    if (options.ownedRuntime) {
+      return launchOwnedSupervisorProcess(
+        argv,
+        options as typeof options & { ownedRuntime: NonNullable<typeof options.ownedRuntime> },
+      );
+    }
     const proc = spawn(argv, {
       stdin: "pipe",
       stdout: "pipe",
@@ -26,6 +41,7 @@ export function makeEngineProcessSpawner(spawn: typeof bunSpawn = bunSpawn): Eng
     }
     return proc;
   };
+  return spawn === bunSpawn ? markOwnedRuntimeSpawner(spawner) : spawner;
 }
 
 export const defaultEngineProcessSpawner = makeEngineProcessSpawner();
@@ -51,7 +67,7 @@ export function defaultSyncSpawner(cmd: string, args: string[], input: string): 
   const resolvedCmd = resolveCommand(cmd) ?? cmd;
   const needsShell = shouldUseWindowsShell(cmd, resolvedCmd);
   const spawnArgs = needsShell
-    ? process.platform === "win32"
+    ? process.platform === RUNTIME_PLATFORM.WINDOWS
       ? ["cmd.exe", "/c", cmd, ...args]
       : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
     : [cmd, ...args];
@@ -82,7 +98,7 @@ function hasWindowsShimSibling(path: string): boolean {
 }
 
 function shouldUseWindowsShell(cmd: string, resolvedCmd: string): boolean {
-  if (process.platform !== "win32") return false;
+  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return false;
   if (/\.(?:cmd|bat)$/i.test(resolvedCmd)) return true;
   if (cmd.toLowerCase() === "copilot") return true;
   return hasWindowsShimSibling(resolvedCmd);
@@ -96,6 +112,10 @@ interface AsyncResult {
   stderr: string;
   timedOut?: boolean;
 }
+
+type StreamReader = {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+};
 
 /**
  * Build an async spawner using node child_process.spawn (no shell). Unlike spawnSync it does
@@ -129,12 +149,19 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     cwd,
   } = opts;
   const _spawn = opts.spawn ?? bunSpawn;
+  const ownsRuntime = opts.spawn === undefined || opts.spawn === bunSpawn;
+  const ownedProcessPlatform = ownsRuntime
+    ? (opts.ownedProcessPlatform ?? createOwnedProcessPlatform())
+    : undefined;
   // #556: scrub the host env ONCE at spawner-build so every launch from this spawner
   // hands the child a filtered env (secret-shaped vars dropped). `onAudit` sees the
   // dropped NAMES (never values) so the caller can log the scrub.
-  const { env: filteredEnv, dropped } = filterEnv(process.env, opts.envPolicy ?? {});
+  const { env: filteredEnv, dropped } = filterEnv(
+    opts.sourceEnv ?? process.env,
+    opts.envPolicy ?? {},
+  );
   opts.onAudit?.(dropped);
-  return async (cmd, args, input): Promise<AsyncResult> => {
+  return async (cmd, args, input, owned): Promise<AsyncResult> => {
     // On Windows, .cmd/.bat shims (e.g. copilot.cmd installed by npm)
     // cannot be executed directly via CreateProcess. Detect and
     // auto-enable shell mode so the existing spawner works without
@@ -144,41 +171,63 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     const resolvedCmd = resolveCommand(cmd) ?? cmd;
     const needsShell = shell ?? shouldUseWindowsShell(cmd, resolvedCmd);
     const spawnArgs = needsShell
-      ? process.platform === "win32"
+      ? process.platform === RUNTIME_PLATFORM.WINDOWS
         ? ["cmd.exe", "/c", cmd, ...args]
         : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
       : [cmd, ...args];
-    // `detached: true` makes the child a process-group leader on POSIX so we can later
-    // `process.kill(-pid, ...)` the entire group (engine + its tool children). On Windows
-    // detached has no effect on group formation, so we skip it and use single-pid kill.
-    const proc = _spawn(spawnArgs, {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      detached: process.platform !== "win32",
-      env: filteredEnv,
-      ...(cwd ? { cwd } : {}),
-    });
-    try {
-      proc.stdin?.write(input);
-    } catch (err) {
-      // B3: if stdin.write throws (EPIPE / child already exited), kill the
-      // child and wait for it to actually exit before re-throwing, otherwise
-      // the orphan process keeps running with a closed pipe.
+    const ownedRuntime =
+      ownsRuntime && owned && ownedProcessPlatform
+        ? (() => {
+            const runtimeRoot =
+              owned.evidenceRoot ??
+              opts.evidenceRoot ??
+              join(process.cwd(), ".vibeflow", "attempts");
+            const store = new OwnedProcessRecordStore(runtimeRoot);
+            assertOwnedProcessHealthClear(
+              inspectOwnedAttemptProcesses(store, ownedProcessPlatform, true),
+              "launch",
+            );
+            return new OwnedProcessController(
+              store,
+              ownedProcessPlatform,
+              store.reserve(owned.attemptId, owned.engine, ownedProcessPlatform),
+            );
+          })()
+        : undefined;
+    const proc = ownedRuntime
+      ? launchOwnedSupervisorProcess(spawnArgs, {
+          stdinText: input,
+          detached: process.platform !== RUNTIME_PLATFORM.WINDOWS,
+          env: filteredEnv,
+          ...(cwd ? { cwd } : {}),
+          ownedRuntime,
+        })
+      : (_spawn(spawnArgs, {
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+          detached: process.platform !== RUNTIME_PLATFORM.WINDOWS,
+          env: filteredEnv,
+          ...(cwd ? { cwd } : {}),
+        }) as unknown as EngineProcess);
+    if (!ownedRuntime) {
       try {
-        proc.kill();
-      } catch {
-        // Process may have already exited — nothing to kill.
+        proc.stdin?.write(input);
+      } catch (err) {
+        try {
+          proc.kill();
+        } catch (cleanupError) {
+          if (err instanceof Error) err.cause ??= cleanupError;
+        }
+        try {
+          await proc.exited;
+        } catch (cleanupError) {
+          if (err instanceof Error) err.cause ??= cleanupError;
+        }
+        throw err;
       }
-      try {
-        await proc.exited;
-      } catch {
-        // proc.exited can reject if the kill itself fails; swallow so the
-        // original stdin error is what the caller sees.
-      }
-      throw err;
+      proc.stdin?.end();
     }
-    proc.stdin?.end();
 
     const stdoutReader = proc.stdout?.getReader();
     const stderrReader = proc.stderr?.getReader();
@@ -191,12 +240,14 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     let publicStdoutDiscarding = false;
     let publicStderrDiscarding = false;
     let timedOut = false;
+    let releaseUnproven = false;
+    let terminating = false;
 
     let term: Timer | undefined;
     let graceTerm: Timer | undefined;
     // Group-leader pid: the SIGN that the child was spawned detached on POSIX. On Windows
     // there is no group-kill equivalent, so we kill the direct child only.
-    const isPosixGroupLeader = process.platform !== "win32" && proc.pid != null;
+    const isPosixGroupLeader = process.platform !== RUNTIME_PLATFORM.WINDOWS && proc.pid != null;
     const killGroup = (signal: NodeJS.Signals) => {
       if (!isPosixGroupLeader || proc.pid == null) {
         try {
@@ -218,12 +269,18 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
         }
       }
     };
-    const killProc = () => {
-      if (timedOut) return;
-      timedOut = true;
+    const beginTermination = (timeout: boolean) => {
+      if (terminating) return;
+      terminating = true;
+      timedOut ||= timeout;
+      if (ownedRuntime) {
+        void ownedRuntime.terminate(graceMs);
+        return;
+      }
       killGroup("SIGTERM");
       if (graceMs > 0) graceTerm = setTimeout(() => killGroup("SIGKILL"), graceMs);
     };
+    const killProc = () => beginTermination(true);
     if (timeoutMs != null) {
       term = setTimeout(killProc, timeoutMs);
     }
@@ -234,84 +291,107 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
       if (idleTimeoutMs != null) idle = setTimeout(killProc, idleTimeoutMs);
     };
     resetIdle();
+    const reapOnRootExit = proc.rootExited
+      ? proc.rootExited.then(async (outcome) => {
+          if (ownedRuntime) await ownedRuntime.terminate(graceMs);
+          return outcome;
+        })
+      : Promise.resolve(undefined);
 
-    await Promise.all([
-      (async () => {
-        while (stdoutReader) {
-          const { done, value } = await stdoutReader.read();
-          if (done) {
-            const tail = stdoutDecoder.decode();
-            stdout += tail;
-            const projected = projectPublicEngineFrames(
-              publicStdout + tail,
-              undefined,
-              true,
-              [],
-              publicStdoutDiscarding,
-            );
-            for (const frame of projected.frames) onChunk?.(frame);
-            break;
-          }
-          const s = stdoutDecoder.decode(value, { stream: true });
-          stdout += s;
+    const readStream = async (
+      reader: StreamReader | undefined,
+      decoder: TextDecoder,
+      consume: (chunk: string, done: boolean) => void,
+    ) => {
+      while (reader) {
+        const { done, value } = await reader.read();
+        consume(done ? decoder.decode() : decoder.decode(value, { stream: true }), done);
+        if (done) break;
+        resetIdle();
+      }
+    };
+    let exitCode: number | null = null;
+    try {
+      await Promise.all([
+        readStream(stdoutReader, stdoutDecoder, (chunk, done) => {
+          stdout += chunk;
           const projected = projectPublicEngineFrames(
-            publicStdout + s,
+            publicStdout + chunk,
             undefined,
-            false,
+            done,
             [],
             publicStdoutDiscarding,
           );
           publicStdout = projected.remainder;
           publicStdoutDiscarding = projected.discardingOversize;
           for (const frame of projected.frames) onChunk?.(frame);
-          resetIdle();
-        }
-      })(),
-      (async () => {
-        while (stderrReader) {
-          const { done, value } = await stderrReader.read();
-          if (done) {
-            const tail = stderrDecoder.decode();
-            stderr += tail;
-            const projected = projectPublicEngineFrames(
-              publicStderr + tail,
-              undefined,
-              true,
-              [],
-              publicStderrDiscarding,
-            );
-            for (const frame of projected.frames) onStderrChunk?.(frame);
-            break;
-          }
-          const s = stderrDecoder.decode(value, { stream: true });
-          stderr += s;
+        }),
+        readStream(stderrReader, stderrDecoder, (chunk, done) => {
+          stderr += chunk;
           const projected = projectPublicEngineFrames(
-            publicStderr + s,
+            publicStderr + chunk,
             undefined,
-            false,
+            done,
             [],
             publicStderrDiscarding,
           );
           publicStderr = projected.remainder;
           publicStderrDiscarding = projected.discardingOversize;
           for (const frame of projected.frames) onStderrChunk?.(frame);
-          resetIdle();
-        }
-      })(),
-    ]);
-
-    if (term) {
-      clearTimeout(term);
+        }),
+      ]);
+      const [processExitCode, rootOutcome] = await Promise.all([proc.exited, reapOnRootExit]);
+      exitCode = rootOutcome?.exitCode ?? processExitCode;
+      const outputDrainFailure = noteOwnedOutputDrainFailure(rootOutcome, ownedRuntime);
+      const releaseReason = outputDrainFailure
+        ? outputDrainFailure
+        : timedOut
+          ? "timeout"
+          : "engine exit";
+      if (ownedRuntime && !ownedRuntime.finalize(exitCode, releaseReason)) {
+        releaseUnproven = true;
+      }
+      const status = timedOut
+        ? TIMEOUT_STATUS
+        : releaseUnproven
+          ? exitCode === 0
+            ? 1
+            : (exitCode ?? 1)
+          : (exitCode ?? 1);
+      return {
+        status,
+        stdout,
+        stderr: [
+          stderr,
+          outputDrainFailure ?? "",
+          releaseUnproven ? "owned CLI release is unproven" : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+          .trim(),
+        timedOut,
+      };
+    } catch (error) {
+      beginTermination(false);
+      try {
+        const [processExitCode, rootOutcome] = await Promise.all([
+          proc.exited.catch(() => null),
+          reapOnRootExit.catch(() => undefined),
+        ]);
+        exitCode = rootOutcome?.exitCode ?? processExitCode;
+      } finally {
+        if (ownedRuntime)
+          void ownedRuntime.finalize(
+            exitCode,
+            `spawn callback failure: ${(error as Error).message}`,
+          );
+      }
+      throw error;
+    } finally {
+      if (term) clearTimeout(term);
+      if (idle) clearTimeout(idle);
+      if (graceTerm) clearTimeout(graceTerm);
     }
-    if (idle) {
-      clearTimeout(idle);
-    }
-    const exitCode = await proc.exited;
-    if (graceTerm) {
-      clearTimeout(graceTerm);
-    }
-    const status = timedOut ? TIMEOUT_STATUS : (exitCode ?? 1);
-    return { status, stdout, stderr, timedOut };
   };
 }
 

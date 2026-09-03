@@ -1,6 +1,7 @@
 import type { MaterializedAgentBinding } from "../../agents/binding.js";
 import type { PersistedResumeBinding } from "./artifact-store.js";
 import type { AttemptConversationAuthority } from "./attempt-runtime.js";
+import type { PersistedTurnDeliveryV1 } from "./turn-delivery-types.js";
 import type { TerminalLifecycle } from "./types.js";
 
 export class ConversationAuthorityClosedError extends Error {
@@ -10,6 +11,8 @@ export class ConversationAuthorityClosedError extends Error {
 export interface LiveConversation extends AttemptConversationAuthority {
   bindings: MaterializedAgentBinding[];
   resumeBindings: Map<string, PersistedResumeBinding>;
+  turnDeliveries: Map<string, PersistedTurnDeliveryV1>;
+  turnObservations: Map<string, number>;
   transitionEpoch: number;
   needsReconcile: boolean;
 }
