@@ -84,7 +84,7 @@ export const VF_WORKFLOW = `## Working with vf (the loop)
 Drive every task through this loop instead of free-handing it:
 1. **Sync context.** After editing ${CTX_DIR}/*, run \`vf init\` to regenerate this file and the engine context from canonical sources. Don't hand-edit generated files.
 2. **Shape the work.** A single-concern task runs as-is — no ceremony. When the task splits into parallel slices with distinct file scopes, model each as a work unit (\`vf units add <name>\`); status, confidence, and evidence are tracked per unit in the ledger.
-3. **Dispatch.** \`vf orchestrate\` plans and dispatches the units, runs an independent review, and records evidence. Work units with overlapping file scopes are serialized automatically so lanes never clobber each other; non-overlapping ones run in parallel.
+3. **Dispatch.** \`vf orchestrate\` plans and dispatches the units (blocked units are skipped), runs an independent review, and records evidence. Work units with overlapping file scopes are serialized automatically so lanes never clobber each other; non-overlapping ones run in parallel.
 4. **Verify before claiming done.** \`vf verify\` runs typecheck/lint/test plus the policy gates.
 
 **Confidence gate — nothing is "done" until \`vf verify\` passes.** A unit only closes at confidence = 1.0 WITH recorded evidence (command output, file path, or test result) and within its declared scope. Below the bar, the unit is investigated, not silently closed. No verification, no completion; no evidence, no conclusion.

@@ -50,8 +50,8 @@ export function units(
         return 0;
       }
       for (const u of state.work_units) {
-        const g = u.gates;
-        const gs = REQUIRED_WORK_UNIT_GATES.map((k) => `${k}:${gateColor(g[k])}`).join(" ");
+        const g = u.gates ?? {};
+        const gs = REQUIRED_WORK_UNIT_GATES.map((k) => `${k}:${gateColor(g[k] ?? "")}`).join(" ");
         out("vf", `${c.bold(u.name)} ${c.dim(u.status)} conf ${u.confidence}`);
         out("vf", `  ${gs}`);
       }
