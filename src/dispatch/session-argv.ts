@@ -113,15 +113,11 @@ export function sessionInvocation(
       args.push("--allowedTools", spawn.rendered_tools.join(","));
     }
   }
-  if (spawn.engine === AGENT_ENGINE.COPILOT) {
-    args.push(`--available-tools=${spawn.rendered_tools.join(",")}`);
-  }
   if (spawn.sandbox === ROLE_SANDBOX.READ_ONLY) {
     if (spawn.engine === AGENT_ENGINE.CLAUDE) {
       args.push("--permission-mode", "plan", "--disallowedTools", "Write,Edit,Bash");
     } else if (spawn.engine === AGENT_ENGINE.CODEX)
       args.unshift("--sandbox", ROLE_SANDBOX.READ_ONLY);
-    else if (spawn.engine === AGENT_ENGINE.COPILOT) args.push("--excluded-tools=Write,Edit,Bash");
   } else if (spawn.sandbox === ROLE_SANDBOX.WORKSPACE_WRITE) {
     if (spawn.engine === AGENT_ENGINE.CLAUDE) args.push("--permission-mode", "acceptEdits");
     else if (spawn.engine === AGENT_ENGINE.CODEX)
@@ -132,6 +128,17 @@ export function sessionInvocation(
     else if (spawn.engine === AGENT_ENGINE.CODEX)
       args.unshift("--sandbox", ROLE_SANDBOX.DANGER_FULL_ACCESS);
     else if (spawn.engine === AGENT_ENGINE.COPILOT) args.push("--allow-all");
+  }
+  if (spawn.engine === AGENT_ENGINE.COPILOT) {
+    // Copilot 1.0.83 rejects any flag placed after the `-p` prompt flag, so every
+    // option must precede it (the prompt itself is spliced in after `-p` by
+    // materializePrompt). `--available-tools`/`--excluded-tools` only accept MCP
+    // tool names in this version, so built-in tool intents are not passed there.
+    const promptFlag = args.indexOf("-p");
+    if (promptFlag >= 0) {
+      args.splice(promptFlag, 1);
+      args.push("-p");
+    }
   }
   return materializePrompt({ ...base, args }, prompt);
 }
