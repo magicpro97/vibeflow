@@ -46,6 +46,39 @@ It keeps the current conversation visible, shows participant state and live stre
 status, and makes new conversation creation obvious. Search filters sessions in place;
 selecting a result opens it directly without a resume dialog.
 
+#### Engine picker
+
+The composer's engine chip (above the message queue) opens a menu with **Auto** plus
+one row per installed-or-known CLI: claude, copilot, codex, opencode, antigravity.
+- **Auto** probes each CLI's readiness and picks a live engine for the conversation
+  (the engine chip shows the resolved pick, e.g. `Engine: Copilot`).
+- A concrete pick applies to **new conversations** (the chip reads `localStorage
+  vf-engine`; values: `auto | claude | copilot | codex | opencode | antigravity`).
+  The currently open conversation keeps its bound engine until it ends.
+- A CLI whose binary is missing shows a disabled row with the install hint
+  (`agy CLI not found — install the Antigravity CLI …`) and is skipped by Auto.
+- The menu re-checks engine binaries when opened; the row subtitle shows `Ready`
+  or the probe detail.
+- Model selection is not exposed in Home: the engine runs its default/configured
+  model (per-role model ranks apply to coordinator roles, not the Home engine picker).
+
+#### Opening a conversation (restore)
+
+Selecting a session in the rail verifies its active head, public trace, and durable
+queue before the transcript unlocks. The restore placeholder ("Verifying the active
+head …") shows while that read completes; a completed/failed conversation has no live
+engine stream, so the transcript renders from the verified timeline alone. Once the
+timeline is loaded the composer unlocks (terminal conversations can still be extended
+with a follow-up message). A conversation that failed mid-turn shows the terminal
+failure in the thread — `[<engine> failed: <reason>]` — instead of a silent empty
+"Complete"; the thread keeps the failure notice and state labels (`*Failed*`,
+`*Complete*`) in both the rail and the transcript.
+
+#### New conversation button
+
+`+ New conversation` in the rail always returns to the composer on the home surface;
+typing the first message creates the conversation with the picked engine.
+
 ### 2. Composer
 
 The composer is conversation-first, not form-first. It owns the durable FIFO queue, ArrowUp editing for the latest queued human message, private file range capture, and typed capability selection. Sends made while an agent is busy queue automatically. ArrowUp starts an edit only for the latest queued human message; Escape cancels, and a lost dispatch/edit race preserves the draft for explicit send-as-new. Typed add-participant actions promote a direct route into coordinate through proposal/review/commit, and removing the last executor collapses it back to direct. Sent messages remain ordered and reviewable. Only a transport-ambiguous request, or a typed admission error with `retryable: true` and `recovery_action: retry`, becomes retryable and may replay the exact request and idempotency key. Typed failures wait for an explicit retry. An in-flight admission interrupted by browser offline remains **Reconciling** and automatically replays the same idempotency key only after authoritative refresh. A non-retryable collision retains the exact rejected payload as **Needs action**, outside the waiting count. Its typed action restores an unsent edit/new draft, refreshes the active conversation before restore, or gives CLI authority-repair guidance; confirmed dismissal settles retained private context first. No typed recovery auto-resends or overwrites newer composer state. Rejected rows are current Home state and are not persisted through `localStorage` or promised across a browser restart.
