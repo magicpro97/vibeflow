@@ -61,25 +61,26 @@ export interface EngineAttachmentSupportV1 {
  *   opencode --file <path>                        (any file; repeatable)
  *   antigravity: binary absent, support unverified → attach surface hidden.
  */
-export const ENGINE_ATTACHMENT_SUPPORT: Readonly<Partial<Record<Engine, EngineAttachmentSupportV1>>> =
-  Object.freeze({
-    [AGENT_ENGINE.CLAUDE]: {
-      kinds: [ATTACHMENT_KIND.TEXT],
-      flag: "--append-system-prompt-file",
-    },
-    [AGENT_ENGINE.COPILOT]: {
-      kinds: [ATTACHMENT_KIND.IMAGE, ATTACHMENT_KIND.DOCUMENT],
-      flag: "--attachment",
-    },
-    [AGENT_ENGINE.CODEX]: {
-      kinds: [ATTACHMENT_KIND.IMAGE],
-      flag: "--image",
-    },
-    [AGENT_ENGINE.OPENCODE]: {
-      kinds: ATTACHMENT_KINDS,
-      flag: "--file",
-    },
-  });
+export const ENGINE_ATTACHMENT_SUPPORT: Readonly<
+  Partial<Record<Engine, EngineAttachmentSupportV1>>
+> = Object.freeze({
+  [AGENT_ENGINE.CLAUDE]: {
+    kinds: [ATTACHMENT_KIND.TEXT],
+    flag: "--append-system-prompt-file",
+  },
+  [AGENT_ENGINE.COPILOT]: {
+    kinds: [ATTACHMENT_KIND.IMAGE, ATTACHMENT_KIND.DOCUMENT],
+    flag: "--attachment",
+  },
+  [AGENT_ENGINE.CODEX]: {
+    kinds: [ATTACHMENT_KIND.IMAGE],
+    flag: "--image",
+  },
+  [AGENT_ENGINE.OPENCODE]: {
+    kinds: ATTACHMENT_KINDS,
+    flag: "--file",
+  },
+});
 
 export function engineAttachmentSupport(engine: Engine): EngineAttachmentSupportV1 | null {
   return ENGINE_ATTACHMENT_SUPPORT[engine] ?? null;
