@@ -483,8 +483,8 @@ describe("production Capability Fabric adapters", () => {
     const config = readFileSync(join(fx.userRoot, ".codex", "config.toml"), "utf8");
     expect(config).toContain('model = "gpt-5"');
     expect(config).toContain("other_feature = true");
-    expect(config).toContain("codex_hooks = true");
-    expect(config.indexOf("codex_hooks = true")).toBeLessThan(config.indexOf("[other]"));
+    expect(config).toContain("hooks = true");
+    expect(config.indexOf("hooks = true")).toBeLessThan(config.indexOf("[other]"));
     expect(config).toContain("keep = 1");
     expect(existsSync(join(fx.root, ".codex", "hooks.json"))).toBeFalse();
 
@@ -551,7 +551,7 @@ describe("production Capability Fabric adapters", () => {
     const restoredConfig = readFileSync(join(fx.userRoot, ".codex", "config.toml"), "utf8");
     expect(restoredConfig).toContain("other_feature = true");
     expect(restoredConfig).toContain("keep = 1");
-    expect(restoredConfig).not.toContain("codex_hooks");
+    expect(restoredConfig).not.toContain("hooks = true");
   });
 
   test("rejects re-digested private preimage smuggling and noncanonical Codex paths", () => {

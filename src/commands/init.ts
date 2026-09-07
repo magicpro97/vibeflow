@@ -57,7 +57,10 @@ import type {
 } from "./_shared.js";
 
 import { activateRecoveryBootstrapForTrustedInstall } from "../capabilities/authority-repair/index.js";
-import { activateProjectCapabilityAuthorityForVfInit } from "../capabilities/source/authority-activation.js";
+import {
+  activateProjectCapabilityAuthorityForVfInit,
+  activateUserCapabilityAuthorityForTrustedInstall,
+} from "../capabilities/source/authority-activation.js";
 import { writeInitArtifacts } from "./init-artifacts.js";
 
 const PROJECT_ID_ALLOW_RULE = "!PROJECT_ID.json";
@@ -243,9 +246,15 @@ export async function init(
   if (!dry) {
     ensurePortableProjectIdentityTracked(cwd());
     activateProjectCapabilityAuthorityForVfInit(cwd());
-    activateRecoveryBootstrapForTrustedInstall(
-      inject.userVibeflowRoot ?? process.env.VF_USER_VIBEFLOW_ROOT ?? join(homedir(), ".vibeflow"),
-    );
+    // Ensure user-level SETTINGS.json exists before activating user capability authority
+    const userVfRoot =
+      inject.userVibeflowRoot ?? process.env.VF_USER_VIBEFLOW_ROOT ?? join(homedir(), ".vibeflow");
+    const userSettingsPath = join(userVfRoot, "SETTINGS.json");
+    if (!existsSync(userSettingsPath)) {
+      writeFileSafe(userSettingsPath, JSON.stringify({ schema_version: "1.0" }));
+    }
+    activateUserCapabilityAuthorityForTrustedInstall(userVfRoot);
+    activateRecoveryBootstrapForTrustedInstall(userVfRoot);
   }
   const label = dry ? "dry run" : "init";
   out("vf", panel("VibeFlow", c.bold(label)));

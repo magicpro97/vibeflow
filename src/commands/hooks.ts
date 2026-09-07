@@ -514,29 +514,31 @@ function mergeCodexHooks(absPath: string, generated: string): string | null {
 }
 
 /**
- * Idempotently ensure `[features] codex_hooks = true` in
+ * Idempotently ensure `[features] hooks = true` in
  * `homedir()/.codex/config.toml` with minimal string editing.
  * Preserves all unrelated content. No-op if already `true`.
+ * Migrates the legacy `codex_hooks` key, which current Codex deprecates
+ * (warns per run and drops the flag silently).
  */
 function ensureCodexFeaturesToml(codexHome?: string): void {
   const home = codexHome ?? homedir();
   const configPath = join(home, ".codex", "config.toml");
   if (!existsSync(configPath)) {
-    writeFileSafe(configPath, "[features]\ncodex_hooks = true");
+    writeFileSafe(configPath, "[features]\nhooks = true");
     return;
   }
   const raw = readFileSync(configPath, "utf8");
-  if (/codex_hooks\s*=\s*true/.test(raw)) return;
-  if (/codex_hooks\s*=/.test(raw)) {
-    writeFileSafe(configPath, raw.replace(/\bcodex_hooks\s*=\s*[^\n]+/, "codex_hooks = true"));
+  if (/^\s*hooks\s*=\s*true$/m.test(raw)) return;
+  if (/\bcodex_hooks\s*=|^\s*hooks\s*=/m.test(raw)) {
+    writeFileSafe(configPath, raw.replace(/\b(?:codex_hooks|hooks)\s*=\s*[^\n]+/, "hooks = true"));
     return;
   }
   if (/\[features\]/.test(raw)) {
-    writeFileSafe(configPath, raw.replace(/(\[features\])/, "$1\ncodex_hooks = true"));
+    writeFileSafe(configPath, raw.replace(/(\[features\])/, "$1\nhooks = true"));
     return;
   }
   const sep = raw.endsWith("\n") ? "" : "\n";
-  writeFileSafe(configPath, `${raw}${sep}[features]\ncodex_hooks = true`);
+  writeFileSafe(configPath, `${raw}${sep}[features]\nhooks = true`);
 }
 
 /**

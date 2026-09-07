@@ -75,6 +75,7 @@ export function loadBunBindings(): NativeBindings {
       returns: FFIType.i32,
     },
     mkdirat: { args: [FFIType.i32, FFIType.cstring, FFIType.u32], returns: FFIType.i32 },
+    fchmod: { args: [FFIType.i32, FFIType.u32], returns: FFIType.i32 },
     fchmodat: {
       args: [FFIType.i32, FFIType.cstring, FFIType.u32, FFIType.i32],
       returns: FFIType.i32,
@@ -112,8 +113,24 @@ export function loadBunBindings(): NativeBindings {
   if (!errnoAddress) durabilityError("unsupported", `Bun FFI is missing ${errnoSymbol}`);
   errnoReader = () => ffi.read.i32(errnoAddress() as import("bun:ffi").Pointer, 0);
   return {
-    openat: (fd, name, flags, _modeType, mode) =>
-      symbols.openat?.(fd, cString(name), flags, mode) ?? -1,
+    // libc openat is variadic (mode is only consumed when O_CREAT is set); Bun FFI
+    // cannot declare variadic parameters, so the mode argument is NOT reliably
+    // delivered on arm64 and can silently create mode-0 files (EACCES on re-open).
+    // Create with mode 0 and fix the permission bits via fchmod (fixed arity) so
+    // the result is deterministic across runtimes/machines.
+    openat: (fd, name, flags, _modeType, mode) => {
+      const created = symbols.openat?.(fd, cString(name), flags, 0) ?? -1;
+      if (created < 0 || (flags & fs.constants.O_CREAT) === 0) return created;
+      if ((symbols.fchmod?.(created, mode) ?? -1) !== 0) {
+        try {
+          fs.closeSync(created);
+        } catch {
+          // Surface the fchmod error that caused the create to be rejected.
+        }
+        return -1;
+      }
+      return created;
+    },
     mkdirat: (fd, name, mode) => symbols.mkdirat?.(fd, cString(name), mode) ?? -1,
     fchmodat: (fd, name, mode, flags) => symbols.fchmodat?.(fd, cString(name), mode, flags) ?? -1,
     renameat: (fromFd, from, toFd, to) =>

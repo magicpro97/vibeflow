@@ -1363,7 +1363,7 @@ describe("post-freeze source and adapter behavioral coverage", () => {
     ).toBe(true);
 
     const feature =
-      "# vf-capability:codex-hooks-feature:start\ncodex_hooks = true\n# vf-capability:codex-hooks-feature:end";
+      "# vf-capability:codex-hooks-feature:start\nhooks = true\n# vf-capability:codex-hooks-feature:end";
     write(
       fsRoots.user,
       ".codex/hooks.json",
@@ -2260,7 +2260,7 @@ describe("post-freeze source and adapter behavioral coverage", () => {
         fsRoots,
       ),
     ).toThrow(/no effective post-tool handler/);
-    write(fsRoots.user, ".codex/config.toml", "codex_hooks = false\n");
+    write(fsRoots.user, ".codex/config.toml", "hooks = false\n");
     expect(() => buildFilesystemProjection(effectRequest(hook, "codex", "user"), fsRoots)).toThrow(
       /unmanaged Codex hook feature/,
     );
