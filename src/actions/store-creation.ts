@@ -11,6 +11,7 @@ import {
 import { ACTION_IDEMPOTENCY_BINDING_STATE } from "./persistence-contract.js";
 import type { ActionFilePersistence } from "./persistence.js";
 import { assertProposalPublicationProof } from "./proposal-publication-proof.js";
+import { ACTION_AUTHORITY_EVENT_KIND } from "./protocol-contract.js";
 import { PUBLIC_ACTION_SCHEMA_VERSION } from "./public-action-contract.js";
 import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import {
@@ -20,7 +21,7 @@ import {
   sameAuthority,
 } from "./store-rules.js";
 import type { CreateProposalInputV1 } from "./store.js";
-import type { ActionProposalV1 } from "./types.js";
+import type { ActionProposalV1, ActionRequestAuthorityV1 } from "./types.js";
 
 export function createActionProposal(
   files: ActionFilePersistence,
@@ -128,6 +129,49 @@ function assertPublicationClosure(
     now: sampledNow,
   });
   assertProposalPublicationProof(proof, proposal, requestDigest, sampledNow);
+}
+
+/** Resolve a previously prepared proposal by idempotency key, verifying the
+ * persisted closure (proposal + first authority frame) still matches the
+ * caller's authority and its recorded digest. */
+export function preparedActionProposal(
+  files: ActionFilePersistence,
+  input: {
+    authority: ActionRequestAuthorityV1;
+    idempotency_key: string;
+  },
+): ActionProposalV1 | null {
+  const keyDigest = actionIdempotencyKeyDigest(input.idempotency_key);
+  const path = files.idempotencyPath(
+    actionIdempotencyFileKey(
+      input.authority.principal_digest,
+      input.authority.authority_scope_digest,
+      keyDigest,
+    ),
+  );
+  const chain = files.readIdempotency(path);
+  if (chain.length === 0) return null;
+  const prepared = chain[0];
+  if (
+    !prepared ||
+    !sameAuthority(prepared, input.authority) ||
+    prepared.idempotency_key_digest !== keyDigest
+  )
+    throw new Error("prepared action idempotency authority changed");
+  const proposal = files.readProposal(prepared.proposal_id);
+  const authority = files.readAuthority(prepared.proposal_id);
+  if (
+    !proposal ||
+    proposal.idempotency_key !== input.idempotency_key ||
+    proposal.proposal_digest !== prepared.proposal_digest ||
+    (authority.length > 0 &&
+      !equalCanonical(authority[0]?.payload, {
+        kind: ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED,
+        proposal,
+      }))
+  )
+    throw new Error("prepared action proposal closure is missing or mismatched");
+  return structuredClone(proposal);
 }
 
 function assertPublicationWindow(proposal: ActionProposalV1, sampledNow: string): void {

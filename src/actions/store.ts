@@ -11,18 +11,15 @@ import {
   type ApprovalChallengeResponseV1,
 } from "./challenge.js";
 import { ActionConflictError } from "./errors.js";
-import {
-  type CanonicalActionRequestV1,
-  actionIdempotencyFileKey,
-  actionIdempotencyKeyDigest,
-} from "./idempotency.js";
+import { type CanonicalActionRequestV1 } from "./idempotency.js";
 import { ActionFilePersistence } from "./persistence.js";
-import { ACTION_AUTHORITY_EVENT_KIND, ACTION_OPERATION_STATE } from "./protocol-contract.js";
+import { ACTION_OPERATION_STATE } from "./protocol-contract.js";
 import { ACTION_CHALLENGE_CLASS, ACTION_DECISION, ACTOR_KIND } from "./public-action-contract.js";
 import { PUBLIC_ERROR_CODE } from "./public-error-contract.js";
 import { materializeApproval } from "./records.js";
+import { ActionAuthorityStoreReadCacheV1 } from "./store-cache.js";
 import { type CancelActionInputV1, cancelAction } from "./store-cancel.js";
-import { createActionProposal } from "./store-creation.js";
+import { createActionProposal, preparedActionProposal } from "./store-creation.js";
 import {
   beginActionDispatch,
   prepareActionDispatch,
@@ -37,7 +34,6 @@ import {
   equalCanonical,
   requireOwnedPending,
   requireOwnedSnapshot,
-  sameAuthority,
 } from "./store-rules.js";
 import { appendApproval, revalidateReview } from "./store-transitions.js";
 import type {
@@ -85,37 +81,15 @@ export class ActionAuthorityStore {
   private readonly challenges: ApprovalChallengeAuthority;
   private readonly authorityResolver: ActionAuthorityResolverV1 | null;
   private readonly fault: ActionAuthorityStoreOptions["fault"];
-  private readonly snapshotCache = new Map<string, ActionAuthoritySnapshotV1 | null>();
-  private readonly snapshotCacheMtimes = new Map<string, number>();
-  private cachedProposalIds: string[] | null = null;
-  private cachedProposalsMtime = -1;
+  private readonly cache: ActionAuthorityStoreReadCacheV1;
 
   private invalidateCache(): void {
-    this.cachedProposalIds = null;
-    this.snapshotCache.clear();
-    this.snapshotCacheMtimes.clear();
-  }
-
-  /** Drop the cached proposal listing when the store directory changed on
-   * disk. A second store instance (browser vs home authorities) writes the
-   * same files, so a same-process cache cannot rely on instance-local
-   * invalidation alone. */
-  private refreshCacheAuthority(): void {
-    const mtime = this.files.proposalsMtimeMs();
-    if (mtime !== this.cachedProposalsMtime) {
-      this.invalidateCache();
-      this.cachedProposalsMtime = mtime;
-    }
-  }
-
-  private proposalIds(): string[] {
-    this.refreshCacheAuthority();
-    if (this.cachedProposalIds === null) this.cachedProposalIds = this.files.proposalIds();
-    return this.cachedProposalIds;
+    this.cache.invalidate();
   }
 
   constructor(actionRoot: string, options: ActionAuthorityStoreOptions = {}) {
     this.files = new ActionFilePersistence(actionRoot);
+    this.cache = new ActionAuthorityStoreReadCacheV1(this.files);
     this.now = options.now ?? Date.now;
     this.random = options.random_bytes ?? systemRandomBytes;
     this.authorityResolver = options.authority_resolver ?? null;
@@ -161,51 +135,13 @@ export class ActionAuthorityStore {
     idempotency_key: string;
   }): ActionProposalV1 | null {
     assertRequestAuthority(input.authority);
-    const keyDigest = actionIdempotencyKeyDigest(input.idempotency_key);
-    const path = this.files.idempotencyPath(
-      actionIdempotencyFileKey(
-        input.authority.principal_digest,
-        input.authority.authority_scope_digest,
-        keyDigest,
-      ),
-    );
-    const chain = this.files.readIdempotency(path);
-    if (chain.length === 0) return null;
-    const prepared = chain[0];
-    if (
-      !prepared ||
-      !sameAuthority(prepared, input.authority) ||
-      prepared.idempotency_key_digest !== keyDigest
-    )
-      throw new Error("prepared action idempotency authority changed");
-    const proposal = this.files.readProposal(prepared.proposal_id);
-    const authority = this.files.readAuthority(prepared.proposal_id);
-    if (
-      !proposal ||
-      proposal.idempotency_key !== input.idempotency_key ||
-      proposal.proposal_digest !== prepared.proposal_digest ||
-      (authority.length > 0 &&
-        !equalCanonical(authority[0]?.payload, {
-          kind: ACTION_AUTHORITY_EVENT_KIND.PROPOSAL_CREATED,
-          proposal,
-        }))
-    )
-      throw new Error("prepared action proposal closure is missing or mismatched");
-    return structuredClone(proposal);
+    return preparedActionProposal(this.files, input);
   }
 
   get(proposalId: string): ActionAuthoritySnapshotV1 | null {
-    // Per-proposal snapshot cache keyed by the authority file's mtime: every
-    // state transition (approval, staleness, terminal) appends to that file
-    // from any store instance, so an equal mtime proves the snapshot is
-    // current without re-reading and re-verifying the whole closure.
-    const authorityMtime = this.files.authorityMtimeMs(proposalId);
-    if (authorityMtime === this.snapshotCacheMtimes.get(proposalId))
-      return this.snapshotCache.get(proposalId) ?? null;
-    const snapshot = readVerifiedActionSnapshot(this.files, this.authorityResolver, proposalId);
-    this.snapshotCache.set(proposalId, snapshot);
-    this.snapshotCacheMtimes.set(proposalId, authorityMtime);
-    return snapshot;
+    return this.cache.get(proposalId, (id) =>
+      readVerifiedActionSnapshot(this.files, this.authorityResolver, id),
+    );
   }
 
   getRecorded(proposalId: string): ActionAuthoritySnapshotV1 | null {
@@ -213,7 +149,8 @@ export class ActionAuthorityStore {
   }
 
   listPending(): ActionAuthoritySnapshotV1[] {
-    return this.proposalIds()
+    return this.cache
+      .proposalIds()
       .map((proposalId) => this.get(proposalId))
       .filter(
         (value): value is ActionAuthoritySnapshotV1 =>
@@ -227,7 +164,7 @@ export class ActionAuthorityStore {
   }
 
   list(): ActionAuthoritySnapshotV1[] {
-    return listActionSnapshots(this.proposalIds(), (proposalId) => this.get(proposalId));
+    return listActionSnapshots(this.cache.proposalIds(), (proposalId) => this.get(proposalId));
   }
 
   /** Structural-only snapshots for domain bootstrap before a retained resolver is rebound. */
