@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { ENGINES } from "../src/core/agent-contract.js";
 import { ProbeCache, setCachedProbe, setSharedCache } from "../src/preflight.js";
 import { liveEngineReadiness } from "../src/server.js";
-import { ENGINES } from "../src/core/agent-contract.js";
 
 const REPO = "agent-live-readiness-repo";
 

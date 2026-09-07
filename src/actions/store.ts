@@ -11,7 +11,7 @@ import {
   type ApprovalChallengeResponseV1,
 } from "./challenge.js";
 import { ActionConflictError } from "./errors.js";
-import { type CanonicalActionRequestV1 } from "./idempotency.js";
+import type { CanonicalActionRequestV1 } from "./idempotency.js";
 import { ActionFilePersistence } from "./persistence.js";
 import { ACTION_OPERATION_STATE } from "./protocol-contract.js";
 import { ACTION_CHALLENGE_CLASS, ACTION_DECISION, ACTOR_KIND } from "./public-action-contract.js";
