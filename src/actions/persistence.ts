@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   type ProcessLock,
@@ -259,6 +259,27 @@ export class ActionFilePersistence {
     return this.namespaceFiles(this.proposals, /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}\.json$/)
       .map((name) => name.slice(0, -5))
       .sort();
+  }
+
+  /** Last modified time of the proposal's authority file, or -1 when absent.
+   * The snapshot cache keys on this value because every state transition
+   * appends to the authority frames. */
+  authorityMtimeMs(proposalId: string): number {
+    try {
+      return statSync(this.authorityPath(proposalId)).mtimeMs;
+    } catch {
+      return -1;
+    }
+  }
+
+  /** Last modified time of the proposals namespace; used to invalidate
+   * in-process read caches when another store instance writes. */
+  proposalsMtimeMs(): number {
+    try {
+      return statSync(this.proposals).mtimeMs;
+    } catch {
+      return -1;
+    }
   }
 
   idempotencyChainsForProposal(proposalId: string): ActionIdempotencyBindingV1[][] {

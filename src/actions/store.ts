@@ -85,6 +85,34 @@ export class ActionAuthorityStore {
   private readonly challenges: ApprovalChallengeAuthority;
   private readonly authorityResolver: ActionAuthorityResolverV1 | null;
   private readonly fault: ActionAuthorityStoreOptions["fault"];
+  private readonly snapshotCache = new Map<string, ActionAuthoritySnapshotV1 | null>();
+  private readonly snapshotCacheMtimes = new Map<string, number>();
+  private cachedProposalIds: string[] | null = null;
+  private cachedProposalsMtime = -1;
+
+  private invalidateCache(): void {
+    this.cachedProposalIds = null;
+    this.snapshotCache.clear();
+    this.snapshotCacheMtimes.clear();
+  }
+
+  /** Drop the cached proposal listing when the store directory changed on
+   * disk. A second store instance (browser vs home authorities) writes the
+   * same files, so a same-process cache cannot rely on instance-local
+   * invalidation alone. */
+  private refreshCacheAuthority(): void {
+    const mtime = this.files.proposalsMtimeMs();
+    if (mtime !== this.cachedProposalsMtime) {
+      this.invalidateCache();
+      this.cachedProposalsMtime = mtime;
+    }
+  }
+
+  private proposalIds(): string[] {
+    this.refreshCacheAuthority();
+    if (this.cachedProposalIds === null) this.cachedProposalIds = this.files.proposalIds();
+    return this.cachedProposalIds;
+  }
 
   constructor(actionRoot: string, options: ActionAuthorityStoreOptions = {}) {
     this.files = new ActionFilePersistence(actionRoot);
@@ -110,9 +138,22 @@ export class ActionAuthorityStore {
     );
   }
 
+  /** Run a store mutation with the read cache dropped before and after, so a
+   * mid-operation throw still leaves the next read with durable truth. */
+  private mutate<T>(operation: () => T): T {
+    this.invalidateCache();
+    try {
+      return operation();
+    } finally {
+      this.invalidateCache();
+    }
+  }
+
   createProposal(input: CreateProposalInputV1): { created: boolean; proposal: ActionProposalV1 } {
     assertRequestAuthority(input.authority);
-    return createActionProposal(this.files, this.now, input, this.authorityResolver, this.fault);
+    return this.mutate(() =>
+      createActionProposal(this.files, this.now, input, this.authorityResolver, this.fault),
+    );
   }
 
   preparedProposal(input: {
@@ -154,7 +195,17 @@ export class ActionAuthorityStore {
   }
 
   get(proposalId: string): ActionAuthoritySnapshotV1 | null {
-    return readVerifiedActionSnapshot(this.files, this.authorityResolver, proposalId);
+    // Per-proposal snapshot cache keyed by the authority file's mtime: every
+    // state transition (approval, staleness, terminal) appends to that file
+    // from any store instance, so an equal mtime proves the snapshot is
+    // current without re-reading and re-verifying the whole closure.
+    const authorityMtime = this.files.authorityMtimeMs(proposalId);
+    if (authorityMtime === this.snapshotCacheMtimes.get(proposalId))
+      return this.snapshotCache.get(proposalId) ?? null;
+    const snapshot = readVerifiedActionSnapshot(this.files, this.authorityResolver, proposalId);
+    this.snapshotCache.set(proposalId, snapshot);
+    this.snapshotCacheMtimes.set(proposalId, authorityMtime);
+    return snapshot;
   }
 
   getRecorded(proposalId: string): ActionAuthoritySnapshotV1 | null {
@@ -162,8 +213,7 @@ export class ActionAuthorityStore {
   }
 
   listPending(): ActionAuthoritySnapshotV1[] {
-    return this.files
-      .proposalIds()
+    return this.proposalIds()
       .map((proposalId) => this.get(proposalId))
       .filter(
         (value): value is ActionAuthoritySnapshotV1 =>
@@ -177,7 +227,7 @@ export class ActionAuthorityStore {
   }
 
   list(): ActionAuthoritySnapshotV1[] {
-    return listActionSnapshots(this.files.proposalIds(), (proposalId) => this.get(proposalId));
+    return listActionSnapshots(this.proposalIds(), (proposalId) => this.get(proposalId));
   }
 
   /** Structural-only snapshots for domain bootstrap before a retained resolver is rebound. */
@@ -218,108 +268,110 @@ export class ActionAuthorityStore {
   }
 
   decide(input: DecideActionInputV1): ActionApprovalV1 {
-    assertRequestAuthority(input.authority);
-    if (input.authority.actor.kind === ACTOR_KIND.AGENT)
-      throw new Error("agent cannot approve or deny host actions");
-    if (input.authority.actor.kind === ACTOR_KIND.SYSTEM_RECOVERY)
-      throw new Error("system recovery cannot approve or deny new intent");
-    const observed = requireOwnedSnapshot(
-      this.files,
-      (id) => this.get(id),
-      input.proposal_id,
-      input.proposal_digest,
-      input.authority,
-    );
-    const required = requiredChallengeClass(observed.proposal, input.authority);
-    const challenged = requiresApprovalChallenge(required);
-    if (input.decision === ACTION_DECISION.APPROVED && challenged) {
-      if (!this.hmacKey || !input.challenge_id || input.challenge_response === null)
-        throw new ActionConflictError(
-          PUBLIC_ERROR_CODE.STALE_PROPOSAL,
-          "A bound approval challenge is required.",
-          input.proposal_id,
-        );
-      return this.challenges.consumeAndCommit(
-        {
-          challenge_id: input.challenge_id,
-          proposal_id: input.proposal_id,
-          proposal_digest: input.proposal_digest,
-          authority: input.authority,
-          response: input.challenge_response,
-        },
-        (lock, snapshot, sampledNow) =>
-          revalidateReview(
-            this.files,
-            this.authorityResolver,
-            sampledNow,
-            snapshot,
-            input.authority,
-            input.decision,
-            lock,
-          ).approval_expires_at,
-        (lock, snapshot, consumed) => {
-          const approval = materializeApproval(snapshot.proposal, {
-            decision: ACTION_DECISION.APPROVED,
-            decided_by: consumed.approval_decided_by ?? input.authority.actor,
-            challenge_class: consumed.challenge_class,
-            challenge_digest: consumed.frame_digest,
-            decided_at: consumed.consumed_at ?? "",
-            expires_at: consumed.approval_expires_at ?? "",
-          });
-          if (snapshot.state === ACTION_OPERATION_STATE.APPROVED) {
-            if (!snapshot.approval || !equalCanonical(snapshot.approval, approval))
-              throw new Error("consumed challenge conflicts with durable approval");
-            return snapshot.approval;
-          }
-          if (snapshot.state !== ACTION_OPERATION_STATE.PENDING_REVIEW)
-            throw new ActionConflictError(
-              PUBLIC_ERROR_CODE.STALE_PROPOSAL,
-              "Proposal already has a terminal winner.",
-              input.proposal_id,
-            );
-          appendApproval(this.files, lock, snapshot, approval);
-          return approval;
-        },
-      );
-    }
-    if (input.challenge_id !== null || input.challenge_response !== null)
-      throw new Error("approval challenge fields must be jointly null or required");
-    return this.files.withLock(`action-decision:${input.proposal_id}`, (lock) => {
-      const snapshot = requireOwnedPending(
+    return this.mutate(() => {
+      assertRequestAuthority(input.authority);
+      if (input.authority.actor.kind === ACTOR_KIND.AGENT)
+        throw new Error("agent cannot approve or deny host actions");
+      if (input.authority.actor.kind === ACTOR_KIND.SYSTEM_RECOVERY)
+        throw new Error("system recovery cannot approve or deny new intent");
+      const observed = requireOwnedSnapshot(
         this.files,
         (id) => this.get(id),
         input.proposal_id,
         input.proposal_digest,
         input.authority,
       );
-      const proof = revalidateReview(
-        this.files,
-        this.authorityResolver,
-        this.now(),
-        snapshot,
-        input.authority,
-        input.decision,
-        lock,
-      );
-      const challengeClass =
-        input.decision === ACTION_DECISION.DENIED
-          ? ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM
-          : required;
-      const approval = materializeApproval(snapshot.proposal, {
-        decision: input.decision,
-        decided_by: input.authority.actor,
-        challenge_class: challengeClass,
-        challenge_digest: null,
-        decided_at: proof.checked_at,
-        expires_at: proof.approval_expires_at,
+      const required = requiredChallengeClass(observed.proposal, input.authority);
+      const challenged = requiresApprovalChallenge(required);
+      if (input.decision === ACTION_DECISION.APPROVED && challenged) {
+        if (!this.hmacKey || !input.challenge_id || input.challenge_response === null)
+          throw new ActionConflictError(
+            PUBLIC_ERROR_CODE.STALE_PROPOSAL,
+            "A bound approval challenge is required.",
+            input.proposal_id,
+          );
+        return this.challenges.consumeAndCommit(
+          {
+            challenge_id: input.challenge_id,
+            proposal_id: input.proposal_id,
+            proposal_digest: input.proposal_digest,
+            authority: input.authority,
+            response: input.challenge_response,
+          },
+          (lock, snapshot, sampledNow) =>
+            revalidateReview(
+              this.files,
+              this.authorityResolver,
+              sampledNow,
+              snapshot,
+              input.authority,
+              input.decision,
+              lock,
+            ).approval_expires_at,
+          (lock, snapshot, consumed) => {
+            const approval = materializeApproval(snapshot.proposal, {
+              decision: ACTION_DECISION.APPROVED,
+              decided_by: consumed.approval_decided_by ?? input.authority.actor,
+              challenge_class: consumed.challenge_class,
+              challenge_digest: consumed.frame_digest,
+              decided_at: consumed.consumed_at ?? "",
+              expires_at: consumed.approval_expires_at ?? "",
+            });
+            if (snapshot.state === ACTION_OPERATION_STATE.APPROVED) {
+              if (!snapshot.approval || !equalCanonical(snapshot.approval, approval))
+                throw new Error("consumed challenge conflicts with durable approval");
+              return snapshot.approval;
+            }
+            if (snapshot.state !== ACTION_OPERATION_STATE.PENDING_REVIEW)
+              throw new ActionConflictError(
+                PUBLIC_ERROR_CODE.STALE_PROPOSAL,
+                "Proposal already has a terminal winner.",
+                input.proposal_id,
+              );
+            appendApproval(this.files, lock, snapshot, approval);
+            return approval;
+          },
+        );
+      }
+      if (input.challenge_id !== null || input.challenge_response !== null)
+        throw new Error("approval challenge fields must be jointly null or required");
+      return this.files.withLock(`action-decision:${input.proposal_id}`, (lock) => {
+        const snapshot = requireOwnedPending(
+          this.files,
+          (id) => this.get(id),
+          input.proposal_id,
+          input.proposal_digest,
+          input.authority,
+        );
+        const proof = revalidateReview(
+          this.files,
+          this.authorityResolver,
+          this.now(),
+          snapshot,
+          input.authority,
+          input.decision,
+          lock,
+        );
+        const challengeClass =
+          input.decision === ACTION_DECISION.DENIED
+            ? ACTION_CHALLENGE_CLASS.NORMAL_CONFIRM
+            : required;
+        const approval = materializeApproval(snapshot.proposal, {
+          decision: input.decision,
+          decided_by: input.authority.actor,
+          challenge_class: challengeClass,
+          challenge_digest: null,
+          decided_at: proof.checked_at,
+          expires_at: proof.approval_expires_at,
+        });
+        appendApproval(this.files, lock, snapshot, approval);
+        return approval;
       });
-      appendApproval(this.files, lock, snapshot, approval);
-      return approval;
     });
   }
 
   prepareDispatch(proposalId: string, approvalId: string): ActionDispatchRecordV1 {
-    return prepareActionDispatch(this.dispatchRuntime(), proposalId, approvalId);
+    return this.mutate(() => prepareActionDispatch(this.dispatchRuntime(), proposalId, approvalId));
   }
 
   prevalidateDispatch(proposalId: string, approvalId: string): void {
@@ -327,7 +379,7 @@ export class ActionAuthorityStore {
   }
 
   reserveDispatch(proposalId: string, approvalId: string): ActionDispatchRecordV1 {
-    return reserveActionDispatch(this.dispatchRuntime(), proposalId, approvalId);
+    return this.mutate(() => reserveActionDispatch(this.dispatchRuntime(), proposalId, approvalId));
   }
 
   getDispatch(operationId: string): ActionDispatchRecordV1 | null {
@@ -339,37 +391,39 @@ export class ActionAuthorityStore {
   }
 
   beginDispatch(proposalId: string, approvalId: string): ActionAuthoritySnapshotV1 {
-    return beginActionDispatch(this.dispatchRuntime(), proposalId, approvalId);
+    return this.mutate(() => beginActionDispatch(this.dispatchRuntime(), proposalId, approvalId));
   }
 
   recordTerminal(proposalId: string): ActionAuthoritySnapshotV1 {
-    return recordActionTerminal(this.dispatchRuntime(), proposalId);
+    return this.mutate(() => recordActionTerminal(this.dispatchRuntime(), proposalId));
   }
 
   cancel(input: CancelActionInputV1): ActionAuthoritySnapshotV1 {
-    return cancelAction(this.files, (id) => this.get(id), this.now, input);
+    return this.mutate(() => cancelAction(this.files, (id) => this.get(id), this.now, input));
   }
 
   issueChallenge(input: ApprovalChallengeRequestV1): ApprovalChallengeResponseV1 {
-    assertRequestAuthority(input.authority);
-    if (input.authority.actor.kind === ACTOR_KIND.AGENT)
-      throw new Error("agent cannot issue host-action approval challenges");
-    if (input.authority.actor.kind === ACTOR_KIND.SYSTEM_RECOVERY)
-      throw new Error("system recovery cannot issue approval challenges");
-    if (!this.hmacKey) throw new Error("approval challenge identity key is required");
-    return this.challenges.issue(input, (lock, snapshot, sampledNow) => {
-      const expected = requiredChallengeClass(snapshot.proposal, input.authority);
-      if (expected !== input.challenge_class || !requiresApprovalChallenge(expected))
-        throw new Error("requested challenge class is not required by the proposal");
-      revalidateReview(
-        this.files,
-        this.authorityResolver,
-        sampledNow,
-        snapshot,
-        input.authority,
-        ACTION_DECISION.APPROVED,
-        lock,
-      );
+    return this.mutate(() => {
+      assertRequestAuthority(input.authority);
+      if (input.authority.actor.kind === ACTOR_KIND.AGENT)
+        throw new Error("agent cannot issue host-action approval challenges");
+      if (input.authority.actor.kind === ACTOR_KIND.SYSTEM_RECOVERY)
+        throw new Error("system recovery cannot issue approval challenges");
+      if (!this.hmacKey) throw new Error("approval challenge identity key is required");
+      return this.challenges.issue(input, (lock, snapshot, sampledNow) => {
+        const expected = requiredChallengeClass(snapshot.proposal, input.authority);
+        if (expected !== input.challenge_class || !requiresApprovalChallenge(expected))
+          throw new Error("requested challenge class is not required by the proposal");
+        revalidateReview(
+          this.files,
+          this.authorityResolver,
+          sampledNow,
+          snapshot,
+          input.authority,
+          ACTION_DECISION.APPROVED,
+          lock,
+        );
+      });
     });
   }
 
