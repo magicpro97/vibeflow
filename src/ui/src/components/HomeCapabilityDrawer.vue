@@ -22,72 +22,67 @@
         <button type="submit" :disabled="store.capabilityLoading">Search</button>
       </form>
 
-      <div v-if="store.capabilityError" class="home-drawer-state" role="alert">
-        <strong>Capability index unavailable</strong>
-        <span>{{ store.capabilityError }}</span>
-        <button type="button" @click="store.searchCapabilities()">Try again</button>
-      </div>
-      <div
-        v-else-if="store.capabilityLoading"
-        class="home-loading-panel home-loading-panel--drawer"
-        aria-label="Loading capabilities"
-        role="status"
-        aria-live="polite"
-      >
-        <header class="home-loading-panel__header">
-          <span>{{ capabilityLoading.eyebrow }}</span>
-          <strong>{{ capabilityLoading.title }}</strong>
-        </header>
-        <p class="home-loading-panel__copy">{{ capabilityLoading.detail }}</p>
-        <ul class="home-loading-panel__checkpoints" aria-label="Capability search progress">
-          <li v-for="checkpoint in capabilityLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
-        </ul>
-        <div class="home-loading-capabilities" aria-hidden="true">
-          <article v-for="index in 3" :key="index">
-            <span class="home-loading-capabilities__icon" />
-            <div class="home-loading-capabilities__copy">
-              <strong />
-              <small />
-            </div>
-            <i />
-          </article>
+      <div class="home-capability-list-wrap">
+        <div class="home-capability-view home-capability-view--list" :class="{ 'home-capability-view--active': store.capabilities.length }">
+          <!-- Thin loading bar — CSS-only, no layout shift -->
+          <div v-if="store.capabilityLoading" class="home-capability-loadbar" role="status" aria-live="polite" />
+
+          <div v-if="store.capabilities.length" class="home-capability-list" role="list">
+            <article v-for="item in store.capabilities" :key="`${item.package_id}:${item.version}`" role="listitem">
+              <header>
+                <span class="home-capability-icon" aria-hidden="true">{{ item.display_name.slice(0, 1).toUpperCase() }}</span>
+                <span><strong>{{ item.display_name }}</strong><small>{{ item.package_id }}</small></span>
+                <i :data-status="item.status">{{ statusLabel(item.status) }}</i>
+              </header>
+              <p>{{ item.summary }}</p>
+              <div class="home-capability-meta">
+                <span v-if="item.version">v{{ item.version }}</span>
+                <span v-if="item.source_trust">{{ item.source_trust }}</span>
+                <span>{{ item.cache_status }}</span>
+              </div>
+              <div v-if="item.status === CAPABILITY_STATUS.MANUAL || item.status === CAPABILITY_STATUS.UNSUPPORTED || item.status === CAPABILITY_STATUS.NEEDS_RECOVERY" class="home-capability-warning">
+                {{ stateHelp(item.status) }}
+              </div>
+              <footer>
+                <button type="button" @click="useCapability(item)">
+                  {{ item.status === CAPABILITY_STATUS.READY ? "Manage in chat" : item.status === CAPABILITY_STATUS.NEEDS_RECOVERY ? "Prepare repair" : "Prepare install" }}
+                  <span aria-hidden="true">→</span>
+                </button>
+              </footer>
+            </article>
+            <button
+              v-if="store.paging.capability.nextCursor"
+              type="button"
+              class="home-button"
+              :disabled="store.paging.capability.loadingMore"
+              @click="store.loadMoreCapabilities()"
+            >{{ store.paging.capability.loadingMore ? "Loading…" : "Load more capabilities" }}</button>
+          </div>
+          <div v-if="store.capabilityError" class="home-drawer-state home-drawer-state--inline" role="alert">
+            <span>{{ store.capabilityError }}</span>
+            <button type="button" @click="store.searchCapabilities()">Retry</button>
+          </div>
         </div>
-      </div>
-      <div v-else-if="!store.capabilities.length" class="home-drawer-state">
-        <span class="home-drawer-state__glyph" aria-hidden="true">⌁</span>
-        <strong>No capabilities found</strong>
-        <span>Try another search or switch scope.</span>
-      </div>
-      <div v-else class="home-capability-list" role="list">
-        <article v-for="item in store.capabilities" :key="`${item.package_id}:${item.version}`" role="listitem">
-          <header>
-            <span class="home-capability-icon" aria-hidden="true">{{ item.display_name.slice(0, 1).toUpperCase() }}</span>
-            <span><strong>{{ item.display_name }}</strong><small>{{ item.package_id }}</small></span>
-            <i :data-status="item.status">{{ statusLabel(item.status) }}</i>
-          </header>
-          <p>{{ item.summary }}</p>
-          <div class="home-capability-meta">
-            <span v-if="item.version">v{{ item.version }}</span>
-            <span v-if="item.source_trust">{{ item.source_trust }}</span>
-            <span>{{ item.cache_status }}</span>
+
+        <div class="home-capability-view home-capability-view--empty" :class="{ 'home-capability-view--active': !store.capabilities.length }">
+          <!-- Full error -->
+          <div v-if="store.capabilityError" class="home-drawer-state" role="alert">
+            <strong>Capability index unavailable</strong>
+            <span>{{ store.capabilityError }}</span>
+            <button type="button" @click="store.searchCapabilities()">Try again</button>
           </div>
-          <div v-if="item.status === CAPABILITY_STATUS.MANUAL || item.status === CAPABILITY_STATUS.UNSUPPORTED || item.status === CAPABILITY_STATUS.NEEDS_RECOVERY" class="home-capability-warning">
-            {{ stateHelp(item.status) }}
+          <!-- Empty -->
+          <div v-else-if="!store.capabilityLoading" class="home-drawer-state">
+            <span class="home-drawer-state__glyph" aria-hidden="true">⌁</span>
+            <strong>No capabilities found</strong>
+            <span>Try another search or switch scope.</span>
           </div>
-          <footer>
-            <button type="button" @click="useCapability(item)">
-              {{ item.status === CAPABILITY_STATUS.READY ? 'Manage in chat' : item.status === CAPABILITY_STATUS.NEEDS_RECOVERY ? 'Prepare repair' : 'Prepare install' }}
-              <span aria-hidden="true">→</span>
-            </button>
-          </footer>
-        </article>
-        <button
-          v-if="store.paging.capability.nextCursor"
-          type="button"
-          class="home-button"
-          :disabled="store.paging.capability.loadingMore"
-          @click="store.loadMoreCapabilities()"
-        >{{ store.paging.capability.loadingMore ? "Loading…" : "Load more capabilities" }}</button>
+          <!-- Loading -->
+          <div v-else class="home-drawer-loading" aria-label="Loading capabilities" role="status" aria-live="polite">
+            <span class="home-drawer-loading__spinner" />
+            Loading…
+          </div>
+        </div>
       </div>
     </aside>
   </Transition>

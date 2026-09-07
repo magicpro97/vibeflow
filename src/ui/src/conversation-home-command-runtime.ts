@@ -6,6 +6,7 @@ import {
 } from "../../orchestrator/conversation/conversation-interaction-contract.js";
 import { CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE } from "../../orchestrator/conversation/conversation-message-queue-contract.js";
 import { CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION } from "../../orchestrator/conversation/conversation-private-context-broker-wire.js";
+import { homeCreateParticipants } from "./composables/useHomeEngines.js";
 import { type BrowserActionCandidate, conversationHomeApi } from "./conversation-home-api.js";
 import {
   moveHomeQuoteReference,
@@ -213,22 +214,22 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     input.composerError.value = "";
     try {
       if (!input.activeRootId.value) {
-        if (
+        const unstartableStart =
           intent.kind !== HOME_COMPOSER_INTENT_KIND.MESSAGE ||
-          intent.targets !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL
-        )
+          intent.targets !== CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL;
+        if (unstartableStart)
           throw new Error("Start with a natural-language goal, then add agents or capabilities.");
         const privateContext = input.privateContext.captureForCreate();
         if (input.privateContext.present() && !privateContext)
-          throw new Error(
-            "Refresh this private context selection before creating the conversation.",
-          );
+          throw new Error("Refresh this private context selection first.");
+        const requestParticipants = homeCreateParticipants();
         const createRequest = {
           schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
           idempotency_key:
             privateContext?.idempotency_key ?? `home-create.${createHomeActionKey()}`.slice(0, 128),
           topic: intent.content,
           private_context_present: privateContext !== null,
+          ...(requestParticipants ? { participants: requestParticipants } : {}),
         };
         let created: Awaited<ReturnType<typeof conversationHomeApi.create>>;
         try {

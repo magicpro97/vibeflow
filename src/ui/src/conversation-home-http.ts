@@ -26,7 +26,7 @@ function headers(method: "GET" | "PATCH" | "POST"): Record<string, string> {
   return {
     "content-type": "application/json",
     ...(write ? {} : { "cache-control": "no-store" }),
-    ...(write && CSRF ? { [UI_LAN_TOKEN_HEADER]: CSRF } : {}),
+    ...(CSRF ? { [UI_LAN_TOKEN_HEADER]: CSRF } : {}),
   };
 }
 

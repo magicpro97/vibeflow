@@ -3,11 +3,12 @@
     <div v-if="!store.online" class="home-offline-note" role="status">
       You’re offline. This draft stays in memory and will not send itself when the connection returns.
     </div>
-    <HomeQueuedMessages :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
-    <HomeQuoteSelectionList v-if="!store.queuedMessageEdit" :chips="quoteChips" />
-    <HomePrivateRangeSummary @change="openPrivateRangePanel(true)" />
+    <HomeQueuedMessages v-if="store.activeSession" :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
+    <HomeQuoteSelectionList v-if="store.activeSession && !store.queuedMessageEdit" :chips="quoteChips" />
+    <HomePrivateRangeSummary v-if="store.activeSession" @change="openPrivateRangePanel(true)" />
     <form class="home-composer" aria-label="Message VibeFlow" @submit.prevent="submit">
       <HomeQueueEditStatus
+        v-if="store.activeSession"
         :queue-sequence="store.queuedMessageEdit?.queue_sequence ?? null"
         :saving="store.queuedMessageEditSaving"
         :send-as-new="store.queueSendAsNew"
@@ -67,7 +68,7 @@
         @dismissed="restoreComposerFocus"
       />
       <div class="home-composer__toolbar">
-        <div class="home-composer__tools" aria-label="Conversation shortcuts">
+        <div v-if="store.activeSession" class="home-composer__tools" aria-label="Conversation shortcuts">
           <button type="button" title="Add an AI participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('+')">
             <span aria-hidden="true">+</span> Agent
           </button>
@@ -93,6 +94,7 @@
             Capabilities
           </button>
         </div>
+        <HomeEnginePicker />
         <button
           class="home-send"
           :class="{
@@ -145,6 +147,7 @@ import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-messag
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
+import HomeEnginePicker from "./HomeEnginePicker.vue";
 import HomePrivateRangePanel from "./HomePrivateRangePanel.vue";
 import HomePrivateRangeSummary from "./HomePrivateRangeSummary.vue";
 import HomeQueueEditStatus from "./HomeQueueEditStatus.vue";

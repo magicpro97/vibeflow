@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { productionCapabilityRuntimeV1 } from "./capabilities/runtime-factory.js";
 import type { CapabilityRuntimeFactoryOptionsV1 } from "./capabilities/runtime-factory.js";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
+import { ENGINES } from "./core/agent-contract.js";
 import { HOOK_DECISION } from "./core/hook-contract.js";
 import {
   UI_HOOK_APPROVAL,
@@ -23,6 +24,7 @@ import {
   serializeSseJsonData,
   serializeSseJsonEvent,
 } from "./orchestrator/conversation/conversation-sse-contract.js";
+import { preflightAll } from "./preflight.js";
 import { scanRepo } from "./scanner.js";
 import { BoundedRequestBodyError, readBoundedUtf8Body } from "./server/bounded-request-body.js";
 import { handleCapabilityRoute } from "./server/capability-route.js";
@@ -193,9 +195,14 @@ export async function startServer(
             packageIdFromPath = "%";
           }
         }
+        const sessions: { authorize(req: Request): boolean } = conversation?.sessions ?? {
+          authorize: guarded,
+        };
+        const authorizeWithFallback: typeof sessions.authorize = (req) =>
+          sessions.authorize(req) || guarded(req);
         return handleCapabilityRoute(
           {
-            sessions: conversation?.sessions ?? { authorize: guarded },
+            sessions: { authorize: authorizeWithFallback },
             capabilities: {
               query: (input) =>
                 productionCapabilityRuntimeV1({
@@ -213,6 +220,17 @@ export async function startServer(
           url,
           packageIdFromPath,
         );
+      }
+
+      if (method === "GET" && path === "/api/engines") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        const refresh = url.searchParams.get("refresh") === "1";
+        const engines = preflightAll([...ENGINES], {
+          probe: false,
+          cacheKey: activeRepo,
+          skipCache: refresh,
+        }).map(({ engine, level, detail, checkedAt }) => ({ engine, level, detail, checkedAt }));
+        return Response.json({ engines }, { headers: { "cache-control": "no-store" } });
       }
 
       if (method === "POST" && path === "/api/home/private-file-range-handoffs") {
