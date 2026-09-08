@@ -263,7 +263,7 @@ export function openOrCreatePrivateFileAt(directory: PinnedDirectory, name: stri
       throw error;
     }
   }
-  const raced = openAtRetryEacces(directory, name);
+  const raced = openAtRetryEacces(() => openAt(directory, name, fs.constants.O_RDWR));
   try {
     assertPrivateFile(raced, name, 1);
     return raced;
@@ -273,13 +273,13 @@ export function openOrCreatePrivateFileAt(directory: PinnedDirectory, name: stri
 }
 
 /** Open with a brief EACCES retry: a racing creator may still be between
- * openat(CREAT) and fchmod, leaving the file at mode 0 for microseconds. */
-function openAtRetryEacces(directory: PinnedDirectory, name: string): number {
-  const deadline = Date.now() + 100;
+ * openat(CREAT) and fchmod, leaving the file at mode 0 for microseconds.
+ * Exported as a pure seam so the branches are testable without a live FS. */
+export function openAtRetryEacces(openAttempt: () => number, deadline = Date.now() + 100): number {
   let lastError: unknown;
   for (;;) {
     try {
-      return openAt(directory, name, fs.constants.O_RDWR);
+      return openAttempt();
     } catch (error) {
       lastError = error;
       if (Date.now() >= deadline) throw lastError;
