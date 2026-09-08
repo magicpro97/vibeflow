@@ -545,6 +545,28 @@ describe("post-freeze sorting and validation authorities", () => {
     ).toThrow("invalid terminal revision reservation edge");
   });
 
+  test("active reservation tolerates not-yet-durable nodes; terminal reservation does not", () => {
+    const { priorHead, reservation } = revisionFixture(1);
+    const history = new Map([[reservation.content_digest, reservation]]);
+    expect(
+      deriveRevisionClaimEpoch(
+        reservation,
+        { root_session_id: reservation.root_session_id, nodes: [], lineages: [] } as never,
+        priorHead,
+        history,
+      ),
+    ).toBe(1);
+    const terminal = materializeConsumedRevisionReservation(reservation);
+    expect(() =>
+      deriveRevisionClaimEpoch(
+        terminal,
+        { root_session_id: reservation.root_session_id, nodes: [], lineages: [] } as never,
+        { ...priorHead, active: terminal.child, updated_by_operation_id: terminal.operation_id },
+        history,
+      ),
+    ).toThrow("is not durable lineage");
+  });
+
   test("rejects invalid node, candidate order, and head state", () => {
     expect(() =>
       assertLineageNodeIdentityV1({
