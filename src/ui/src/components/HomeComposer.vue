@@ -68,16 +68,12 @@
       />
       <div class="home-composer__toolbar">
         <div class="home-composer__tools" aria-label="Conversation shortcuts">
-          <button type="button" title="Add an AI participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('+')">
-            <span aria-hidden="true">+</span> Agent
-          </button>
-          <button type="button" title="Remove an AI participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('-@')">
-            <span aria-hidden="true">−</span> Remove
-          </button>
-          <button type="button" title="Message one participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('@')">
-            <span aria-hidden="true">@</span> Mention
-          </button>
-          <button
+                <HomeToolbarActions
+                  :participants="store.activeRevision?.participants ?? []"
+                  :disabled="Boolean(store.queuedMessageEdit)"
+                  @select="insert"
+                />
+                <button
             type="button"
             :disabled="Boolean(store.queuedMessageEdit)"
             :aria-expanded="privateRangeOpen"
@@ -152,6 +148,7 @@ import HomePrivateRangeSummary from "./HomePrivateRangeSummary.vue";
 import HomeQueueEditStatus from "./HomeQueueEditStatus.vue";
 import HomeQueuedMessages from "./HomeQueuedMessages.vue";
 import HomeQuoteSelectionList from "./HomeQuoteSelectionList.vue";
+import HomeToolbarActions from "./HomeToolbarActions.vue";
 
 const props = withDefaults(defineProps<{ transientUiOpen?: boolean }>(), {
   transientUiOpen: false,

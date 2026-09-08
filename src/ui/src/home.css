@@ -1772,6 +1772,43 @@ button:disabled {
   stroke: var(--home-amber);
   stroke-width: 1.45;
 }
+.home-composer__tool-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.home-toolbar-menu {
+  position: absolute;
+  z-index: 40;
+  top: 100%;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 17rem;
+  margin-top: 0.3rem;
+  padding: 0.35rem;
+  border: 1px solid var(--home-border);
+  border-radius: 0.7rem;
+  background: var(--home-surface);
+  box-shadow: 0 0.9rem 2.4rem rgb(0 0 0 / 0.22);
+}
+.home-toolbar-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+}
+.home-toolbar-menu__option--active {
+  background: var(--home-panel);
+  color: var(--home-ink);
+}
+.home-toolbar-menu__glyph {
+  width: 1.1rem;
+  text-align: center;
+  color: var(--home-amber);
+  font-weight: 650;
+}
 .home-send {
   display: grid;
   place-items: center;

@@ -19,7 +19,7 @@ import {
   PUBLIC_OPERATION_PROGRESS_STATUS,
 } from "../src/actions/public-operation-contract.js";
 import { AGENT_ENGINE } from "../src/core/agent-contract.js";
-import { WORKFLOW_ROLE_NAME } from "../src/core/role-name-contract.js";
+import { CONVERSATION_ROLE_NAME, WORKFLOW_ROLE_NAME } from "../src/core/role-name-contract.js";
 import { projectConversationAgentTurnOutput } from "../src/orchestrator/conversation/agent-turn-output-projection.js";
 import {
   CONVERSATION_CATALOG_HEALTH,
@@ -483,12 +483,12 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByText(/Private file range selected/i)).toHaveCount(0);
 
     await page.getByRole("button", { name: "Agent", exact: true }).click();
-    await expect(combobox).toHaveAttribute("aria-label", "Message");
-    await expect(combobox).toHaveAttribute("aria-expanded", "true");
-    await expect(page.getByRole("listbox", { name: "Composer suggestions" })).toBeVisible();
+    const toolbarMenu = page.getByRole("listbox", { name: "Toolbar agent suggestions" });
+    await expect(toolbarMenu).toBeVisible();
     await expect(page.getByRole("option", { name: /Implementation agent/ })).toBeVisible();
-    await expectAxeClean(page, "composer suggestions");
+    await expectAxeClean(page, "toolbar agent suggestions");
     await page.getByRole("option", { name: /Web UI/ }).click();
+    await expect(toolbarMenu).toHaveCount(0);
     await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`);
     await composer.fill("+");
     await expect(composer).toHaveAttribute("aria-controls", "composer-suggestions");
@@ -768,7 +768,17 @@ test.describe("AI-first conversation Home", () => {
     await composer.fill("Keep this draft");
     await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(4, 4));
     await page.getByRole("button", { name: "Agent", exact: true }).click();
-    await expect(composer).toHaveValue("Keep + this draft");
+    await expect(composer).toHaveValue("Keep this draft");
+    const draftMenu = page.getByRole("listbox", { name: "Toolbar agent suggestions" });
+    await expect(draftMenu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(draftMenu).toHaveCount(0);
+    await expect(composer).toHaveValue("Keep this draft");
+    await page.getByRole("button", { name: "Agent", exact: true }).click();
+    await page.getByRole("option", { name: /Implementation agent/ }).click();
+    await expect(composer).toHaveValue(
+      `Keep +${CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR}@${AGENT_ENGINE.CODEX} this draft`,
+    );
 
     const admitted = page.waitForResponse(
       (response) =>
