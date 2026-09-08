@@ -144,7 +144,6 @@ import HomeQueueEditStatus from "./HomeQueueEditStatus.vue";
 import HomeQueuedMessages from "./HomeQueuedMessages.vue";
 import HomeQuoteSelectionList from "./HomeQuoteSelectionList.vue";
 import HomeToolbarActions from "./HomeToolbarActions.vue";
-
 const props = withDefaults(defineProps<{ transientUiOpen?: boolean }>(), {
   transientUiOpen: false,
 });
@@ -210,16 +209,17 @@ const composerBusy = computed(() =>
   }),
 );
 const suggestionSignature = computed(() =>
-  visibleSuggestions.value.map((suggestion) => suggestion.value).join("\0"),
+  matchHomeComposerSuggestions(store.draft, store.activeRevision?.participants ?? [])
+    .map((s) => s.value)
+    .join("\0"),
 );
 const activeSuggestionId = computed(() =>
   visibleSuggestions.value.length ? suggestionOptionId(activeSuggestion.value) : undefined,
 );
-function resetSuggestionState() {
+watch(suggestionSignature, () => {
   suggestionsDismissed.value = false;
   activeSuggestion.value = 0;
-}
-watch(suggestionSignature, resetSuggestionState);
+});
 watch(
   [() => store.draft, visibleSuggestions],
   ([draft, availableSuggestions]) => {
