@@ -553,7 +553,7 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
 
   test("runDispatchAsync in bridge mode returns ok:false when VIBEFLOW_AI is unset", async () => {
     const origVAI = process.env.VIBEFLOW_AI;
-    delete process.env.VIBEFLOW_AI;
+    process.env.VIBEFLOW_AI = "";
     try {
       const r = await runDispatchAsync({
         engine: "claude",
@@ -563,7 +563,7 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
       expect(r.ok).toBe(false);
       expect(r.reason).toBe("VIBEFLOW_AI is not set");
     } finally {
-      if (origVAI === undefined) delete process.env.VIBEFLOW_AI;
+      if (origVAI === undefined) process.env.VIBEFLOW_AI = "";
       else process.env.VIBEFLOW_AI = origVAI;
     }
   });
