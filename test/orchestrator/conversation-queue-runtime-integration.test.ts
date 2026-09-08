@@ -508,7 +508,11 @@ test("FIFO delivery and needs-input replies publish each durable child exactly o
       "queue dispatcher quiescence",
       (items) => items.every(({ state }) => state === "delivered" || state === "stale"),
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The dispatcher polls on an interval; after quiescence it may still be
+    // mid-tick, and removing the root underneath it surfaces as an "unsafe
+    // journal/directory" append on slow runners. Give the loop a couple of
+    // poll windows to idle before the teardown removes the workspace.
+    await new Promise((resolve) => setTimeout(resolve, 250));
   });
   const enqueue = (key: string, content: string) =>
     bootstrap.authorities.messageQueue.enqueue({

@@ -220,7 +220,6 @@ function resetSuggestionState() {
   activeSuggestion.value = 0;
 }
 watch(suggestionSignature, resetSuggestionState);
-
 watch(
   [() => store.draft, visibleSuggestions],
   ([draft, availableSuggestions]) => {
