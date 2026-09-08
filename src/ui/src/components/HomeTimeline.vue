@@ -1,5 +1,5 @@
 <template>
-  <main id="conversation-main" ref="scroller" class="home-timeline" aria-label="Conversation" tabindex="-1" @scroll="trackScroll">
+  <main id="conversation-main" ref="scroller" class="home-timeline" aria-label="Conversation" tabindex="0" @scroll="trackScroll">
     <div v-if="store.activationError" class="home-inline-state home-inline-state--error" role="alert">
       <span><strong>Couldn’t refresh this conversation.</strong>{{ store.activationError }}</span>
       <button v-if="store.activeRootId" type="button" @click="store.selectSession(store.activeRootId)">Try again</button>
