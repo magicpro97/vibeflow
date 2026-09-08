@@ -12,6 +12,15 @@
         <span class="home-new-button__mark" aria-hidden="true">+</span>
         <span>New conversation</span>
       </button>
+      <button
+        class="home-rail__collapse"
+        type="button"
+        aria-label="Collapse conversation history"
+        title="Collapse conversation history"
+        @click="store.railCollapsed = true"
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m13 4-6 6 6 6" /></svg>
+      </button>
       <label class="home-search">
         <svg viewBox="0 0 20 20" aria-hidden="true">
           <circle cx="8.5" cy="8.5" r="5.5" />

@@ -466,6 +466,35 @@ button:disabled {
   font-size: 1.1rem;
   font-weight: 350;
 }
+.home-rail__top {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+.home-rail__collapse {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.7rem;
+  background: var(--home-paper);
+  color: var(--home-muted);
+  cursor: pointer;
+}
+.home-rail__collapse:hover {
+  border-color: var(--home-border-hover);
+  color: var(--home-ink);
+}
+.home-rail__collapse svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
 .home-search {
   position: relative;
   display: flex;
@@ -1711,7 +1740,28 @@ button:disabled {
   border-color: var(--home-border-accent);
   box-shadow: var(--home-focus-shadow);
 }
+.home-composer__field {
+  position: relative;
+}
+.home-composer__field .home-composer__highlight {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  overflow: hidden;
+  padding: 0.5rem 1rem 0.4rem;
+  pointer-events: none;
+  color: var(--home-ink);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
 .home-composer textarea {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   min-height: 3.45rem;
@@ -1720,12 +1770,34 @@ button:disabled {
   padding: 0.5rem 1rem 0.4rem;
   border: 0;
   background: transparent;
-  color: var(--home-ink);
+  color: transparent;
+  caret-color: var(--home-ink);
   font-size: 0.9rem;
   line-height: 1.5;
 }
+.home-composer textarea::selection {
+  background: rgb(180 130 60 / 0.25);
+  color: transparent;
+}
 .home-composer textarea::placeholder {
   color: var(--home-placeholder);
+}
+.home-composer-chip {
+  display: inline;
+  padding: 0.06rem 0.32rem;
+  border: 1px solid rgb(180 130 60 / 0.5);
+  border-radius: 0.4rem;
+  background: rgb(180 130 60 / 0.12);
+  color: var(--home-ink);
+  font-weight: 600;
+}
+.home-composer-chip--remove {
+  border-color: rgb(190 80 60 / 0.55);
+  background: rgb(190 80 60 / 0.12);
+}
+.home-composer-chip--mention {
+  border-color: rgb(80 130 190 / 0.5);
+  background: rgb(80 130 190 / 0.12);
 }
 .home-composer__toolbar {
   display: flex;
@@ -1803,7 +1875,7 @@ button:disabled {
   min-height: 2.7rem;
   padding: 0.45rem 0.6rem;
   border-radius: 0.55rem;
-  background: transparent;
+  background: var(--home-paper);
   color: var(--home-ink);
   text-align: left;
   font-size: 0.72rem;
@@ -1811,6 +1883,12 @@ button:disabled {
 .home-composer__tools .home-toolbar-menu button:hover,
 .home-toolbar-menu__option--active {
   background: var(--home-panel);
+}
+.home-toolbar-menu {
+  background: var(--home-surface);
+}
+.home-toolbar-menu button + button {
+  margin-top: 0.15rem;
 }
 .home-composer__tools .home-toolbar-menu button > span:last-child {
   color: var(--home-ink);

@@ -26,6 +26,11 @@
         :aria-owns="visibleSuggestions.length ? suggestionListId : undefined"
         tabindex="-1"
       >
+        <div
+          class="home-composer__highlight"
+          aria-hidden="true"
+          v-html="composerHighlight"
+        ></div>
         <textarea
           id="home-composer"
           ref="textarea"
@@ -40,6 +45,7 @@
           @compositionend="composing = false"
           @beforeinput="onBeforeInput"
           @input="resize"
+          @scroll="syncHighlightScroll"
           @keydown="onKeydown"
           @keyup="onKeyup"
         />
@@ -140,6 +146,7 @@ import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
 import { describeHomeComposerBusy } from "../conversation-home-loading.js";
 import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-message-queue-types.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
+import { renderComposerHighlight } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
 import HomeEnginePicker from "./HomeEnginePicker.vue";
@@ -241,11 +248,20 @@ watch(
   () => void restoreComposerFocus(),
 );
 
+const composerHighlight = computed(() => renderComposerHighlight(store.draft));
+
 function resize() {
   const element = textarea.value;
   if (!element) return;
   element.style.height = "0";
   element.style.height = `${Math.min(element.scrollHeight, 176)}px`;
+}
+
+function syncHighlightScroll() {
+  const element = textarea.value;
+  if (!element) return;
+  const overlay = document.querySelector<HTMLElement>(".home-composer__highlight");
+  if (overlay) overlay.scrollTop = element.scrollTop;
 }
 
 function insert(value: string) {

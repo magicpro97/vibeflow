@@ -1773,6 +1773,14 @@ test.describe("AI-first conversation Home", () => {
     await expect(railToggle).toBeFocused();
 
     await railToggle.click();
+    const railCollapse = page.getByRole("button", {
+      name: "Collapse conversation history",
+    });
+    await expect(railCollapse).toBeVisible();
+    await railCollapse.click();
+    await expect(page.locator(".home-rail")).toHaveAttribute("aria-hidden", "true");
+
+    await railToggle.click();
     await page.getByRole("button", { name: /Focus session/ }).click();
     const details = page.getByRole("button", { name: "Details" });
     await page.locator("#home-composer").fill("Keep this");
