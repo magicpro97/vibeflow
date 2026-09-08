@@ -77,7 +77,10 @@ failure in the thread — `[<engine> failed: <reason>]` — instead of a silent 
 #### New conversation button
 
 `+ New conversation` in the rail always returns to the composer on the home surface;
-typing the first message creates the conversation with the picked engine.
+typing the first message creates the conversation with the picked engine. The composer
+toolbar (agent, remove participant, attach, mention, private range, capabilities,
+engine chip, send) is available before a session exists — the creation flow needs
+`+ Agent`, private range, and the engine picker before the first send.
 
 ### 2. Composer
 
