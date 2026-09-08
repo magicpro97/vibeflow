@@ -2005,6 +2005,15 @@ button:disabled {
   font-size: 0.68rem;
   text-align: center;
 }
+.home-composer__suggestion-hint {
+  margin: 0.35rem 0.4rem 0.45rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px dashed var(--home-line);
+  border-radius: 0.6rem;
+  color: var(--home-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
 .home-suggestions {
   width: calc(100% - 0.8rem);
   max-height: 15rem;

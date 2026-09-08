@@ -49,6 +49,11 @@
           @keyup="onKeyup"
         />
       </div>
+      <HomeComposerSuggestionHint
+        v-if="!visibleSuggestions.length"
+        :draft="store.draft"
+        :participants="store.activeRevision?.participants ?? []"
+      />
       <div v-if="visibleSuggestions.length" :id="suggestionListId" class="home-suggestions" role="listbox" aria-label="Composer suggestions">
         <button
           v-for="(suggestion, index) in visibleSuggestions"
@@ -131,6 +136,7 @@ import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
 import HomeComposerHighlight from "./HomeComposerHighlight.vue";
 import HomeComposerSend from "./HomeComposerSend.vue";
 import HomeComposerStatus from "./HomeComposerStatus.vue";
+import HomeComposerSuggestionHint from "./HomeComposerSuggestionHint.vue";
 import HomeEnginePicker from "./HomeEnginePicker.vue";
 import HomePrivateRangePanel from "./HomePrivateRangePanel.vue";
 import HomePrivateRangeSummary from "./HomePrivateRangeSummary.vue";
@@ -162,11 +168,10 @@ const placeholder = computed(() =>
     activeSession: Boolean(store.activeSession),
   }),
 );
-const suggestions = computed(() =>
-  matchHomeComposerSuggestions(store.draft, store.activeRevision?.participants ?? []),
-);
 const visibleSuggestions = computed(() =>
-  store.queuedMessageEdit || suggestionsDismissed.value ? [] : suggestions.value,
+  store.queuedMessageEdit || suggestionsDismissed.value
+    ? []
+    : matchHomeComposerSuggestions(store.draft, store.activeRevision?.participants ?? []),
 );
 const queueEditAvailable = computed(
   () =>
@@ -205,19 +210,19 @@ const composerBusy = computed(() =>
   }),
 );
 const suggestionSignature = computed(() =>
-  suggestions.value.map((suggestion) => suggestion.value).join("\0"),
+  visibleSuggestions.value.map((suggestion) => suggestion.value).join("\0"),
 );
 const activeSuggestionId = computed(() =>
   visibleSuggestions.value.length ? suggestionOptionId(activeSuggestion.value) : undefined,
 );
-
-watch(suggestionSignature, () => {
+function resetSuggestionState() {
   suggestionsDismissed.value = false;
   activeSuggestion.value = 0;
-});
+}
+watch(suggestionSignature, resetSuggestionState);
 
 watch(
-  [() => store.draft, suggestions],
+  [() => store.draft, visibleSuggestions],
   ([draft, availableSuggestions]) => {
     if (availableSuggestions.length) suggestionDraftSnapshot.value = draft;
   },

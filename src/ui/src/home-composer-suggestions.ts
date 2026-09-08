@@ -74,3 +74,15 @@ export function matchHomeComposerSuggestions(
     return COMMAND_SUGGESTIONS.filter((row) => row.value.startsWith(value.toLowerCase()));
   return [];
 }
+
+export function emptyComposerSuggestionHint(
+  draft: string,
+  participants: readonly HomeParticipant[],
+): string | null {
+  const value = draft.trimStart();
+  return value.startsWith("@") && !value.includes(" ") && participants.length === 0
+    ? "Chưa có tác nhân để nhắc — thêm bằng nút +Agent trước."
+    : (value === "-" || value.startsWith("-@")) && !value.includes(" ") && participants.length === 0
+      ? "Chưa có tác nhân để gỡ — thêm bằng nút +Agent trước."
+      : null;
+}
