@@ -214,13 +214,29 @@ export function openExistingPrivateFileAt(
   flags = fs.constants.O_RDWR,
   maxLinks = 1,
 ): number | null {
-  const fd = tryOpenAt(directory, name, flags);
-  if (fd === null) return null;
-  try {
-    assertPrivateFile(fd, name, maxLinks);
-    return fd;
-  } catch (error) {
-    return cleanupThenThrow(error, [() => fs.closeSync(fd)]);
+  // A concurrent creator (openat + fchmod on arm64 where the variadic mode
+  // is dropped) can leave the file at mode 0 for a few microseconds; the
+  // open then fails EACCES even though the file is mid-creation. Retry
+  // briefly so the CAS race resolves deterministically instead of erroring.
+  const deadline = Date.now() + 100;
+  let lastError: unknown;
+  for (;;) {
+    let fd: number | null;
+    try {
+      fd = tryOpenAt(directory, name, flags);
+    } catch (error) {
+      lastError = error;
+      if (Date.now() >= deadline) throw lastError;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+      continue;
+    }
+    if (fd === null) return null;
+    try {
+      assertPrivateFile(fd, name, maxLinks);
+      return fd;
+    } catch (error) {
+      return cleanupThenThrow(error, [() => fs.closeSync(fd)]);
+    }
   }
 }
 
@@ -247,11 +263,27 @@ export function openOrCreatePrivateFileAt(directory: PinnedDirectory, name: stri
       throw error;
     }
   }
-  const raced = openAt(directory, name, fs.constants.O_RDWR);
+  const raced = openAtRetryEacces(directory, name);
   try {
     assertPrivateFile(raced, name, 1);
     return raced;
   } catch (error) {
     return cleanupThenThrow(error, [() => fs.closeSync(raced)]);
+  }
+}
+
+/** Open with a brief EACCES retry: a racing creator may still be between
+ * openat(CREAT) and fchmod, leaving the file at mode 0 for microseconds. */
+function openAtRetryEacces(directory: PinnedDirectory, name: string): number {
+  const deadline = Date.now() + 100;
+  let lastError: unknown;
+  for (;;) {
+    try {
+      return openAt(directory, name, fs.constants.O_RDWR);
+    } catch (error) {
+      lastError = error;
+      if (Date.now() >= deadline) throw lastError;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+    }
   }
 }

@@ -6,7 +6,7 @@ describe("openatWithRecoveredMode (openat variadic mode seam)", () => {
   test("propagates openat failure as-is", () => {
     expect(
       openatWithRecoveredMode(
-        () => -1,
+        (_fd, _name, _flags, _mode) => -1,
         () => 0,
         () => {},
         3,
@@ -20,7 +20,7 @@ describe("openatWithRecoveredMode (openat variadic mode seam)", () => {
   test("returns fd unchanged when O_CREAT is not set", () => {
     let fchmodCalls = 0;
     const fd = openatWithRecoveredMode(
-      () => 7,
+      (_fd, _name, _flags, _mode) => 7,
       () => {
         fchmodCalls++;
         return 0;
@@ -37,8 +37,12 @@ describe("openatWithRecoveredMode (openat variadic mode seam)", () => {
 
   test("applies fchmod to a freshly created fd", () => {
     let chmodded = -1;
+    let openMode = -1;
     const fd = openatWithRecoveredMode(
-      () => 9,
+      (_fd, _name, _flags, mode) => {
+        openMode = mode;
+        return 9;
+      },
       (d, mode) => {
         chmodded = d;
         expect(mode).toBe(0o640);
@@ -52,12 +56,13 @@ describe("openatWithRecoveredMode (openat variadic mode seam)", () => {
     );
     expect(fd).toBe(9);
     expect(chmodded).toBe(9);
+    expect(openMode).toBe(0o640);
   });
 
   test("closes the fd and returns -1 when fchmod fails", () => {
     const closed: number[] = [];
     const fd = openatWithRecoveredMode(
-      () => 11,
+      (_fd, _name, _flags, _mode) => 11,
       () => -1,
       (d) => closed.push(d),
       3,
@@ -71,7 +76,7 @@ describe("openatWithRecoveredMode (openat variadic mode seam)", () => {
 
   test("tolerates a throwing close after fchmod failure", () => {
     const fd = openatWithRecoveredMode(
-      () => 13,
+      (_fd, _name, _flags, _mode) => 13,
       () => -1,
       () => {
         throw new Error("close failed");

@@ -11,7 +11,7 @@ import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 // the result is deterministic across runtimes/machines. Exported as a pure
 // seam so the failure branches are testable without a live libc.
 export function openatWithRecoveredMode(
-  openat: (fd: number, name: string, flags: number) => number,
+  openat: (fd: number, name: string, flags: number, mode: number) => number,
   fchmod: (fd: number, mode: number) => number,
   closeFd: (fd: number) => void,
   fd: number,
@@ -19,7 +19,11 @@ export function openatWithRecoveredMode(
   flags: number,
   mode: number,
 ): number {
-  const created = openat(fd, name, flags) ?? -1;
+  // Pass the real mode to openat (reliably delivered on x64) so the file
+  // never exists as mode-0 in the create/fchmod window — a concurrent
+  // contender opening it there would hit EACCES. On arm64 the variadic
+  // mode is dropped, so fchmod below still repairs the bits.
+  const created = openat(fd, name, flags, mode) ?? -1;
   if (created < 0 || (flags & fs.constants.O_CREAT) === 0) return created;
   if ((fchmod(created, mode) ?? -1) !== 0) {
     try {
