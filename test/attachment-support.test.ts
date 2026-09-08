@@ -80,7 +80,11 @@ describe("engine attachment support matrix", () => {
     expect(textEngines).not.toContain(AGENT_ENGINE.CODEX);
     expect(textEngines).not.toContain(AGENT_ENGINE.ANTIGRAVITY);
     const imageEngines = enginesForAttachmentKind(ATTACHMENT_KIND.IMAGE);
-    expect(imageEngines).toEqual([AGENT_ENGINE.COPILOT, AGENT_ENGINE.CODEX, AGENT_ENGINE.OPENCODE]);
+    expect(imageEngines).toEqual([
+      AGENT_ENGINE.COPILOT,
+      AGENT_ENGINE.CODEX,
+      AGENT_ENGINE.OPENCODE,
+    ]);
   });
 
   test("every declared engine has kinds and a flag", () => {
