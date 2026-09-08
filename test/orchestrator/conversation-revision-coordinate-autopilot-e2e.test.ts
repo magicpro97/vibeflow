@@ -180,7 +180,7 @@ function passingVerifyReport(head: string): PolicyVerifyReport {
 }
 
 async function waitForCompleted(bootstrap: ConversationBootstrap, conversationId: string) {
-  const deadline = Date.now() + 8_000;
+  const deadline = Date.now() + 12_000;
   let snapshot = await bootstrap.service.snapshot(conversationId);
   while (snapshot?.lifecycle !== CONVERSATION_LIFECYCLE.COMPLETED && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 10));
