@@ -1,40 +1,52 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { HomeParticipant } from "../conversation-home-types.js";
+import { chipLabelFor, findComposerMentions } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 
 const props = defineProps<{
   participants: readonly HomeParticipant[];
   disabled: boolean;
+  draft: string;
+  agentLabels: ReadonlyMap<string, string>;
+  participantLabels: ReadonlyMap<string, string>;
 }>();
 
-const emit = defineEmits<{ select: [value: string] }>();
+const emit = defineEmits<{
+  select: [value: string];
+  remove: [value: string];
+}>();
 
-const openMenu = ref<"agent" | "mention" | "remove" | null>(null);
+const openMenu = ref<"agent" | "remove" | null>(null);
 const activeOption = ref(0);
 
 const options = computed(() => {
   if (!openMenu.value) return [];
-  const prefix = openMenu.value === "agent" ? "+" : openMenu.value === "remove" ? "-@" : "@";
-  return matchHomeComposerSuggestions(prefix, props.participants);
+  if (openMenu.value === "remove") {
+    const inDraft = findComposerMentions(props.draft);
+    if (inDraft.length)
+      return inDraft.map((token) => ({
+        glyph: "−",
+        label: `Remove ${chipLabelFor(token, props.agentLabels, props.participantLabels)}`,
+        description: "Remove this mention from the draft",
+        value: token,
+      }));
+  }
+  return matchHomeComposerSuggestions("+", props.participants);
 });
 
-const menuLabel = computed(() => {
-  const labels = {
-    agent: "Toolbar agent suggestions",
-    mention: "Toolbar mention suggestions",
-    remove: "Toolbar remove suggestions",
-  };
-  return labels[openMenu.value ?? "agent"];
-});
+const menuLabel = computed(() =>
+  openMenu.value === "remove" ? "Toolbar remove suggestions" : "Toolbar agent suggestions",
+);
 
-function toggle(kind: "agent" | "mention" | "remove") {
+function toggle(kind: "agent" | "remove") {
   openMenu.value = openMenu.value === kind ? null : kind;
   activeOption.value = 0;
 }
 
 function choose(value: string) {
-  emit("select", value);
+  if (openMenu.value === "remove") emit("remove", value);
+  else emit("select", value);
   openMenu.value = null;
 }
 
@@ -85,16 +97,6 @@ function onKeydown(event: KeyboardEvent) {
       @click="toggle('remove')"
     >
       <span aria-hidden="true">−</span> Remove
-    </button>
-    <button
-      type="button"
-      :disabled="props.disabled"
-      :aria-expanded="openMenu === 'mention' ? 'true' : 'false'"
-      aria-controls="toolbar-mention-options"
-      title="Message one participant"
-      @click="toggle('mention')"
-    >
-      <span aria-hidden="true">@</span> Mention
     </button>
     <div
       v-if="openMenu"

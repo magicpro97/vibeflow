@@ -9,7 +9,7 @@ export interface HomeComposerSuggestion {
   value: string;
 }
 
-const AGENT_SUGGESTIONS: HomeComposerSuggestion[] = [
+export const AGENT_SUGGESTIONS: HomeComposerSuggestion[] = [
   {
     glyph: "+",
     label: "Implementation agent",

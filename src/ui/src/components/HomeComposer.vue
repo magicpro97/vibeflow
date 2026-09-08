@@ -77,7 +77,11 @@
                 <HomeToolbarActions
                   :participants="store.activeRevision?.participants ?? []"
                   :disabled="Boolean(store.queuedMessageEdit)"
+                  :draft="store.draft"
+                  :agent-labels="agentChipLabels"
+                  :participant-labels="participantChipLabels"
                   @select="insert"
+                  @remove="removeMention"
                 />
                 <button
             type="button"
@@ -146,8 +150,8 @@ import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
 import { describeHomeComposerBusy } from "../conversation-home-loading.js";
 import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-message-queue-types.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import { renderComposerHighlight } from "../home-composer-highlight.js";
-import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import { nextMentionToken, renderComposerHighlight } from "../home-composer-highlight.js";
+import { AGENT_SUGGESTIONS, matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
 import HomeEnginePicker from "./HomeEnginePicker.vue";
 import HomePrivateRangePanel from "./HomePrivateRangePanel.vue";
@@ -248,7 +252,21 @@ watch(
   () => void restoreComposerFocus(),
 );
 
-const composerHighlight = computed(() => renderComposerHighlight(store.draft));
+const agentChipLabels = computed(
+  () => new Map(AGENT_SUGGESTIONS.map((suggestion) => [suggestion.value, suggestion.label])),
+);
+const participantChipLabels = computed(
+  () =>
+    new Map(
+      (store.activeRevision?.participants ?? []).map((participant) => [
+        participant.participant_id,
+        participant.role_ref,
+      ]),
+    ),
+);
+const composerHighlight = computed(() =>
+  renderComposerHighlight(store.draft, agentChipLabels.value, participantChipLabels.value),
+);
 
 function resize() {
   const element = textarea.value;
@@ -271,13 +289,26 @@ function insert(value: string) {
   const end = element?.selectionEnd ?? start;
   const before = store.draft.slice(0, start);
   const after = store.draft.slice(end);
+  const mention = nextMentionToken(store.draft, value);
   const leading = before && !/\s$/u.test(before) ? " " : "";
   const trailing = after && !/^\s/u.test(after) ? " " : "";
-  store.draft = `${before}${leading}${value}${trailing}${after}`;
-  const caret = before.length + leading.length + value.length + trailing.length;
+  store.draft = `${before}${leading}${mention}${trailing}${after}`;
+  const caret = before.length + leading.length + mention.length + trailing.length;
   nextTick(() => {
     textarea.value?.focus();
     textarea.value?.setSelectionRange(caret, caret);
+    resize();
+  });
+}
+
+function removeMention(value: string) {
+  if (store.queuedMessageEdit) return;
+  store.draft = store.draft
+    .split(value)
+    .map((part, index) => (index > 0 ? part.replace(/^\s+/, "") : part))
+    .join("");
+  nextTick(() => {
+    textarea.value?.focus();
     resize();
   });
 }
