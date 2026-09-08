@@ -112,7 +112,7 @@ describe("makeVibflowLLMFn (ADR-001)", () => {
     process.env.VIBEFLOW_AI = "echo COVERED";
     const fn = makeVibflowLLMFn("claude");
     expect(typeof fn).toBe("function");
-    if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+    if (orig === undefined) process.env.VIBEFLOW_AI = "";
     else process.env.VIBEFLOW_AI = orig;
   });
 
@@ -133,7 +133,7 @@ describe("makeVibflowLLMFn (ADR-001)", () => {
     const result = (await fn?.("test prompt")) ?? "";
     expect(result.trim()).toBe("COVERED");
     expect(requests).toEqual([{ engine: "codex", command: "echo COVERED", input: "test prompt" }]);
-    if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+    if (orig === undefined) process.env.VIBEFLOW_AI = "";
     else process.env.VIBEFLOW_AI = orig;
   });
 });
