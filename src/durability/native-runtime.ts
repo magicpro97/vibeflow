@@ -4,6 +4,34 @@ import { arch, constants as osConstants } from "node:os";
 import { DurabilityError, durabilityError } from "./errors.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
+// libc openat is variadic (mode is only consumed when O_CREAT is set); Bun FFI
+// cannot declare variadic parameters, so the mode argument is NOT reliably
+// delivered on arm64 and can silently create mode-0 files (EACCES on re-open).
+// Create with mode 0 and fix the permission bits via fchmod (fixed arity) so
+// the result is deterministic across runtimes/machines. Exported as a pure
+// seam so the failure branches are testable without a live libc.
+export function openatWithRecoveredMode(
+  openat: (fd: number, name: string, flags: number) => number,
+  fchmod: (fd: number, mode: number) => number,
+  closeFd: (fd: number) => void,
+  fd: number,
+  name: string,
+  flags: number,
+  mode: number,
+): number {
+  const created = openat(fd, name, flags) ?? -1;
+  if (created < 0 || (flags & fs.constants.O_CREAT) === 0) return created;
+  if ((fchmod(created, mode) ?? -1) !== 0) {
+    try {
+      closeFd(created);
+    } catch {
+      // Surface the fchmod error that caused the create to be rejected.
+    }
+    return -1;
+  }
+  return created;
+}
+
 export interface NativeBindings {
   openat: (
     directoryFd: number,
@@ -113,24 +141,16 @@ export function loadBunBindings(): NativeBindings {
   if (!errnoAddress) durabilityError("unsupported", `Bun FFI is missing ${errnoSymbol}`);
   errnoReader = () => ffi.read.i32(errnoAddress() as import("bun:ffi").Pointer, 0);
   return {
-    // libc openat is variadic (mode is only consumed when O_CREAT is set); Bun FFI
-    // cannot declare variadic parameters, so the mode argument is NOT reliably
-    // delivered on arm64 and can silently create mode-0 files (EACCES on re-open).
-    // Create with mode 0 and fix the permission bits via fchmod (fixed arity) so
-    // the result is deterministic across runtimes/machines.
-    openat: (fd, name, flags, _modeType, mode) => {
-      const created = symbols.openat?.(fd, cString(name), flags, 0) ?? -1;
-      if (created < 0 || (flags & fs.constants.O_CREAT) === 0) return created;
-      if ((symbols.fchmod?.(created, mode) ?? -1) !== 0) {
-        try {
-          fs.closeSync(created);
-        } catch {
-          // Surface the fchmod error that caused the create to be rejected.
-        }
-        return -1;
-      }
-      return created;
-    },
+    openat: (fd, name, flags, _modeType, mode) =>
+      openatWithRecoveredMode(
+        (d, n, f) => symbols.openat?.(d, cString(n), f) ?? -1,
+        (d, m) => symbols.fchmod?.(d, m) ?? -1,
+        (d) => fs.closeSync(d),
+        fd,
+        name,
+        flags,
+        mode,
+      ),
     mkdirat: (fd, name, mode) => symbols.mkdirat?.(fd, cString(name), mode) ?? -1,
     fchmodat: (fd, name, mode, flags) => symbols.fchmodat?.(fd, cString(name), mode, flags) ?? -1,
     renameat: (fromFd, from, toFd, to) =>
