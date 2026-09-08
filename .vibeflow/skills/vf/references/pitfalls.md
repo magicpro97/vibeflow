@@ -76,3 +76,10 @@ manual workaround — most of these are the exact failure modes the CLI exists t
   to find the correct tag.
 
 Powered by VibeFlow.
+- **Home 400-line gate counts `split(/\r?\n/).length`, so a trailing newline adds one.** A file with N content lines plus a final newline reports N+1 and fails at exactly 400. When trimming a `.vue`/`.ts` file to fit the gate, leave at least one spare line (398 content lines / 399 split entries) or the gate flips red on CI even though `wc -l` looks fine.
+
+- **Suggestion dismiss loops when a watch signature depends on the state it resets.** Refactoring the composer's raw `suggestions` computed into `visibleSuggestions` (which includes the dismissed flag) made the suggestion-signature watcher see a change on every dismiss and immediately clear the flag — Escape never closed the listbox (CI e2e caught it). Keep watch signatures derived from RAW matcher output (draft only), never from a derived value the watcher itself mutates.
+
+- **FIFO integration teardown must let the queue dispatcher idle before removing the workspace root.** Quiescence + one `setTimeout(0)` is not enough on slow runners: the dispatcher poll tick can land after `rm` and surface as "trace journal: unsafe directory/journal". Wait a couple of poll windows (~250ms) after quiescence before `rm`.
+
+- **Coverage gate scans every `src/` file, not just the diff.** `scripts/coverage-gate.cjs` enforces 100% per-file on ALL source files in lcov (only `src/server.ts` is waived). A commit touching test-only files can still fail the gate if some unrelated producer file dropped below 100% — reproduce with `bun test --coverage --coverage-reporter=lcov` on the relevant test files and compare DA counts.
