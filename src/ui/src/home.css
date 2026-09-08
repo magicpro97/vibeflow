@@ -271,6 +271,8 @@ button:disabled {
   align-items: center;
   min-width: 0;
   gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .home-icon-button,
 .home-topbar-button {
@@ -3407,6 +3409,9 @@ button:disabled {
   cursor: pointer;
   font-size: 0.68rem;
   font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
 }
 .home-engine-picker__toggle:hover {
   border-color: var(--home-line-strong);
@@ -3427,6 +3432,10 @@ button:disabled {
 }
 .home-engine-picker__label {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 4rem;
+  min-width: 0;
 }
 .home-engine-picker__caret {
   font-size: 0.6rem;

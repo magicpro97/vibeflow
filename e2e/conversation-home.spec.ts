@@ -1042,6 +1042,9 @@ test.describe("AI-first conversation Home", () => {
     const gates = new Map(["Restore A", "Dismiss A"].map((content) => [content, deferred<void>()]));
     const postBodies: Array<Record<string, unknown>> = [];
     await page.setViewportSize({ width: 320, height: 740 });
+    await page.route("**/api/engines**", (route) =>
+      route.fulfill({ status: 200, json: { engines: [] } }),
+    );
     await page.route("**/api/conversations?**", async (route) => {
       await route.fulfill({
         status: 200,

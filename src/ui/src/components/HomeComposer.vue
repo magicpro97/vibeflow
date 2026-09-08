@@ -3,12 +3,11 @@
     <div v-if="!store.online" class="home-offline-note" role="status">
       You’re offline. This draft stays in memory and will not send itself when the connection returns.
     </div>
-    <HomeQueuedMessages v-if="store.activeSession" :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
-    <HomeQuoteSelectionList v-if="store.activeSession && !store.queuedMessageEdit" :chips="quoteChips" />
-    <HomePrivateRangeSummary v-if="store.activeSession" @change="openPrivateRangePanel(true)" />
+    <HomeQueuedMessages :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
+    <HomeQuoteSelectionList v-if="!store.queuedMessageEdit" :chips="quoteChips" />
+    <HomePrivateRangeSummary @change="openPrivateRangePanel(true)" />
     <form class="home-composer" aria-label="Message VibeFlow" @submit.prevent="submit">
       <HomeQueueEditStatus
-        v-if="store.activeSession"
         :queue-sequence="store.queuedMessageEdit?.queue_sequence ?? null"
         :saving="store.queuedMessageEditSaving"
         :send-as-new="store.queueSendAsNew"
@@ -68,7 +67,7 @@
         @dismissed="restoreComposerFocus"
       />
       <div class="home-composer__toolbar">
-        <div v-if="store.activeSession" class="home-composer__tools" aria-label="Conversation shortcuts">
+        <div class="home-composer__tools" aria-label="Conversation shortcuts">
           <button type="button" title="Add an AI participant" :disabled="Boolean(store.queuedMessageEdit)" @click="insert('+')">
             <span aria-hidden="true">+</span> Agent
           </button>
