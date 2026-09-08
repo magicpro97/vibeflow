@@ -3,7 +3,7 @@ import {
   chipLabelFor,
   findComposerMentions,
   nextMentionToken,
-  renderComposerHighlight,
+  parseComposerHighlight,
 } from "../home-composer-highlight.js";
 
 const AGENTS = new Map([
@@ -13,37 +13,44 @@ const AGENTS = new Map([
 const PARTICIPANTS = new Map([["participant-1", "Coordinator (codex)"]]);
 
 describe("home composer highlight", () => {
-  test("plain text stays untouched", () => {
-    expect(renderComposerHighlight("build the home page")).toBe("build the home page");
+  test("plain text stays a single text segment", () => {
+    expect(parseComposerHighlight("build the home page")).toEqual([
+      { kind: "text", text: "build the home page" },
+    ]);
   });
-  test("escapes html in plain text", () => {
-    expect(renderComposerHighlight("a <b>& c")).toBe("a &lt;b&gt;&amp; c");
+  test("draft text stays raw — Vue escapes it at render time", () => {
+    expect(parseComposerHighlight("a <b>& c")).toEqual([{ kind: "text", text: "a <b>& c" }]);
   });
-  test("agent mention becomes a labeled amber chip", () => {
-    expect(renderComposerHighlight("+web_ui@codex now", AGENTS, PARTICIPANTS)).toBe(
-      '<span class="home-composer-chip home-composer-chip--agent">Web UI</span> now',
-    );
+  test("agent mention becomes a labeled amber chip segment", () => {
+    expect(parseComposerHighlight("+web_ui@codex now", AGENTS, PARTICIPANTS)).toEqual([
+      { kind: "chip-agent", text: "Web UI" },
+      { kind: "text", text: " now" },
+    ]);
   });
   test("unknown agent token falls back to token without special chars", () => {
-    expect(renderComposerHighlight("+custom@claude now", AGENTS, PARTICIPANTS)).toBe(
-      '<span class="home-composer-chip home-composer-chip--agent">custom@claude</span> now',
-    );
+    expect(parseComposerHighlight("+custom@claude now", AGENTS, PARTICIPANTS)).toEqual([
+      { kind: "chip-agent", text: "custom@claude" },
+      { kind: "text", text: " now" },
+    ]);
   });
-  test("remove mention becomes a labeled red chip", () => {
-    expect(renderComposerHighlight("drop -@participant-1 after", AGENTS, PARTICIPANTS)).toBe(
-      'drop <span class="home-composer-chip home-composer-chip--remove">Coordinator (codex)</span> after',
-    );
+  test("remove mention becomes a labeled red chip segment", () => {
+    expect(parseComposerHighlight("drop -@participant-1 after", AGENTS, PARTICIPANTS)).toEqual([
+      { kind: "text", text: "drop " },
+      { kind: "chip-remove", text: "Coordinator (codex)" },
+      { kind: "text", text: " after" },
+    ]);
   });
-  test("plain mention becomes a labeled blue chip", () => {
-    expect(renderComposerHighlight("ask @participant-2", AGENTS, PARTICIPANTS)).toBe(
-      'ask <span class="home-composer-chip home-composer-chip--mention">participant-2</span>',
-    );
+  test("plain mention becomes a labeled blue chip segment", () => {
+    expect(parseComposerHighlight("ask @participant-2", AGENTS, PARTICIPANTS)).toEqual([
+      { kind: "text", text: "ask " },
+      { kind: "chip-mention", text: "participant-2" },
+    ]);
   });
   test("no chip for bare + or @ alone", () => {
-    expect(renderComposerHighlight("+ @")).toBe("+ @");
+    expect(parseComposerHighlight("+ @")).toEqual([{ kind: "text", text: "+ @" }]);
   });
   test("no chip for a plus without engine target", () => {
-    expect(renderComposerHighlight("+ something")).toBe("+ something");
+    expect(parseComposerHighlight("+ something")).toEqual([{ kind: "text", text: "+ something" }]);
   });
   test("findComposerMentions lists agent and participant tokens", () => {
     expect(findComposerMentions("+web_ui@codex then @participant-9 done")).toEqual([
@@ -66,8 +73,17 @@ describe("home composer highlight", () => {
       "+web_ui@codex#3",
     );
     expect(chipLabelFor("+web_ui@codex#2", AGENTS, PARTICIPANTS)).toBe("Web UI #2");
-    expect(renderComposerHighlight("+web_ui@codex and +web_ui@codex#2", AGENTS, PARTICIPANTS)).toBe(
-      '<span class="home-composer-chip home-composer-chip--agent">Web UI</span> and <span class="home-composer-chip home-composer-chip--agent">Web UI #2</span>',
-    );
+    expect(
+      parseComposerHighlight("+web_ui@codex and +web_ui@codex#2", AGENTS, PARTICIPANTS),
+    ).toEqual([
+      { kind: "chip-agent", text: "Web UI" },
+      { kind: "text", text: " and " },
+      { kind: "chip-agent", text: "Web UI #2" },
+    ]);
+  });
+  test("chip text never carries markup — labels render through Vue escaping", () => {
+    const hostile = new Map([["+attack@codex", "<img src=x onerror=alert(1)>"]]);
+    const segments = parseComposerHighlight("+attack@codex", hostile);
+    expect(segments).toEqual([{ kind: "chip-agent", text: "<img src=x onerror=alert(1)>" }]);
   });
 });

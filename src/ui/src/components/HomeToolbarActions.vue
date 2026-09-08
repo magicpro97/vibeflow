@@ -2,14 +2,12 @@
 import { computed, ref } from "vue";
 import type { HomeParticipant } from "../conversation-home-types.js";
 import { chipLabelFor, findComposerMentions } from "../home-composer-highlight.js";
-import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import { AGENT_SUGGESTIONS, matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 
 const props = defineProps<{
   participants: readonly HomeParticipant[];
   disabled: boolean;
   draft: string;
-  agentLabels: ReadonlyMap<string, string>;
-  participantLabels: ReadonlyMap<string, string>;
 }>();
 
 const emit = defineEmits<{
@@ -20,6 +18,16 @@ const emit = defineEmits<{
 const openMenu = ref<"agent" | "remove" | null>(null);
 const activeOption = ref(0);
 
+const agentChipLabels = computed(
+  () => new Map(AGENT_SUGGESTIONS.map((suggestion) => [suggestion.value, suggestion.label])),
+);
+const participantChipLabels = computed(
+  () =>
+    new Map(
+      props.participants.map((participant) => [participant.participant_id, participant.role_ref]),
+    ),
+);
+
 const options = computed(() => {
   if (!openMenu.value) return [];
   if (openMenu.value === "remove") {
@@ -27,7 +35,7 @@ const options = computed(() => {
     if (inDraft.length)
       return inDraft.map((token) => ({
         glyph: "−",
-        label: `Remove ${chipLabelFor(token, props.agentLabels, props.participantLabels)}`,
+        label: `Remove ${chipLabelFor(token, agentChipLabels.value, participantChipLabels.value)}`,
         description: "Remove this mention from the draft",
         value: token,
       }));

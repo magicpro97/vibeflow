@@ -26,11 +26,10 @@
         :aria-owns="visibleSuggestions.length ? suggestionListId : undefined"
         tabindex="-1"
       >
-        <div
-          class="home-composer__highlight"
-          aria-hidden="true"
-          v-html="composerHighlight"
-        ></div>
+        <HomeComposerHighlight
+          :draft="store.draft"
+          :participants="store.activeRevision?.participants ?? []"
+        />
         <textarea
           id="home-composer"
           ref="textarea"
@@ -78,8 +77,6 @@
                   :participants="store.activeRevision?.participants ?? []"
                   :disabled="Boolean(store.queuedMessageEdit)"
                   :draft="store.draft"
-                  :agent-labels="agentChipLabels"
-                  :participant-labels="participantChipLabels"
                   @select="insert"
                   @remove="removeMention"
                 />
@@ -100,46 +97,19 @@
           </button>
         </div>
         <HomeEnginePicker />
-        <button
-          class="home-send"
-          :class="{
-            'home-send--labeled': store.queueSendAsNew || composerBusy.blocksSubmit,
-            'home-send--busy': composerBusy.blocksSubmit,
-          }"
-          type="submit"
+        <HomeComposerSend
+          :busy="composerBusy"
+          :send-as-new="store.queueSendAsNew"
+          :send-label="sendLabel"
           :disabled="!store.draft.trim() || composerBusy.blocksSubmit || !store.online"
-          :aria-label="sendLabel"
-          :aria-busy="composerBusy.blocksSubmit ? 'true' : 'false'"
-        >
-          <template v-if="composerBusy.blocksSubmit">
-            <span class="home-send__label">{{ composerBusy.label }}</span>
-            <span class="home-send__busy" aria-hidden="true"><i /><i /><i /></span>
-          </template>
-          <template v-else>
-            <span v-if="store.queueSendAsNew" class="home-send__label">Send as new</span>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 12-6-4 12-2-5-6-1Z" /></svg>
-          </template>
-        </button>
+        />
       </div>
       <HomePrivateRangePanel
         ref="privateRangePanel"
         @open-change="privateRangeOpen = $event"
       />
     </form>
-    <div class="home-composer__below">
-      <span id="composer-help">Enter to send · Shift+Enter for a new line · ArrowUp edits your latest queued message</span>
-      <span
-        v-if="composerBusy.active"
-        id="composer-status"
-        class="home-composer__status"
-        role="status"
-        aria-live="polite"
-      >{{ composerBusy.detail }}</span>
-      <span id="composer-error" class="home-composer__error" role="alert">{{ store.composerError }}</span>
-    </div>
-    <div id="home-queue-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-      {{ store.queueAnnouncement }}
-    </div>
+    <HomeComposerStatus />
   </div>
 </template>
 
@@ -147,12 +117,20 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
 import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
-import { describeHomeComposerBusy } from "../conversation-home-loading.js";
+import {
+  describeHomeComposerBusy,
+  describeHomeComposerDescription,
+  describeHomeComposerPlaceholder,
+  describeHomeSendLabel,
+} from "../conversation-home-loading.js";
 import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-message-queue-types.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import { nextMentionToken, renderComposerHighlight } from "../home-composer-highlight.js";
-import { AGENT_SUGGESTIONS, matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import { nextMentionToken } from "../home-composer-highlight.js";
+import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
+import HomeComposerHighlight from "./HomeComposerHighlight.vue";
+import HomeComposerSend from "./HomeComposerSend.vue";
+import HomeComposerStatus from "./HomeComposerStatus.vue";
 import HomeEnginePicker from "./HomeEnginePicker.vue";
 import HomePrivateRangePanel from "./HomePrivateRangePanel.vue";
 import HomePrivateRangeSummary from "./HomePrivateRangeSummary.vue";
@@ -179,11 +157,10 @@ const privateRangePanel = ref<{ open(reset?: boolean): void } | null>(null);
 const openPrivateRangePanel = (reset = false) => privateRangePanel.value?.open(reset);
 
 const placeholder = computed(() =>
-  store.activeRevision?.lifecycle === CONVERSATION_LIFECYCLE.NEEDS_INPUT
-    ? "Reply with the missing detail to continue…"
-    : store.activeSession
-      ? "Ask, steer, add an agent, or extend the CLI…"
-      : "What do you want the AI team to build?",
+  describeHomeComposerPlaceholder({
+    needsInput: store.activeRevision?.lifecycle === CONVERSATION_LIFECYCLE.NEEDS_INPUT,
+    activeSession: Boolean(store.activeSession),
+  }),
 );
 const suggestions = computed(() =>
   matchHomeComposerSuggestions(store.draft, store.activeRevision?.participants ?? []),
@@ -202,21 +179,20 @@ const queueEditAvailable = computed(
     visibleSuggestions.value.length === 0,
 );
 const composerDescription = computed(() =>
-  store.queuedMessageEdit
-    ? "composer-help queue-edit-help composer-error home-queue-status"
-    : store.queueSendAsNew
-      ? "composer-help queue-send-as-new-help composer-error home-queue-status"
-      : composerBusy.value.active
-        ? "composer-help composer-status composer-error home-queue-status"
-        : "composer-help composer-error home-queue-status",
+  describeHomeComposerDescription({
+    queuedMessageEdit: store.queuedMessageEdit !== null,
+    queueSendAsNew: store.queueSendAsNew,
+    busyActive: composerBusy.value.active === true,
+  }),
 );
-const sendLabel = computed(() => {
-  if (store.queuedMessageEditSaving) return "Saving queued message";
-  if (store.queuedMessageEdit) return "Save queued message";
-  if (store.queueSendAsNew) return "Send preserved draft as a new queued message";
-  if (store.submitting) return "Preparing action";
-  return "Send message";
-});
+const sendLabel = computed(() =>
+  describeHomeSendLabel({
+    savingQueuedEdit: store.queuedMessageEditSaving,
+    queuedMessageEdit: store.queuedMessageEdit !== null,
+    queueSendAsNew: store.queueSendAsNew,
+    submitting: store.submitting,
+  }),
+);
 const composerBusy = computed(() =>
   describeHomeComposerBusy({
     hasActiveSession: Boolean(store.activeSession),
@@ -250,22 +226,6 @@ watch(
 watch(
   () => store.queueComposerFocusEpoch,
   () => void restoreComposerFocus(),
-);
-
-const agentChipLabels = computed(
-  () => new Map(AGENT_SUGGESTIONS.map((suggestion) => [suggestion.value, suggestion.label])),
-);
-const participantChipLabels = computed(
-  () =>
-    new Map(
-      (store.activeRevision?.participants ?? []).map((participant) => [
-        participant.participant_id,
-        participant.role_ref,
-      ]),
-    ),
-);
-const composerHighlight = computed(() =>
-  renderComposerHighlight(store.draft, agentChipLabels.value, participantChipLabels.value),
 );
 
 function resize() {

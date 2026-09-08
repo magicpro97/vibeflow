@@ -1,12 +1,9 @@
-// Renders the composer draft as HTML with participant/agent mentions
-// wrapped in chip spans. The composer textarea draws transparent text over
-// this layer (aria-hidden, pointer-events none) so mentions read as
-// bordered chips like modern chat apps while the draft stays plain text.
+// Splits the composer draft into plain-text and mention segments. The
+// composer draws transparent text over an aria-hidden layer that renders
+// each mention token as a bordered chip (like modern chat apps) while the
+// draft stays plain text. Segments are rendered by Vue interpolation
+// (auto-escaped) — never via v-html — so draft text cannot inject markup.
 const CHIP_TOKEN = /(?:\+[^\s@]+@[^\s,;.!?)]+|-@[^\s,;.!?)]+|@[^\s,;.!?)]+)/gu;
-
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
 
 // Chip labels: token → readable text. Agent tokens map to their suggestion
 // labels (`+web_ui@codex` → `Web UI`), participant/@ tokens map to their
@@ -47,23 +44,32 @@ export function findComposerMentions(draft: string): string[] {
   return Array.from(draft.matchAll(CHIP_TOKEN), (match) => match[0]);
 }
 
-// Apply chipLabelFor while rendering, keeping the label escaped in the chip.
-export function renderComposerHighlight(
+export type ComposerHighlightSegment =
+  | { kind: "text"; text: string }
+  | { kind: "chip-agent" | "chip-remove" | "chip-mention"; text: string };
+
+// Draft → renderable segments. Plain text stays raw (Vue escapes it when
+// interpolating); mention tokens become labeled chip segments whose class
+// carries the kind color.
+export function parseComposerHighlight(
   draft: string,
   agentLabels: ReadonlyMap<string, string> = new Map(),
   participantLabels: ReadonlyMap<string, string> = new Map(),
-): string {
-  let output = "";
+): ComposerHighlightSegment[] {
+  const segments: ComposerHighlightSegment[] = [];
   let cursor = 0;
   for (const match of draft.matchAll(CHIP_TOKEN)) {
     const index = match.index ?? 0;
+    if (index > cursor) segments.push({ kind: "text", text: draft.slice(cursor, index) });
     const token = match[0];
-    output += escapeHtml(draft.slice(cursor, index));
-    const kind = token.startsWith("+") ? "agent" : token.startsWith("-@") ? "remove" : "mention";
-    const label = chipLabelFor(token, agentLabels, participantLabels);
-    output += `<span class="home-composer-chip home-composer-chip--${kind}">${escapeHtml(label)}</span>`;
+    const kind = token.startsWith("+")
+      ? "chip-agent"
+      : token.startsWith("-@")
+        ? "chip-remove"
+        : "chip-mention";
+    segments.push({ kind, text: chipLabelFor(token, agentLabels, participantLabels) });
     cursor = index + token.length;
   }
-  output += escapeHtml(draft.slice(cursor));
-  return output;
+  if (cursor < draft.length) segments.push({ kind: "text", text: draft.slice(cursor) });
+  return segments;
 }
