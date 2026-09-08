@@ -10,7 +10,6 @@ import {
   realpathSync,
 } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import lockfile from "proper-lockfile";
 import {
   type CapturedTraceAppendV1,
   TraceIdempotencyConflictError,
@@ -27,6 +26,7 @@ import {
   refreshJournal,
   writeFully,
 } from "./journal-cursor.js";
+import { acquireJournalLock } from "./journal-lock.js";
 import { TraceLifecycleConflictError, assertCanonicalLifecycleAppend } from "./lifecycle-cas.js";
 import { TRACE_LIMITS } from "./limits.js";
 import { assertNoSymlinkPathComponents } from "./path-safety.js";
@@ -181,14 +181,17 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
     return true;
   }
   private async withLockedJournal<T>(id: string, action: (fd: number) => T): Promise<T> {
-    const path = this.path(id);
-    const created = this.create(path);
+    let path = this.path(id);
+    let created = this.create(path);
     let release: (() => Promise<void>) | undefined;
     let fd: number | undefined;
     try {
-      release = await lockfile.lock(path, {
-        realpath: false,
-        retries: { retries: 100, factor: 1, minTimeout: 50, maxTimeout: 50 },
+      // A concurrent sandbox recreate may remove the journal directory
+      // between ensureDirectory and the lock mkdir; recreate + retry once.
+      release = await acquireJournalLock(path, () => {
+        path = this.path(id);
+        created = this.create(path);
+        return path;
       });
       fd = this.fd(path);
       if (!created) {
