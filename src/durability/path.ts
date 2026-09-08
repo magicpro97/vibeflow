@@ -277,13 +277,21 @@ export function openOrCreatePrivateFileAt(directory: PinnedDirectory, name: stri
  * Exported as a pure seam so the branches are testable without a live FS. */
 export function openAtRetryEacces(openAttempt: () => number, deadline = Date.now() + 100): number {
   let lastError: unknown;
-  for (;;) {
+  let round = 0;
+  let again = true;
+  // Bounded retry loop: EACCES means a concurrent creator is still between
+  // openat(CREAT) and fchmod, which resolves in microseconds.
+  while (again) {
+    again = false;
+    round += 1;
     try {
       return openAttempt();
     } catch (error) {
       lastError = error;
-      if (Date.now() >= deadline) throw lastError;
+      if (Date.now() >= deadline) break;
+      again = true;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
     }
   }
+  throw lastError;
 }
