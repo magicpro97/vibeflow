@@ -1,12 +1,12 @@
 // Coverage fixture for useHomeEngines. The composable keeps module-level
-// refs, so a single sequential test drives every branch (fresh module
-// instances via require.cache deletion would detach the coverage counters
-// from the instrumented file).
-import { afterEach, expect, test } from "bun:test";
+// refs, so a single sequential test drives every branch. "bun:test" is
+// imported dynamically (String(...)) so vue-tsc (src/ui build) never sees
+// the module dependency, same as the conversation coverage fixture.
 import type { HomeEngineStatusRow } from "../conversation-home-types.js";
 
 const MODULE_PATH = require.resolve("../composables/useHomeEngines.ts");
 type Module = typeof import("../composables/useHomeEngines.js");
+const { afterEach, expect, test } = await import(String("bun:test"));
 
 let storageValue: string | null = null;
 let fetchImpl: typeof fetch | undefined;
