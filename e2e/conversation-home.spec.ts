@@ -489,7 +489,7 @@ test.describe("AI-first conversation Home", () => {
     await expectAxeClean(page, "toolbar agent suggestions");
     await page.getByRole("option", { name: /Web UI/ }).click();
     await expect(toolbarMenu).toHaveCount(0);
-    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`);
+    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX} `);
     await composer.fill("+");
     await expect(composer).toHaveAttribute("aria-controls", "composer-suggestions");
     const implementationAgentId = await page
@@ -500,10 +500,10 @@ test.describe("AI-first conversation Home", () => {
     const webUiId = await page.getByRole("option", { name: /Web UI/ }).getAttribute("id");
     await expect(combobox).toHaveAttribute("aria-activedescendant", webUiId ?? "");
     await page.keyboard.press("Enter");
-    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`);
+    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX} `);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("listbox", { name: "Composer suggestions" })).toHaveCount(0);
-    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX}`);
+    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX} `);
 
     const capabilitiesTrigger = page.getByRole("button", { name: "Open CLI capabilities" });
     await capabilitiesTrigger.click();

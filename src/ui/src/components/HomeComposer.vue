@@ -160,7 +160,6 @@ const suggestionListId = "composer-suggestions";
 const privateRangeOpen = ref(false);
 const privateRangePanel = ref<{ open(reset?: boolean): void } | null>(null);
 const openPrivateRangePanel = (reset = false) => privateRangePanel.value?.open(reset);
-
 const placeholder = computed(() =>
   describeHomeComposerPlaceholder({
     needsInput: store.activeRevision?.lifecycle === CONVERSATION_LIFECYCLE.NEEDS_INPUT,
@@ -255,7 +254,7 @@ function insert(value: string) {
   const after = store.draft.slice(end);
   const mention = nextMentionToken(store.draft, value);
   const leading = before && !/\s$/u.test(before) ? " " : "";
-  const trailing = after && !/^\s/u.test(after) ? " " : "";
+  const trailing = !after || !/^\s/u.test(after) ? " " : "";
   store.draft = `${before}${leading}${mention}${trailing}${after}`;
   const caret = before.length + leading.length + mention.length + trailing.length;
   nextTick(() => {
@@ -300,10 +299,11 @@ async function cancelQueuedEdit() {
 }
 
 function choose(value: string) {
-  store.draft = value;
+  const mention = nextMentionToken(store.draft, value);
+  store.draft = `${mention} `;
   nextTick(() => {
     textarea.value?.focus();
-    textarea.value?.setSelectionRange(value.length, value.length);
+    textarea.value?.setSelectionRange(store.draft.length, store.draft.length);
     resize();
   });
 }

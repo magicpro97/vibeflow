@@ -450,7 +450,11 @@ export async function startServer(
       // --- GET /api/file — token+loopback guarded, sandboxed to activeRepo (#558) ---
       if (method === "GET" && path === "/api/file") {
         if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
-        return handleFileRoute(activeRepo, url.searchParams.get("path") ?? "");
+        return handleFileRoute(
+          activeRepo,
+          url.searchParams.get("path") ?? "",
+          url.searchParams.has("preview"),
+        );
       }
 
       // --- GET /api/projects* and /api/hook/pending (#561: guarded) ---

@@ -27,7 +27,7 @@ function outside(root: string, target: string): boolean {
 }
 
 /** Read `rel` if it resolves inside `repo`; else a sandbox/size/binary JSON reply. */
-export function handleFileRoute(repo: string, rel: string): Response {
+export function handleFileRoute(repo: string, rel: string, preview = false): Response {
   const rootLex = resolve(repo);
   // Lexical guard: rejects `~`, absolute paths, and `..` escapes up front.
   if (rel.startsWith("~") || outside(rootLex, resolve(repo, rel)))
@@ -38,9 +38,17 @@ export function handleFileRoute(repo: string, rel: string): Response {
   try {
     st = statSync(target);
   } catch {
-    return Response.json({ error: "not found" }, { status: 404 });
+    // Preview mode reports a miss as a well-formed reply (the panel treats a
+    // missing file as an ordinary state, not a transport error, and a 404
+    // would spam the browser console for every keystroke of a typo'd path).
+    return preview
+      ? Response.json({ ok: false, reason: "not found" })
+      : Response.json({ error: "not found" }, { status: 404 });
   }
-  if (!st.isFile()) return Response.json({ error: "not found" }, { status: 404 });
+  if (!st.isFile())
+    return preview
+      ? Response.json({ ok: false, reason: "not found" })
+      : Response.json({ error: "not found" }, { status: 404 });
 
   // Symlink guard: realpath both sides (target exists here, so realpath is safe)
   // to defeat an in-repo symlink whose real target escapes the sandbox.

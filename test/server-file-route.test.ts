@@ -22,8 +22,8 @@ interface FileResp {
   reason?: string;
 }
 
-const get = (url: string, path: string, token?: string) =>
-  fetch(`${url}/api/file?path=${encodeURIComponent(path)}`, {
+const get = (url: string, path: string, token?: string, preview = false) =>
+  fetch(`${url}/api/file?path=${encodeURIComponent(path)}${preview ? "&preview=1" : ""}`, {
     headers: token ? { "x-vibeflow-token": token } : {},
   });
 
@@ -205,6 +205,31 @@ describe("GET /api/file (#558 sandboxed file-read route)", () => {
         const token = await csrfToken(url);
         const res = await get(url, "does-not-exist-558.txt", token);
         expect(res.status).toBe(404);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      expect(process.cwd()).toBe(callerCwd);
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  test("preview mode miss → 200 {ok:false, reason:not found} (no console noise)", async () => {
+    const callerCwd = process.cwd();
+    const repo = mkdtempSync(join(tmpdir(), "vf-repo-"));
+    try {
+      writeFileSync(join(repo, "package.json"), '{"name":"fixture"}');
+      const { server, url } = await startServer(0, { repoDir: repo });
+      try {
+        const token = await csrfToken(url);
+        const res = await get(url, "does-not-exist-preview.txt", token, true);
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as FileResp;
+        expect(body.ok).toBe(false);
+        expect(body.reason).toBe("not found");
+        const dirRes = await get(url, "src", token, true);
+        expect(dirRes.status).toBe(200);
+        expect(((await dirRes.json()) as FileResp).reason).toBe("not found");
       } finally {
         server.stop();
       }

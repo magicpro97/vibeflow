@@ -30,7 +30,7 @@
       <label>
         <span>Start line</span>
         <input
-          v-model="privateRangeDraft.startLine"
+          v-model.number="privateRangeDraft.startLine"
           type="number"
           min="1"
           step="1"
@@ -41,7 +41,7 @@
       <label>
         <span>End line</span>
         <input
-          v-model="privateRangeDraft.endLine"
+          v-model.number="privateRangeDraft.endLine"
           type="number"
           min="1"
           step="1"
@@ -49,6 +49,28 @@
           name="private-range-end"
         />
       </label>
+    </div>
+    <div class="home-private-range-preview">
+      <p v-if="previewLoading" class="home-private-range-preview__status">Đang đọc file…</p>
+      <p v-else-if="previewError" class="home-private-range-preview__error" role="alert">
+        {{ previewError }}
+      </p>
+      <div v-else-if="previewLines.length" class="home-private-range-preview__frame" role="group" aria-label="File preview — click a line to choose the range">
+        <div
+          v-for="(line, index) in previewLines"
+          :key="window.from + index"
+          class="home-private-range-preview__row"
+          :class="{ 'home-private-range-preview__row--active': lineInRange(rangeDraft, window.from + index) }"
+          :data-line="window.from + index"
+          @click="pickPreviewLine(window.from + index)"
+        >
+          <span class="home-private-range-preview__gutter">{{ window.from + index }}</span>
+          <code class="home-private-range-preview__code">{{ line }}</code>
+        </div>
+      </div>
+      <p v-else class="home-private-range-preview__status">
+        Nhập đường dẫn repo-relative để xem trước và chọn dòng.
+      </p>
     </div>
     <div class="home-private-range-panel__actions">
       <button
@@ -83,9 +105,17 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { api } from "../api.js";
 import { useHomePrivateRangeComposer } from "../composables/useHomePrivateRangeComposer.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
+import {
+  type PrivateRangePreviewDraft,
+  lineInRange,
+  parseFilePreviewError,
+  previewWindow,
+  selectRangeOnLine,
+} from "../home-private-range-preview.js";
 
 const emit = defineEmits<{ "open-change": [open: boolean] }>();
 const store = useConversationHomeStore();
@@ -102,6 +132,65 @@ const {
 } = useHomePrivateRangeComposer({
   stagePrivateContext: store.stagePrivateContext,
 });
+
+const previewContent = ref("");
+const previewLoading = ref(false);
+const previewError = ref<string | null>(null);
+
+watch(
+  () => privateRangeDraft.path,
+  async (path) => {
+    const trimmed = path.trim();
+    if (!trimmed) {
+      previewContent.value = "";
+      previewError.value = null;
+      previewLoading.value = false;
+      return;
+    }
+    previewLoading.value = true;
+    try {
+      const result = await api.readFile(trimmed, undefined, true);
+      if (result.ok && result.content !== undefined && result.path === trimmed) {
+        previewContent.value = result.content;
+        previewError.value = null;
+      } else {
+        previewContent.value = "";
+        previewError.value = parseFilePreviewError(result.reason);
+      }
+    } catch {
+      previewContent.value = "";
+      previewError.value = "Không thể đọc file.";
+    } finally {
+      previewLoading.value = false;
+    }
+  },
+  { immediate: false },
+);
+
+const rangeDraft = computed<PrivateRangePreviewDraft>(() => ({
+  path: privateRangeDraft.path,
+  startLine: normalizeLine(privateRangeDraft.startLine),
+  endLine: normalizeLine(privateRangeDraft.endLine),
+}));
+const allPreviewLines = computed(() =>
+  previewContent.value ? previewContent.value.split("\n") : [],
+);
+const window = computed(() => previewWindow(rangeDraft.value, allPreviewLines.value.length));
+const previewLines = computed(() => {
+  const { from, to } = window.value;
+  if (from === 0) return [];
+  return allPreviewLines.value.slice(from - 1, to);
+});
+
+function normalizeLine(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : null;
+}
+
+function pickPreviewLine(line: number) {
+  Object.assign(privateRangeDraft, { ...selectRangeOnLine(rangeDraft.value, line) });
+}
 
 watch(privateRangeOpen, (open) => emit("open-change", open), { immediate: true });
 defineExpose({ open: openPrivateRangePanel });
