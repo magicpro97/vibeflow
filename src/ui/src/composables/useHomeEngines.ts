@@ -28,7 +28,9 @@ function storedSelection(): HomeEngineSelection {
 }
 
 const _selection = ref<HomeEngineSelection>(storedSelection());
-const _statuses = ref<HomeEngineStatus[]>([]);
+// Seed with all engines "unknown" so readiness-dependent surfaces (attach
+// button) render immediately while the first probe is still in flight.
+const _statuses = ref<HomeEngineStatus[]>(normalizeStatuses([]));
 const _checking = ref(false);
 const _checkedAt = ref<number | null>(null);
 

@@ -14,12 +14,13 @@
         @cancel="cancelQueuedEdit"
       />
       <label id="home-composer-label" class="home-composer__label" for="home-composer">Message</label>
+<HomeAttachments />
       <div
         class="home-composer__field"
         role="combobox"
         aria-label="Message"
         aria-haspopup="listbox"
-        :aria-activedescendant="activeSuggestionId"
+        :aria-activedescendant="visibleSuggestions.length ? suggestionOptionId(activeSuggestion) : undefined"
         :aria-controls="visibleSuggestions.length ? suggestionListId : undefined"
         :aria-expanded="visibleSuggestions.length ? 'true' : 'false'"
         aria-labelledby="home-composer-label"
@@ -36,7 +37,7 @@
           v-model="store.draft"
           rows="1"
           :placeholder="placeholder"
-          :aria-activedescendant="activeSuggestionId"
+          :aria-activedescendant="visibleSuggestions.length ? suggestionOptionId(activeSuggestion) : undefined"
           aria-autocomplete="list"
           :aria-controls="visibleSuggestions.length ? suggestionListId : undefined"
           :aria-describedby="composerDescription"
@@ -96,6 +97,7 @@
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM7 2v4M13 2v4M7 14h6" /></svg>
             {{ store.privateContextPresent ? "Replace range" : "Private range" }}
           </button>
+          <HomeAttachmentButton :disabled="Boolean(store.queuedMessageEdit)" />
           <button type="button" title="Find a capability" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-capabilities')">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3h8v4h3v7h-3v3H6v-3H3V7h3V3Z" /></svg>
             Capabilities
@@ -117,7 +119,6 @@
     <HomeComposerStatus />
   </div>
 </template>
-
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
@@ -132,6 +133,8 @@ import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-messag
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { nextMentionToken } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import HomeAttachmentButton from "./HomeAttachmentButton.vue";
+import HomeAttachments from "./HomeAttachments.vue";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
 import HomeComposerHighlight from "./HomeComposerHighlight.vue";
 import HomeComposerSend from "./HomeComposerSend.vue";
@@ -212,9 +215,6 @@ const suggestionSignature = computed(() =>
     .map((s) => s.value)
     .join("\0"),
 );
-const activeSuggestionId = computed(() =>
-  visibleSuggestions.value.length ? suggestionOptionId(activeSuggestion.value) : undefined,
-);
 watch(suggestionSignature, () => {
   suggestionsDismissed.value = false;
   activeSuggestion.value = 0;
@@ -237,7 +237,6 @@ function resize() {
   element.style.height = "0";
   element.style.height = `${Math.min(element.scrollHeight, 176)}px`;
 }
-
 function syncHighlightScroll() {
   const element = textarea.value;
   if (!element) return;
