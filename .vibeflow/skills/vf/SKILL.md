@@ -77,6 +77,12 @@ SPEC-FIRST questions until the spec is concrete — then map it to a Flow above.
 - After init: `vf doctor` (engine ready + hooks armed) and the generated files exist.
 - After a dispatch/workflow: `vf verify` exits 0 (all gates green) and `vf units status`
   shows the units done at confidence 1.0 with recorded evidence.
+- When the work edited repo code directly (not via a vf dispatch): the
+  repo's own gate checklist still applies in full — `bun run fix`, `bun run check`,
+  `bun run build`, e2e on UI diffs, `refresh-normative-proofs`, and pre-push review
+  evidence. Load `.vibeflow/skills/bun-typescript-conventions` §Verification; on this
+  repo `bun run check` IS the CI `check` job, so skipping it is how "every change
+  fails CI" happens.
 - Validate this skill itself: `vf skills validate`.
 
 See `references/flows.md` §Flow D and `references/pitfalls.md` for the full verify loop.

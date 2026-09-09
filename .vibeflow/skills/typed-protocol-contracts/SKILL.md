@@ -64,6 +64,9 @@ ordinary text or move every literal into a miscellaneous constants file.
 ## Verification
 Run focused contract tests, `bun run typecheck`, `bun run lint`, `bun run file-size:check`,
 `git diff --check`, and every affected build. If the protocol is normative, refresh and run
-`bun run normative:check`. Before completion, run the repository's full `vf verify` confidence gate.
+`bun run normative:check`. Before completion, run the repository's full `bun run check`
+(typecheck + lint + file-size + waiver + tests + 100% coverage — the CI `check` job) and
+`bun run scripts/refresh-normative-proofs.ts` after any test/production change; see
+`.vibeflow/skills/bun-typescript-conventions` §Verification for the exact gate order.
 
 > VERIFIED — reviewed against the runtime-contract migration and enforced by focused regressions.

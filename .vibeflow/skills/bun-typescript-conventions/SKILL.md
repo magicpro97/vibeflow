@@ -81,7 +81,31 @@ development, build, and tests, while the published CLI is bundled with
 
 ## Verification
 
-Run the smallest focused Bun tests first, then `bun run typecheck`,
-`bun run lint`, `bun run file-size:check`, affected builds, and
-`git diff --check`. Any code edit still requires the final whole-repo
-`vf verify` confidence gate.
+Run these in order before claiming done — this is the exact gate order CI
+enforces (`.github/workflows/ci.yml`), and every one of them has failed a
+real PR when skipped:
+
+1. `bun run fix` — Biome auto-format FIRST. CI's `lint` step fails on any
+   unformatted file ("Formatter would" error); formatting after the fact
+   changes test preimages and forces a proof-matrix refresh (see step 5).
+2. `bun run check` — the full local gate: typecheck, lint, file-size,
+   waiver, whole-repo tests, and the 100% per-file line coverage gate.
+   This is what CI's `check` job runs; `vf verify` does NOT substitute
+   for it on this repo.
+3. `bun run build` — UI (vite) plus the node-targeted CLI bundle, and
+   restart any local UI server with the fresh build before testing it.
+4. When the diff touches UI/components/DTOs: run the focused e2e
+   (`bunx playwright test e2e/conversation-home.spec.ts`) — contract
+   tests assert markers that move between components, and e2e encodes
+   exact draft values (e.g. a mention pick now ends with a trailing
+   space: assert `"+role@engine "`, not `"+role@engine"`).
+5. `bun run scripts/refresh-normative-proofs.ts` after ANY test or
+   production change — the normative matrix digests test preimages and
+   goes stale whenever tests change shape (even a Biome-only format of a
+   test file). A stale matrix fails `normative:check` on CI.
+6. `git diff --check`, then before pushing, produce review evidence
+   against the remote merge-base (see `.vibeflow/skills/vf/references/pitfalls.md`
+   — pre-push hook enforces it; base is the remote tip, not main).
+7. Keep the 400-line file gate in mind while editing: it counts
+   `split(/\r?\n/).length`, so a trailing newline pushes a 399-line file
+   to 400 and fails `file-size:check`.
