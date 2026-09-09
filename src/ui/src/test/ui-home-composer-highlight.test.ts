@@ -66,6 +66,19 @@ describe("home composer highlight", () => {
     expect(chipLabelFor("-@participant-1", AGENTS, PARTICIPANTS)).toBe("Coordinator (codex)");
     expect(chipLabelFor("@participant-9", AGENTS, PARTICIPANTS)).toBe("participant-9");
   });
+  test("chipLabelFor keeps the agent label while a pick is partially deleted", () => {
+    // Backspacing from `+web_ui@codex` must not flash the raw partial token:
+    // the chip stays "Web UI" until the token stops matching any agent.
+    expect(chipLabelFor("+web_ui@code", AGENTS, PARTICIPANTS)).toBe("Web UI");
+    expect(chipLabelFor("+web_ui@c", AGENTS, PARTICIPANTS)).toBe("Web UI");
+    expect(chipLabelFor("+web", AGENTS, PARTICIPANTS)).toBe("Web UI");
+    expect(chipLabelFor("+web_ui@codex#1", AGENTS, PARTICIPANTS)).toBe("Web UI #1");
+    expect(chipLabelFor("+no-such-agent@x", AGENTS, PARTICIPANTS)).toBe("no-such-agent@x");
+    expect(chipLabelFor("@participant", AGENTS, PARTICIPANTS)).toBe("Coordinator (codex)");
+    expect(parseComposerHighlight("+implementation@c", AGENTS, PARTICIPANTS)).toEqual([
+      { kind: "chip-agent", text: "Implementation agent" },
+    ]);
+  });
   test("repeated agent token gets a numeric suffix and labeled chip", () => {
     expect(nextMentionToken("", "+web_ui@codex")).toBe("+web_ui@codex");
     expect(nextMentionToken("+web_ui@codex", "+web_ui@codex")).toBe("+web_ui@codex#2");

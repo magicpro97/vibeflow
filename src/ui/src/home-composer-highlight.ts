@@ -21,12 +21,24 @@ export function chipLabelFor(
   const base = suffix ? token.slice(0, token.length - suffix.length) : token;
   let label: string;
   if (base.startsWith("+")) {
-    label = agentLabels.get(base) ?? base.replace(/^[+-]?@?/, "");
+    label = agentLabels.get(base) ?? prefixLabel(base, agentLabels) ?? base.replace(/^[+-]?@?/, "");
   } else {
     const fallback = base.replace(/^[+-]?@?/, "");
-    label = participantLabels.get(fallback) ?? fallback;
+    label = participantLabels.get(fallback) ?? prefixLabel(fallback, participantLabels) ?? fallback;
   }
   return suffix ? `${label} ${suffix}` : label;
+}
+
+// While the user is typing or backspacing an agent/participant token, the
+// token is only a PREFIX of the full value (e.g. `+web_ui@co` after deleting
+// from `+web_ui@codex`). Resolve any key that either extends or is extended
+// by the partial token to its stable label, so the chip keeps its readable
+// name (and color) instead of flashing raw draft text mid-edit.
+function prefixLabel(partial: string, labels: ReadonlyMap<string, string>): string | null {
+  for (const key of labels.keys()) {
+    if (key.startsWith(partial) || partial.startsWith(key)) return labels.get(key) ?? null;
+  }
+  return null;
 }
 
 // A second call with the same agent token gets a numeric suffix so repeated

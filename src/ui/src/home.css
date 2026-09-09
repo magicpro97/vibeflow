@@ -1861,12 +1861,12 @@ button:disabled {
   min-width: 17rem;
   margin-bottom: 0.35rem;
   padding: 0.4rem;
-  border: 1px solid var(--home-border);
+  border: 1px solid var(--home-line-strong);
   border-radius: 0.75rem;
-  background: var(--home-surface);
+  background: var(--home-paper);
   box-shadow: 0 -0.9rem 2.4rem rgb(0 0 0 / 0.22);
 }
-.home-composer__tools .home-toolbar-menu button {
+.home-toolbar-menu button {
   display: grid;
   grid-template-columns: 1.1rem 1fr;
   gap: 0.45rem;
@@ -1874,23 +1874,24 @@ button:disabled {
   width: 100%;
   min-height: 2.7rem;
   padding: 0.45rem 0.6rem;
+  border: 0;
   border-radius: 0.55rem;
   background: var(--home-paper);
   color: var(--home-ink);
   text-align: left;
   font-size: 0.72rem;
 }
-.home-composer__tools .home-toolbar-menu button:hover,
+.home-toolbar-menu button:hover,
 .home-toolbar-menu__option--active {
   background: var(--home-panel);
 }
 .home-toolbar-menu {
-  background: var(--home-surface);
+  background: var(--home-paper);
 }
 .home-toolbar-menu button + button {
   margin-top: 0.15rem;
 }
-.home-composer__tools .home-toolbar-menu button > span:last-child {
+.home-toolbar-menu button > span:last-child {
   color: var(--home-ink);
 }
 .home-toolbar-menu button strong {
