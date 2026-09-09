@@ -510,9 +510,12 @@ test("FIFO delivery and needs-input replies publish each durable child exactly o
     );
     // The dispatcher polls on an interval; after quiescence it may still be
     // mid-tick, and removing the root underneath it surfaces as an "unsafe
-    // journal/directory" append on slow runners. Give the loop a couple of
-    // poll windows to idle before the teardown removes the workspace.
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // journal/directory" append on slow runners. The last item's attempt also
+    // finalizes its artifact publish AFTER the queue row reads "delivered",
+    // so give both the loop and the in-flight attempt a few ticks to idle
+    // before the teardown removes the workspace. 250ms proved insufficient
+    // under CI coverage instrumentation (ENOENT on artifacts.lock mkdir).
+    await new Promise((resolve) => setTimeout(resolve, 750));
   });
   const enqueue = (key: string, content: string) =>
     bootstrap.authorities.messageQueue.enqueue({
