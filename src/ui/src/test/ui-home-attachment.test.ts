@@ -9,6 +9,7 @@ import {
   gateAttachment,
   resolveAttachmentEngine,
 } from "../home-attachment.js";
+import { useHomeAttachments } from "../home-attachments.js";
 
 const READY = [
   { engine: AGENT_ENGINE.CLAUDE, ready: true, admitted: true },
@@ -85,5 +86,27 @@ describe("attachment picker gating", () => {
 
   test("no engine at all is refused", () => {
     expect(gateAttachment("notes.md", null, READY, false).ok).toBe(false);
+  });
+
+  test("removing an attachment chip deletes the uploaded file and drops the chip", async () => {
+    const deleted: string[] = [];
+    const { attachmentNames, add, remove } = useHomeAttachments();
+    add("a.txt");
+    add("b.png");
+    await remove("a.txt", (name) => {
+      deleted.push(name);
+      return Promise.resolve({ ok: true });
+    });
+    expect(attachmentNames.value).toEqual(["b.png"]);
+    expect(deleted).toEqual(["a.txt"]);
+  });
+
+  test("a failed server delete still drops the chip", async () => {
+    const { attachmentNames, add, remove } = useHomeAttachments();
+    add("keep.png");
+    await remove("keep.png", async () => {
+      throw new Error("delete failed");
+    });
+    expect(attachmentNames.value).toEqual([]);
   });
 });

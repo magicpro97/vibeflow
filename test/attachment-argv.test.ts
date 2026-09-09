@@ -16,13 +16,13 @@ describe("attachment argv projection", () => {
       privateContext: null,
     }) as never;
 
-  test("claude appends each text attachment flag before the prompt", () => {
+  test("claude appends each text attachment flag with the repo-relative path before the prompt", () => {
     const args = attachFileArgs(spawnProjection("claude"), ["notes.md", "brief.txt"]);
     expect(args).toEqual([
       "--append-system-prompt-file",
-      "notes.md",
+      ".vibeflow/attachments/notes.md",
       "--append-system-prompt-file",
-      "brief.txt",
+      ".vibeflow/attachments/brief.txt",
     ]);
   });
 
@@ -35,14 +35,14 @@ describe("attachment argv projection", () => {
     if (promptIndex >= 0) expect(attachIndex).toBeLessThan(promptIndex);
   });
 
-  test("codex passes --image for an image attachment", () => {
+  test("codex passes --image with the repo-relative path for an image attachment", () => {
     const args = attachFileArgs(spawnProjection("codex"), ["shot.jpg"]);
-    expect(args).toEqual(["--image", "shot.jpg"]);
+    expect(args).toEqual(["--image", ".vibeflow/attachments/shot.jpg"]);
   });
 
-  test("opencode passes --file regardless of kind", () => {
+  test("opencode passes --file with the repo-relative path regardless of kind", () => {
     const args = attachFileArgs(spawnProjection("opencode"), ["data.csv"]);
-    expect(args).toEqual(["--file", "data.csv"]);
+    expect(args).toEqual(["--file", ".vibeflow/attachments/data.csv"]);
   });
 
   test("empty attachments add no args", () => {
@@ -58,8 +58,10 @@ describe("attachment argv projection", () => {
     ).args;
     const promptIndex = args.indexOf("-p");
     expect(promptIndex).toBeGreaterThanOrEqual(0);
-    expect(args).toContain("--attachment");
-    expect(args.indexOf("--attachment")).toBeLessThan(promptIndex);
+    const attachIndex = args.indexOf("--attachment");
+    expect(attachIndex).toBeGreaterThanOrEqual(0);
+    expect(attachIndex).toBeLessThan(promptIndex);
+    expect(args[attachIndex + 1]).toBe(".vibeflow/attachments/photo.png");
   });
 
   test("Auto resolves to the capable engine by attachment kind", () => {

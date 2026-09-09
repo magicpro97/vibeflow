@@ -1,4 +1,4 @@
-import type { Engine } from "../core.js";
+import { CTX_DIR, type Engine } from "../core.js";
 import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { attachmentKindForExtension, engineAttachmentSupport } from "../core/attachment-support.js";
 import { ROLE_SANDBOX } from "../core/role-contract.js";
@@ -165,7 +165,10 @@ export function attachFileArgs(
     const ext = name.split(".").pop()?.toLowerCase() ?? "";
     const kind = attachmentKindForExtension(ext);
     if (kind === null || !support.kinds.includes(kind)) continue;
-    pairs.push(support.flag, name);
+    // Uploads live under <repo>/.vibeflow/attachments/<name> (server
+    // handlers) and the CLI spawn runs with the repo as cwd, so project
+    // the repo-relative path — a bare basename would not resolve.
+    pairs.push(support.flag, `${CTX_DIR}/attachments/${name}`);
   }
   return pairs;
 }
