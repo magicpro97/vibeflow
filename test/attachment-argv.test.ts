@@ -29,7 +29,7 @@ describe("attachment argv projection", () => {
   test("copilot places attachment flags before the -p prompt flag", () => {
     const args = attachFileArgs(spawnProjection("copilot"), ["photo.png"]);
     expect(args).toContain("--attachment");
-    expect(args).toContain("photo.png");
+    expect(args).toContain(".vibeflow/attachments/photo.png");
     const promptIndex = args.indexOf("-p");
     const attachIndex = args.indexOf("--attachment");
     if (promptIndex >= 0) expect(attachIndex).toBeLessThan(promptIndex);

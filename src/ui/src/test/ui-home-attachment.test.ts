@@ -103,6 +103,7 @@ describe("attachment picker gating", () => {
 
   test("a failed server delete still drops the chip", async () => {
     const { attachmentNames, add, remove } = useHomeAttachments();
+    attachmentNames.value = [];
     add("keep.png");
     await remove("keep.png", async () => {
       throw new Error("delete failed");
