@@ -1,7 +1,6 @@
 ---
 name: vf
-description: "Drive any task through VibeFlow's local-first CLI (vf) instead of free-handing it. Triggers: /vf, the word vibeflow, orchestrate, init, or a request to set up a repo for AI agents, implement a spec/issue, run a parallel multi-unit workflow, or verify/ship under the confidence gate. SPEC-FIRST: ask the clarifying questions BEFORE running anything that writes or dispatches. /vf with no args → load references/grill.md and grill the user from chat context toward a concrete spec. Wraps vf init / run / orchestrate / units / verify / skills / discover / doctor / hooks."
-when_to_load: on any `/vf …` command (and bare `/vf`), and whenever a task maps to init / spec-implementation / workflow-creation / verify-and-ship on a VibeFlow repo
+description: "Drive any task through VibeFlow's local-first CLI (vf) instead of free-handing it. Use whenever the user types /vf, mentions vibeflow, asks to orchestrate, init, implement a spec/issue, run a parallel workflow, or verify/ship under the confidence gate—even without naming vf. SPEC-FIRST: ask clarifying questions BEFORE anything that writes or dispatches. /vf with no args → load references/grill.md and grill the user toward a concrete spec. Wraps vf init / run / orchestrate / units / verify / skills / discover / doctor / hooks."
 ---
 
 # Driving work through VibeFlow (`vf`)
