@@ -9,6 +9,7 @@ import {
   attachmentPickerAccept,
   gateAttachment,
   resolveAttachmentEngine,
+  unionAttachmentPickerAccept,
 } from "../home-attachment.js";
 import { useHomeAttachments } from "../home-attachments.js";
 
@@ -41,13 +42,15 @@ const support = computed(() =>
 
 /** A CLI with no attachment support hides the button entirely. */
 const visible = computed(() => support.value !== null && resolvedEngine.value !== null);
-const accept = computed(() => (support.value ? attachmentPickerAccept(support.value) : ""));
+const accept = computed(() => {
+  if (autoMode.value) return unionAttachmentPickerAccept(rows.value);
+  return support.value ? attachmentPickerAccept(support.value) : "";
+});
 const buttonTitle = computed(() => {
   if (!visible.value) return "";
-  const engine = String(resolvedEngine.value);
   return autoMode.value
-    ? `Attach a file; auto picks a CLI that supports it (${engine})`
-    : `Attach a file (${engine})`;
+    ? "Attach a file; auto picks a CLI that supports it"
+    : `Attach a file (${String(resolvedEngine.value)})`;
 });
 
 function pickFile() {

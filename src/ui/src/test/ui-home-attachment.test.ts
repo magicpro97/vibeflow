@@ -8,6 +8,7 @@ import {
   attachmentPickerAccept,
   gateAttachment,
   resolveAttachmentEngine,
+  unionAttachmentPickerAccept,
 } from "../home-attachment.js";
 import { useHomeAttachments } from "../home-attachments.js";
 
@@ -48,6 +49,22 @@ describe("attachment picker gating", () => {
     expect(resolveAttachmentEngine("auto", [])).toBeNull();
   });
 
+  test("auto-mode picker accept unions every engine's kinds so images stay choosable", () => {
+    const accept = unionAttachmentPickerAccept([
+      { engine: AGENT_ENGINE.CLAUDE, ready: true, admitted: true },
+      { engine: AGENT_ENGINE.CODEX, ready: true, admitted: true },
+    ]);
+    expect(accept).toContain(".png");
+    expect(accept).toContain(".md");
+    expect(accept).toContain(".pdf");
+  });
+
+  test("auto picker accept stays broad even before the probe fills in", () => {
+    const accept = unionAttachmentPickerAccept([]);
+    expect(accept).toContain(".png");
+    expect(accept).toContain(".md");
+  });
+
   test("explicit engine accepts its native kind", () => {
     const gate = gateAttachment("notes.md", AGENT_ENGINE.CLAUDE, READY, false);
     expect(gate).toEqual({
@@ -72,10 +89,23 @@ describe("attachment picker gating", () => {
     });
   });
 
-  test("auto mode with no capable ready engine is refused", () => {
+  test("auto mode with no capable engine at all is refused", () => {
     const gate = gateAttachment("shot.png", AGENT_ENGINE.CLAUDE, READY.slice(0, 1), true);
     expect(gate.ok).toBe(false);
-    expect(gate.ok ? "" : gate.reason).toMatch(/no ready engine supports png/);
+    expect(gate.ok ? "" : gate.reason).toMatch(/no engine supports png/);
+  });
+
+  test("auto mode accepts a latent capable engine while probes are pending", () => {
+    const pending = [
+      { engine: AGENT_ENGINE.CLAUDE, ready: false, admitted: false },
+      { engine: AGENT_ENGINE.CODEX, ready: false, admitted: false },
+    ];
+    const gate = gateAttachment("shot.png", AGENT_ENGINE.CLAUDE, pending, true);
+    expect(gate).toEqual({
+      ok: true,
+      engine: AGENT_ENGINE.CODEX,
+      kind: ATTACHMENT_KIND.IMAGE,
+    });
   });
 
   test("unknown extension is refused", () => {

@@ -25,6 +25,22 @@ export function attachmentPickerAccept(support: {
   return [...extensions].map((ext) => `.${ext}`).join(",");
 }
 
+/** Accept string for "Auto" mode: the union of every engine's attachment
+ * kinds, so the file dialog does not hide image/pdf files that another
+ * engine could consume. The per-file gate later picks the capable engine. */
+export function unionAttachmentPickerAccept(rows: readonly AttachmentEngineRow[]): string {
+  const kinds = new Set<AttachmentKind>();
+  for (const row of rows) {
+    for (const kind of engineAttachmentSupport(row.engine)?.kinds ?? []) {
+      kinds.add(kind);
+    }
+  }
+  if (kinds.size === 0) {
+    for (const kind of Object.values(ATTACHMENT_KIND)) kinds.add(kind);
+  }
+  return attachmentPickerAccept({ kinds: [...kinds] });
+}
+
 export interface AttachmentEngineRow {
   readonly engine: Engine;
   readonly ready: boolean;
@@ -77,8 +93,13 @@ export function gateAttachment(
   const capable = enginesForAttachmentKind(kind);
   const candidate = rows.find((row) => capable.includes(row.engine) && row.ready && row.admitted);
   if (candidate) return { ok: true, engine: candidate.engine, kind };
+  // Probes may still be filling in: accept the first engine whose support
+  // matrix covers this kind so a fresh probe never blocks an attachable
+  // file; the CLI dispatch layer still fails loudly if it is not usable.
+  const latent = rows.find((row) => capable.includes(row.engine));
+  if (latent) return { ok: true, engine: latent.engine, kind };
   return {
     ok: false,
-    reason: `no ready engine supports ${ext} files`,
+    reason: `no engine supports ${ext} files`,
   };
 }
