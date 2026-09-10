@@ -104,6 +104,8 @@ Powered by VibeFlow.
   mobile widths/200% zoom, and server-side upload/delete state matches visible chips. Unit tests
   alone miss stale shared composable state and readiness races.
 
+- **Clean the Playwright workspace before every real-user run.** `.e2e-workspace/.home/go/pkg/mod` can retain thousands of files after a prior run; macOS then returns `ENOTEMPTY` while config startup recursively removes the workspace. Stop stale UI/Playwright processes, run `chmod -R u+w .e2e-workspace test-results && rm -rf .e2e-workspace test-results`, verify the directory is gone, then rerun. Do not treat a setup cleanup error as an app pass.
+
 - **Pre-push local CI must not be weakened by convenience flags.** Run the full local CI sequence
   after source/test/docs changes; `--quick` is diagnostic only and never evidence for a mergeable
   PR. If the hook reports failure, fix the first failing gate, refresh normative proofs, regenerate
