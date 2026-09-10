@@ -45,17 +45,6 @@ Skip the gate only for read-only commands (`vf doctor`, `vf units status`, `vf v
 | "is it done / ship it" | **Flow D — verify & ship** | `references/flows.md` |
 | bare `/vf` (no arguments) | **Grill from context** | `references/grill.md` |
 
-## Hook behavior: web UI vs CLI
-
-**Web UI dispatch** (vf orchestrate --yes via browser):
-- require_approval → user sees modal in browser (waits indefinitely)
-- --auto-pilot: independent LLM eval, approve if confidence >= 0.9
-- --yolo: blind allow-all
-
-**CLI dispatch** (vf orchestrate --yes in terminal, no UI):
-- require_approval → auto-block (no UI available)
-- Set VF_HOOK_MODE=yolo in env to override (use carefully)
-
 Always start with `vf doctor --probe` if you have not confirmed an engine is ready
 this session — a dispatch against a cold engine fails the creation gate.
 
@@ -71,7 +60,7 @@ SPEC-FIRST questions until the spec is concrete — then map it to a Flow above.
 
 - **`references/flows.md`** — full Flow A-D playbooks (init / spec→task / workflow / verify-and-ship), every flag explained.
 - **`references/grill.md`** — bare `/vf` context-grill protocol: infer intents, interview to a spec, route to a Flow.
-- **`references/hooks.md`** — guardrail hooks: arming, live PreToolUse gate, per-engine semantics, web UI approval modal, auto-pilot/yolo flags, audit log
+- **`references/hooks.md`** — guardrail hooks: arming, the live PreToolUse gate, per-engine block-vs-detect semantics.
 - **`references/pitfalls.md`** — the anti-patterns learned the hard way; read before improvising.
 
 ## 3. Skills and external docs (before inventing steps)
@@ -88,17 +77,14 @@ SPEC-FIRST questions until the spec is concrete — then map it to a Flow above.
 - After init: `vf doctor` (engine ready + hooks armed) and the generated files exist.
 - After a dispatch/workflow: `vf verify` exits 0 (all gates green) and `vf units status`
   shows the units done at confidence 1.0 with recorded evidence.
+- When the work edited repo code directly (not via a vf dispatch): the
+  repo's own gate checklist still applies in full — `bun run fix`, `bun run check`,
+  `bun run build`, e2e on UI diffs, `refresh-normative-proofs`, and pre-push review
+  evidence. Load `.vibeflow/skills/bun-typescript-conventions` §Verification; on this
+  repo `bun run check` IS the CI `check` job, so skipping it is how "every change
+  fails CI" happens.
 - Validate this skill itself: `vf skills validate`.
-- goalEval gate (ADR-003): pass goal + goalEvalFn to collectVerifyReportAsync for behavioral verification
 
 See `references/flows.md` §Flow D and `references/pitfalls.md` for the full verify loop.
 
 Powered by VibeFlow.
-
-## Spec-first test generation (ADR-002)
-
-`generateSpecFirstTests({ unitName, spec, llmFn })` — generate test stubs from spec ONLY.
-- Returns null if spec is empty (skip silently)
-- LLM sees ONLY spec + unit name, no implementation
-- Generated files (*.spec-first.test.ts) are oracle — pre-write hook blocks modification
-- Phase 2: `vf orchestrate --spec-first` generates and protects these files automatically

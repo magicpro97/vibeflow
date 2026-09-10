@@ -146,6 +146,41 @@ export function describeHomeCapabilityLoading(input: {
   };
 }
 
+export function describeHomeComposerDescription(input: {
+  queuedMessageEdit: boolean;
+  queueSendAsNew: boolean;
+  busyActive: boolean;
+}): string {
+  if (input.queuedMessageEdit)
+    return "composer-help queue-edit-help composer-error home-queue-status";
+  if (input.queueSendAsNew)
+    return "composer-help queue-send-as-new-help composer-error home-queue-status";
+  if (input.busyActive) return "composer-help composer-status composer-error home-queue-status";
+  return "composer-help composer-error home-queue-status";
+}
+
+export function describeHomeComposerPlaceholder(input: {
+  needsInput: boolean;
+  activeSession: boolean;
+}): string {
+  if (input.needsInput) return "Reply with the missing detail to continue…";
+  if (input.activeSession) return "Ask, steer, add an agent, or extend the CLI…";
+  return "What do you want the AI team to build?";
+}
+
+export function describeHomeSendLabel(input: {
+  savingQueuedEdit: boolean;
+  queuedMessageEdit: boolean;
+  queueSendAsNew: boolean;
+  submitting: boolean;
+}): string {
+  if (input.savingQueuedEdit) return "Saving queued message";
+  if (input.queuedMessageEdit) return "Save queued message";
+  if (input.queueSendAsNew) return "Send preserved draft as a new queued message";
+  if (input.submitting) return "Preparing action";
+  return "Send message";
+}
+
 export function describeHomeComposerBusy(input: {
   hasActiveSession: boolean;
   submitting: boolean;

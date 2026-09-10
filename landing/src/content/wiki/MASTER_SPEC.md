@@ -201,7 +201,11 @@ quota      → parse claude / codex / copilot quota output (src/engine-quota.ts)
 
 Engine readiness results are cached in-process (`src/probe-cache.ts`): stable
 results live 60 s, transient `probe-failed` results live 5 s. `vf doctor --refresh`
-discards the cache and re-probes immediately. The preflight gate
+discards the cache and re-probes immediately. Conversation creation uses the same
+probe cache under a **live lane** (`checkEngineAsync`, 10 s timeout): the Home
+engine picker and conversation creation resolve readiness against the live lane
+so a CLI that appeared (or auth state that changed) after the static probe is
+honored on the next create. The preflight gate
 (`src/preflight-delegate.ts`) layers **presence → auth → quota** in that order
 and auto-falls-back to the next ready engine when the chosen one is exhausted,
 returns 429 / 403, or fails auth.

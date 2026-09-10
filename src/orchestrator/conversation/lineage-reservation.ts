@@ -172,7 +172,14 @@ export function deriveRevisionClaimEpoch(
   const nodes = new Map(lineage.nodes.map((node) => [key(node.node), node]));
   const parent = nodes.get(key(input.parent));
   const child = nodes.get(key(input.child));
-  if (!parent || !child || !child.parent || key(child.parent) !== key(parent.node))
+  // The reservation file is written at prepare time; the child node only
+  // becomes durable once the attempt appends its first journal event. A
+  // concurrent reader in that window sees an active reservation whose nodes
+  // are not yet materialized — that is in-flight progress, not corruption.
+  // Terminal reservations must reference fully durable nodes, so the
+  // lineage check stays strict once the attempt has settled.
+  const pairMissing = !parent || !child || !child.parent || key(child.parent) !== key(parent.node);
+  if (pairMissing && input.status !== "active")
     throw new Error("revision reservation pair is not durable lineage");
   if (
     (input.status === "released" && !same(head.active, input.parent)) ||

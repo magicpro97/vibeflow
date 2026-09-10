@@ -21,6 +21,23 @@ import type {
   MessageRequest,
 } from "./types.js";
 
+/** Pure seam: derive a visible failure notice when a direct attempt produced no
+ *  usable response — either an explicit engine failure (`ok: false`) or a
+ *  silent empty completion (completed with zero emitted response chunks).
+ *  `ponytail:` callers needing richer diagnostics (tool stderr, model bindings)
+ *  can extend the input shape without changing the policy flow. */
+export function deriveConversationFailureNotice(input: {
+  ok: boolean;
+  complete: boolean;
+  emittedChunks: number;
+  reason?: string;
+  engine: string;
+}): string | null {
+  if (!input.ok) return `[${input.engine} failed${input.reason ? `: ${input.reason}` : ""}]`;
+  if (input.complete && input.emittedChunks === 0) return `[${input.engine} produced no response]`;
+  return null;
+}
+
 /** One-participant compatibility policy; all execution still flows through launchAttempt. */
 export class DirectConversationPolicy implements ConversationPolicy {
   readonly name = CONVERSATION_POLICY.DIRECT;
@@ -135,6 +152,13 @@ export class DirectConversationPolicy implements ConversationPolicy {
       await emissionChain;
       const complete = result.state === CONVERSATION_OPERATION_STATE.COMPLETED;
       const failed = !result.ok || context.signal.aborted;
+      const failureNotice = deriveConversationFailureNotice({
+        ok: result.ok,
+        complete,
+        emittedChunks,
+        reason: result.reason,
+        engine: result.engine,
+      });
       let pending = false;
       if (!failed) {
         delivery = await context.prepareTurn({
@@ -160,8 +184,12 @@ export class DirectConversationPolicy implements ConversationPolicy {
             payload: {
               round_id: `direct:${context.correlation.operation_id}`,
               participant_id: participantId,
-              content_delta: "",
-              final_claim: complete && result.ok ? parsed.answer || null : null,
+              content_delta: failureNotice ?? "",
+              final_claim: failureNotice
+                ? null
+                : complete && result.ok
+                  ? parsed.answer || null
+                  : null,
               final_evidence: [],
               completes_response: complete,
             },

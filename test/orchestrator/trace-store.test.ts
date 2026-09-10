@@ -2344,6 +2344,41 @@ test("a post-fsync registry commit failure cannot reject the durable trace appen
   }
 });
 
+test("a sandbox recreate between path ensure and lock acquisition is retried once", async () => {
+  const root = await mkdtemp(join(tmpdir(), "trace-lock-enoent-retry-"));
+  const traceDir = join(root, "trace");
+  const realLock = lockfile.lock.bind(lockfile);
+  let lockCalls = 0;
+  lockfile.lock = async (path: string, options?: object) => {
+    lockCalls += 1;
+    if (lockCalls === 1) {
+      const error = new Error("ENOENT: no such file or directory") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    }
+    return realLock(path, options);
+  };
+  try {
+    const store = new TraceStore({ dir: traceDir });
+    const stored = await store.append(correlation, {
+      idempotency_key: "lock-enoent-retry",
+      event: {
+        type: "artifact_created",
+        payload: { artifact_id: "retried", artifact_type: "plan", ref: "artifact/retried" },
+      },
+    });
+    expect(stored.seq).toBe(1);
+    expect(lockCalls).toBe(2);
+    const replayed = await new TraceStore({ dir: traceDir }).readConversation("safe");
+    expect(replayed.map(({ stored_event }) => stored_event.idempotency_key)).toEqual([
+      "lock-enoent-retry",
+    ]);
+  } finally {
+    lockfile.lock = realLock;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("session-reference capacity is rejected before its trace record becomes durable", async () => {
   const root = await mkdtemp(join(tmpdir(), "trace-session-preflight-"));
   const traceDir = join(root, "trace");

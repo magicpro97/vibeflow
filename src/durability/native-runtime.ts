@@ -4,6 +4,38 @@ import { arch, constants as osConstants } from "node:os";
 import { DurabilityError, durabilityError } from "./errors.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
+// libc openat is variadic (mode is only consumed when O_CREAT is set); Bun FFI
+// cannot declare variadic parameters, so the mode argument is NOT reliably
+// delivered on arm64 and can silently create mode-0 files (EACCES on re-open).
+// Create with mode 0 and fix the permission bits via fchmod (fixed arity) so
+// the result is deterministic across runtimes/machines. Exported as a pure
+// seam so the failure branches are testable without a live libc.
+export function openatWithRecoveredMode(
+  openat: (fd: number, name: string, flags: number, mode: number) => number,
+  fchmod: (fd: number, mode: number) => number,
+  closeFd: (fd: number) => void,
+  fd: number,
+  name: string,
+  flags: number,
+  mode: number,
+): number {
+  // Pass the real mode to openat (reliably delivered on x64) so the file
+  // never exists as mode-0 in the create/fchmod window — a concurrent
+  // contender opening it there would hit EACCES. On arm64 the variadic
+  // mode is dropped, so fchmod below still repairs the bits.
+  const created = openat(fd, name, flags, mode) ?? -1;
+  if (created < 0 || (flags & fs.constants.O_CREAT) === 0) return created;
+  if ((fchmod(created, mode) ?? -1) !== 0) {
+    try {
+      closeFd(created);
+    } catch {
+      // Surface the fchmod error that caused the create to be rejected.
+    }
+    return -1;
+  }
+  return created;
+}
+
 export interface NativeBindings {
   openat: (
     directoryFd: number,
@@ -75,6 +107,7 @@ export function loadBunBindings(): NativeBindings {
       returns: FFIType.i32,
     },
     mkdirat: { args: [FFIType.i32, FFIType.cstring, FFIType.u32], returns: FFIType.i32 },
+    fchmod: { args: [FFIType.i32, FFIType.u32], returns: FFIType.i32 },
     fchmodat: {
       args: [FFIType.i32, FFIType.cstring, FFIType.u32, FFIType.i32],
       returns: FFIType.i32,
@@ -113,7 +146,15 @@ export function loadBunBindings(): NativeBindings {
   errnoReader = () => ffi.read.i32(errnoAddress() as import("bun:ffi").Pointer, 0);
   return {
     openat: (fd, name, flags, _modeType, mode) =>
-      symbols.openat?.(fd, cString(name), flags, mode) ?? -1,
+      openatWithRecoveredMode(
+        (d, n, f) => symbols.openat?.(d, cString(n), f) ?? -1,
+        (d, m) => symbols.fchmod?.(d, m) ?? -1,
+        (d) => fs.closeSync(d),
+        fd,
+        name,
+        flags,
+        mode,
+      ),
     mkdirat: (fd, name, mode) => symbols.mkdirat?.(fd, cString(name), mode) ?? -1,
     fchmodat: (fd, name, mode, flags) => symbols.fchmodat?.(fd, cString(name), mode, flags) ?? -1,
     renameat: (fromFd, from, toFd, to) =>

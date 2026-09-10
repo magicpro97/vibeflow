@@ -3229,7 +3229,7 @@ describe("commands.makeResearcher (test seam)", () => {
       expect(spawnedArgv).toContain(bridgeCommand);
       expect(spawnedArgv?.[0]).not.toBe("claude");
     } finally {
-      if (previous === undefined) process.env.VIBEFLOW_AI = undefined;
+      if (previous === undefined) process.env.VIBEFLOW_AI = "";
       else process.env.VIBEFLOW_AI = previous;
       rmSync(dir, { recursive: true, force: true });
     }
@@ -3256,7 +3256,7 @@ describe("commands.makeResearcher (test seam)", () => {
         expect(result.blocked).toBe(false);
         expect(observedInput).toContain("private question");
       } finally {
-        if (previous === undefined) process.env.VIBEFLOW_AI = undefined;
+        if (previous === undefined) process.env.VIBEFLOW_AI = "";
         else process.env.VIBEFLOW_AI = previous;
         rmSync(dir, { recursive: true, force: true });
       }
@@ -4615,7 +4615,7 @@ describe("makeReviewer diff injection", () => {
   test("ADR-001: skips auto-wire LLM review when VF_LLM_REVIEW not set + VIBEFLOW_AI set", async () => {
     const origVFR = process.env.VF_LLM_REVIEW;
     const origVAI = process.env.VIBEFLOW_AI;
-    process.env.VF_LLM_REVIEW = undefined;
+    process.env.VF_LLM_REVIEW = "";
     process.env.VIBEFLOW_AI = "echo COVERED";
     // No explicit llmReviewFn → should NOT auto-wire when VF_LLM_REVIEW absent
     const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
@@ -4631,9 +4631,9 @@ describe("makeReviewer diff injection", () => {
     const v = await r(unit, outcome);
     expect(v.reason).not.toContain("LLM reviewer"); // local gate only
     if (origVFR !== undefined) process.env.VF_LLM_REVIEW = origVFR;
-    else process.env.VF_LLM_REVIEW = undefined;
+    else process.env.VF_LLM_REVIEW = "";
     if (origVAI !== undefined) process.env.VIBEFLOW_AI = origVAI;
-    else process.env.VIBEFLOW_AI = undefined;
+    else process.env.VIBEFLOW_AI = "";
   });
 
   test("ADR-001: calls LLM review when goal + llmReviewFn provided and local gate passes", async () => {

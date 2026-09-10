@@ -137,6 +137,17 @@ Choose a session in the rail and use it immediately, or select **New conversatio
 filters the rail without changing the active session. The center timeline remains the source
 of truth while details, trace, and capability drawers open alongside it.
 
+The **engine chip** in the composer picks which CLI runs new conversations: `Auto`
+(probes installed CLIs and picks a live one) or a specific engine
+(claude / copilot / codex / opencode / antigravity). The choice is remembered in
+`localStorage`; a conversation keeps the engine it was created with. Missing CLIs show
+a disabled row with an install hint.
+
+Opening a session briefly shows the restore placeholder while the head and timeline
+are verified. A finished conversation renders its transcript without a live stream;
+a turn that failed shows `[<engine> failed: …]` in the thread instead of an empty
+completion, and the composer stays usable for a follow-up.
+
 The composer keeps collaboration inside the conversation:
 
 1. Send another message while agents are working; it joins the durable FIFO queue instead of

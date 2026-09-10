@@ -106,14 +106,16 @@ describe("emitHookFiles", () => {
       expect(data1.hooks.PreToolUse).toBeDefined();
       expect(data1.hooks.PostToolUse).toBeDefined();
 
-      // config.toml has [features] codex_hooks = true
+      // config.toml has [features] hooks = true
       const configPath = join(isolatedHome, ".codex", "config.toml");
       expect(existsSync(configPath)).toBe(true);
-      expect(readFileSync(configPath, "utf8")).toContain("codex_hooks = true");
+      expect(readFileSync(configPath, "utf8")).toContain("hooks = true");
 
-      // Existing false flag, existing [features], and no [features] are all
-      // repaired without disturbing unrelated TOML content.
+      // Existing false flag, legacy key, existing [features], and no [features]
+      // are all repaired without disturbing unrelated TOML content.
       for (const original of [
+        "[features]\nhooks = false\nother = true\n",
+        "[features]\ncodex_hooks = true\nother = true\n",
         "[features]\ncodex_hooks = false\nother = true\n",
         "[features]\nother = true\n",
         'title = "keep"\n',
@@ -121,7 +123,7 @@ describe("emitHookFiles", () => {
         writeFileSync(configPath, original);
         emitHookFiles(dir, ["codex"], isolatedHome);
         const updated = readFileSync(configPath, "utf8");
-        expect(updated).toContain("codex_hooks = true");
+        expect(updated).toContain("hooks = true");
         expect(updated).toContain(original.includes("title") ? 'title = "keep"' : "other = true");
       }
 

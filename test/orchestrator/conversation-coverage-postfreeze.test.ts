@@ -1421,6 +1421,29 @@ describe("post-freeze revision recovery evidence", () => {
     return events;
   };
 
+  test("proves recovery through the fallback lineage resolve when the primary resolve throws", () => {
+    const fixture = priorAuthorities(false);
+    fixture.lineages = {
+      resolve: () => {
+        throw new Error("lineage not found");
+      },
+      resolveRevisionRecovery: () => {
+        const recovered = resolvedLineage();
+        recovered.head = {
+          ...recovered.head,
+          root_session_id: fixture.operation.root_session_id,
+          content_digest: fixture.operation.expected_head_digest,
+        };
+        return recovered;
+      },
+    } as unknown as ConversationLineageService;
+    const events = recoveryFromPreparing(fixture.operation);
+    expect(inspectRevisionRecovery({ ...fixture, events, quiescent: true })).toMatchObject({
+      kind: "proved",
+      state: "preparing",
+    });
+  });
+
   test("proves only quiescent pre-publication recovery and abandon authority", () => {
     const preparing = priorAuthorities(false);
     const events = recoveryFromPreparing(preparing.operation);
@@ -1933,6 +1956,196 @@ describe("post-freeze revision reconciliation effect planning", () => {
       target_operation_id: operation.operation_id,
       effects: [],
     });
+  });
+
+  test("proposes abandon, retry, and abandon-through-recovery revision control", async () => {
+    const controlRequest = (
+      candidate: ActionProposalRequestV1["candidate"],
+      resolved: ReturnType<ConversationLineageService["resolve"]>,
+    ): ActionProposalRequestV1 => ({
+      schema_version: "1.0",
+      idempotency_key: "control-proposal",
+      anchor_event_id: null,
+      expected: {
+        mode: "writable-revision",
+        conversation_id: resolved.requested.node.conversation_id,
+        revision_id: resolved.requested.node.revision_id,
+        last_seq: resolved.requested.source.journal_head.last_seq,
+        conversation_lock_digest: conversationLockDigest(
+          resolved.lineage.root_session_id,
+          resolved.requested.source,
+          resolved.revision_claim_epoch,
+        ),
+      },
+      candidate,
+    });
+    const controlHome = (
+      operation: RevisionOperationV1,
+      events: RevisionOperationEventV1[],
+      published: unknown[] = [],
+    ) =>
+      ({
+        revisions: {
+          readOperation: () => operation,
+          readEvents: () => events,
+          readPlan: () => revisionPlan(),
+        },
+        revisionLanes: { receiptIsProved: () => true },
+        publishedRevisionTransitions: () => published,
+        controlEffects: { writeClosure: () => {} },
+        actionReceipts: { writePlan: () => {} },
+        actions: { create: (plan: any) => ({ created: true, proposal: plan.proposal }) },
+        now: () => STAGED_AT,
+      }) as unknown as ConversationHomeAuthorities;
+    const stateTransition = (
+      operation: RevisionOperationV1,
+      events: RevisionOperationEventV1[],
+      from: any,
+      to: any,
+      reasonCode: string | null = null,
+    ) =>
+      appendRevisionEvent(operation, events, {
+        kind: "state-transition",
+        from,
+        to,
+        authorized_by_action_operation_id: operation.operation_id,
+        effect_action_operation_id: operation.operation_id,
+        action_terminals:
+          to === "needs_recovery"
+            ? [
+                {
+                  action_operation_id: operation.operation_id,
+                  outcome: "needs_recovery",
+                  reason_code: reasonCode ?? "uncertain_start",
+                },
+              ]
+            : to === "start_failed"
+              ? [
+                  {
+                    action_operation_id: operation.operation_id,
+                    outcome: "failed",
+                    reason_code: reasonCode ?? "child_start_failed",
+                  },
+                ]
+              : [],
+        reason_code: reasonCode,
+      });
+
+    const operation = revisionOperation();
+    const sourceResolved = resolvedLineage();
+    sourceResolved.head = {
+      ...sourceResolved.head,
+      root_session_id: operation.root_session_id,
+      content_digest: operation.expected_head_digest,
+    };
+    const recoverable: RevisionOperationEventV1[] = [];
+    stateTransition(operation, recoverable, "created", "preparing");
+    stateTransition(operation, recoverable, "preparing", "needs_recovery", "uncertain_start");
+
+    const abandoned = await proposeRevisionControlAction({
+      lineages: { resolve: () => sourceResolved } as unknown as ConversationLineageService,
+      home: controlHome(operation, recoverable),
+      quiescent: () => true,
+      conversation_id: "conversation",
+      request: controlRequest(
+        {
+          type: "conversation.abandon_revision_operation",
+          revision_operation_id: operation.operation_id,
+        },
+        sourceResolved,
+      ),
+      authority: actionAuthority(),
+    });
+    expect(abandoned).toMatchObject({ created: true });
+
+    const abandonedThroughRecovery = await proposeRevisionControlAction({
+      lineages: {
+        resolve: () => {
+          throw new Error("lineage not found");
+        },
+        resolveRevisionRecovery: () => {
+          const recovered = resolvedLineage();
+          recovered.head = {
+            ...recovered.head,
+            root_session_id: operation.root_session_id,
+            content_digest: operation.expected_head_digest,
+          };
+          return recovered;
+        },
+      } as unknown as ConversationLineageService,
+      home: controlHome(operation, recoverable),
+      quiescent: () => true,
+      conversation_id: "conversation",
+      request: controlRequest(
+        {
+          type: "conversation.abandon_revision_operation",
+          revision_operation_id: operation.operation_id,
+        },
+        sourceResolved,
+      ),
+      authority: actionAuthority(),
+    });
+    expect(abandonedThroughRecovery).toMatchObject({ created: true });
+
+    const started = revisionOperation();
+    const startFailed: RevisionOperationEventV1[] = [];
+    stateTransition(started, startFailed, "created", "preparing");
+    stateTransition(started, startFailed, "preparing", "prepared");
+    appendRevisionEvent(started, startFailed, {
+      kind: "head-commit",
+      authorized_by_action_operation_id: started.operation_id,
+      effect_action_operation_id: started.operation_id,
+      prior_head_digest: started.expected_head_digest,
+      prior_head_checkpoint_digest: started.expected_head_digest,
+      committed_head_digest: postfreezeDigest("revision-child-head"),
+      directory_fsync_completed: true,
+    });
+    stateTransition(started, startFailed, "published", "starting");
+    for (const state of ["prepared", "effect_in_progress", "failed"] as const)
+      appendRevisionEvent(started, startFailed, {
+        kind: "participant-start",
+        authorized_by_action_operation_id: started.operation_id,
+        effect_action_operation_id: started.operation_id,
+        receipt: participantReceipt(started, state),
+      });
+    stateTransition(started, startFailed, "starting", "start_failed", "child_start_failed");
+    const childSource = resolvedLineage();
+    childSource.requested = {
+      ...childSource.requested,
+      node: {
+        conversation_id: started.child.conversation_id,
+        revision_id: started.child.revision_id,
+        revision_ordinal: 1,
+      },
+    };
+    childSource.head = {
+      ...childSource.head,
+      root_session_id: started.root_session_id,
+      content_digest: postfreezeDigest("revision-child-head"),
+      previous_head_digest: started.expected_head_digest,
+      updated_by_operation_id: started.operation_id,
+      active: started.child,
+    };
+    const retried = await proposeRevisionControlAction({
+      lineages: { resolve: () => childSource } as unknown as ConversationLineageService,
+      home: controlHome(started, startFailed, [
+        {
+          authority: { operation: { operation_id: started.operation_id } },
+          committed_head: { content_digest: postfreezeDigest("revision-child-head") },
+        },
+      ]),
+      quiescent: () => true,
+      conversation_id: "conversation",
+      request: controlRequest(
+        {
+          type: "conversation.retry_revision_operation",
+          revision_operation_id: started.operation_id,
+        },
+        childSource,
+      ),
+      authority: actionAuthority(),
+    });
+    expect(retried).toMatchObject({ created: true });
   });
 });
 

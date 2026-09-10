@@ -11,7 +11,7 @@ import {
   supportsConversationRoleAuthority,
   supportsPhaseOneConversationAuthority,
 } from "../../dispatch/session-contract.js";
-import { preflightAll } from "../../preflight.js";
+import { checkEngineAsync, getCachedProbe, preflightAll, setCachedProbe } from "../../preflight.js";
 import { type ConversationIsolationAuthority, bindWithIsolation } from "./bootstrap-isolation.js";
 import {
   conversationBindingInput,
@@ -92,16 +92,52 @@ export function defaultConversationReadiness(
   }));
 }
 
-function routingAuthority(
-  options: ConversationRequestResolutionOptions,
+/**
+ * Live readiness for conversation routing: the auto engine selection must only
+ * admit engines that actually respond to a probe, otherwise a preferred engine
+ * with a revoked/expired credential (e.g. claude 401) is chosen and every
+ * create fails with "conversation binding requires a verified engine". Uses the
+ * shared probe cache (60s TTL) so repeated creates stay cheap; the first probe
+ * after TTL expiry bounds each engine to `LIVE_PROBE_TIMEOUT_MS` in parallel.
+ */
+export async function liveConversationReadiness(
   repoRoot: string,
   phase: number,
+): Promise<ConversationEngineReadiness[]> {
+  // Separate cache lane (["live"] args) so static probe:false results (which
+  // stamp every installed engine "ready") can never satisfy a live probe request.
+  const LIVE_READINESS_CACHE_LANE = ["live"] as const;
+  const LIVE_PROBE_TIMEOUT_MS = 10_000;
+  const statuses = await Promise.all(
+    [...ENGINES].map(async (engine) => {
+      const cached = getCachedProbe(engine, repoRoot, LIVE_READINESS_CACHE_LANE);
+      if (cached) return cached;
+      const fresh = await checkEngineAsync(engine, {
+        cacheKey: repoRoot,
+        probeTimeoutMs: LIVE_PROBE_TIMEOUT_MS,
+      });
+      setCachedProbe(engine, repoRoot, LIVE_READINESS_CACHE_LANE, fresh);
+      return fresh;
+    }),
+  );
+  return statuses.map((status) => ({
+    engine: status.engine,
+    ready: status.level === "ready",
+    admitted:
+      supportsConversationRoleAuthority(status.engine) &&
+      (phase > 1 || supportsPhaseOneConversationAuthority(status.engine)),
+  }));
+}
+
+function routingAuthority(
+  options: ConversationRequestResolutionOptions,
+  roles: readonly string[],
+  engines: readonly ConversationEngineReadiness[],
 ): ConversationRoutingAuthority {
-  const roles = [...ALL_ROLE_NAMES, ...(options.registeredRoles ?? [])];
   return {
     registeredPolicies: [...CONVERSATION_POLICIES],
     registeredRoles: [...new Set(roles)],
-    engines: [...(options.readiness?.() ?? defaultConversationReadiness(repoRoot, phase))],
+    engines: [...engines],
     domainRoles: [...(options.domainRoles ?? [])],
   };
 }
@@ -121,7 +157,11 @@ async function selectedRoute(
     attachments: extra.attachments,
     skillDomains: extra.skillDomains,
   };
-  const authority = routingAuthority(options, repoRoot, phase);
+  const authority = routingAuthority(
+    options,
+    [...ALL_ROLE_NAMES, ...(options.registeredRoles ?? [])],
+    await (options.readiness ? options.readiness() : liveConversationReadiness(repoRoot, phase)),
+  );
   const route = routeConversation(input, authority);
   const participants = route.participants.map((participant, index) => {
     const requested = request.participants?.[index];

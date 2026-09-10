@@ -374,7 +374,7 @@ test("defaultGoalEvalFn: returns covered=true when VIBEFLOW_AI set to echo COVER
   expect(result.covered).toBe(true);
   expect(result.uncovered).toHaveLength(0);
   expect(calls).toEqual(["codex:echo COVERED"]);
-  if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+  if (orig === undefined) process.env.VIBEFLOW_AI = "";
   else process.env.VIBEFLOW_AI = orig;
 });
 
@@ -392,7 +392,7 @@ test("defaultGoalEvalFn: returns covered=false when VIBEFLOW_AI returns non-COVE
   });
   expect(result.covered).toBe(false);
   expect(result.uncovered.length).toBeGreaterThan(0);
-  if (orig === undefined) process.env.VIBEFLOW_AI = undefined;
+  if (orig === undefined) process.env.VIBEFLOW_AI = "";
   else process.env.VIBEFLOW_AI = orig;
 });
 

@@ -100,7 +100,7 @@ export function installHint(engine: Engine): string {
   if (engine === AGENT_ENGINE.COPILOT) return "copilot CLI not found — install GitHub Copilot CLI";
   if (engine === AGENT_ENGINE.OPENCODE) return "opencode CLI not found — install opencode CLI";
   if (engine === AGENT_ENGINE.ANTIGRAVITY)
-    return "agy (Antigravity CLI) not found — install from https://antigravity.google/docs/cli/install";
+    return "agy CLI not found — install the Antigravity CLI (see https://antigravity.google/docs/cli/install)";
   return `${engine} CLI not found — install the ${engine} CLI`;
 }
 

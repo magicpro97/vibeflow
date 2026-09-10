@@ -221,10 +221,10 @@ export const api = {
       req<{ ok: boolean }>("POST", UI_HOOK_ROUTE.APPROVE, { id, decision }),
   },
   // #558: read a repo file for `file:line` evidence (token-guarded, sandboxed server-side).
-  readFile: (path: string, line?: number) =>
+  readFile: (path: string, line?: number, preview = false) =>
     req<{ ok: boolean; content?: string; reason?: string; path?: string }>(
       "GET",
-      `/api/file?path=${encodeURIComponent(path)}${line ? `&line=${line}` : ""}`,
+      `/api/file?path=${encodeURIComponent(path)}${line ? `&line=${line}` : ""}${preview ? "&preview=1" : ""}`,
     ),
   // #557: a unit's append-only status-transition ledger (token-guarded, name-sanitized).
   unitTimeline: (name: string) =>

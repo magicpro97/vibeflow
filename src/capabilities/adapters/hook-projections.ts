@@ -225,8 +225,8 @@ function featurePostimage(text: string): {
   const ownsHeader = prior?.includes("[features]") || (!prior && !hasFeatures);
   return {
     block: ownsHeader
-      ? `# vf-capability:${CODEX_FEATURE_BLOCK}:start\n[features]\ncodex_hooks = true\n# vf-capability:${CODEX_FEATURE_BLOCK}:end`
-      : `# vf-capability:${CODEX_FEATURE_BLOCK}:start\ncodex_hooks = true\n# vf-capability:${CODEX_FEATURE_BLOCK}:end`,
+      ? `# vf-capability:${CODEX_FEATURE_BLOCK}:start\n[features]\nhooks = true\n# vf-capability:${CODEX_FEATURE_BLOCK}:end`
+      : `# vf-capability:${CODEX_FEATURE_BLOCK}:start\nhooks = true\n# vf-capability:${CODEX_FEATURE_BLOCK}:end`,
     placement: ownsHeader ? "append" : "after-features-header",
   };
 }
@@ -271,7 +271,7 @@ function jsonHook(
     const featureBytes = readProjectionFile(boundedProjectionPath(root, featurePath));
     const featureText = featureBytes?.toString("utf8") ?? "";
     beforeFeatureBlock = tomlOwnedBlock(featureText, CODEX_FEATURE_BLOCK);
-    if (beforeFeatureBlock === null && /(^|\n)\s*codex_hooks\s*=/u.test(featureText))
+    if (beforeFeatureBlock === null && /(^|\n)\s*(?:codex_hooks|hooks)\s*=/u.test(featureText))
       throw new CapabilityValidationError(
         "unmanaged Codex hook feature requires adoption",
         featurePath,

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { productionCapabilityRuntimeV1 } from "./capabilities/runtime-factory.js";
 import type { CapabilityRuntimeFactoryOptionsV1 } from "./capabilities/runtime-factory.js";
 import { CTX_DIR, type WorkflowState, c, cwd, readState } from "./core.js";
+import { ENGINES } from "./core/agent-contract.js";
 import { HOOK_DECISION } from "./core/hook-contract.js";
 import {
   UI_HOOK_APPROVAL,
@@ -23,6 +24,7 @@ import {
   serializeSseJsonData,
   serializeSseJsonEvent,
 } from "./orchestrator/conversation/conversation-sse-contract.js";
+import { checkEngineAsync, getCachedProbe, preflightAll, setCachedProbe } from "./preflight.js";
 import { scanRepo } from "./scanner.js";
 import { BoundedRequestBodyError, readBoundedUtf8Body } from "./server/bounded-request-body.js";
 import { handleCapabilityRoute } from "./server/capability-route.js";
@@ -85,6 +87,39 @@ const CSP =
   // script-src 'self': Vite bundles all JS externally — no inline scripts needed.
   // style-src 'unsafe-inline': UnoCSS injects atomic utility styles at runtime.
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'";
+
+/** Live readiness for the Home engine picker: installed CLIs report real
+ * probe levels (no-binary / ready / no-auth / probe-failed) instead of the
+ * static "installed (probe skipped)" stamp, so the dots match what routing
+ * will admit. Reuses the shared probe cache's ["live"] lane so the first
+ * picker load stays cheap; `refresh=1` (re-check button) forces a re-probe. */
+export async function liveEngineReadiness(
+  repo: string,
+  refresh: boolean,
+): Promise<Array<{ engine: string; level: string; detail: string; checkedAt?: string }>> {
+  const LIVE_READINESS_CACHE_LANE = ["live"] as const;
+  const LIVE_PROBE_TIMEOUT_MS = 10_000;
+  const statuses = await Promise.all(
+    [...ENGINES].map(async (engine) => {
+      if (!refresh) {
+        const cached = getCachedProbe(engine, repo, LIVE_READINESS_CACHE_LANE);
+        if (cached) return cached;
+      }
+      const fresh = await checkEngineAsync(engine, {
+        cacheKey: repo,
+        probeTimeoutMs: LIVE_PROBE_TIMEOUT_MS,
+      });
+      setCachedProbe(engine, repo, LIVE_READINESS_CACHE_LANE, fresh);
+      return fresh;
+    }),
+  );
+  return statuses.map(({ engine, level, detail, checkedAt }) => ({
+    engine,
+    level,
+    detail,
+    checkedAt,
+  }));
+}
 
 export async function startServer(
   port = 0,
@@ -193,9 +228,14 @@ export async function startServer(
             packageIdFromPath = "%";
           }
         }
+        const sessions: { authorize(req: Request): boolean } = conversation?.sessions ?? {
+          authorize: guarded,
+        };
+        const authorizeWithFallback: typeof sessions.authorize = (req) =>
+          sessions.authorize(req) || guarded(req);
         return handleCapabilityRoute(
           {
-            sessions: conversation?.sessions ?? { authorize: guarded },
+            sessions: { authorize: authorizeWithFallback },
             capabilities: {
               query: (input) =>
                 productionCapabilityRuntimeV1({
@@ -213,6 +253,13 @@ export async function startServer(
           url,
           packageIdFromPath,
         );
+      }
+
+      if (method === "GET" && path === "/api/engines") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        const refresh = url.searchParams.get("refresh") === "1";
+        const engines = await liveEngineReadiness(activeRepo, refresh);
+        return Response.json({ engines }, { headers: { "cache-control": "no-store" } });
       }
 
       if (method === "POST" && path === "/api/home/private-file-range-handoffs") {
@@ -403,7 +450,11 @@ export async function startServer(
       // --- GET /api/file — token+loopback guarded, sandboxed to activeRepo (#558) ---
       if (method === "GET" && path === "/api/file") {
         if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
-        return handleFileRoute(activeRepo, url.searchParams.get("path") ?? "");
+        return handleFileRoute(
+          activeRepo,
+          url.searchParams.get("path") ?? "",
+          url.searchParams.has("preview"),
+        );
       }
 
       // --- GET /api/projects* and /api/hook/pending (#561: guarded) ---

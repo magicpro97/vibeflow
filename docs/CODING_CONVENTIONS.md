@@ -119,16 +119,21 @@ contract evidence in the same change.
 
 ## Required verification
 
-Run focused tests while iterating, then:
+This is the exact gate order CI enforces (`.github/workflows/ci.yml` `check`
+job); every step has failed a real PR when skipped. Run focused tests while
+iterating, then in order:
 
 ```bash
-bun run typecheck
-bun run lint
-bun run file-size:check
-bun run waiver:check
-bun run build
-git diff --check
+bun run fix                    # 1. Biome auto-format FIRST (unformatted files fail CI lint; formatting later changes test preimages)
+bun run check                  # 2. typecheck + lint + file-size + waiver + whole-repo tests + 100% per-file coverage gate
+bun run build                  # 3. UI (vite) + node-targeted CLI bundle; restart any local UI server with the fresh build
+bunx playwright test e2e/conversation-home.spec.ts   # 4. focused e2e when the diff touches UI/components/DTOs
+bun run scripts/refresh-normative-proofs.ts          # 5. after ANY test or production change (stale proof matrix fails normative:check)
+git diff --check               # 6. then review evidence against the remote merge-base before pushing (pre-push hook enforces it)
 ```
 
-Run affected UI, landing, E2E, native, or normative gates as applicable. Before claiming
-completion after any code edit, run whole-repo `vf verify` and require confidence `1.0`.
+`vf verify` is NOT a substitute for `bun run check` on this repo: CI's `check`
+job runs the local scripts above, and `vf verify` gates vf-dispatched work.
+The coverage gate scans ALL of `src/` (not just the diff), so an untouched
+file can fail a PR. Run affected UI, landing, E2E, native, or normative gates
+as applicable.

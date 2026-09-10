@@ -34,6 +34,13 @@ export interface HomeParticipant {
   model: string | null;
 }
 
+export interface HomeEngineStatusRow {
+  engine: string;
+  level: string;
+  detail: string;
+  checkedAt?: string;
+}
+
 export interface HomeRevisionSummary {
   schema_version: typeof CONVERSATION_CATALOG_SCHEMA_VERSION;
   conversation_id: string;

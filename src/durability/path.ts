@@ -214,13 +214,29 @@ export function openExistingPrivateFileAt(
   flags = fs.constants.O_RDWR,
   maxLinks = 1,
 ): number | null {
-  const fd = tryOpenAt(directory, name, flags);
-  if (fd === null) return null;
-  try {
-    assertPrivateFile(fd, name, maxLinks);
-    return fd;
-  } catch (error) {
-    return cleanupThenThrow(error, [() => fs.closeSync(fd)]);
+  // A concurrent creator (openat + fchmod on arm64 where the variadic mode
+  // is dropped) can leave the file at mode 0 for a few microseconds; the
+  // open then fails EACCES even though the file is mid-creation. Retry
+  // briefly so the CAS race resolves deterministically instead of erroring.
+  const deadline = Date.now() + 100;
+  let lastError: unknown;
+  for (;;) {
+    let fd: number | null;
+    try {
+      fd = tryOpenAt(directory, name, flags);
+    } catch (error) {
+      lastError = error;
+      if (Date.now() >= deadline) throw lastError;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+      continue;
+    }
+    if (fd === null) return null;
+    try {
+      assertPrivateFile(fd, name, maxLinks);
+      return fd;
+    } catch (error) {
+      return cleanupThenThrow(error, [() => fs.closeSync(fd)]);
+    }
   }
 }
 
@@ -247,11 +263,35 @@ export function openOrCreatePrivateFileAt(directory: PinnedDirectory, name: stri
       throw error;
     }
   }
-  const raced = openAt(directory, name, fs.constants.O_RDWR);
+  const raced = openAtRetryEacces(() => openAt(directory, name, fs.constants.O_RDWR));
   try {
     assertPrivateFile(raced, name, 1);
     return raced;
   } catch (error) {
     return cleanupThenThrow(error, [() => fs.closeSync(raced)]);
   }
+}
+
+/** Open with a brief EACCES retry: a racing creator may still be between
+ * openat(CREAT) and fchmod, leaving the file at mode 0 for microseconds.
+ * Exported as a pure seam so the branches are testable without a live FS. */
+export function openAtRetryEacces(openAttempt: () => number, deadline = Date.now() + 100): number {
+  let lastError: unknown;
+  let round = 0;
+  let again = true;
+  // Bounded retry loop: EACCES means a concurrent creator is still between
+  // openat(CREAT) and fchmod, which resolves in microseconds.
+  while (again) {
+    again = false;
+    round += 1;
+    try {
+      return openAttempt();
+    } catch (error) {
+      lastError = error;
+      if (Date.now() >= deadline) break;
+      again = true;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+    }
+  }
+  throw lastError;
 }

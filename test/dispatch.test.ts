@@ -516,24 +516,15 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
     // Default spawner path in bridge mode: VIBEFLOW_AI set, no spawner
     // injected. The function must use the default shell-aware async
     // spawner (line 496-497) instead of a sync fallback.
-    const origVAI = process.env.VIBEFLOW_AI;
-    process.env.VIBEFLOW_AI = "echo bridge-output";
-    try {
-      const r = await runDispatchAsync({
-        engine: "claude",
-        prompt: "p",
-        mode: "bridge",
-      });
-      expect(r.ok).toBe(true);
-      expect(r.raw).toContain("bridge-output");
-      expect(r.mode).toBe("bridge");
-    } finally {
-      if (origVAI === undefined) {
-        process.env.VIBEFLOW_AI = "";
-      } else {
-        process.env.VIBEFLOW_AI = origVAI;
-      }
-    }
+    const r = await runDispatchAsync({
+      engine: "claude",
+      prompt: "p",
+      mode: "bridge",
+      bridgeCmd: "echo bridge-output",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.raw).toContain("bridge-output");
+    expect(r.mode).toBe("bridge");
   });
 
   test("runDispatch bridge: stderr is routed to onStderrChunk (PR28 audit M5)", async () => {
@@ -543,30 +534,21 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
     // sync bridge path. Async path streamed it per-chunk.
     // Post-fix: the sync bridge calls opts.onStderrChunk with
     // the captured stderr.
-    const origVAI = process.env.VIBEFLOW_AI;
-    process.env.VIBEFLOW_AI = "sh -c 'echo bridge-stderr-noise 1>&2'";
-    try {
-      const captured: string[] = [];
-      const r = await runDispatch({
-        engine: "claude",
-        prompt: "p",
-        mode: "bridge",
-        onStderrChunk: (text) => captured.push(text),
-      });
-      // The bridge command emits a single line to stderr; the
-      // fix routes that line through onStderrChunk.
-      expect(captured.length).toBeGreaterThan(0);
-      expect(captured.join("")).toContain("bridge-stderr-noise");
-      // The result object also carries stderr for callers that
-      // want to log it themselves.
-      expect(r.ok).toBe(true);
-    } finally {
-      if (origVAI === undefined) {
-        process.env.VIBEFLOW_AI = "";
-      } else {
-        process.env.VIBEFLOW_AI = origVAI;
-      }
-    }
+    const captured: string[] = [];
+    const r = await runDispatch({
+      engine: "claude",
+      prompt: "p",
+      mode: "bridge",
+      bridgeCmd: "sh -c 'echo bridge-stderr-noise 1>&2'",
+      onStderrChunk: (text) => captured.push(text),
+    });
+    // The bridge command emits a single line to stderr; the
+    // fix routes that line through onStderrChunk.
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured.join("")).toContain("bridge-stderr-noise");
+    // The result object also carries stderr for callers that
+    // want to log it themselves.
+    expect(r.ok).toBe(true);
   });
 
   test("runDispatchAsync in bridge mode returns ok:false when VIBEFLOW_AI is unset", async () => {
@@ -581,7 +563,8 @@ describe("runDispatchAsync — genuine async spawn seam (defect #3)", () => {
       expect(r.ok).toBe(false);
       expect(r.reason).toBe("VIBEFLOW_AI is not set");
     } finally {
-      if (origVAI !== undefined) process.env.VIBEFLOW_AI = origVAI;
+      if (origVAI === undefined) process.env.VIBEFLOW_AI = "";
+      else process.env.VIBEFLOW_AI = origVAI;
     }
   });
 });

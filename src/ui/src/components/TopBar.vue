@@ -30,6 +30,17 @@
       <button class="home-icon-button" type="button" aria-label="New conversation" title="New conversation" @click="newConversation">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
       </button>
+      <button
+        class="home-icon-button"
+        type="button"
+        :aria-label="schemeLabel"
+        :title="schemeLabel"
+        @click="toggle"
+      >
+        <svg v-if="current === 'light'" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4" /><path d="M10 1v2m0 15v2M1 10h2m15 0h2M4.5 4.5l1.4 1.4m8.5 8.5 1.4 1.4m0-11.3-1.4 1.4m-8.5 8.5-1.4 1.4" /></svg>
+        <svg v-else-if="current === 'dark'" viewBox="0 0 20 20" aria-hidden="true"><path d="M17.4 11.5A8 8 0 0 1 8.5 2.6 8 8 0 1 0 17.4 11.5Z" /></svg>
+        <svg v-else viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4" /><path d="M10 2v2m0 12v2M2 10h2m12 0h2M5.5 5.5l1 1m7 7 1 1m0-9-1 1m-7 7-1 1" /><circle cx="10" cy="10" r="1.5" fill="none" stroke-width="1.5" stroke-dasharray="2 2" /></svg>
+      </button>
       <button class="home-icon-button" type="button" aria-label="Open settings" title="Settings" @click="$emit('open-settings')">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3" /><path d="M10 2v2m0 12v2M2 10h2m12 0h2M4.35 4.35l1.4 1.4m8.5 8.5 1.4 1.4m0-11.3-1.4 1.4m-8.5 8.5-1.4 1.4" /></svg>
       </button>
@@ -39,11 +50,14 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick } from "vue";
+import { computed, nextTick } from "vue";
+import { SCHEME_LABELS, useColorScheme } from "../composables/useColorScheme.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 
 defineEmits<{ "open-capabilities": []; "open-settings": [] }>();
 const store = useConversationHomeStore();
+const { current, toggle } = useColorScheme();
+const schemeLabel = computed(() => SCHEME_LABELS[current.value]);
 
 function newConversation() {
   store.newConversation();

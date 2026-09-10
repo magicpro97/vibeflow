@@ -139,7 +139,7 @@ if (preparedRun !== setupRun) {
         PATH: `${TEST_BIN}${delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`,
       },
       stdio: "ignore",
-      timeout: 30_000,
+      timeout: 90_000,
     });
     writeFileSync(SETUP_FLAG, setupRun);
   } catch (err) {

@@ -24,7 +24,7 @@ CLI is bumped you know exactly what to re-check.
 | -------- | ---------------- | ---------- | --------------------------------- |
 | claude   | 2.1.207          | 2026-07-12 | npm `@anthropic-ai/claude-code`   |
 | codex    | 0.144.1          | 2026-07-12 | brew `codex`                      |
-| copilot  | 1.0.69           | 2026-07-12 | brew `copilot` (GitHub Copilot CLI) |
+| copilot  | 1.0.83           | 2026-09-08 | brew `copilot` (GitHub Copilot CLI) |
 | opencode | 1.18.22          | 2026-08-27 | brew `anomalyco/tap/opencode`     |
 | agy      | 1.1.4            | 2026-07-19 | `%LOCALAPPDATA%\\agy\\bin\\agy.exe` |
 | bun      | 1.4.0            | 2026-08-26 | (runtime)                         |
@@ -57,9 +57,10 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
 
 ### copilot
 
-- **Fresh invocation:** `copilot -p <prompt> --allow-all` (prompt is an argv value, not stdin; argv is ~32K-capped so large prompts are written to `.vibeflow/dispatch/<unit>.md` and a short pointer `Read <abs path> and follow it` is passed instead)
+- **Fresh invocation:** `copilot --allow-all -p <prompt>` — every option (including `--allow-all`) must **precede** the `-p` flag; copilot 1.0.83 rejects any flag placed after `-p` or after the prompt value. The prompt is an argv value, not stdin; argv is ~32K-capped so large prompts are written to `.vibeflow/dispatch/<unit>.md` and a short pointer `Read <abs path> and follow it` is passed instead.
+- **Tool flags:** `--available-tools` / `--excluded-tools` accept **MCP tool names only** in 1.0.83 (e.g. `Neon-*` from the user's MCP config). Built-in tool intents (`Read`, `Grep`, `Glob`, `WebFetch`, …) are never passed to these flags — they are always treated as unknown names and silently ignored. Copilot has no read-only mode flag, so the conversation read-only sandbox is unenforced for copilot (enforcement flags are dropped rather than sent as invalid values).
 - **Resume:** exact by-id resume is not supported by VibeFlow. Latest-session shortcuts are not accepted as exact authority; a turn without a valid exact binding uses bounded structured own-history replay instead of silently omitting context.
-- **Version guard:** the CLI has a history of silent breaking auto-updates (github/copilot-cli#1606 removed `--headless --stdio`); when `copilot --version` can't be read, dispatch proceeds with a warning.
+- **Version guard:** the CLI has a history of silent breaking auto-updates (github/copilot-cli#1606 removed `--headless --stdio`); when `copilot --version` can't be read, dispatch proceeds with a warning. The verified contract (2026-09-08, copilot 1.0.83) is `copilot [options...] -p <prompt>`.
 
 ### antigravity
 
