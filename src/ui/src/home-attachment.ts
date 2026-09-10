@@ -41,6 +41,15 @@ export function unionAttachmentPickerAccept(rows: readonly AttachmentEngineRow[]
   return attachmentPickerAccept({ kinds: [...kinds] });
 }
 
+export function canUseAttachmentForPrivateRange(fileName: string): boolean {
+  const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
+  return attachmentKindForExtension(extension) === ATTACHMENT_KIND.TEXT;
+}
+
+export function privateRangePathForAttachment(fileName: string): string {
+  return `.vibeflow/attachments/${fileName}`;
+}
+
 export interface AttachmentEngineRow {
   readonly engine: Engine;
   readonly ready: boolean;
@@ -64,6 +73,24 @@ export function resolveAttachmentEngine(
     if (!row.ready && engineAttachmentSupport(row.engine)) return row.engine;
   }
   return null;
+}
+
+export function resolveAttachmentEngineForFiles(
+  fileNames: readonly string[],
+  rows: readonly AttachmentEngineRow[],
+): Engine | null {
+  const kinds = fileNames
+    .map((name) => attachmentKindForExtension(name.split(".").pop()?.toLowerCase() ?? ""))
+    .filter((kind): kind is AttachmentKind => kind !== null);
+  if (!kinds.length || kinds.length !== fileNames.length) return null;
+  const candidates = rows.filter((row) =>
+    kinds.every((kind) => engineAcceptsAttachment(row.engine, kind)),
+  );
+  return (
+    candidates.find((row) => row.ready && row.admitted)?.engine ??
+    candidates.find((row) => !row.ready)?.engine ??
+    null
+  );
 }
 
 export type AttachmentGate =

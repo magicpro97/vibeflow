@@ -6,18 +6,25 @@ import {
 } from "../../../../src/core/attachment-support.js";
 import {
   attachmentPickerAccept,
+  canUseAttachmentForPrivateRange,
   gateAttachment,
+  privateRangePathForAttachment,
   resolveAttachmentEngine,
+  resolveAttachmentEngineForFiles,
   unionAttachmentPickerAccept,
 } from "../home-attachment.js";
-import { useHomeAttachments } from "../home-attachments.js";
+import {
+  getHomeAttachmentEngine,
+  setHomeAttachmentEngine,
+  useHomeAttachments,
+} from "../home-attachments.js";
 
 const READY = [
   { engine: AGENT_ENGINE.CLAUDE, ready: true, admitted: true },
   { engine: AGENT_ENGINE.COPILOT, ready: true, admitted: true },
   { engine: AGENT_ENGINE.CODEX, ready: false, admitted: false },
+  { engine: AGENT_ENGINE.OPENCODE, ready: true, admitted: true },
 ];
-
 describe("attachment picker gating", () => {
   test("accept lists only extensions the engine kind supports", () => {
     const claude = engineAttachmentSupport(AGENT_ENGINE.CLAUDE);
@@ -34,11 +41,18 @@ describe("attachment picker gating", () => {
     expect(resolveAttachmentEngine("codex", READY)).toBe(AGENT_ENGINE.CODEX);
   });
 
+  test("Auto keeps one engine capable of every selected attachment kind", () => {
+    expect(resolveAttachmentEngineForFiles(["private-photo.png", "private-notes.txt"], READY)).toBe(
+      AGENT_ENGINE.OPENCODE,
+    );
+  });
+
   test("Auto falls back to the first attachment-capable engine while probes are pending", () => {
     const pending = [
       { engine: AGENT_ENGINE.CLAUDE, ready: false, admitted: false },
       { engine: AGENT_ENGINE.COPILOT, ready: false, admitted: false },
       { engine: AGENT_ENGINE.CODEX, ready: false, admitted: false },
+      { engine: AGENT_ENGINE.OPENCODE, ready: false, admitted: false },
     ];
     expect(resolveAttachmentEngine("auto", pending)).toBe(AGENT_ENGINE.CLAUDE);
     expect(
@@ -52,7 +66,7 @@ describe("attachment picker gating", () => {
   test("auto-mode picker accept unions every engine's kinds so images stay choosable", () => {
     const accept = unionAttachmentPickerAccept([
       { engine: AGENT_ENGINE.CLAUDE, ready: true, admitted: true },
-      { engine: AGENT_ENGINE.CODEX, ready: true, admitted: true },
+      { engine: AGENT_ENGINE.COPILOT, ready: true, admitted: true },
     ]);
     expect(accept).toContain(".png");
     expect(accept).toContain(".md");
@@ -63,6 +77,13 @@ describe("attachment picker gating", () => {
     const accept = unionAttachmentPickerAccept([]);
     expect(accept).toContain(".png");
     expect(accept).toContain(".md");
+  });
+
+  test("only text attachments can provide a private line range", () => {
+    expect(canUseAttachmentForPrivateRange("notes.md")).toBe(true);
+    expect(canUseAttachmentForPrivateRange("photo.png")).toBe(false);
+    expect(canUseAttachmentForPrivateRange("report.pdf")).toBe(false);
+    expect(privateRangePathForAttachment("notes.md")).toBe(".vibeflow/attachments/notes.md");
   });
 
   test("explicit engine accepts its native kind", () => {
@@ -118,6 +139,10 @@ describe("attachment picker gating", () => {
     expect(gateAttachment("notes.md", null, READY, false).ok).toBe(false);
   });
 
+  test("attachment engine state follows the selected capable engine", () => {
+    setHomeAttachmentEngine(AGENT_ENGINE.OPENCODE);
+    expect(getHomeAttachmentEngine()).toBe(AGENT_ENGINE.OPENCODE);
+  });
   test("removing an attachment chip deletes the uploaded file and drops the chip", async () => {
     const deleted: string[] = [];
     const { attachmentNames, add, remove } = useHomeAttachments();

@@ -9,15 +9,20 @@ import {
   attachmentPickerAccept,
   gateAttachment,
   resolveAttachmentEngine,
+  resolveAttachmentEngineForFiles,
   unionAttachmentPickerAccept,
 } from "../home-attachment.js";
-import { useHomeAttachments } from "../home-attachments.js";
+import {
+  getHomeAttachmentEngine,
+  setHomeAttachmentEngine,
+  useHomeAttachments,
+} from "../home-attachments.js";
 
 const props = defineProps<{
   disabled: boolean;
 }>();
 
-const { add } = useHomeAttachments();
+const { attachmentNames, add } = useHomeAttachments();
 const { selection, statuses, pick } = useHomeEngines();
 const fileInput = ref<HTMLInputElement | null>(null);
 const hint = ref("");
@@ -63,13 +68,17 @@ async function onFile(event: Event) {
   const file = input.files?.[0];
   input.value = "";
   if (!file) return;
-  const gate = gateAttachment(file.name, resolvedEngine.value, rows.value, autoMode.value);
+  const allFiles = [...attachmentNames.value, file.name];
+  const selectedEngine = autoMode.value
+    ? (resolveAttachmentEngineForFiles(allFiles, rows.value) ?? getHomeAttachmentEngine())
+    : resolvedEngine.value;
+  const gate = gateAttachment(file.name, selectedEngine, rows.value, autoMode.value);
   if (!gate.ok) {
     hint.value = gate.reason;
     return;
   }
   // Auto mode may pick a different, capable CLI for this file.
-  if (autoMode.value) pick(gate.engine);
+  if (autoMode.value) setHomeAttachmentEngine(gate.engine);
   uploading.value = true;
   try {
     const result = await api.upload(file);

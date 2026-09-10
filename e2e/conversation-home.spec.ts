@@ -1715,6 +1715,47 @@ test.describe("AI-first conversation Home", () => {
     expect(legacyCalls).toBe(0);
   });
 
+  test("uses an uploaded text attachment for private range and clears stale source on removal", async ({
+    page,
+  }) => {
+    await page.route("**/api/engines**", (route) =>
+      route.fulfill({ status: 200, json: { engines: [] } }),
+    );
+    await page.goto("/");
+    await waitForPage(page);
+
+    const fileInput = page.getByLabel(/Attach a file/).last();
+    await fileInput.setInputFiles({
+      name: "private-photo.png",
+      mimeType: "image/png",
+      buffer: Buffer.from([137, 80, 78, 71]),
+    });
+    await expect(page.locator(".home-composer__attachment")).toContainText("private-photo.png");
+    await fileInput.setInputFiles({
+      name: "private-notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("first line\nsecond line\nthird line\n", "utf8"),
+    });
+    await expect(
+      page.locator(".home-composer__attachment").filter({ hasText: "private-notes.txt" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Private range", exact: true }).click();
+    const source = page.getByLabel("Private range file");
+    await expect(source).toBeFocused();
+    await source.selectOption("private-notes.txt");
+    await expect(page.getByText("second line", { exact: true })).toBeVisible();
+    await page.getByLabel("Start line").fill("2");
+    await page.getByLabel("End line").fill("3");
+
+    await page.getByRole("button", { name: "Remove attachment private-notes.txt" }).click();
+    await expect(page.getByLabel("Private range file")).toHaveCount(0);
+    await expect(page.getByLabel("Path")).toBeVisible();
+    await expect(page.getByLabel("Path")).toHaveValue("");
+    await expect(page.getByText("private-notes.txt", { exact: true })).toHaveCount(0);
+    await expectAxeClean(page, "private range attachment source");
+  });
+
   test("restores focus for Conversation Details and keeps a collapsed rail inert", async ({
     page,
   }) => {

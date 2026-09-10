@@ -5,6 +5,7 @@ import { HOME_API_ERROR_CONTRACT } from "../conversation-home-error-boundary.js"
 import { conversationHomeRequest } from "../conversation-home-http.js";
 import { HOME_ENGINE_DISPLAY_LABEL } from "../conversation-home-participant-label.js";
 import type { HomeEngineStatusRow } from "../conversation-home-types.js";
+import { getHomeAttachmentEngine } from "../home-attachments.js";
 
 export type HomeEngineSelection = "auto" | Engine;
 
@@ -36,7 +37,10 @@ const _checkedAt = ref<number | null>(null);
 
 /** Read-only access for the command runtime so create requests carry the pick. */
 export function getHomePreferredEngine(): HomeEngineSelection {
-  return _selection.value;
+  const attachmentEngine = getHomeAttachmentEngine();
+  return _selection.value === HOME_ENGINE_AUTO && attachmentEngine
+    ? attachmentEngine
+    : _selection.value;
 }
 
 /** Participants override sent when a concrete CLI is picked; undefined = auto. */

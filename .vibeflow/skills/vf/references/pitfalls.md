@@ -87,6 +87,27 @@ manual workaround — most of these are the exact failure modes the CLI exists t
   to find the correct tag.
 
 Powered by VibeFlow.
+
+- **Attachments and private ranges are different context lifecycles.** Attachments upload into
+  `.vibeflow/attachments/<name>` and remain selectable chips for engine argv projection. A private
+  range is an exact text excerpt staged through the guarded private-context broker; when text
+  attachments exist, the panel must offer a file selector sourced from those chips instead of
+  making users retype a path. Keep path input only as an explicit fallback for repo files that
+  were not uploaded. Images/documents cannot provide line ranges; reject them with a readable
+  source hint. Test this as a real flow: upload text + image, open Private range, select text file,
+  verify preview and staged repo-relative path, then remove attachment and verify selector state.
+
+- **Full-flow UI verification must include feature transitions, not only static render.** For any
+  picker/attachment change, exercise the exact user sequence (open page, wait for probe, choose
+  file, observe chip, open dependent panel, select source, preview, choose range, send, remove).
+  Assert browser console is clean, accessibility has no violations, controls remain viewport-safe at
+  mobile widths/200% zoom, and server-side upload/delete state matches visible chips. Unit tests
+  alone miss stale shared composable state and readiness races.
+
+- **Pre-push local CI must not be weakened by convenience flags.** Run the full local CI sequence
+  after source/test/docs changes; `--quick` is diagnostic only and never evidence for a mergeable
+  PR. If the hook reports failure, fix the first failing gate, refresh normative proofs, regenerate
+  review evidence against the remote tip, then retry push. Never use `--no-verify`.
 - **Home 400-line gate counts `split(/\r?\n/).length`, so a trailing newline adds one.** A file with N content lines plus a final newline reports N+1 and fails at exactly 400. When trimming a `.vue`/`.ts` file to fit the gate, leave at least one spare line (398 content lines / 399 split entries) or the gate flips red on CI even though `wc -l` looks fine.
 
 - **Suggestion dismiss loops when a watch signature depends on the state it resets.** Refactoring the composer's raw `suggestions` computed into `visibleSuggestions` (which includes the dismissed flag) made the suggestion-signature watcher see a change on every dismiss and immediately clear the flag — Escape never closed the listbox (CI e2e caught it). Keep watch signatures derived from RAW matcher output (draft only), never from a derived value the watcher itself mutates.
