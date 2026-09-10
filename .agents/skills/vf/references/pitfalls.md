@@ -18,6 +18,17 @@ manual workaround — most of these are the exact failure modes the CLI exists t
   edits to the generated region (between the vibeflow markers) are clobbered on the next
   regeneration. Edit sources, then regenerate.
 
+- **Capability-gate on the static support matrix, not the live probe.** The engine
+  readiness probe is slow (CLI spawns, 5-15s) and can report "unknown" on a fresh start.
+  If a UI surface gates its visibility/acceptance on `ready`, it flickers hidden or blocks
+  use for seconds on machines that actually have the CLI. Gate *display* on the static
+  contract (support matrix) and let dispatch fail loudly; gate *dispatch* on readiness.
+  Example: attach "Auto" mode — file-dialog `accept` unions every engine's kinds and the
+  per-file gate falls back to the first engine whose support matrix covers the kind, so a
+  fresh probe never hides images that codex/copilot can consume. This exact bug shipped as
+  "attach does not support images" — the resolved engine was claude (first ready), the
+  dialog hid `.png`, and probes still filling in caused "no ready engine supports png".
+
 - **A red `vf verify` is investigated, not worked around.** Read the failing lines — each
   names a failing toolchain gate (typecheck/lint/test) or a policy gate (confidence < 1,
   no-evidence, scope overlap). Fix the root cause, then re-run. Never paper over it by
