@@ -2536,7 +2536,13 @@ describe("commands.verify branches", () => {
     });
     const calls: Array<{ cmd: string; args: readonly string[] }> = [];
 
-    expect(verify({ projectDir: dir, spawner: asSpawnSync(makeFakeSpawner({ calls })) })).toBe(1);
+    expect(
+      verify({
+        projectDir: dir,
+        spawner: asSpawnSync(makeFakeSpawner({ calls })),
+        requireReviewEvidence: true,
+      }),
+    ).toBe(1);
     expect(
       verify({
         projectDir: dir,
