@@ -1,14 +1,19 @@
 <template>
   <div class="home-app">
     <a class="home-skip-link" href="#conversation-main">Skip to conversation</a>
-    <TopBar @open-capabilities="openCapabilities" @open-settings="openSettings" />
+    <TopBar
+      @open-capabilities="openCapabilities"
+      @open-settings="openSettings"
+      @open-control-center="openControlCenter"
+    />
     <ConversationHome
-      :transient-ui-open="capabilitiesOpen || settingsOpen || traceOpen"
+      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen"
       @open-capabilities="openCapabilities"
       @open-trace="openTrace"
     />
     <HomeCapabilityDrawer :open="capabilitiesOpen" @close="closeCapabilities" />
     <HomePreferencesDrawer :open="settingsOpen" @close="closeSettings" />
+    <HomeControlCenterDrawer :open="controlCenterOpen" @close="closeControlCenter" />
     <HomeTraceDrawer :open="traceOpen" @close="closeTrace" />
     <div class="sr-only" role="status" aria-live="polite">{{ announcement }}</div>
   </div>
@@ -18,6 +23,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ConversationHome from "./components/ConversationHome.vue";
 import HomeCapabilityDrawer from "./components/HomeCapabilityDrawer.vue";
+import HomeControlCenterDrawer from "./components/HomeControlCenterDrawer.vue";
 import HomePreferencesDrawer from "./components/HomePreferencesDrawer.vue";
 import HomeTraceDrawer from "./components/HomeTraceDrawer.vue";
 import TopBar from "./components/TopBar.vue";
@@ -27,6 +33,7 @@ import "./home.css";
 const store = useConversationHomeStore();
 const capabilitiesOpen = ref(false);
 const settingsOpen = ref(false);
+const controlCenterOpen = ref(false);
 const traceOpen = ref(false);
 const announcement = ref("");
 
@@ -48,6 +55,7 @@ function closeCapabilities() {
 
 function openCapabilities() {
   settingsOpen.value = false;
+  controlCenterOpen.value = false;
   traceOpen.value = false;
   capabilitiesOpen.value = true;
 }
@@ -59,13 +67,29 @@ function closeSettings() {
 
 function openSettings() {
   capabilitiesOpen.value = false;
+  controlCenterOpen.value = false;
   traceOpen.value = false;
   settingsOpen.value = true;
+}
+
+function closeControlCenter() {
+  controlCenterOpen.value = false;
+  nextTick(() =>
+    document.querySelector<HTMLElement>('[aria-label="Open control center"]')?.focus(),
+  );
+}
+
+function openControlCenter() {
+  capabilitiesOpen.value = false;
+  settingsOpen.value = false;
+  traceOpen.value = false;
+  controlCenterOpen.value = true;
 }
 
 function openTrace() {
   capabilitiesOpen.value = false;
   settingsOpen.value = false;
+  controlCenterOpen.value = false;
   traceOpen.value = true;
 }
 
@@ -84,6 +108,7 @@ function closeActiveDrawer(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
   if (capabilitiesOpen.value) closeCapabilities();
   else if (settingsOpen.value) closeSettings();
+  else if (controlCenterOpen.value) closeControlCenter();
   else if (traceOpen.value) closeTrace();
 }
 

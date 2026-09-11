@@ -14,7 +14,7 @@
         @cancel="cancelQueuedEdit"
       />
       <label id="home-composer-label" class="home-composer__label" for="home-composer">Message</label>
-<HomeAttachments />
+      <HomeAttachments />
       <div
         class="home-composer__field"
         role="combobox"
@@ -27,10 +27,7 @@
         :aria-owns="visibleSuggestions.length ? suggestionListId : undefined"
         tabindex="-1"
       >
-        <HomeComposerHighlight
-          :draft="store.draft"
-          :participants="store.activeRevision?.participants ?? []"
-        />
+        <HomeComposerHighlight :draft="store.draft" :participants="store.activeRevision?.participants ?? []" />
         <textarea
           id="home-composer"
           ref="textarea"
@@ -50,28 +47,26 @@
           @keyup="onKeyup"
         />
       </div>
-      <HomeComposerSuggestionHint
-        v-if="!visibleSuggestions.length"
-        :draft="store.draft"
-        :participants="store.activeRevision?.participants ?? []"
-      />
-      <div v-if="visibleSuggestions.length" :id="suggestionListId" class="home-suggestions" role="listbox" aria-label="Composer suggestions">
-        <button
-          v-for="(suggestion, index) in visibleSuggestions"
-          :id="suggestionOptionId(index)"
-          :key="suggestion.value"
-          type="button"
-          role="option"
-          :aria-selected="index === activeSuggestion"
-          :class="{ 'home-suggestion--active': index === activeSuggestion }"
-          @click="choose(suggestion.value)"
-          @mousedown.prevent="choose(suggestion.value)"
-        >
-          <span class="home-suggestion__glyph" aria-hidden="true">{{ suggestion.glyph }}</span>
-          <span><strong>{{ suggestion.label }}</strong><small>{{ suggestion.description }}</small></span>
-          <kbd>{{ suggestion.value }}</kbd>
-        </button>
-      </div>
+      <HomeComposerSuggestionHint v-if="!visibleSuggestions.length" :draft="store.draft" :participants="store.activeRevision?.participants ?? []" />
+      <Teleport to="body">
+        <div v-if="visibleSuggestions.length" :id="suggestionListId" class="home-suggestions" role="listbox" aria-label="Composer suggestions" :style="suggestionStyle">
+          <button
+            v-for="(suggestion, index) in visibleSuggestions"
+            :id="suggestionOptionId(index)"
+            :key="suggestion.value"
+            type="button"
+            role="option"
+            :aria-selected="index === activeSuggestion"
+            :class="{ 'home-suggestion--active': index === activeSuggestion }"
+            @click="choose(suggestion.value)"
+            @mousedown.prevent="choose(suggestion.value)"
+          >
+            <span class="home-suggestion__glyph" aria-hidden="true">{{ suggestion.glyph }}</span>
+            <span><strong>{{ suggestion.label }}</strong><small>{{ suggestion.description }}</small></span>
+            <kbd>{{ suggestion.value }}</kbd>
+          </button>
+        </div>
+      </Teleport>
       <HomeCapabilityTargetChooser
         v-if="store.capabilityTargetRequest?.selection_mode === 'explicit'"
         @confirming="restoreComposerFocusAfterConfirmation"
@@ -79,14 +74,14 @@
       />
       <div class="home-composer__toolbar">
         <div class="home-composer__tools" aria-label="Conversation shortcuts">
-                <HomeToolbarActions
-                  :participants="store.activeRevision?.participants ?? []"
-                  :disabled="Boolean(store.queuedMessageEdit)"
-                  :draft="store.draft"
-                  @select="insert"
-                  @remove="removeMention"
-                />
-                <button
+          <HomeToolbarActions
+            :participants="store.activeRevision?.participants ?? []"
+            :disabled="Boolean(store.queuedMessageEdit)"
+            :draft="store.draft"
+            @select="insert"
+            @remove="removeMention"
+          />
+          <button
             type="button"
             :disabled="Boolean(store.queuedMessageEdit)"
             :aria-expanded="privateRangeOpen"
@@ -243,7 +238,6 @@ function syncHighlightScroll() {
   const overlay = document.querySelector<HTMLElement>(".home-composer__highlight");
   if (overlay) overlay.scrollTop = element.scrollTop;
 }
-
 function insert(value: string) {
   if (store.queuedMessageEdit) return;
   const element = textarea.value;
@@ -274,7 +268,6 @@ function removeMention(value: string) {
     resize();
   });
 }
-
 async function restoreComposerFocus() {
   await nextTick();
   textarea.value?.focus();
@@ -300,6 +293,7 @@ async function cancelQueuedEdit() {
 function choose(value: string) {
   const mention = nextMentionToken(store.draft, value);
   store.draft = `${mention} `;
+  suggestionsDismissed.value = true;
   nextTick(() => {
     textarea.value?.focus();
     textarea.value?.setSelectionRange(store.draft.length, store.draft.length);
@@ -307,7 +301,17 @@ function choose(value: string) {
   });
 }
 const suggestionOptionId = (index: number) => `composer-suggestion-${index}`;
-
+const suggestionStyle = computed(() => {
+  const rect = textarea.value?.getBoundingClientRect();
+  return rect
+    ? {
+        top: `${rect.top}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+        transform: "translateY(-100%) translateY(-0.35rem)",
+      }
+    : null;
+});
 function onKeydown(event: KeyboardEvent) {
   if (composing.value || event.isComposing || event.keyCode === 229) return;
   if (visibleSuggestions.value.length) {
@@ -358,7 +362,6 @@ function dismissSuggestionsWithEscape(event: KeyboardEvent): boolean {
   event.stopPropagation();
   return true;
 }
-
 function restorePreservedDraft(preservedDraft: string) {
   if (store.draft !== preservedDraft) store.draft = preservedDraft;
   const element = textarea.value;
@@ -376,16 +379,13 @@ function restoreDismissedDraft(event: KeyboardEvent) {
   event.preventDefault();
   event.stopPropagation();
 }
-
 function onKeyup(event: KeyboardEvent) {
   restoreDismissedDraft(event);
 }
-
 function onBeforeInput(event: InputEvent) {
   if ((composing.value || event.isComposing) && event.inputType === "insertLineBreak")
     event.preventDefault();
 }
-
 async function submit() {
   if (composing.value) return;
   await store.submitDraft();

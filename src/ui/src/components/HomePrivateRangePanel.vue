@@ -4,6 +4,7 @@
     id="home-private-range-panel"
     class="home-private-range-panel"
     aria-labelledby="home-private-range-title"
+    @keydown.esc.stop="closePrivateRangePanel"
   >
     <div class="home-private-range-panel__copy">
       <strong id="home-private-range-title">

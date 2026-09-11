@@ -96,6 +96,10 @@ export interface NormativeRunnerCommandV2 {
   reportEnvironment?: Readonly<Record<string, string>>;
 }
 
+const reportEnvironment = (reportPath: string): Readonly<Record<string, string>> => ({
+  PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath,
+});
+
 export function normativeRunnerCommand(
   runner: Exclude<NormativeProofRunner, "manual">,
   proofs: readonly NormativeProofDefinitionV2[],
@@ -127,7 +131,7 @@ export function normativeRunnerCommand(
     command: "bunx",
     versionArgs: ["playwright", "--version"],
     args: ["playwright", "test", ...paths, "--grep", pattern, "--reporter=json"],
-    reportEnvironment: { PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath },
+    reportEnvironment: reportEnvironment(reportPath),
   };
 }
 

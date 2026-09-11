@@ -82,6 +82,8 @@ export const api = {
         ...(settings ? { settings } : {}),
       }).then(() => api.settings.get()),
   },
+  detect: (repoPath: string) =>
+    req<import("./types.js").RepoDetection>("POST", "/api/detect", { path: repoPath }),
   skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
   // #689: recent curator findings (severity-badged, sanitized).
   curator: () =>
@@ -157,7 +159,6 @@ export const api = {
     req<{ events: unknown[] }>("GET", `/api/logs/recent?since=${since}&limit=${limit}`).then((r) =>
       decodeLogEvents(r.events),
     ),
-  detect: (repoPath: string) => req<unknown>("POST", "/api/detect", { path: repoPath }),
   init: (payload: unknown) => req<unknown>("POST", "/api/init", payload),
   dispatch: (payload?: unknown) => req<unknown>("POST", "/api/dispatch", payload ?? {}),
   units: (payload: unknown) => req<unknown>("POST", "/api/units", payload),

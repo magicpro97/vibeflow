@@ -958,6 +958,7 @@ button:disabled {
 .home-timeline {
   grid-row: 2;
   position: relative;
+  z-index: 0;
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
@@ -1446,8 +1447,10 @@ button:disabled {
 
 /* Composer */
 .home-composer-wrap {
+  position: relative;
   grid-row: 3;
   z-index: 10;
+  isolation: isolate;
   display: grid;
   align-content: start;
   height: max-content;
@@ -2098,9 +2101,10 @@ button:disabled {
   line-height: 1.4;
 }
 .home-suggestions {
-  width: calc(100% - 0.8rem);
+  position: fixed;
+  z-index: 30;
   max-height: 15rem;
-  margin: 0.35rem 0.4rem 0.45rem;
+  margin: 0;
   overflow-y: auto;
   padding: 0.35rem;
   border: 1px solid var(--home-line-strong);
@@ -2719,6 +2723,164 @@ button:disabled {
   margin-top: 0.35rem;
   overflow-wrap: anywhere;
   color: var(--home-muted);
+}
+
+/* Control center */
+.home-control-center {
+  position: fixed;
+  top: 4.5rem;
+  right: 1rem;
+  z-index: 30;
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 5.5rem);
+  overflow-y: auto;
+  padding: 1rem;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.8rem;
+  background: var(--home-panel);
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 35%);
+}
+.home-control-center__header,
+.home-control-section__heading,
+.home-control-path,
+.home-control-engine,
+.home-control-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.home-control-center__header,
+.home-control-section__heading {
+  justify-content: space-between;
+}
+.home-control-center__header strong,
+.home-control-section__heading strong,
+.home-control-toggle strong,
+.home-control-engine strong {
+  display: block;
+  color: var(--home-text);
+  font-size: 0.82rem;
+}
+.home-control-center__header small,
+.home-control-section__heading small,
+.home-control-toggle small,
+.home-control-engine small {
+  display: block;
+  color: var(--home-muted);
+  font-size: 0.68rem;
+}
+.home-control-center__header > button {
+  color: var(--home-muted);
+  font-size: 1.4rem;
+}
+.home-control-section {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--home-line);
+}
+.home-control-section__heading > button,
+.home-control-save {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.35rem;
+  color: var(--home-text);
+  font-size: 0.7rem;
+}
+.home-control-path {
+  margin-top: 0.65rem;
+}
+.home-control-path > span {
+  color: var(--home-muted);
+  font-size: 0.7rem;
+}
+.home-control-path input {
+  min-width: 0;
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--home-text);
+  font: inherit;
+  font-size: 0.72rem;
+}
+.home-control-path button {
+  color: var(--home-muted);
+  font-size: 0.7rem;
+}
+.home-control-note,
+.home-control-message,
+.home-control-error {
+  margin: 0.55rem 0 0;
+  color: var(--home-muted);
+  font-size: 0.7rem;
+}
+.home-control-message {
+  color: var(--home-positive);
+}
+.home-control-error {
+  color: var(--home-danger);
+}
+.home-control-engine-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+.home-control-engine {
+  position: relative;
+  padding: 0.5rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.4rem;
+}
+.home-control-engine > span {
+  min-width: 0;
+  flex: 1;
+}
+.home-control-engine > i {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--home-muted);
+}
+.home-control-engine > i[data-ready="true"] {
+  background: var(--home-positive);
+}
+.home-control-toggle {
+  margin-top: 0.65rem;
+  align-items: flex-start;
+}
+.home-control-toggle > span {
+  flex: 1;
+}
+.home-control-save {
+  margin-top: 0.75rem;
+}
+.home-control-tags,
+.home-control-mcp-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+}
+.home-control-tags span,
+.home-control-mcp-list span {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.3rem;
+  color: var(--home-muted);
+  font-size: 0.68rem;
+}
+@media (max-width: 640px) {
+  .home-control-center {
+    top: 0.75rem;
+    right: 0.75rem;
+    width: calc(100vw - 1.5rem);
+    max-height: calc(100vh - 1.5rem);
+  }
+  .home-control-engine-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Inspector and drawers */
