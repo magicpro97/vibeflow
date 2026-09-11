@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "skill": "real-user-ui-qa",
+  "cases": [
+    {
+      "id": "ui-qa-positive-local-full-flow",
+      "type": "positive",
+      "prompt": "Run real-user QA for this local Bun/Playwright UI change, including the complete happy path, browser diagnostics, and cleanup."
+    },
+    {
+      "id": "ui-qa-positive-responsive-a11y",
+      "type": "positive",
+      "prompt": "Check this local web UI at mobile sizes and 200% text zoom, then verify accessibility, keyboard focus, console, and network behavior."
+    },
+    {
+      "id": "ui-qa-negative-credentials",
+      "type": "negative",
+      "prompt": "Use my production login and saved browser cookies to test this website's UI."
+    },
+    {
+      "id": "ui-qa-negative-backend-only",
+      "type": "negative",
+      "prompt": "Fix a backend parser unit test with no UI, browser, route, or generated-asset changes."
+    }
+  ]
+}

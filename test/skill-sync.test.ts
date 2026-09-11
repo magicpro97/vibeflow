@@ -229,19 +229,35 @@ describe("verifySkillSync", () => {
     expect(result.errors.join("\n")).toMatch(/missing-mirror[\\/]SKILL\.md missing/);
   });
 
-  test("reports ok when all mirrors are present", () => {
-    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-ok-"));
+  test("checks pointer target and full mirror byte identity", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-identity-"));
     dirs.push(repo);
-    const src = join(repo, ".vibeflow", "skills", "all-good");
+    const src = join(repo, ".vibeflow", "skills", "identity-skill");
     mkdirSync(src, { recursive: true });
+    const canonical =
+      "---\nname: identity-skill\ndescription: Identity check.\n---\n\n# Identity\n\nActionable body content for validation.\n";
+    writeFileSync(join(src, "SKILL.md"), canonical);
+    const mirror = join(repo, ".claude", "skills", "identity-skill", "SKILL.md");
+    mkdirSync(join(repo, ".claude", "skills", "identity-skill"), { recursive: true });
+
     writeFileSync(
-      join(src, "SKILL.md"),
-      "---\nname: all-good\ndescription: All good mirror test skill.\n---\n\n# All Good\n\nEnough actionable body content for validation.\n",
+      mirror,
+      "---\nname: identity-skill\ndescription: bad\n---\n\nCanonical skill lives at:\n`.vibeflow/skills/wrong/SKILL.md`\n",
     );
-    const catalogDir = join(repo, ".vibeflow", "skills");
-    syncSkillMirrors(repo, { mode: "pointer", catalogDir });
-    const result = verifySkillSync(repo, undefined, { catalogDir });
+    let result = verifySkillSync(repo, ["claude"], {
+      catalogDir: join(repo, ".vibeflow", "skills"),
+    });
+    expect(result.errors.some((error) => error.includes("wrong canonical path"))).toBe(true);
+
+    writeFileSync(mirror, canonical);
+    result = verifySkillSync(repo, ["claude"], { catalogDir: join(repo, ".vibeflow", "skills") });
     expect(result.ok).toBe(true);
+
+    writeFileSync(mirror, canonical.replace("Identity check", "Different mirror"));
+    result = verifySkillSync(repo, ["claude"], { catalogDir: join(repo, ".vibeflow", "skills") });
+    expect(result.errors.some((error) => error.includes("differs from canonical source"))).toBe(
+      true,
+    );
   });
 });
 

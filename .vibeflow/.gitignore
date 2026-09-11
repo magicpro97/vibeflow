@@ -35,8 +35,14 @@
 !skills/deterministic-async-teardown/**
 !skills/windows-path-authority-leases/
 !skills/windows-path-authority-leases/**
+!skills/ci-flake-triage/
+!skills/ci-flake-triage/**
+!skills/real-user-ui-qa/
+!skills/real-user-ui-qa/**
+!skills/tdd-bun-regression/
+!skills/tdd-bun-regression/**
 
-# Machine-specific (explicit for clarity):
-# PROJECT_CONTEXT.md, TASK_CONTEXT.md, SKILL_INDEX.md
-# knowledge/**, backup/**
-# All other skills (brandkit, gsap-*, image*, taste*, etc.)
+# Shareable knowledge
+!knowledge/
+!knowledge/index.md
+!knowledge/anti-patterns.md

@@ -13,6 +13,7 @@ screenshots/
 
 # Tool-generated agent config. AGENTS.md is now a VibeFlow-generated engine file
 # (committed as part of this repo's reference example); the rest stay ignored.
+.agents/skills/
 .github/skills/
 .claude/*
 !.claude/settings.json

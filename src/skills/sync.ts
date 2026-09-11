@@ -221,8 +221,7 @@ export function verifySkillSync(
   engines?: Engine[],
   opts: { catalogDir?: string; fromRegistry?: boolean } = {},
 ): SkillSyncResult {
-  // When --from-registry is set and no explicit engine, verify ALL mirrors
-  const resolvedEngines: Engine[] | undefined =
+  const resolvedEngines =
     opts.fromRegistry && (!engines || engines.length === 0)
       ? (ENGINES as unknown as Engine[])
       : engines;
@@ -231,15 +230,11 @@ export function verifySkillSync(
   const warnings: string[] = [];
   const synced: string[] = [];
   let names = skillNames(repo, { catalogDir: opts.catalogDir });
+  const canonical = join(repo, CANONICAL);
   if (opts.fromRegistry) {
     const reg = requiredSkillNames(repo, { catalogDir: opts.catalogDir });
-    if (reg.names.length) {
-      names = [...new Set([...names, ...reg.names])];
-    }
-    // Missing registry-pinned skills ARE errors, not just warnings
+    if (reg.names.length) names = [...new Set([...names, ...reg.names])];
     errors.push(...reg.errors.map((e) => `registry-pinned: ${e}`));
-
-    // Bundle hash verification for each installed skill
     const catalog = opts.catalogDir ?? sharedCatalogDir();
     const lock = parseRegistryLock(repo);
     for (const reg of lock.registries) {
@@ -251,7 +246,7 @@ export function verifySkillSync(
           continue;
         }
         const catDir = join(catalog, sk.name);
-        if (!existsSync(catDir)) continue; // already reported by requiredSkillNames
+        if (!existsSync(catDir)) continue;
         const actual = skillBundleHash(catDir);
         if (actual !== sk.bundleHash) {
           errors.push(
@@ -269,7 +264,21 @@ export function verifySkillSync(
       if (!existsSync(dst)) {
         errors.push(`${mirror}/${name}/SKILL.md missing`);
       } else {
-        synced.push(`${mirror}/${name}`);
+        const body = readFileSync(dst, "utf8");
+        const source = join(canonical, name, "SKILL.md");
+        const sourceBody = existsSync(source) ? readFileSync(source, "utf8") : "";
+        if (
+          body.includes("Canonical skill lives at:") &&
+          !body.includes(`.vibeflow/skills/${name}/SKILL.md`)
+        ) {
+          errors.push(`${mirror}/${name}/SKILL.md points at wrong canonical path`);
+        } else if (body === sourceBody) {
+          synced.push(`${mirror}/${name}`);
+        } else if (body.includes("Canonical skill lives at:")) {
+          synced.push(`${mirror}/${name}`);
+        } else {
+          errors.push(`${mirror}/${name}/SKILL.md differs from canonical source`);
+        }
       }
     }
   }

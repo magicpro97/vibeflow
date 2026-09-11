@@ -75,7 +75,8 @@ export async function skills(sub: string | undefined, rest: string[] = []): Prom
   }
   if (sub === "show") return showSkill(found, rest);
   if (sub === "validate") {
-    const result = validateSkillRoots(repo);
+    const includeMirrors = rest.includes("--include-mirrors");
+    const result = validateSkillRoots(repo, { includeMirrors });
     for (const w of result.warnings) out("vf", c.yellow(`! ${w}`));
     for (const e of result.errors) out("vf", c.red(`✗ ${e}`));
     if (result.ok) {

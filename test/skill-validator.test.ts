@@ -309,18 +309,42 @@ describe("validateSkillDir — Anthropic skill format", () => {
 });
 
 describe("validateSkillRoots", () => {
-  test("validates .vibeflow, .claude, and .kiro skill roots", () => {
+  test("validates canonical project skills without importing mirror failures", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-repo-skills-"));
     dirs.push(repo);
     const skillDir = join(repo, ".vibeflow", "skills", "repo-skill");
+    const mirrorDir = join(repo, ".claude", "skills", "imported-broken");
     mkdirSync(skillDir, { recursive: true });
+    mkdirSync(mirrorDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
       "---\nname: repo-skill\ndescription: Validate repo-level skill discovery.\n---\n\n# Repo Skill\n\nEnough actionable body content to validate this skill directory.\n",
     );
+    writeFileSync(join(mirrorDir, "SKILL.md"), "# imported tool\n");
+
     const result = validateSkillRoots(repo);
+
     expect(result.ok).toBe(true);
-    expect(result.skills.map((s) => s.name)).toContain("repo-skill");
+    expect(result.skills.map((s) => s.name)).toEqual(["repo-skill"]);
+  });
+
+  test("can opt into validating engine mirrors for diagnostics", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-repo-mirror-diagnostics-"));
+    dirs.push(repo);
+    const skillDir = join(repo, ".vibeflow", "skills", "repo-skill");
+    const mirrorDir = join(repo, ".claude", "skills", "imported-broken");
+    mkdirSync(skillDir, { recursive: true });
+    mkdirSync(mirrorDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      "---\nname: repo-skill\ndescription: Validate repo-level skill discovery.\n---\n\n# Repo Skill\n\nEnough actionable body content to validate this skill directory.\n",
+    );
+    writeFileSync(join(mirrorDir, "SKILL.md"), "# imported tool\n");
+
+    const result = validateSkillRoots(repo, { includeMirrors: true });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((error) => error.includes("imported-broken"))).toBe(true);
   });
 
   test("returns no-skills (ok:false) when no skill roots exist", () => {
