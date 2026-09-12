@@ -2,6 +2,15 @@
 name: real-user-ui-qa
 description: Use when validating a local web UI as a real user through Bun and Playwright, especially after UI changes or when mobile, zoom, accessibility, focus, console, or network regressions are possible.
 compatibility: Bun 1.4, @playwright/test, and project-local Playwright browsers.
+capabilities:
+  - local web UI
+  - Playwright
+  - responsive
+  - accessibility
+  - keyboard focus
+  - browser diagnostics
+triggers:
+  - real-user QA
 ---
 
 # Real-User UI QA

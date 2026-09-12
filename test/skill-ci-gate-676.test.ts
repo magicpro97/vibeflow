@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { installLogbus, setLogbusForTests } from "../src/logbus.js";
 import {
   handleCiDomainIntegrity,
@@ -14,6 +15,8 @@ import {
   runSkillValidationGate,
 } from "../src/skills/ci-gate.js";
 import type { CiGateDeps } from "../src/skills/ci-gate.js";
+import { loadEvalFile, runSkillEval } from "../src/skills/eval.js";
+import { parseSkill } from "../src/skills/registry.js";
 import type { ScanDeps } from "../src/skills/security-scan.js";
 
 type FakeSpawn = ScanDeps["spawnSync"];
@@ -147,6 +150,15 @@ function highScanDeps(): CiGateDeps {
 // ── Individual gate isolation ──────────────────────────────────────────────
 
 describe("runSkillValidationGate", () => {
+  test("real-user-ui-qa eval cases all match canonical trigger metadata", () => {
+    const repo = dirname(dirname(fileURLToPath(import.meta.url)));
+    const skillDir = join(repo, ".vibeflow", "skills", "real-user-ui-qa");
+    const skill = parseSkill(join(skillDir, "SKILL.md"), skillDir);
+    const evals = loadEvalFile(join(skillDir, "evals", "evals.json"));
+    expect(skill).not.toBeNull();
+    expect(skill && runSkillEval(skill, evals).summary.triggerAccuracy).toBe(1);
+  });
+
   test("no skills → pass", () => {
     expect(runSkillValidationGate(base).ok).toBe(true);
   });
