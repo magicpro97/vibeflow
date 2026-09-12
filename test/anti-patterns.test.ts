@@ -42,6 +42,30 @@ describe("anti-pattern registry", () => {
     expect(relevantAntiPatterns(patterns, ["test/example.test.ts"])).toEqual([]);
   });
 
+  test("matches nested paths for ** scopes", () => {
+    const patterns = parseAntiPatterns(REGISTRY);
+    expect(relevantAntiPatterns(patterns, ["e2e/sub/home.spec.ts"])).toEqual([
+      expect.objectContaining({ id: "AP-001" }),
+    ]);
+  });
+
+  test("matches nested middle segments for ** scopes", () => {
+    const patterns = parseAntiPatterns(
+      REGISTRY.replace("e2e/**, scripts/**", "test/**/source-contract*.test.ts"),
+    );
+    expect(relevantAntiPatterns(patterns, ["test/a/b/source-contract-x.test.ts"])).toEqual([
+      expect.objectContaining({ id: "AP-001" }),
+    ]);
+  });
+  test("keeps active pointer guidance scoped to skill sync", () => {
+    const patterns = parseAntiPatterns(
+      `${REGISTRY}\n## [AP-006] Pointer mirror\nPattern: Canonical skill lives at:\nWhy: pointer\nScope files: src/skills/**\nDetection: review\nStatus: active\nGuidance: parse pointer target.\n`,
+    );
+    expect(relevantAntiPatterns(patterns, ["src/skills/sync.ts"])).toEqual([
+      expect.objectContaining({ id: "AP-006" }),
+    ]);
+  });
+
   test("renders bounded guidance with evidence and scope", () => {
     const rendered = renderAntiPatterns(parseAntiPatterns(REGISTRY));
 
@@ -77,6 +101,40 @@ describe("anti-pattern registry", () => {
 });
 
 describe("scan-anti-patterns.py", () => {
+  test("matches nested paths in the Python scanner", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-anti-scan-nested-"));
+    try {
+      mkdirSync(join(base, ".vibeflow", "knowledge"), { recursive: true });
+      mkdirSync(join(base, "scripts", "nested"), { recursive: true });
+      const registry =
+        "## [AP-003] broad staging\nPattern: ^\\s*git\\s+add\\s+-A\\s*$\nWhy: test\nScope files: scripts/**\nDetection: regex\nStatus: active\nGuidance: test\n";
+      writeFileSync(join(base, ".vibeflow", "knowledge", "anti-patterns.md"), registry);
+      writeFileSync(join(base, "scripts", "nested", "bad.py"), "git add -A\n");
+      const script = join(process.cwd(), "scripts", "scan-anti-patterns.py");
+      const result = spawnSync("python3", [script, "--root", base, "--json"], { encoding: "utf8" });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("scripts/nested/bad.py");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+  test("scans nested .vibeflow files without inspecting generated mirrors", () => {
+    const base = mkdtempSync(join(tmpdir(), "vf-anti-scan-vibeflow-"));
+    try {
+      mkdirSync(join(base, ".vibeflow", "skills", "nested"), { recursive: true });
+      mkdirSync(join(base, ".vibeflow", "knowledge"), { recursive: true });
+      const body =
+        "## [AP-004] verified declaration\nPattern: ^\\s*status: verified\\s*$\nWhy: test\nScope files: .vibeflow/skills/**\nDetection: regex\nStatus: active\nGuidance: test\n";
+      writeFileSync(join(base, ".vibeflow", "knowledge", "anti-patterns.md"), body);
+      writeFileSync(join(base, ".vibeflow", "skills", "nested", "SKILL.md"), "status: verified\n");
+      const script = join(process.cwd(), "scripts", "scan-anti-patterns.py");
+      const result = spawnSync("python3", [script, "--root", base, "--json"], { encoding: "utf8" });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(".vibeflow/skills/nested/SKILL.md");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
   test("reports active regex hits and fails only when requested", () => {
     const base = mkdtempSync(join(tmpdir(), "vf-anti-scan-"));
     try {

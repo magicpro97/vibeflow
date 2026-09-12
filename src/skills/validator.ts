@@ -50,6 +50,7 @@ const STANDARD_FRONTMATTER = new Set([
   "supersedes",
   "sourceAnchors",
   "version",
+  "status",
   "triggers",
   "capabilities",
   "requires",
@@ -256,8 +257,6 @@ export function validateSkillDir(
   warnings.push(...validateLifecycleSupersedes(data));
   warnings.push(...validateSourceAnchors(data));
 
-  // Warn (not error) on frontmatter keys outside the spec's standard set,
-  // so typos surface without breaking existing skills that carry legacy
   // keys (status/version/triggers/requires/when_to_load).
   for (const key of Object.keys(data)) {
     if (!STANDARD_FRONTMATTER.has(key)) {

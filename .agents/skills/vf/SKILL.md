@@ -15,12 +15,30 @@ loops) is the anti-pattern this skill exists to stop.
 This SKILL.md is the slim index. Load a reference file only when the task needs it
 (progressive disclosure) — do not carry the full detail in every turn.
 
+## When to use
+
+Use when a task involves VibeFlow workflow setup, orchestration, agent dispatch, or gated verification.
+
+## When not to use
+
+Do not use this skill to bypass the SPEC-FIRST gate or replace evidence with a self-reported completion claim.
+
+## Steps
+
+1. Apply the SPEC-FIRST gate, choose the matching flow, load only needed references, then run the flow.
+
+## Verification
+
+- `vf verify` exits 0 after typecheck, lint, tests, evidence, scope, and normative gates pass.
+- `vf skills validate` passes for canonical project skills.
+
 ## 0. SPEC-FIRST GATE (before any writing/dispatching command)
 
 `vf init`, `vf run --yes`, and `vf orchestrate --yes` all WRITE or DISPATCH. Never
 run them blind. First reflect the task back as a short spec and get confirmation.
 Ask only the questions whose answers you don't already have:
 
+## 0.1 Spec questions
 1. **Goal** — one sentence: what does "done" look like? (becomes the workflow goal)
 2. **Scope** — which files/dirs may change? what is off-limits? (drives per-unit scope)
 3. **Engine** — claude, codex, or copilot? (default: copilot). Cheap mechanical work → codex.

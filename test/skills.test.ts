@@ -276,6 +276,23 @@ describe("registry provenance (never auto-verify external skills)", () => {
     }
   });
 
+  test("normalizes metadata resolver keys without changing renderSkillIndex", () => {
+    const dir = tmpRepo();
+    try {
+      const sk = join(dir, "SKILL.md");
+      writeFileSync(
+        sk,
+        "---\nname: metadata-skill\ndescription: metadata fields are resolver inputs\nmetadata:\n  status: verified\n  version: 1.2.3\n  triggers: [xlsx]\n  capabilities: [read]\n---\n\n# Metadata\n\nActionable metadata skill body.\n",
+      );
+      const parsed = parseSkill(sk, dir);
+      expect(parsed?.status).toBe("verified");
+      expect(parsed?.version).toBe("1.2.3");
+      expect(parsed?.triggers).toEqual(["xlsx"]);
+      expect(parsed?.capabilities).toEqual(["read"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   test("discoverSkills dedupes case-insensitively across roots (issue #93)", () => {
     const dir = tmpRepo();
     try {

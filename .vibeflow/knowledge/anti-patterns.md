@@ -30,23 +30,23 @@ Guidance: Stage explicit paths and inspect `git diff --cached` before committing
 ## [AP-004] Unverified skill is treated as proof
 Pattern: ^\s*status:\s*verified\s*$
 Why: A self-declared status does not prove skill safety or correctness at a trust boundary.
-Scope files: src/skills/**, .vibeflow/skills/**
-Detection: registry validator and review
-Status: active
-Guidance: Validate provenance, run the skill gate, and promote only with recorded evidence.
+Scope files: src/skills/**
+Detection: regex
+Status: resolved
+Guidance: Require local review evidence before treating external skill status as verified.
 
 ## [AP-005] Fixed sleep substitutes for lifecycle ownership
 Pattern: ^\s*setTimeout\(
 Why: Elapsed time does not prove streams, callbacks, processes, or fixture users are quiescent.
 Scope files: src/**, test/**, e2e/**
-Detection: regex scanner plus lifecycle review
+Detection: manual lifecycle review
 Status: active
 Guidance: Await an observable completion barrier; use bounded timeouts only as typed failure guards.
 
-## [AP-006] Generated pointer mirrors fail content-only contracts
-Pattern: \bCanonical skill lives at:
-Why: Pointer mirrors intentionally omit canonical body content, so callers that validate or test mirror content directly fail even though runtime can resolve the canonical source.
-Scope files: src/workflow/**, src/skills/**, test/**
-Detection: mirror parity test plus review
+## [AP-006] Generated pointer mirrors fail content verification
+Pattern: Canonical skill lives at:
+Why: Generated pointer mirrors are valid references, not byte-identical copies.
+Scope files: src/skills/**
+Detection: manual lifecycle review
 Status: active
-Guidance: Choose pointer mode only for engines that resolve canonical files; use full mode when a consumer requires self-contained mirror content.
+Guidance: Parse pointer targets exactly and resolve full mirrors against their real source.

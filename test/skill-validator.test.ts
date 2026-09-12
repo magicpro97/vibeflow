@@ -162,16 +162,48 @@ describe("validateSkillDir — Anthropic skill format", () => {
     const dir = tmpSkill("legacy-keys");
     writeSkill(
       dir,
-      "---\nname: legacy-keys\ndescription: A skill carrying a legacy non-spec key.\nstatus: draft\n---\n\n# Legacy\n\nEnough actionable content for this skill body to be valid here.\n",
+      "---\nname: legacy-keys\ndescription: A skill carrying a legacy non-spec key.\ncustom-key: draft\n---\n\n# Legacy\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(true);
+    expect(
+      result.warnings.some((w) => w.includes("non-standard frontmatter key: custom-key")),
+    ).toBe(true);
+  });
+
+  test("accepts legacy resolver frontmatter keys without warning", () => {
+    const dir = tmpSkill("legacy-resolver-keys");
+    writeSkill(
+      dir,
+      "---\nname: legacy-resolver-keys\ndescription: legacy resolver keys remain supported\nstatus: draft\nversion: 1.0.0\ntriggers: [xlsx]\ncapabilities: [read]\nrequires:\n  filesystem: read\nwhen_to_load: xlsx\ntype: project\nmcp:\n  command: tool\n---\n\n# Legacy resolver\n\nEnough actionable content for this skill body to be valid here.\n",
     );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(true);
     expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: status"))).toBe(
-      true,
+      false,
+    );
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: version"))).toBe(
+      false,
+    );
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: triggers"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("non-standard frontmatter key: capabilities")),
+    ).toBe(false);
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: requires"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("non-standard frontmatter key: when_to_load")),
+    ).toBe(false);
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: type"))).toBe(
+      false,
+    );
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: mcp"))).toBe(
+      false,
     );
   });
-
-  // #660: lifecycle metadata validation
   test("accepts owners as an array of names", () => {
     const dir = tmpSkill("owned-skill");
     writeSkill(

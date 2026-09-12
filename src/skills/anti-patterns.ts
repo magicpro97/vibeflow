@@ -69,11 +69,25 @@ export function parseAntiPatterns(text: string): AntiPattern[] {
 }
 
 function globToRegExp(glob: string): RegExp {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/gu, "\\$&")
-    .replace(/\*\*/gu, ".*")
-    .replace(/\*/gu, "[^/]*");
-  return new RegExp(`^${escaped}$`, "u");
+  const normalized = glob.replaceAll("\\\\", "/");
+  let source = "";
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index] ?? "";
+    if (char === "*" && normalized[index + 1] === "*") {
+      if (normalized[index + 2] === "/") {
+        source += "(?:.*/)?";
+        index += 2;
+      } else {
+        source += ".*";
+        index += 1;
+      }
+    } else if (char === "*") {
+      source += "[^/]*";
+    } else {
+      source += /[.+^${}()|[\]\\]/u.test(char) ? `\\${char}` : char;
+    }
+  }
+  return new RegExp(`^${source}$`, "u");
 }
 
 function scopeMatches(scopes: readonly string[], file: string): boolean {
@@ -112,6 +126,5 @@ export function loadRelevantAntiPatterns(base: string, files: readonly string[])
   const path = join(base, CTX_DIR, "knowledge", "anti-patterns.md");
   if (!existsSync(path)) return "";
   const body = readFileSync(path, "utf8");
-  if (body.includes("Canonical skill lives at:")) return "";
   return renderAntiPatterns(relevantAntiPatterns(parseAntiPatterns(body), files));
 }

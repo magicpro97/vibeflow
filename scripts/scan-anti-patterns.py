@@ -10,7 +10,7 @@ from pathlib import Path
 
 FIELD_RE = re.compile(r"^(Pattern|Why|Scope files|Detection|Status|Guidance):\s*(.*)$")
 HEADING_RE = re.compile(r"^## \[([^\]]+)\]")
-SKIP_DIRS = {".git", "node_modules", ".vibeflow", ".agents", ".claude", ".github", ".opencode"}
+SKIP_DIRS = {".git", "node_modules", ".agents", ".claude", ".github", ".opencode"}
 
 
 def parse_registry(path: Path) -> list[dict[str, object]]:
@@ -36,7 +36,16 @@ def parse_registry(path: Path) -> list[dict[str, object]]:
 
 def scope_matches(scopes: str, rel: str) -> bool:
     patterns = [part.strip() for part in scopes.split(",") if part.strip()]
-    return not patterns or any(Path(rel).match(pattern) for pattern in patterns)
+
+    def matches(pattern: str) -> bool:
+        if pattern.endswith("/**"):
+            return rel == pattern[:-3].rstrip("/") or rel.startswith(pattern[:-2])
+        if "/**/" in pattern:
+            prefix, suffix = pattern.split("/**/", 1)
+            return rel.startswith(f"{prefix}/") and rel.endswith(f"/{suffix}")
+        return Path(rel).match(pattern)
+
+    return not patterns or any(matches(pattern) for pattern in patterns)
 
 
 def scan(root: Path) -> list[dict[str, str]]:
@@ -57,6 +66,8 @@ def scan(root: Path) -> list[dict[str, str]]:
                 continue
             rel = path.relative_to(root).as_posix()
             if rel.startswith((".agents/skills/", ".claude/skills/", ".github/skills/", ".opencode/skills/")):
+                continue
+            if rel.startswith(".vibeflow/knowledge/") and path.name == "anti-patterns.md":
                 continue
             if not scope_matches(str(fields.get("Scope files", "")), rel):
                 continue
