@@ -51,6 +51,7 @@ export interface SpawnOptionsProjection {
   sessionMode: SessionMode;
   rendered_prompt: string;
   rendered_tools: string[];
+  attachments: readonly string[];
   sandbox: RoleSandbox | null;
   env_policy: EnvPolicy;
   isolation: IsolationLeaseProjection | null;
@@ -64,6 +65,7 @@ export type SpawnOptionsInput = {
   sessionMode: SessionMode;
   rendered_prompt: string;
   rendered_tools: readonly string[];
+  attachments?: readonly string[];
   sandbox: RoleSandbox | null;
   env_policy: EnvPolicy;
   isolation: IsolationLeaseProjection | null;
@@ -117,6 +119,7 @@ export function createSpawnOptionsProjection(input: SpawnOptionsInput): SpawnOpt
     sessionMode: input.sessionMode,
     rendered_prompt: input.rendered_prompt,
     rendered_tools: Object.freeze([...input.rendered_tools]) as unknown as string[],
+    attachments: Object.freeze([...(input.attachments ?? [])]) as unknown as string[],
     sandbox: input.sandbox,
     env_policy: input.env_policy,
     isolation: input.isolation,

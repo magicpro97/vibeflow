@@ -23,6 +23,10 @@
 
     <div class="home-topbar__right">
       <span v-if="!store.online" class="home-network-pill" role="status"><i />Offline</span>
+      <button class="home-topbar-button" type="button" aria-label="Open control center" title="Control center" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-control-center')">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2 12 7l5 1-3.5 3.5L15 17l-5-2.6L5 17l1.5-5.5L3 8l5-1Z" /></svg>
+        <span>Control center</span>
+      </button>
       <button class="home-topbar-button" type="button" aria-label="Open CLI capabilities" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-capabilities')">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3h8v4h3v7h-3v3H6v-3H3V7h3V3Z" /></svg>
         <span>Capabilities</span>
@@ -54,7 +58,7 @@ import { computed, nextTick } from "vue";
 import { SCHEME_LABELS, useColorScheme } from "../composables/useColorScheme.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 
-defineEmits<{ "open-capabilities": []; "open-settings": [] }>();
+defineEmits<{ "open-capabilities": []; "open-settings": []; "open-control-center": [] }>();
 const store = useConversationHomeStore();
 const { current, toggle } = useColorScheme();
 const schemeLabel = computed(() => SCHEME_LABELS[current.value]);

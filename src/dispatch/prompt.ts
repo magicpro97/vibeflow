@@ -13,9 +13,10 @@ export function buildEnginePrompt(
   ctx: ProjectContext,
   units: UnitBrief[],
   memoryBlock?: string,
+  antiPatterns?: string,
 ): string {
   return [
-    dispatchPrompt(engine, ctx, units, { memoryBlock }),
+    dispatchPrompt(engine, ctx, units, { memoryBlock, antiPatterns }),
     "When finished, emit a single fenced JSON block as the LAST thing you output:",
     "```json",
     '{ "skills_used": [], "files_changed": [], "commands_run": [], "tests_run": [], "confidence": 0.0, "uncertainty": "" }',

@@ -31,6 +31,23 @@ function writeRaw(base: string, content: string): void {
 const FIXED = "2026-01-02T03:04:05.000Z";
 const fixedNow = () => FIXED;
 
+describe("settings.controlCenter", () => {
+  test("round-trips enabled engines and ignores unknown values", () => {
+    const dir = tmpRepo();
+    try {
+      const written = writeSettings(
+        dir,
+        { enabledEngines: ["codex", "unknown" as never, "copilot"] },
+        { now: fixedNow },
+      );
+      expect(written.enabledEngines).toEqual(["codex", "copilot"]);
+      expect(readSettings(dir).enabledEngines).toEqual(["codex", "copilot"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("settings.defaults", () => {
   test("readSettings on an empty repo returns the defaults (tools on, codegraph>lsp>native)", () => {
     const dir = tmpRepo();

@@ -56,19 +56,10 @@ describe("skill-mirror cross-file invariant (C2)", () => {
     expect(actual).toEqual(expected);
   });
 
-  test.skip("sync.ts MIRRORS is the SAME list as SKILL_MIRRORS", () => {
-    // Read sync.ts source and confirm there's no `[".claude", "skills"], ...`
-    // hard-coded literal that disagrees.
+  test("sync.ts derives mirror roots from ENGINE_CONFIGS", () => {
     const src = readFileSync(join(REPO_ROOT, "src", "skills", "sync.ts"), "utf8");
-    // The fix: the file should import SKILL_MIRRORS and use it, not redeclare.
-    expect(src).toMatch(
-      /import\s*\{[^}]*SKILL_MIRRORS[^}]*\}\s*from\s*["']\.\.\/workflow-artifacts\.js["']/,
-    );
-    // And there should be no hand-rolled list of engine skill roots.
-    // Detect at least 2 hand-rolled ".X/skills" join()s in one expression.
-    expect(src).not.toMatch(
-      /join\(\s*"\.(claude|agents|github)"\s*,\s*"skills"\s*\).*join\(\s*"\.(claude|agents|github)"\s*,\s*"skills"\s*\)/,
-    );
+    expect(src).toContain("ENGINE_CONFIGS[e].skillRoot");
+    expect(src).not.toContain("const ENGINE_MIRROR");
   });
 
   test("registry.ts SR -> discovery.ts SKILL_ROOTS is a superset of SKILL_MIRRORS (audit C2)", () => {

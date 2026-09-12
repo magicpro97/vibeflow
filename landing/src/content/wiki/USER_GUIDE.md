@@ -319,8 +319,7 @@ vf brainstorm --yes --no-baseline --json "Compare designs"
 
 `ask` stages the selected file range as private context and then routes the follow-up through
 the durable conversation runtime. Public turns use the canonical `VF-TURN/1` JSON envelope;
-private file ranges use a separate `VF-PRIVATE-FILE-RANGES/1` JSON payload that is cleared
-after the turn. The private payload is not written into public trace or browser persistence.
+Private file ranges use separate `VF-PRIVATE-FILE-RANGES/1` payloads cleared after turn. In Web UI, attach a text file first, open `Private range`, choose it from `Private range file`, preview numbered lines, then select start/end; no path retyping is needed. `Path fallback` remains for repo files not uploaded. Image/document attachments cannot provide line ranges because they are not text.
 `--conversation <id>` is the explicit persisted path and `--resume` is compatibility-only:
 it requires `--conversation` and never targets a native latest-session shortcut. Exact
 by-id resume is supported only for Claude, Codex, and OpenCode. OpenCode's conversation

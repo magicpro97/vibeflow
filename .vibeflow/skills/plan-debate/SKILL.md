@@ -9,6 +9,14 @@ When an artifact is contested — two plausible designs, a disputed claim, or a 
 flagging a design-level disagreement — the coordinator dispatches a cross-debate.
 The debate resolves on **evidence**, not rhetorical skill.
 
+## When to use
+
+Use when two plausible designs or a design-level claim require evidence-based resolution.
+
+## When not to use
+
+Do not use for style preferences, local naming choices, or fix-level patches where behavior is already the test.
+
 ## 1. When to trigger
 
 - 2+ workable designs for the same problem (e.g., event-sourcing vs CRUD for a
@@ -21,7 +29,7 @@ The debate resolves on **evidence**, not rhetorical skill.
 Do NOT trigger for style preferences, naming that is locally consistent, or
 `fix`-level patches where behavior is the test.
 
-## 2. The debate structure (Claim → Counter → Evidence → Resolution)
+## Steps
 
 Every debate follows exactly 4 steps. Skipping a step = bikeshedding.
 
@@ -82,6 +90,10 @@ WINNER: Claimant (SQLite)
 EVIDENCE: git log -- .vibeflow/state/ → 4 corruption events in 30 days;
           concurrent dispatch is possible under any engine.
 ```
+
+## Verification
+
+Accept a debate only when its resolution records a winner and anchored evidence; otherwise mark it `BLOCKED`.
 
 ## 4. Pitfalls
 

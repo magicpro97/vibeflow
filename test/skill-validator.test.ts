@@ -162,16 +162,48 @@ describe("validateSkillDir — Anthropic skill format", () => {
     const dir = tmpSkill("legacy-keys");
     writeSkill(
       dir,
-      "---\nname: legacy-keys\ndescription: A skill carrying a legacy non-spec key.\nstatus: draft\n---\n\n# Legacy\n\nEnough actionable content for this skill body to be valid here.\n",
+      "---\nname: legacy-keys\ndescription: A skill carrying a legacy non-spec key.\ncustom-key: draft\n---\n\n# Legacy\n\nEnough actionable content for this skill body to be valid here.\n",
+    );
+    const result = validateSkillDir(dir);
+    expect(result.ok).toBe(true);
+    expect(
+      result.warnings.some((w) => w.includes("non-standard frontmatter key: custom-key")),
+    ).toBe(true);
+  });
+
+  test("accepts legacy resolver frontmatter keys without warning", () => {
+    const dir = tmpSkill("legacy-resolver-keys");
+    writeSkill(
+      dir,
+      "---\nname: legacy-resolver-keys\ndescription: legacy resolver keys remain supported\nstatus: draft\nversion: 1.0.0\ntriggers: [xlsx]\ncapabilities: [read]\nrequires:\n  filesystem: read\nwhen_to_load: xlsx\ntype: project\nmcp:\n  command: tool\n---\n\n# Legacy resolver\n\nEnough actionable content for this skill body to be valid here.\n",
     );
     const result = validateSkillDir(dir);
     expect(result.ok).toBe(true);
     expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: status"))).toBe(
-      true,
+      false,
+    );
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: version"))).toBe(
+      false,
+    );
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: triggers"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("non-standard frontmatter key: capabilities")),
+    ).toBe(false);
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: requires"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("non-standard frontmatter key: when_to_load")),
+    ).toBe(false);
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: type"))).toBe(
+      false,
+    );
+    expect(result.warnings.some((w) => w.includes("non-standard frontmatter key: mcp"))).toBe(
+      false,
     );
   });
-
-  // #660: lifecycle metadata validation
   test("accepts owners as an array of names", () => {
     const dir = tmpSkill("owned-skill");
     writeSkill(
@@ -309,18 +341,42 @@ describe("validateSkillDir — Anthropic skill format", () => {
 });
 
 describe("validateSkillRoots", () => {
-  test("validates .vibeflow, .claude, and .kiro skill roots", () => {
+  test("validates canonical project skills without importing mirror failures", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-repo-skills-"));
     dirs.push(repo);
     const skillDir = join(repo, ".vibeflow", "skills", "repo-skill");
+    const mirrorDir = join(repo, ".claude", "skills", "imported-broken");
     mkdirSync(skillDir, { recursive: true });
+    mkdirSync(mirrorDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
       "---\nname: repo-skill\ndescription: Validate repo-level skill discovery.\n---\n\n# Repo Skill\n\nEnough actionable body content to validate this skill directory.\n",
     );
+    writeFileSync(join(mirrorDir, "SKILL.md"), "# imported tool\n");
+
     const result = validateSkillRoots(repo);
+
     expect(result.ok).toBe(true);
-    expect(result.skills.map((s) => s.name)).toContain("repo-skill");
+    expect(result.skills.map((s) => s.name)).toEqual(["repo-skill"]);
+  });
+
+  test("can opt into validating engine mirrors for diagnostics", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-repo-mirror-diagnostics-"));
+    dirs.push(repo);
+    const skillDir = join(repo, ".vibeflow", "skills", "repo-skill");
+    const mirrorDir = join(repo, ".claude", "skills", "imported-broken");
+    mkdirSync(skillDir, { recursive: true });
+    mkdirSync(mirrorDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      "---\nname: repo-skill\ndescription: Validate repo-level skill discovery.\n---\n\n# Repo Skill\n\nEnough actionable body content to validate this skill directory.\n",
+    );
+    writeFileSync(join(mirrorDir, "SKILL.md"), "# imported tool\n");
+
+    const result = validateSkillRoots(repo, { includeMirrors: true });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((error) => error.includes("imported-broken"))).toBe(true);
   });
 
   test("returns no-skills (ok:false) when no skill roots exist", () => {

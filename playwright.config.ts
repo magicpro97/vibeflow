@@ -10,12 +10,12 @@ const PORT = 5317;
 const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(PROJECT_ROOT, "dist/cli.js");
 const TEST_DIR = resolve(PROJECT_ROOT, "e2e");
-const WORKSPACE = resolve(PROJECT_ROOT, ".e2e-workspace");
+const SETUP_RUN_ENV = "VF_PLAYWRIGHT_SETUP_RUN";
+const setupRun = randomUUID();
+process.env[SETUP_RUN_ENV] = setupRun;
+const WORKSPACE = resolve(PROJECT_ROOT, `.e2e-workspace-${setupRun}`);
 const TEST_HOME = resolve(WORKSPACE, ".home");
 const TEST_BIN = resolve(WORKSPACE, ".bin");
-const SETUP_RUN_ENV = "VF_PLAYWRIGHT_SETUP_RUN";
-const setupRun = process.env[SETUP_RUN_ENV] ?? randomUUID();
-process.env[SETUP_RUN_ENV] = setupRun;
 // Conversation isolation creates detached Git worktrees below TMPDIR. Keep that
 // authority outside the repository worktree: Git correctly refuses nested worktrees.
 const TEST_TMP = resolve(tmpdir(), `vibeflow-playwright-${setupRun}`);
@@ -67,7 +67,6 @@ function rmSyncRetry(p: string): void {
     }
   }
 }
-
 // The controller creates a new identity for every Playwright invocation and
 // workers inherit it through the environment. This makes worker config imports
 // idempotent without letting a previous invocation's workflow state leak into
@@ -152,6 +151,7 @@ if (preparedRun !== setupRun) {
       // another worker finished — we're done
     } else {
       try {
+        rmSyncRetry(WORKSPACE);
         mkdirSync(WORKSPACE, { recursive: true });
       } catch {
         // If we still can't create the dir, fall through and re-throw

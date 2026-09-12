@@ -264,11 +264,19 @@ process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "019f27
           platform,
           store.reserve(attemptId, AGENT_ENGINE.CODEX, platform),
         );
-        const cliFixture = join(parent, "cli-fixture.ts");
-        // File-based (not an inline `bun -e`): bun 1.4.0 on Windows runners
-        // can crash in its eval path (see `.github/workflows/ci.yml`).
-        writeFileSync(cliFixture, 'process.stdout.write("owned-live-ok\\n");\n', { mode: 0o600 });
-        const handle = launchOwnedSupervisorProcess([process.execPath, cliFixture], {
+        const cliFixtureSource = join(parent, "cli-fixture.ts");
+        const cliFixture = join(parent, "cli-fixture.exe");
+        // File-based compiled fixture: spawning a raw `.ts` through Bun's
+        // Windows executable path is not the same launch contract as a CLI.
+        writeFileSync(cliFixtureSource, 'process.stdout.write("owned-live-ok\\n");\n', {
+          mode: 0o600,
+        });
+        const compiled = await Bun.build({
+          entrypoints: [cliFixtureSource],
+          compile: { outfile: cliFixture },
+        });
+        expect(compiled.success).toBe(true);
+        const handle = launchOwnedSupervisorProcess([cliFixture], {
           detached: false,
           env: { PATH: process.env.PATH ?? "" },
           stdinText: "",

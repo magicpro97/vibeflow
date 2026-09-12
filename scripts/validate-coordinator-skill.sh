@@ -29,7 +29,8 @@ FM_END="$(awk 'NR>1 && /^---$/{print NR; exit}' "$SKILL")"
 FM="$(sed -n "2,$((FM_END - 1))p" "$SKILL")"
 echo "$FM" | grep -qE '^name:[[:space:]]*coordinator[[:space:]]*$' || err "frontmatter missing 'name: coordinator'"
 echo "$FM" | grep -qE '^description:[[:space:]]*.' || err "frontmatter missing 'description'"
-echo "$FM" | grep -qE '^when_to_load:[[:space:]]*.' || err "frontmatter missing 'when_to_load'"
+echo "$FM" | grep -qE '^metadata:[[:space:]]*$' || err "frontmatter missing 'metadata'"
+echo "$FM" | grep -qE '^  when_to_load:[[:space:]]*.' || err "frontmatter missing 'metadata.when_to_load'"
 
 # Body must have the 6 required section headings (0, 1, 2, 3, 4, 5).
 for n in 0 1 2 3 4 5; do

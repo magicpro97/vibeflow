@@ -15,6 +15,7 @@ import { mapGateResult } from "../orchestrator/gate-map.js";
 import { updateMarker } from "../orchestrator/marker.js";
 import { resolveResumeId } from "../orchestrator/resume-policy.js";
 import { readSettings } from "../settings.js";
+import { loadRelevantAntiPatterns } from "../skills/anti-patterns.js";
 import { materializeDiscoveredDispatchSkills } from "../skills/dispatch-resolution.js";
 import {
   CTX_DIR,
@@ -82,9 +83,13 @@ export function makeResearcher(
 ): AsyncResearcher {
   const repoRoot = base ?? process.cwd();
   return async (round, question) => {
-    const prompt = buildEnginePrompt(engine, { ...ctx, goal: question }, [
-      `research round ${round}`,
-    ]);
+    const prompt = buildEnginePrompt(
+      engine,
+      { ...ctx, goal: question },
+      [`research round ${round}`],
+      undefined,
+      loadRelevantAntiPatterns(repoRoot, []),
+    );
     const unit = `research-round-${round}`;
     const result = await runDispatchWithSessionRuntime({
       engine,
@@ -197,6 +202,7 @@ export function makeDispatcher(
     const skillsInjected = skillNames;
     // Why the unit is knowledge-heavy: risk class first, else the UX/UI regex, else undefined.
     const knowledgeHeavySource = computeKnowledgeHeavySource(riskClass, unitText);
+    const antiPatterns = loadRelevantAntiPatterns(base, u.scope ?? []);
     const memProvider = resolveMemoryProvider(readSettings(base).memory, join(base, CTX_DIR));
     const memBlock = memProvider
       ? renderMemoryBlock(memProvider.recall(unitText, { limit: 3 }))
@@ -218,6 +224,7 @@ export function makeDispatcher(
           },
         ],
         memBlock,
+        antiPatterns,
       ),
       // A dry run is a READ-ONLY preview (see :309): it must still READ + PREPEND the
       // queued guidance so CONTEXT.md shows it, but MUST NOT consume (delete) the file —

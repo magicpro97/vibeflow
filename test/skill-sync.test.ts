@@ -229,19 +229,91 @@ describe("verifySkillSync", () => {
     expect(result.errors.join("\n")).toMatch(/missing-mirror[\\/]SKILL\.md missing/);
   });
 
-  test("reports ok when all mirrors are present", () => {
-    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-ok-"));
-    dirs.push(repo);
-    const src = join(repo, ".vibeflow", "skills", "all-good");
-    mkdirSync(src, { recursive: true });
-    writeFileSync(
-      join(src, "SKILL.md"),
-      "---\nname: all-good\ndescription: All good mirror test skill.\n---\n\n# All Good\n\nEnough actionable body content for validation.\n",
-    );
-    const catalogDir = join(repo, ".vibeflow", "skills");
-    syncSkillMirrors(repo, { mode: "pointer", catalogDir });
-    const result = verifySkillSync(repo, undefined, { catalogDir });
+  test("resolves shared-catalog full mirrors without a local canonical", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-shared-verify-"));
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-sync-shared-catalog-"));
+    dirs.push(repo, catalogDir);
+    const source = join(catalogDir, "shared-skill");
+    mkdirSync(source, { recursive: true });
+    const body =
+      "---\nname: shared-skill\ndescription: Shared catalog skill.\n---\n\n# Shared\n\nThis actionable shared catalog body is deliberately longer than fifty characters.\n";
+    writeFileSync(join(source, "SKILL.md"), body);
+    const result = syncSkillMirrors(repo, {
+      mode: "full",
+      engines: ["claude"],
+      catalogDir,
+    });
     expect(result.ok).toBe(true);
+    const verified = verifySkillSync(repo, ["claude"], { catalogDir });
+    expect(verified.ok).toBe(true);
+    expect(verified.errors).toEqual([]);
+    expect(readFileSync(join(repo, ".claude", "skills", "shared-skill", "SKILL.md"), "utf8")).toBe(
+      body,
+    );
+  });
+  test("preserves full mirror validation for local canonical skills", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-local-full-"));
+    dirs.push(repo);
+    const canonical = join(repo, ".vibeflow", "skills", "local-skill");
+    mkdirSync(canonical, { recursive: true });
+    const body =
+      "---\nname: local-skill\ndescription: Local skill.\n---\n\n# Local\n\nThis body is long enough for validation and has actionable instructions.\n";
+    writeFileSync(join(canonical, "SKILL.md"), body);
+    const result = syncSkillMirrors(repo, { mode: "full", engines: ["claude"] });
+    expect(result.ok).toBe(true);
+    const mirror = join(repo, ".claude", "skills", "local-skill", "SKILL.md");
+    expect(readFileSync(mirror, "utf8")).toBe(body);
+    expect(verifySkillSync(repo, ["claude"]).ok).toBe(true);
+  });
+  test("rejects a pointer with a canonical-path substring but wrong root", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-pointer-root-"));
+    dirs.push(repo);
+    const src = join(repo, ".vibeflow", "skills", "identity-skill");
+    mkdirSync(src, { recursive: true });
+    const canonical =
+      "---\nname: identity-skill\ndescription: Identity check.\n---\n\n# Identity\n\nActionable body content for validation.\n";
+    writeFileSync(join(src, "SKILL.md"), canonical);
+    const mirror = join(repo, ".claude", "skills", "identity-skill");
+    mkdirSync(mirror, { recursive: true });
+    writeFileSync(
+      join(mirror, "SKILL.md"),
+      "---\nname: identity-skill\ndescription: pointer\n---\n\nCanonical skill lives at:\n`evil/.vibeflow/skills/identity-skill/SKILL.md`\n",
+    );
+    const result = verifySkillSync(repo, ["claude"]);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain(
+      ".claude/skills/identity-skill/SKILL.md points at wrong canonical path",
+    );
+  });
+  test("checks pointer target and full mirror byte identity", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-identity-"));
+    dirs.push(repo);
+    const src = join(repo, ".vibeflow", "skills", "identity-skill");
+    mkdirSync(src, { recursive: true });
+    const canonical =
+      "---\nname: identity-skill\ndescription: Identity check.\n---\n\n# Identity\n\nActionable body content for validation.\n";
+    writeFileSync(join(src, "SKILL.md"), canonical);
+    const mirror = join(repo, ".claude", "skills", "identity-skill", "SKILL.md");
+    mkdirSync(join(repo, ".claude", "skills", "identity-skill"), { recursive: true });
+
+    writeFileSync(
+      mirror,
+      "---\nname: identity-skill\ndescription: bad\n---\n\nCanonical skill lives at:\n`.vibeflow/skills/wrong/SKILL.md`\n",
+    );
+    let result = verifySkillSync(repo, ["claude"], {
+      catalogDir: join(repo, ".vibeflow", "skills"),
+    });
+    expect(result.errors.some((error) => error.includes("wrong canonical path"))).toBe(true);
+
+    writeFileSync(mirror, canonical);
+    result = verifySkillSync(repo, ["claude"], { catalogDir: join(repo, ".vibeflow", "skills") });
+    expect(result.ok).toBe(true);
+
+    writeFileSync(mirror, canonical.replace("Identity check", "Different mirror"));
+    result = verifySkillSync(repo, ["claude"], { catalogDir: join(repo, ".vibeflow", "skills") });
+    expect(result.errors.some((error) => error.includes("differs from canonical source"))).toBe(
+      true,
+    );
   });
 });
 

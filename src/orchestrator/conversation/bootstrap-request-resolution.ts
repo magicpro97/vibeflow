@@ -147,8 +147,8 @@ async function selectedRoute(
   options: ConversationRequestResolutionOptions,
   repoRoot: string,
   phase: number,
+  extra: ConversationRoutingContext = {},
 ) {
-  const extra = (await options.routingContext?.(request)) ?? {};
   const input: ConversationRoutingInput = {
     topic: request.topic,
     explicitPolicy: request.policy,
@@ -238,7 +238,8 @@ export function createConversationRequestResolvers({
     request: ConversationCreateRequest,
   ): Promise<RuntimeCreateRequest> => {
     const maxRounds = requestedConversationMaxRounds(request);
-    const selection = await selectedRoute(request, options, repoRoot, phase);
+    const routingExtra = (await options.routingContext?.(request)) ?? {};
+    const selection = await selectedRoute(request, options, repoRoot, phase, routingExtra);
     const bindings = await Promise.all(
       selection.participants.map(async (participant, index) => {
         const input = conversationBindingInput(participant);
@@ -251,7 +252,13 @@ export function createConversationRequestResolvers({
             repoRoot,
             phase,
             request.topic,
-            (bindingOptions) => binder.materialize(input, bindingOptions),
+            (bindingOptions) =>
+              binder.materialize(input, {
+                ...bindingOptions,
+                ...(routingExtra.attachments?.length
+                  ? { attachments: routingExtra.attachments }
+                  : {}),
+              }),
           ),
         };
       }),

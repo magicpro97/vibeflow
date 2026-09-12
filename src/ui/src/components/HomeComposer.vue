@@ -14,29 +14,27 @@
         @cancel="cancelQueuedEdit"
       />
       <label id="home-composer-label" class="home-composer__label" for="home-composer">Message</label>
+      <HomeAttachments />
       <div
         class="home-composer__field"
         role="combobox"
         aria-label="Message"
         aria-haspopup="listbox"
-        :aria-activedescendant="activeSuggestionId"
+        :aria-activedescendant="visibleSuggestions.length ? suggestionOptionId(activeSuggestion) : undefined"
         :aria-controls="visibleSuggestions.length ? suggestionListId : undefined"
         :aria-expanded="visibleSuggestions.length ? 'true' : 'false'"
         aria-labelledby="home-composer-label"
         :aria-owns="visibleSuggestions.length ? suggestionListId : undefined"
         tabindex="-1"
       >
-        <HomeComposerHighlight
-          :draft="store.draft"
-          :participants="store.activeRevision?.participants ?? []"
-        />
+        <HomeComposerHighlight :draft="store.draft" :participants="store.activeRevision?.participants ?? []" />
         <textarea
           id="home-composer"
           ref="textarea"
           v-model="store.draft"
           rows="1"
           :placeholder="placeholder"
-          :aria-activedescendant="activeSuggestionId"
+          :aria-activedescendant="visibleSuggestions.length ? suggestionOptionId(activeSuggestion) : undefined"
           aria-autocomplete="list"
           :aria-controls="visibleSuggestions.length ? suggestionListId : undefined"
           :aria-describedby="composerDescription"
@@ -49,28 +47,26 @@
           @keyup="onKeyup"
         />
       </div>
-      <HomeComposerSuggestionHint
-        v-if="!visibleSuggestions.length"
-        :draft="store.draft"
-        :participants="store.activeRevision?.participants ?? []"
-      />
-      <div v-if="visibleSuggestions.length" :id="suggestionListId" class="home-suggestions" role="listbox" aria-label="Composer suggestions">
-        <button
-          v-for="(suggestion, index) in visibleSuggestions"
-          :id="suggestionOptionId(index)"
-          :key="suggestion.value"
-          type="button"
-          role="option"
-          :aria-selected="index === activeSuggestion"
-          :class="{ 'home-suggestion--active': index === activeSuggestion }"
-          @click="choose(suggestion.value)"
-          @mousedown.prevent="choose(suggestion.value)"
-        >
-          <span class="home-suggestion__glyph" aria-hidden="true">{{ suggestion.glyph }}</span>
-          <span><strong>{{ suggestion.label }}</strong><small>{{ suggestion.description }}</small></span>
-          <kbd>{{ suggestion.value }}</kbd>
-        </button>
-      </div>
+      <HomeComposerSuggestionHint v-if="!visibleSuggestions.length" :draft="store.draft" :participants="store.activeRevision?.participants ?? []" />
+      <Teleport to="body">
+        <div v-if="visibleSuggestions.length" :id="suggestionListId" class="home-suggestions" role="listbox" aria-label="Composer suggestions" :style="suggestionStyle">
+          <button
+            v-for="(suggestion, index) in visibleSuggestions"
+            :id="suggestionOptionId(index)"
+            :key="suggestion.value"
+            type="button"
+            role="option"
+            :aria-selected="index === activeSuggestion"
+            :class="{ 'home-suggestion--active': index === activeSuggestion }"
+            @click="choose(suggestion.value)"
+            @mousedown.prevent="choose(suggestion.value)"
+          >
+            <span class="home-suggestion__glyph" aria-hidden="true">{{ suggestion.glyph }}</span>
+            <span><strong>{{ suggestion.label }}</strong><small>{{ suggestion.description }}</small></span>
+            <kbd>{{ suggestion.value }}</kbd>
+          </button>
+        </div>
+      </Teleport>
       <HomeCapabilityTargetChooser
         v-if="store.capabilityTargetRequest?.selection_mode === 'explicit'"
         @confirming="restoreComposerFocusAfterConfirmation"
@@ -78,14 +74,14 @@
       />
       <div class="home-composer__toolbar">
         <div class="home-composer__tools" aria-label="Conversation shortcuts">
-                <HomeToolbarActions
-                  :participants="store.activeRevision?.participants ?? []"
-                  :disabled="Boolean(store.queuedMessageEdit)"
-                  :draft="store.draft"
-                  @select="insert"
-                  @remove="removeMention"
-                />
-                <button
+          <HomeToolbarActions
+            :participants="store.activeRevision?.participants ?? []"
+            :disabled="Boolean(store.queuedMessageEdit)"
+            :draft="store.draft"
+            @select="insert"
+            @remove="removeMention"
+          />
+          <button
             type="button"
             :disabled="Boolean(store.queuedMessageEdit)"
             :aria-expanded="privateRangeOpen"
@@ -96,6 +92,7 @@
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM7 2v4M13 2v4M7 14h6" /></svg>
             {{ store.privateContextPresent ? "Replace range" : "Private range" }}
           </button>
+          <HomeAttachmentButton :disabled="Boolean(store.queuedMessageEdit)" />
           <button type="button" title="Find a capability" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-capabilities')">
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3h8v4h3v7h-3v3H6v-3H3V7h3V3Z" /></svg>
             Capabilities
@@ -117,7 +114,6 @@
     <HomeComposerStatus />
   </div>
 </template>
-
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
@@ -132,6 +128,8 @@ import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-messag
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { nextMentionToken } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import HomeAttachmentButton from "./HomeAttachmentButton.vue";
+import HomeAttachments from "./HomeAttachments.vue";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
 import HomeComposerHighlight from "./HomeComposerHighlight.vue";
 import HomeComposerSend from "./HomeComposerSend.vue";
@@ -212,9 +210,6 @@ const suggestionSignature = computed(() =>
     .map((s) => s.value)
     .join("\0"),
 );
-const activeSuggestionId = computed(() =>
-  visibleSuggestions.value.length ? suggestionOptionId(activeSuggestion.value) : undefined,
-);
 watch(suggestionSignature, () => {
   suggestionsDismissed.value = false;
   activeSuggestion.value = 0;
@@ -237,14 +232,12 @@ function resize() {
   element.style.height = "0";
   element.style.height = `${Math.min(element.scrollHeight, 176)}px`;
 }
-
 function syncHighlightScroll() {
   const element = textarea.value;
   if (!element) return;
   const overlay = document.querySelector<HTMLElement>(".home-composer__highlight");
   if (overlay) overlay.scrollTop = element.scrollTop;
 }
-
 function insert(value: string) {
   if (store.queuedMessageEdit) return;
   const element = textarea.value;
@@ -275,7 +268,6 @@ function removeMention(value: string) {
     resize();
   });
 }
-
 async function restoreComposerFocus() {
   await nextTick();
   textarea.value?.focus();
@@ -301,6 +293,7 @@ async function cancelQueuedEdit() {
 function choose(value: string) {
   const mention = nextMentionToken(store.draft, value);
   store.draft = `${mention} `;
+  suggestionsDismissed.value = true;
   nextTick(() => {
     textarea.value?.focus();
     textarea.value?.setSelectionRange(store.draft.length, store.draft.length);
@@ -308,7 +301,17 @@ function choose(value: string) {
   });
 }
 const suggestionOptionId = (index: number) => `composer-suggestion-${index}`;
-
+const suggestionStyle = computed(() => {
+  const rect = textarea.value?.getBoundingClientRect();
+  return rect
+    ? {
+        top: `${rect.top}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+        transform: "translateY(-100%) translateY(-0.35rem)",
+      }
+    : null;
+});
 function onKeydown(event: KeyboardEvent) {
   if (composing.value || event.isComposing || event.keyCode === 229) return;
   if (visibleSuggestions.value.length) {
@@ -359,7 +362,6 @@ function dismissSuggestionsWithEscape(event: KeyboardEvent): boolean {
   event.stopPropagation();
   return true;
 }
-
 function restorePreservedDraft(preservedDraft: string) {
   if (store.draft !== preservedDraft) store.draft = preservedDraft;
   const element = textarea.value;
@@ -377,16 +379,13 @@ function restoreDismissedDraft(event: KeyboardEvent) {
   event.preventDefault();
   event.stopPropagation();
 }
-
 function onKeyup(event: KeyboardEvent) {
   restoreDismissedDraft(event);
 }
-
 function onBeforeInput(event: InputEvent) {
   if ((composing.value || event.isComposing) && event.inputType === "insertLineBreak")
     event.preventDefault();
 }
-
 async function submit() {
   if (composing.value) return;
   await store.submitDraft();

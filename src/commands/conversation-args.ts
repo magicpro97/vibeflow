@@ -38,6 +38,7 @@ import type {
   MessageResponse,
 } from "../orchestrator/conversation/types.js";
 import type { PublicStoredTraceEvent } from "../orchestrator/trace/types.js";
+import { syncAttachments } from "../server/handlers.js";
 import { verifyLockGate } from "../skills/verify-lock.js";
 import {
   type VerifyReport,
@@ -250,6 +251,9 @@ export function conversationBootstrap(deps: ConversationCommandDeps = {}, base =
   return createConversationBootstrap({
     repoRoot: base,
     libraries: deps.bootstrap?.libraries ?? productionLibraries(base),
+    routingContext: async () => ({
+      attachments: syncAttachments(base).map((attachment) => attachment.name),
+    }),
     coordinationVerifier: async ({ cwd: workspace, expected_oracles: expectedOracles }) => {
       const oracleResults = await runConversationDelegationVerificationOracles(
         workspace,

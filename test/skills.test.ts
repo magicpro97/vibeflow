@@ -276,6 +276,23 @@ describe("registry provenance (never auto-verify external skills)", () => {
     }
   });
 
+  test("normalizes metadata resolver keys without changing renderSkillIndex", () => {
+    const dir = tmpRepo();
+    try {
+      const sk = join(dir, "SKILL.md");
+      writeFileSync(
+        sk,
+        "---\nname: metadata-skill\ndescription: metadata fields are resolver inputs\nmetadata:\n  status: verified\n  version: 1.2.3\n  triggers: [xlsx]\n  capabilities: [read]\n---\n\n# Metadata\n\nActionable metadata skill body.\n",
+      );
+      const parsed = parseSkill(sk, dir);
+      expect(parsed?.status).toBe("verified");
+      expect(parsed?.version).toBe("1.2.3");
+      expect(parsed?.triggers).toEqual(["xlsx"]);
+      expect(parsed?.capabilities).toEqual(["read"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   test("discoverSkills dedupes case-insensitively across roots (issue #93)", () => {
     const dir = tmpRepo();
     try {
@@ -593,7 +610,7 @@ describe("coordinator skill (A2 #168)", () => {
     expect(exists).toBe(true);
   });
 
-  test("SKILL.md has YAML frontmatter with name=coordinator, description, when_to_load", () => {
+  test("SKILL.md has YAML frontmatter with name=coordinator, description, metadata.when_to_load", () => {
     const text = readFileSync(skillPath, "utf8");
     // Frontmatter opens on line 1 and closes on a later --- line.
     expect(text.split("\n")[0]?.trim()).toBe("---");
@@ -608,7 +625,8 @@ describe("coordinator skill (A2 #168)", () => {
       .join("\n");
     expect(fm).toMatch(/^name:\s*coordinator\s*$/m);
     expect(fm).toMatch(/^description:\s*\S/m);
-    expect(fm).toMatch(/^when_to_load:\s*\S/m);
+    expect(fm).toMatch(/^metadata:\s*$/m);
+    expect(fm).toMatch(/^\s+when_to_load:\s*\S/m);
   });
 
   test("SKILL.md has the 6 required sections (## 0 .. ## 5)", () => {

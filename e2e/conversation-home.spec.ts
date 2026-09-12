@@ -491,6 +491,17 @@ test.describe("AI-first conversation Home", () => {
     await expect(toolbarMenu).toHaveCount(0);
     await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX} `);
     await composer.fill("+");
+    const composerHeightBeforeSuggestions = await page
+      .locator(".home-composer")
+      .evaluate((element) => element.getBoundingClientRect().height);
+    await expect(page.getByRole("listbox", { name: "Composer suggestions" })).toBeVisible();
+    await expect
+      .poll(async () =>
+        page
+          .locator(".home-composer")
+          .evaluate((element) => element.getBoundingClientRect().height),
+      )
+      .toBe(composerHeightBeforeSuggestions);
     await expect(composer).toHaveAttribute("aria-controls", "composer-suggestions");
     const implementationAgentId = await page
       .getByRole("option", { name: /Implementation agent/ })
@@ -499,11 +510,9 @@ test.describe("AI-first conversation Home", () => {
     await page.keyboard.press("ArrowDown");
     const webUiId = await page.getByRole("option", { name: /Web UI/ }).getAttribute("id");
     await expect(combobox).toHaveAttribute("aria-activedescendant", webUiId ?? "");
-    await page.keyboard.press("Enter");
-    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX} `);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("listbox", { name: "Composer suggestions" })).toHaveCount(0);
-    await expect(composer).toHaveValue(`+${WORKFLOW_ROLE_NAME.WEB_UI}@${AGENT_ENGINE.CODEX} `);
+    await expect(composer).toHaveValue("+");
 
     const capabilitiesTrigger = page.getByRole("button", { name: "Open CLI capabilities" });
     await capabilitiesTrigger.click();
@@ -522,6 +531,31 @@ test.describe("AI-first conversation Home", () => {
     await page.keyboard.press("Escape");
     await expect(settings).toBeHidden();
     await expect(settingsTrigger).toBeFocused();
+
+    const controlCenterTrigger = page.getByRole("button", { name: "Open control center" });
+    await controlCenterTrigger.click();
+    const controlCenter = page.getByRole("complementary", { name: "VibeFlow control center" });
+    await expect(controlCenter).toBeVisible();
+    for (const section of [
+      "Harness initialization",
+      "Agents and CLIs",
+      "Settings",
+      "Capabilities",
+      "Skills",
+      "MCP servers",
+    ])
+      await expect(controlCenter.getByText(section, { exact: true })).toBeVisible();
+    await expect(controlCenter.getByRole("button", { name: "Initialize harness" })).toBeEnabled();
+    await expect(controlCenter.getByRole("button", { name: "Initialize agent" })).toBeEnabled();
+    const codexToggle = controlCenter.getByRole("checkbox", { name: /codex/i });
+    await expect(codexToggle).toBeChecked();
+    await codexToggle.uncheck();
+    await expect(controlCenter.getByRole("status")).toContainText("Configuration saved");
+    await codexToggle.check();
+    await expect(controlCenter.getByRole("status")).toContainText("Configuration saved");
+    await page.keyboard.press("Escape");
+    await expect(controlCenter).toBeHidden();
+    await expect(controlCenterTrigger).toBeFocused();
 
     await page.keyboard.press("Control+K");
     await expect(page.getByPlaceholder("Search conversations")).toBeFocused();
@@ -1715,6 +1749,47 @@ test.describe("AI-first conversation Home", () => {
     expect(legacyCalls).toBe(0);
   });
 
+  test("uses an uploaded text attachment for private range and clears stale source on removal", async ({
+    page,
+  }) => {
+    await page.route("**/api/engines**", (route) =>
+      route.fulfill({ status: 200, json: { engines: [] } }),
+    );
+    await page.goto("/");
+    await waitForPage(page);
+
+    const fileInput = page.getByLabel(/Attach a file/).last();
+    await fileInput.setInputFiles({
+      name: "private-photo.png",
+      mimeType: "image/png",
+      buffer: Buffer.from([137, 80, 78, 71]),
+    });
+    await expect(page.locator(".home-composer__attachment")).toContainText("private-photo.png");
+    await fileInput.setInputFiles({
+      name: "private-notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("first line\nsecond line\nthird line\n", "utf8"),
+    });
+    await expect(
+      page.locator(".home-composer__attachment").filter({ hasText: "private-notes.txt" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Private range", exact: true }).click();
+    const source = page.getByLabel("Private range file");
+    await expect(source).toBeFocused();
+    await source.selectOption("private-notes.txt");
+    await expect(page.getByText("second line", { exact: true })).toBeVisible();
+    await page.getByLabel("Start line").fill("2");
+    await page.getByLabel("End line").fill("3");
+
+    await page.getByRole("button", { name: "Remove attachment private-notes.txt" }).click();
+    await expect(page.getByLabel("Private range file")).toHaveCount(0);
+    await expect(page.getByLabel("Path")).toBeVisible();
+    await expect(page.getByLabel("Path")).toHaveValue("");
+    await expect(page.getByText("private-notes.txt", { exact: true })).toHaveCount(0);
+    await expectAxeClean(page, "private range attachment source");
+  });
+
   test("restores focus for Conversation Details and keeps a collapsed rail inert", async ({
     page,
   }) => {
@@ -2366,6 +2441,7 @@ test.describe("AI-first conversation Home", () => {
       page.getByRole("button", { name: /conversation list/ }),
       page.getByRole("button", { name: "Open CLI capabilities" }),
       page.getByRole("button", { name: "Open settings" }),
+      page.getByRole("button", { name: "Open control center" }),
       page.getByRole("button", { name: "Send message" }),
     ]) {
       const box = await control.boundingBox();

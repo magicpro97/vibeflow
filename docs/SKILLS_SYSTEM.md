@@ -68,8 +68,9 @@ VibeFlow validates skills against the official Agent Skills spec
   `allowed-tools`, `metadata`, `compatibility` (<= 500 chars),
   `owners` (array of names/emails), `changelog` (block list with version/date/description),
   `supersedes` (replacement skill name for deprecation) — are recognized.
-  Any other key is a **warning** (not an error), so legacy VibeFlow keys
-  (`status`/`version`/`triggers`/`requires`) keep validating.
+  Legacy-compatible resolver keys `type`, `mcp`, `version`, `status`, `triggers`,
+  `capabilities`, `requires`, and `when_to_load` are recognized too. New skills
+  should nest them under `metadata:`; top-level forms warn but still parse.
 - Optional dirs `scripts/`, `references/`, `assets/` are emptiness-checked; the
   spec allows **any additional top-level file or directory**, so extras are not
   flagged (Anthropic's own `skill-creator` ships `agents/` and `eval-viewer/`).
@@ -78,21 +79,25 @@ VibeFlow validates skills against the official Agent Skills spec
 
 ## Skill metadata
 
-Skill metadata lives in the `SKILL.md` YAML frontmatter. The orchestrator parses that frontmatter for deterministic capability matching — there is no separate metadata file.
+Skill metadata lives in the `SKILL.md` YAML frontmatter. Standard resolver metadata is nested under `metadata:` for new skills.
+Top-level legacy keys remain accepted with warnings for compatibility. The orchestrator parses that frontmatter for
+deterministic capability matching — there is no separate metadata file.
 
 Example:
 
 ```md
 ---
 name: xlsx-reader
-version: 1.0.0
-capabilities: ["read:xlsx", "extract:tables"]
-triggers: ["xlsx", "spreadsheet", "excel"]
-requires:
-  filesystem: read
-  network: false
-  shell: false
-status: verified
+description: Read spreadsheet files
+metadata:
+  version: 1.0.0
+  capabilities: ["read:xlsx", "extract:tables"]
+  triggers: ["xlsx", "spreadsheet", "excel"]
+  requires:
+    filesystem: read
+    network: false
+    shell: false
+  status: verified
 ---
 
 # XLSX Reader
