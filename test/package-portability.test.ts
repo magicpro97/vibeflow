@@ -44,27 +44,24 @@ describe("package portability", () => {
     try {
       const npm = Bun.which("npm");
       if (!npm) throw new Error("npm is required for package smoke");
-      const pack = execFileSync(npm, ["pack", "--pack-destination", output, "--json"], {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      // npm resolves to npm.cmd on Windows; CreateProcess rejects that shim
+      // without shell mode even when argv is otherwise portable.
+      const execNpm = (args: string[]): string =>
+        execFileSync(npm, args, {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(npm),
+        });
+      const pack = execNpm(["pack", "--pack-destination", output, "--json"]);
       const metadata = JSON.parse(pack) as Array<{ filename?: string }>;
       const filename = metadata[0]?.filename;
       expect(filename).toBeString();
       if (!filename) return;
       const tarball = join(output, filename);
       const prefix = join(output, "prefix");
-      execFileSync(npm, ["install", "--global", "--prefix", prefix, tarball, "--ignore-scripts"], {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const npmRoot = execFileSync(npm, ["root", "--global", "--prefix", prefix], {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      execNpm(["install", "--global", "--prefix", prefix, tarball, "--ignore-scripts"]);
+      const npmRoot = execNpm(["root", "--global", "--prefix", prefix]);
       const installedLauncher = join(npmRoot.trim(), "@magicpro97", "vibeflow", "bin", "vf.mjs");
       const version = execFileSync(process.execPath, [installedLauncher, "--version"], {
         cwd: root,
