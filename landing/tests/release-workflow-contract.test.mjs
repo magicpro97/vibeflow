@@ -35,7 +35,9 @@ test("release-please waits for the same-SHA native Windows aggregate", () => {
   assert.match(windows, /^          ref: \$\{\{ github\.sha \}\}$/m);
   assert.match(windows, /test\/dispatch-owned-process-windows-live\.test\.ts/);
   assert.match(aggregate, /^      - windows-owned-process$/m);
-  assert.match(aggregate, /Release prerequisites passed for \$GITHUB_SHA/);
+  assert.match(aggregate, /^      - windows-package-smoke$/m);
+  assert.match(aggregate, /WINDOWS_PACKAGE_RESULT/);
+  assert.match(aggregate, /Release prerequisites passed for/);
   assert.match(releasePlease, /^    needs: release-prerequisites$/m);
   assert.match(releasePlease, /^          ref: \$\{\{ github\.sha \}\}$/m);
   assert.match(releasePlease, /uses: googleapis\/release-please-action@v4/);
@@ -52,7 +54,7 @@ test("npm publish cannot bypass same-SHA native Windows release evidence", () =>
 
   assert.match(verify, /^          ref: \$\{\{ github\.sha \}\}$/m);
   assert.match(windows, /^          ref: \$\{\{ github\.sha \}\}$/m);
-  assert.match(windows, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+  assert.match(windows, /release checkout is not same SHA/);
   assert.match(windows, /test\/dispatch-owned-process-windows-live\.test\.ts/);
   assert.match(aggregate, /^      - verify$/m);
   assert.match(aggregate, /^      - windows-owned-process$/m);

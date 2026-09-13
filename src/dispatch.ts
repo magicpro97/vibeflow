@@ -6,6 +6,7 @@ import {
   cwd,
   hasCommand,
   resolveCommand,
+  resolveEngineBinary,
   sanitizeUnitName,
   writeFileSafe,
 } from "./core.js";
@@ -252,19 +253,19 @@ function resolveCli(
   | { ok: true; cmd: string; args: string[]; promptMode?: EnginePromptMode; warning?: string }
   | { ok: false; reason: string } {
   // With an injected spawner we never touch the real PATH, so treat the engine as present.
-  const invocation = engineCommand(
-    engine,
-    hasSpawner ? { has: () => true } : { has },
-    false,
-    resumeSessionId,
-  );
+  const hasEngine = hasSpawner
+    ? () => true
+    : has === hasCommand
+      ? (cmd: string) => has(cmd) || resolveEngineBinary(cmd) !== undefined
+      : has;
+  const invocation = engineCommand(engine, { has: hasEngine }, false, resumeSessionId);
   if (isUnavailable(invocation)) return { ok: false, reason: invocation.unavailable };
-  if (!hasSpawner && !has(invocation.cmd)) {
+  if (!hasSpawner && !hasEngine(invocation.cmd)) {
     return { ok: false, reason: `${invocation.cmd} CLI not found` };
   }
   return {
     ok: true,
-    cmd: hasSpawner ? invocation.cmd : (resolveCommand(invocation.cmd) ?? invocation.cmd),
+    cmd: hasSpawner ? invocation.cmd : (resolveEngineBinary(invocation.cmd) ?? invocation.cmd),
     args: invocation.args,
     promptMode: invocation.promptMode,
     warning: invocation.warning,

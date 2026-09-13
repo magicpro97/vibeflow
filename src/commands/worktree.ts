@@ -3,8 +3,8 @@
 // A6 of the orchestrator-first plan (issue #172): `vf worktree
 // create|remove|list` — symlink node_modules, skip `bun install`.
 //
-// The shell side of A6 lives in `scripts/create-worktree.sh` (the
-// ~100-LOC helper that does `git worktree add` + the symlink).
+// The Node side of A6 lives in `scripts/create-worktree.mjs` (the helper
+// that does `git worktree add` + the junction/symlink).
 // This file is the thin TS wrapper that:
 //   1. dispatches the right subcommand based on `args[0]`
 //   2. shells out to `git` / the helper script via an injected
@@ -30,6 +30,7 @@
 
 import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { c, cwd, out, spawnSync } from "./_shared.js";
 
 /** The A6 sub-actions. */
@@ -102,10 +103,15 @@ export function buildCreateArgs(
   base?: string,
   repoDir?: string,
 ): { cmd: string; args: string[] } {
-  const scriptPath = join(repoDir ?? cwd(), "scripts", "create-worktree.sh");
-  const args = [branch, path];
+  const sourceHelperPath = fileURLToPath(
+    new URL("../../scripts/create-worktree.mjs", import.meta.url),
+  );
+  const scriptPath = existsSync(sourceHelperPath)
+    ? sourceHelperPath
+    : fileURLToPath(new URL("../scripts/create-worktree.mjs", import.meta.url));
+  const args = [scriptPath, branch, path];
   if (base && base.length > 0) args.push("--base", base);
-  return { cmd: scriptPath, args };
+  return { cmd: process.execPath, args };
 }
 
 /** `vf worktree create <branch> [--base <base>] [--path <path>]` */
@@ -143,6 +149,7 @@ export function worktreeCreate(
     return 2;
   }
 
+  // Invoke Node directly; native Windows cannot execute the legacy POSIX helper.
   const { cmd, args: helperArgs } = buildCreateArgs(branch, wtPath, base, repoDir);
   out("vf", c.dim(`vf worktree create: ${cmd} ${helperArgs.join(" ")}`), {
     meta: { kind: "worktree-create", branch, path: wtPath, base: base ?? "HEAD" },

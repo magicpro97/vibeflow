@@ -101,10 +101,9 @@ jobs:
           bun-version: 1.4.0
       - run: bun ci
       - name: Assert the release commit on a real Windows runtime
-        shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          bun -e "if (process.platform !== 'win32') throw new Error('live Windows evidence requires win32')"
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw "release checkout is not same SHA" }
+          bun run scripts/assert-win32.ts
       - name: Windows PID, Job Object, release, and orphan release gate
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
 
@@ -122,10 +121,11 @@ jobs:
         env:
           VERIFY_RESULT: ${{ needs.verify.result }}
           WINDOWS_RESULT: ${{ needs.windows-owned-process.result }}
+        shell: pwsh
         run: |
-          test "$VERIFY_RESULT" = success
-          test "$WINDOWS_RESULT" = success
-          echo "Release prerequisites passed for $GITHUB_SHA"
+          if ($env:VERIFY_RESULT -ne "success") { throw "verify result: $env:VERIFY_RESULT" }
+          if ($env:WINDOWS_RESULT -ne "success") { throw "windows result: $env:WINDOWS_RESULT" }
+          Write-Output "Release prerequisites passed for $env:GITHUB_SHA"
 
   publish:
     needs: release-prerequisites

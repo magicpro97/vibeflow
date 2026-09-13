@@ -2,7 +2,17 @@
 # VibeFlow CLI — shell wrapper with Windows-safe path quoting
 # ponytail: minimal wrapper, rely on dist/cli.js for all logic
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P 2>/dev/null || dirname "$0")"
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  SOURCE_DIR="$(cd "$(dirname "$SOURCE")" && pwd -P 2>/dev/null || dirname "$SOURCE")"
+  SOURCE="$(readlink "$SOURCE")"
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$SOURCE_DIR/$SOURCE" ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd -P 2>/dev/null || dirname "$SOURCE")"
 
 case "$(uname)" in
   CYGWIN*|MINGW*|MSYS*)

@@ -92,8 +92,8 @@ export function makeWorktreeOps(
       const cwd = repoDir ?? process.cwd();
       const parentDir = resolve(cwd, "..");
       const wtPath = defaultWorktreePath(branch, parentDir);
-      const scriptPath = join(cwd, "scripts", "create-worktree.sh");
-      const r = spawn(scriptPath, [branch, wtPath, "--base", base], {
+      const scriptPath = join(cwd, "scripts", "create-worktree.mjs");
+      const r = spawn(process.execPath, [scriptPath, branch, wtPath, "--base", base], {
         cwd,
         encoding: "utf8",
         timeout: 60_000,
@@ -120,6 +120,6 @@ export function makeWorktreeOps(
   };
 }
 
-/** Default WorktreeOps — shells out to scripts/create-worktree.sh for create
+/** Default WorktreeOps — runs scripts/create-worktree.mjs for create
  *  and git worktree remove --force for cleanup. Errors are swallowed in remove. */
 export const defaultWorktreeOps: WorktreeOps = makeWorktreeOps();

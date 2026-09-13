@@ -54,9 +54,11 @@ describe("Bun toolchain policy", () => {
   test("keeps Playwright-owned specs out of every Bun unit and coverage invocation", () => {
     expect(bunConfig.test?.pathIgnorePatterns).toEqual([...PLAYWRIGHT_OWNED_TEST_PATHS]);
     expect(packageJson.scripts?.coverage).toBe("bun test --coverage");
-    expect(packageJson.scripts?.["coverage:check"]).toContain(
-      "bun test --timeout 30000 --coverage --coverage-reporter=lcov",
-    );
+    expect(packageJson.scripts?.["coverage:check"]).toBe("node scripts/coverage-check.mjs");
+    const coverageCheck = readFileSync("scripts/coverage-check.mjs", "utf8");
+    expect(coverageCheck).toContain('run("bun", [');
+    expect(coverageCheck).toContain('"--coverage-reporter=lcov"');
+    expect(coverageCheck).not.toMatch(/(?:e2e|landing\/tests\/.*\.spec\.mjs)/);
     for (const script of ["test", "test:parallel", "coverage", "coverage:check"] as const) {
       expect(packageJson.scripts?.[script]).not.toContain("--path-ignore-patterns");
     }

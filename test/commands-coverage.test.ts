@@ -4679,7 +4679,8 @@ describe("commands.makeWorktreeOps (injectable spawn seam)", () => {
     const p = ops.create("u1", "main");
     expect(p).toContain("vf-wt-u1");
     expect(calls.length).toBe(1);
-    expect(calls[0]?.cmd).toContain("create-worktree.sh");
+    expect(calls[0]?.cmd).toBe(process.execPath);
+    expect(calls[0]?.args[0]).toContain("create-worktree.mjs");
   });
 
   test("create throws when the script exits non-zero (stderr surfaced)", () => {
