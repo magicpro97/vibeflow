@@ -17,6 +17,7 @@
 
 import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import type { AcquisitionApprover, AcquisitionReadDeps } from "../skills/acquisition.js";
+import { loadRelevantAntiPatterns } from "../skills/anti-patterns.js";
 import type { confirmInput } from "../terminal-prompts/prompts.js";
 import {
   CTX_DIR,
@@ -125,7 +126,11 @@ export async function run(
   const baseCtx = defaultContext({ base });
   const ctx: ProjectContext = { ...baseCtx, goal };
   const units = state.work_units.map((u) => u.name);
-  const prompt = dispatchPrompt(engine, ctx, units);
+  const antiPatterns = loadRelevantAntiPatterns(
+    base,
+    state.work_units.flatMap((u) => u.scope ?? []),
+  );
+  const prompt = dispatchPrompt(engine, ctx, units, { antiPatterns });
   writeFileSafe(ctxPathIn(base, "dispatch", `${engine}.md`), prompt);
   out("vf", `${c.green("+")} ${CTX_DIR}/dispatch/${engine}.md`);
 

@@ -51,6 +51,7 @@ export interface MaterializeAgentBindingOptions {
   phase: number;
   taskText: string;
   isolation?: IsolationLeaseProjection;
+  attachments?: readonly string[];
 }
 
 export interface MaterializedAgentBinding {
@@ -247,6 +248,7 @@ function resolveBindingAuthority(
       sessionMode: binding.sessionMode,
       rendered_prompt: rendered.rendered_prompt,
       rendered_tools: rendered.rendered_tools,
+      attachments: options.attachments,
       sandbox: rendered.sandbox,
       env_policy: envPolicy,
       isolation,

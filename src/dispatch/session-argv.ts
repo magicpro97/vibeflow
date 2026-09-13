@@ -1,5 +1,6 @@
-import type { Engine } from "../core.js";
+import { CTX_DIR, type Engine } from "../core.js";
 import { AGENT_ENGINE } from "../core/agent-contract.js";
+import { attachmentKindForExtension, engineAttachmentSupport } from "../core/attachment-support.js";
 import { ROLE_SANDBOX } from "../core/role-contract.js";
 import { engineCommand, isUnavailable, materializePrompt } from "../dispatch.js";
 import { CONVERSATION_RECONCILIATION_STATUS } from "../orchestrator/conversation/conversation-public-wire-contract.js";
@@ -83,6 +84,7 @@ export function sessionInvocation(
   spawn: SpawnOptionsProjection,
   nativeSessionId?: string,
   prompt = spawn.rendered_prompt,
+  attachments: readonly string[] = [],
 ) {
   const exactId = spawn.sessionMode === ENGINE_SESSION_MODE.EXACT ? nativeSessionId : undefined;
   const base = engineCommand(
@@ -140,7 +142,35 @@ export function sessionInvocation(
       args.push("-p");
     }
   }
+  const attachArgs = attachFileArgs(spawn, attachments);
+  if (attachArgs.length) {
+    const promptFlag = args.indexOf("-p");
+    if (promptFlag >= 0) args.splice(promptFlag, 0, ...attachArgs);
+    else args.push(...attachArgs);
+  }
   return materializePrompt({ ...base, args }, prompt);
+}
+
+// Argument projection (flag + path per file) for attached files per engine
+// support matrix. The composer gates attachments before dispatch, so an
+// unsupported file is skipped defensively rather than turned into args.
+export function attachFileArgs(
+  spawn: SpawnOptionsProjection,
+  attachments: readonly string[],
+): string[] {
+  const support = engineAttachmentSupport(spawn.engine);
+  if (!support) return [];
+  const pairs: string[] = [];
+  for (const name of attachments) {
+    const ext = name.split(".").pop()?.toLowerCase() ?? "";
+    const kind = attachmentKindForExtension(ext);
+    if (kind === null || !support.kinds.includes(kind)) continue;
+    // Uploads live under <repo>/.vibeflow/attachments/<name> (server
+    // handlers) and the CLI spawn runs with the repo as cwd, so project
+    // the repo-relative path — a bare basename would not resolve.
+    pairs.push(support.flag, `${CTX_DIR}/attachments/${name}`);
+  }
+  return pairs;
 }
 
 function hasJsonLine(

@@ -396,7 +396,6 @@ describe("vf skill seeding", () => {
       expect(content).toContain("name: vf");
       expect(content).toContain("VibeFlow");
 
-      // Skill should be synced to engine mirror
       const claudeSkillPath = join(dir, ".claude", "skills", "vf", "SKILL.md");
       expect(existsSync(claudeSkillPath)).toBe(true);
     } finally {

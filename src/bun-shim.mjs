@@ -72,6 +72,10 @@ export function installNodeBunShim(target = globalThis, deps = undefined) {
       const child = cp.spawn(cmd[0], cmd.slice(1), {
         stdio: ["pipe", "pipe", "pipe"],
         env: opts?.env,
+        ...(opts?.cwd ? { cwd: opts.cwd } : {}),
+        ...(opts?.shell !== undefined ? { shell: opts.shell } : {}),
+        ...(opts?.detached !== undefined ? { detached: opts.detached } : {}),
+        ...(opts?.windowsHide !== undefined ? { windowsHide: opts.windowsHide } : {}),
       });
       return {
         stdin: child.stdin

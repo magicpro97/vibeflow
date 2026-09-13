@@ -42,6 +42,8 @@ export interface FailureProtection {
 
 /** Per-repo user settings persisted to `.vibeflow/SETTINGS.json`. */
 export interface VibeSettings {
+  /** Engines allowed for new init and agent dispatch from the control center. */
+  enabledEngines?: Engine[];
   tools: { codegraph: boolean; lsp: boolean };
   toolPriority: ToolTier[];
   lspServers?: string[];
@@ -185,7 +187,7 @@ function coerceEnvPolicy(raw: unknown): { deny?: string[]; allow?: string[] } | 
   return out;
 }
 
-/** #548: validate a stored record<string, string> → drop non-string values, undefined when empty. */
+/** Validate a string map; undefined when empty. */
 function coerceStrMap(raw: unknown): Record<string, string> | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const out: Record<string, string> = {};
@@ -228,8 +230,7 @@ function coerceMcpServers(raw: unknown): Record<string, UserMcpServer> | undefin
   return Object.keys(out).length ? out : undefined;
 }
 
-/** #549: validate a stored eval block → {minPassRate?, minSamples?} of finite numbers,
- *  or undefined when absent/garbage (so `vf eval` reports only, no gate). */
+/** Validate optional eval thresholds; undefined when absent or garbage. */
 function coerceEval(raw: unknown): { minPassRate?: number; minSamples?: number } | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const obj = raw as { minPassRate?: unknown; minSamples?: unknown };
@@ -243,7 +244,7 @@ function coerceEval(raw: unknown): { minPassRate?: number; minSamples?: number }
   return out.minPassRate === undefined && out.minSamples === undefined ? undefined : out;
 }
 
-/** #687: validate a stored skills config block → defaults on garbage/absent. */
+/** Validate skills resolution and mirroring policy. */
 function coerceSkillsConfig(raw: unknown): SkillsConfig | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const obj = raw as Record<string, unknown>;
@@ -259,12 +260,22 @@ function coerceSkillsConfig(raw: unknown): SkillsConfig | undefined {
   return out;
 }
 
+/** Keep only valid engine names; empty/garbage input -> {} so defaults stay untouched. */
+function coerceEnabledEngines(raw: unknown): Pick<VibeSettings, "enabledEngines"> {
+  if (!Array.isArray(raw)) return {};
+  const enabled = raw.filter(
+    (e): e is Engine => typeof e === "string" && (ENGINES as readonly string[]).includes(e),
+  );
+  return raw.length === 0 || enabled.length > 0 ? { enabledEngines: enabled } : {};
+}
+
 /** Merge a partial/old/unknown stored object over the defaults into a complete VibeSettings. */
 function coerce(raw: unknown): VibeSettings {
   const out = defaults();
   if (!raw || typeof raw !== "object") return out;
   const obj = raw as Record<string, unknown>;
 
+  Object.assign(out, coerceEnabledEngines(obj.enabledEngines));
   const tools = obj.tools;
   if (tools && typeof tools === "object") {
     const t = tools as Record<string, unknown>;
@@ -275,24 +286,16 @@ function coerce(raw: unknown): VibeSettings {
   out.toolPriority = normalizePriority(obj.toolPriority);
   out.failureProtection = coerceFailureProtection(obj.failureProtection);
 
-  // Read the `memory` field if the stored file carries it. PR #160 added
-  // this; without it, `readSettings` always returns the default (false)
-  // regardless of what's on disk — the setting would never read true.
+  // Read persisted memory mode; legacy true is coerced above.
   out.memory = coerceMemory(obj.memory);
 
   // #559: absent → default true (forward-merge); a non-boolean value stays true.
   if (typeof obj.notifications === "boolean") out.notifications = obj.notifications;
 
-  // Only materialize `hooks` when the stored file actually carries the key, so
-  // repos that never configured hooks keep an absent block (fail-safe all-on at
-  // scoring time) and SETTINGS.json stays free of churn. A present-but-garbage
-  // block coerces to the all-on default rather than throwing.
+  // Preserve absent hooks for back-compat; garbage uses fail-safe defaults.
   if ("hooks" in obj) out.hooks = coerceHookConfig(obj.hooks);
 
-  // #556: materialize envPolicy ONLY when the stored file carries it (like hooks),
-  // so repos that never configured it keep an absent block (conservative default
-  // applies at filterEnv). Validate both arrays to string[]; a present-but-garbage
-  // block (non-object, or arrays of non-strings) coerces to undefined → default.
+  // Materialize envPolicy only when present; garbage coerces to the conservative default.
   if ("envPolicy" in obj) {
     const ep = coerceEnvPolicy(obj.envPolicy);
     if (ep) out.envPolicy = ep;
@@ -305,8 +308,7 @@ function coerce(raw: unknown): VibeSettings {
     if (servers.length) out.lspServers = servers;
   }
 
-  // #548: materialize mcpServers ONLY when present (like envPolicy); malformed entries
-  // are dropped, an all-garbage/empty block coerces to undefined → absent.
+  // Materialize valid MCP servers only.
   if ("mcpServers" in obj) {
     const m = coerceMcpServers(obj.mcpServers);
     if (m) out.mcpServers = m;
@@ -318,8 +320,7 @@ function coerce(raw: unknown): VibeSettings {
     const ev = coerceEval(obj.eval);
     if (ev) out.eval = ev;
   }
-  // #687: skills always materialized (defaults on absent/garbage) — it lives in
-  // DEFAULT_SETTINGS so readSettings returns a complete, predictable block.
+  // Skills always materialize from defaults.
   const sk = coerceSkillsConfig(obj.skills);
   if (sk) out.skills = sk;
   curator.applyCuratorSettings(out, obj.curator);
@@ -336,7 +337,6 @@ export function readSettings(base?: string): VibeSettings {
     return defaults();
   }
 }
-
 /** Read-modify-write: merge `next` over current settings, stamp `updatedAt`, persist, return it. */
 export function writeSettings(
   base: string,
@@ -346,6 +346,7 @@ export function writeSettings(
   const now = opts?.now ?? (() => new Date().toISOString());
   const current = readSettings(base);
   const merged: VibeSettings = {
+    ...coerceEnabledEngines(next.enabledEngines ?? current.enabledEngines),
     tools: { ...current.tools, ...(next.tools ?? {}) },
     toolPriority: next.toolPriority ? normalizePriority(next.toolPriority) : current.toolPriority,
     failureProtection: coerceFailureProtection({
@@ -384,10 +385,7 @@ export function writeSettings(
   return merged;
 }
 
-/**
- * Turn the ordered `toolPriority` list into a rank map where higher = preferred, mirroring
- * STATUS_RANK in skills/registry.ts. The first element gets the highest rank.
- */
+/** Turn ordered `toolPriority` into a rank map (higher = preferred), mirroring skills/registry.ts. */
 export function priorityRank(settings: VibeSettings): Record<ToolTier, number> {
   const order = normalizePriority(settings.toolPriority);
   const rank = {} as Record<ToolTier, number>;

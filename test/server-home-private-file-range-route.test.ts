@@ -5,6 +5,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleHomePrivateFileRangeRoute } from "../src/server/home-private-file-range-route.js";
 
+test("home private file range route accepts Windows separators", async () => {
+  const repo = await mkdtemp(join(tmpdir(), "vf-home-private-range-"));
+  try {
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src/example.ts"), "one\n", { mode: 0o600 });
+    const staged: Array<Record<string, unknown>> = [];
+    const response = await handleHomePrivateFileRangeRoute(
+      {
+        createId: () =>
+          "vf-file-range-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        stage: (input) => {
+          staged.push(input as unknown as Record<string, unknown>);
+          return input as never;
+        },
+      },
+      repo,
+      new Request("http://vf.test/api/home/private-file-range-handoffs", {
+        method: "POST",
+        body: JSON.stringify({ path: "src\\example.ts", start_line: 1, end_line: 1 }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(response.status).toBe(202);
+    expect(staged[0]?.repo_relative_path).toBe("src/example.ts");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
 test("home private file range route stages an exact repo-relative excerpt", async () => {
   const repo = await mkdtemp(join(tmpdir(), "vf-home-private-range-"));
   try {

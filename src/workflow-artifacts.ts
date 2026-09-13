@@ -254,18 +254,18 @@ export function generateWorkflowArtifacts(
     const canonicalDir = join(base, CTX_DIR, "skills", slug);
     const canonicalPath = join(canonicalDir, "SKILL.md");
     mkdirSync(canonicalDir, { recursive: true });
-    writeFileSync(canonicalPath, content);
+    const canonicalContent = content.includes("VibeFlow")
+      ? content
+      : `${content}\n\nPowered by VibeFlow.\n`;
+    writeFileSync(canonicalPath, canonicalContent);
     written.push(`${CTX_DIR}/skills/${slug}/SKILL.md`);
 
-    // Mirror to each engine's skill root so the engine reads it at
-    // runtime. Same content — a thin pointer would also work, but a
-    // full copy means the mirror is usable even if the canonical is
-    // temporarily missing (e.g. during re-init).
+    // Mirror to each selected engine's skill root so the engine reads it at runtime.
     for (const engine of engines) {
       const mirrorDir = join(base, skillDirPath(engine, slug));
       const mirrorPath = skillFilePath(engine, slug);
       mkdirSync(mirrorDir, { recursive: true });
-      writeFileSync(join(base, mirrorPath), content);
+      writeFileSync(join(base, mirrorPath), canonicalContent);
       written.push(mirrorPath);
     }
   }

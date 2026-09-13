@@ -163,7 +163,7 @@ function asRequires(v: unknown): SkillRequires | undefined {
 }
 
 function parseScope(data: Record<string, unknown>): SkillScope | undefined {
-  const raw = data.scope;
+  const raw = data.scope ?? (data.metadata as Record<string, unknown> | undefined)?.scope;
   if (typeof raw !== "string") return undefined;
   const scope = raw.trim().toLowerCase();
   return isSkillScope(scope) ? scope : undefined;
@@ -186,22 +186,20 @@ export function parseSkillText(
   opts: ParseSkillOpts = {},
 ): Skill | null {
   const { data } = parseFrontmatter(text);
-  // `data` has a null prototype (see frontmatter.ts) — reading `data.status` can only
-  // ever return an OWN key, never an inherited one. Read it via hasOwnProperty to be safe.
-  const ownStatus = Object.prototype.hasOwnProperty.call(data, "status") ? data.status : undefined;
-  // Issue #93: normalize the declared name to lowercase BEFORE regex
-  // validation. Earlier this code only `.trim()`-ed, then the regex
-  // `^[a-z0-9]+(?:-[a-z0-9]+)*$` rejected any uppercase letter — so a
-  // mixed-case `name: Shared-Tool` was silently dropped. Lowercasing
-  // first makes the skill survive under its canonical `shared-tool`
-  // form, which is also what `discoverSkills` now uses as its dedup key.
+  // `data` may contain legacy resolver keys at top level or standard nested metadata.
+  const metadata = data.metadata;
+  const normalized =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? { ...data, ...(metadata as Record<string, unknown>) }
+      : data;
+  // Normalize mixed-case names before regex validation for case-insensitive discovery.
   const name = typeof data.name === "string" ? data.name.trim().toLowerCase() : "";
   const description = typeof data.description === "string" ? data.description.trim() : "";
   // Required by the spec: lowercase-hyphen name, non-empty description (<=1024 chars).
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) return null;
   if (!description || description.length > 1024) return null;
 
-  const statusRaw = typeof ownStatus === "string" ? ownStatus : "";
+  const statusRaw = typeof normalized.status === "string" ? normalized.status : "";
   let status: SkillStatus = isSkillStatus(statusRaw) ? statusRaw : SKILL_STATUS.UNVERIFIED;
 
   // External claims are untrusted. Only a caller-supplied identity plus matching
@@ -211,31 +209,32 @@ export function parseSkillText(
     status = hasValidReviewProof(name, opts) ? SKILL_STATUS.VERIFIED : SKILL_STATUS.EXPERIMENTAL;
   }
 
-  const { domain, owns, dependsOn } = parseDomainMeta(data as Record<string, unknown>);
-  const owners = parseLifecycleOwners(data as Record<string, unknown>);
-  const changelog = parseLifecycleChangelog(data as Record<string, unknown>);
-  const supersedes = parseLifecycleSupersedes(data as Record<string, unknown>);
+  const { domain, owns, dependsOn } = parseDomainMeta(normalized);
+  const owners = parseLifecycleOwners(normalized);
+  const changelog = parseLifecycleChangelog(normalized);
+  const supersedes = parseLifecycleSupersedes(normalized);
 
   return {
     name,
     description,
-    version: typeof data.version === "string" ? data.version : undefined,
+    version: typeof normalized.version === "string" ? normalized.version : undefined,
     status,
-    scope: parseScope(data),
-    projectId: typeof data["project.id"] === "string" ? data["project.id"].trim() : undefined,
-    extends: asStringArray(data.extends),
-    capabilities: asStringArray(data.capabilities),
-    triggers: asStringArray(data.triggers),
-    type: isSkillType(data.type) ? data.type : undefined,
-    requires: asRequires(data.requires),
-    mcp: asMcp(data.mcp, name),
+    scope: parseScope(normalized),
+    projectId:
+      typeof normalized["project.id"] === "string" ? normalized["project.id"].trim() : undefined,
+    extends: asStringArray(normalized.extends),
+    capabilities: asStringArray(normalized.capabilities),
+    triggers: asStringArray(normalized.triggers),
+    type: isSkillType(normalized.type) ? normalized.type : undefined,
+    requires: asRequires(normalized.requires),
+    mcp: asMcp(normalized.mcp, name),
     domain,
     owns,
     dependsOn,
     owners,
     changelog,
     supersedes,
-    sourceAnchors: parseSourceAnchors(data as Record<string, unknown>),
+    sourceAnchors: parseSourceAnchors(normalized as Record<string, unknown>),
     dir,
     path: skillMdPath,
   };

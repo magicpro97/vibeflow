@@ -30,6 +30,7 @@ import {
   units,
   verify,
   workflow,
+  worktree,
 } from "./commands.js";
 import { ask } from "./commands/ask.js";
 import { brainstorm } from "./commands/brainstorm.js";
@@ -291,6 +292,8 @@ async function main(argv: string[]): Promise<number> {
       return canary(positionals[0], positionals.slice(1), flags);
     case "units":
       return units(positionals[0], positionals.slice(1), flags);
+    case "worktree":
+      return worktree(positionals, flags);
     case "status":
       return status(positionals[0], positionals.slice(1), flags);
     case "config":

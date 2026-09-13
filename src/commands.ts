@@ -282,7 +282,7 @@ export type { PilotEncounter } from "./commands/review-cross.js";
 // === Re-export the worktree cluster (issue #172, A6) ===
 // `vf worktree create|remove|list` — symlink node_modules from
 // the parent repo, skip `bun install`. The TS wrapper is a thin
-// shell-out to git + `scripts/create-worktree.sh`. The
+// shell-out to git + `scripts/create-worktree.mjs`. The
 // `runCommandSync` inject is the test seam (same pattern as
 // `vf review`'s dispatch inject).
 export {

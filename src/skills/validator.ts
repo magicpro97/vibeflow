@@ -27,13 +27,8 @@ export const REQUIRED_SECTIONS = ["when to use", "when not to use", "steps", "ve
 // meant to catch "ALWAYS", "NEVER", "MUST" directive blocks
 const ALL_CAPS_PAT = /\b(?:ALWAYS|NEVER|MUST|REQUIRED|MANDATORY)\b/;
 
-// Standard SKILL.md frontmatter fields per the Agent Skills spec
-// (https://agentskills.io/specification). Anthropic's own reference
-// validator (skills/skill-creator/scripts/quick_validate.py) uses the
-// same set. Unknown keys are WARNED (not errored): some existing repo
-// skills carry legacy non-spec keys (status/version/triggers/requires/
-// when_to_load), so a hard error would break them. Promote to error in
-// a future major.
+// Standard SKILL.md frontmatter fields per the Agent Skills spec.
+// Legacy VibeFlow resolver metadata is intentionally warning-only.
 const STANDARD_FRONTMATTER = new Set([
   "name",
   "description",
@@ -54,6 +49,12 @@ const STANDARD_FRONTMATTER = new Set([
   "changelog",
   "supersedes",
   "sourceAnchors",
+  "version",
+  "status",
+  "triggers",
+  "capabilities",
+  "requires",
+  "when_to_load",
 ]);
 
 const HARDCODED_PATH_PAT = /\/Users\/\w+|C:\\Users\\\w+|\/home\/\w+/;
@@ -256,8 +257,6 @@ export function validateSkillDir(
   warnings.push(...validateLifecycleSupersedes(data));
   warnings.push(...validateSourceAnchors(data));
 
-  // Warn (not error) on frontmatter keys outside the spec's standard set,
-  // so typos surface without breaking existing skills that carry legacy
   // keys (status/version/triggers/requires/when_to_load).
   for (const key of Object.keys(data)) {
     if (!STANDARD_FRONTMATTER.has(key)) {
@@ -340,7 +339,13 @@ export function validateSkillDir(
   return { ok: errors.length === 0, dir, name: name || undefined, errors, warnings };
 }
 
-const SKILL_ROOTS = [join(CTX_DIR, "skills"), join(".kiro", "skills"), ...SKILL_MIRRORS];
+const CANONICAL_SKILL_ROOTS = [join(CTX_DIR, "skills")];
+const MIRROR_SKILL_ROOTS = [...SKILL_MIRRORS];
+
+export interface SkillRootsValidationOptions {
+  /** Include generated engine mirrors for an explicit parity diagnostic. */
+  includeMirrors?: boolean;
+}
 
 export interface SkillRootsValidationResult {
   ok: boolean;
@@ -349,9 +354,15 @@ export interface SkillRootsValidationResult {
   warnings: string[];
 }
 
-export function validateSkillRoots(repo: string): SkillRootsValidationResult {
+export function validateSkillRoots(
+  repo: string,
+  options: SkillRootsValidationOptions = {},
+): SkillRootsValidationResult {
   const skills: SkillValidationResult[] = [];
-  for (const root of SKILL_ROOTS) {
+  const roots = options.includeMirrors
+    ? [...CANONICAL_SKILL_ROOTS, join(".kiro", "skills"), ...MIRROR_SKILL_ROOTS]
+    : CANONICAL_SKILL_ROOTS;
+  for (const root of roots) {
     const base = join(repo, root);
     if (!existsSync(base)) continue;
     // base is verified to exist via existsSync above, so

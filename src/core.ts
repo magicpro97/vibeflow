@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -179,15 +180,19 @@ export function writeFileSafe(
     writeFileSync?: (p: string, data: string) => void;
     renameSync?: (from: string, to: string) => void;
     chmodSync?: (p: string, mode: number) => void;
+    randomUUID?: () => string;
+    now?: () => number;
   } = {},
 ): void {
   const _mkdir = inject.mkdirSync ?? mkdirSync;
   const _write = inject.writeFileSync ?? writeFileSync;
   const _rename = inject.renameSync ?? renameSync;
   const _chmod = inject.chmodSync ?? chmodSync;
+  const _randomUUID = inject.randomUUID ?? randomUUID;
+  const _now = inject.now ?? Date.now;
   _mkdir(dirname(path), { recursive: true });
   const finalContent = content.endsWith("\n") ? content : `${content}\n`;
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  const tmp = `${path}.tmp-${process.pid}-${_now()}-${_randomUUID()}`;
   _write(tmp, finalContent);
   // Tighten the temp file's permissions BEFORE the rename. The renamed
   // target inherits the temp's mode on POSIX, so the chmod has to happen
@@ -303,58 +308,12 @@ export function recomputeTotals(s: WorkflowState): WorkflowState {
   return s;
 }
 
-function safeCommandName(cmd: string): boolean {
-  // `command -v` is a POSIX shell builtin with no standalone binary (absent on most Linux),
-  // so it must run through a shell — otherwise spawnSync hits ENOENT and reports every tool
-  // as missing (CI false-negative). Guard the input (tool names only) so the shell string is safe.
-  return /^[A-Za-z0-9._-]+$/.test(cmd);
-}
-
-/** Resolve the first executable path for a command, matching how the platform PATH is searched. */
-export function resolveCommand(cmd: string): string | undefined {
-  if (!safeCommandName(cmd)) return undefined;
-  const found = Bun.which(cmd);
-  return found ?? undefined;
-}
-
-/** Windows .cmd/.bat shims require shell execution under node:child_process. */
-export function needsShellForCommand(cmd: string): boolean {
-  return process.platform === RUNTIME_PLATFORM.WINDOWS && /\.(?:cmd|bat)$/i.test(cmd);
-}
-
-/**
- * Variant suffixes tried, in order, when the bare name is absent on PATH.
- * Windows only — POSIX shells don't auto-resolve extensions the way
- * `CreateProcess` does, and synthesizing a `.cmd` path that doesn't exist
- * would mask the real "not installed" condition. Issue #87.
- */
-const WINDOWS_SHIM_VARIANTS = [".cmd", ".bat", ".ps1"] as const;
-
-/**
- * Resolve an engine binary, falling back to Windows shim variants
- * (`.cmd` / `.bat` / `.ps1`) when the bare name is absent on PATH. On
- * POSIX, behaves identically to `resolveCommand` (no extensions
- * synthesized). Returns the first variant that resolves, or undefined.
- *
- * Issue #87: previously `hasCommand("claude")` / `hasCommand("codex")` /
- * `hasCommand("copilot")` returned false on Windows when npm installed the
- * engine as a shim (e.g. `claude.cmd`), so preflight reported a false
- * "no-binary". Use this helper for the engine-under-test presence check.
- */
-export function resolveEngineBinary(engine: string): string | undefined {
-  const direct = resolveCommand(engine);
-  if (direct !== undefined) return engine;
-  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return undefined;
-  for (const ext of WINDOWS_SHIM_VARIANTS) {
-    if (resolveCommand(`${engine}${ext}`) !== undefined) return `${engine}${ext}`;
-  }
-  return undefined;
-}
-
-/** Detect whether a command exists on PATH. */
-export function hasCommand(cmd: string): boolean {
-  return resolveCommand(cmd) !== undefined;
-}
+export {
+  hasCommand,
+  needsShellForCommand,
+  resolveCommand,
+  resolveEngineBinary,
+} from "./core/command-runtime.js";
 
 export function isGitRepo(): boolean {
   return existsSync(join(cwd(), ".git")) || existsSync(resolve(cwd(), ".git"));

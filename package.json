@@ -5,7 +5,7 @@
   "description": "Local-first npm CLI that opens a web UI and orchestrates Claude Code, Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI with shared context, skills, hooks, and verification.",
   "type": "module",
   "bin": {
-    "vf": "./bin/vf"
+    "vf": "./bin/vf.mjs"
   },
   "files": [
     "dist",
@@ -16,6 +16,7 @@
     ".agents/skills/vf",
     "templates/skills",
     "templates",
+    "scripts/create-worktree.mjs",
     "bin"
   ],
   "engines": {
@@ -25,7 +26,7 @@
     "dev": "bun run src/cli.ts",
     "state": "node dist/cli.js state",
     "coord": "node dist/cli.js coord",
-    "build": "bun run --cwd src/ui build && bun build ./src/cli.ts --target=node --external bun:sqlite --external bun:ffi --external koffi --outfile=dist/cli.js --banner='#!/usr/bin/env node' && mkdir -p dist/assets && cp -R src/assets/. dist/assets && chmod +x dist/cli.js",
+    "build": "node scripts/build.mjs",
     "ui:dev": "bun run --cwd src/ui dev",
     "debug:ui": "bun --inspect=7499 run src/cli.ts ui --no-open",
     "debug:ui:break": "bun --inspect-brk=7499 run src/cli.ts ui --no-open",
@@ -40,13 +41,14 @@
     "test:e2e": "playwright test --config ./playwright.config.ts",
     "smoke": "node scripts/smoke.mjs",
     "check": "bun run typecheck && bun run lint && bun run file-size:check && bun run waiver:check && bun run test && bun run coverage:check",
+    "ci:local": "bun scripts/local-ci.mjs",
     "file-size:check": "node scripts/check-file-size.cjs",
     "waiver:check": "node scripts/waiver-policy.cjs",
     "file-size:check:waivers": "node -e \"const r=require('./scripts/check-file-size.cjs');\" 2>/dev/null; node -e \"const fs=require('fs');const path=require('path');const text=fs.readFileSync('scripts/check-file-size.cjs','utf8');const m=text.match(/const WAIVERS = \\[([\\s\\S]*?)\\];/);if(!m){console.log('no waivers');process.exit(0)}console.log(m[1])\"",
     "prepare": "git config core.hooksPath .githooks || true",
     "prepublishOnly": "bun run build",
     "coverage": "bun test --coverage",
-    "coverage:check": "rm -rf coverage && bun run --cwd src/ui build && ( bun test --timeout 30000 --coverage --coverage-reporter=lcov --coverage-dir coverage/full --parallel=1 --no-isolate ; full=$? ; bun test --timeout 30000 --coverage --coverage-reporter=lcov --coverage-dir coverage/conversation --parallel=1 --no-isolate src/ui/src/test/ui-conversation-api-coverage.test.ts ; conv=$? ; node scripts/merge-lcov.cjs coverage/lcov.info coverage/full/lcov.info --union-sf=src/ui/src/conversation-api.ts coverage/conversation/lcov.info ; merge=$? ; bun run coverage:gate ; gate=$? ; if [ \"$full\" -ne 0 ] || [ \"$conv\" -ne 0 ] || [ \"$merge\" -ne 0 ] || [ \"$gate\" -ne 0 ]; then echo \"coverage:check failed (full=$full conv=$conv merge=$merge gate=$gate)\" >&2 ; exit 1 ; fi )",
+    "coverage:check": "node scripts/coverage-check.mjs",
     "coverage:report": "node -e \"const fs=require(\"fs\");const lines=fs.readFileSync(\"coverage/lcov.info\",\"utf8\").split(\"\\n\");let totl=0,toth=0;for(const l of lines){const m=l.match(/^L([FH]):(\\d+)/);if(m){{m[1]===\"F\"&&(totl+=+m[2]);m[1]===\"H\"&&(toth+=+m[2])}}}const pct=100*toth/totl;console.log(\"lcov line coverage:\",pct.toFixed(2)+\"%\");if(Math.floor(pct)<100){console.error(\"::error::lcov line coverage is\",pct.toFixed(2)+\"%, must be 100%\");process.exit(1)}\"",
     "coverage:gate": "node scripts/coverage-gate.cjs",
     "normative:generate": "bun run scripts/generate-normative-matrix.ts",

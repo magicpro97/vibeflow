@@ -1,7 +1,6 @@
 ---
 name: vf
-description: "Drive any task through VibeFlow's local-first CLI (vf) instead of free-handing it. Triggers: /vf, the word vibeflow, orchestrate, init, or a request to set up a repo for AI agents, implement a spec/issue, run a parallel multi-unit workflow, or verify/ship under the confidence gate. SPEC-FIRST: ask the clarifying questions BEFORE running anything that writes or dispatches. /vf with no args → load references/grill.md and grill the user from chat context toward a concrete spec. Wraps vf init / run / orchestrate / units / verify / skills / discover / doctor / hooks."
-when_to_load: on any `/vf …` command (and bare `/vf`), and whenever a task maps to init / spec-implementation / workflow-creation / verify-and-ship on a VibeFlow repo
+description: "Drive any task through VibeFlow's local-first CLI (vf) instead of free-handing it. Use whenever the user types /vf, mentions vibeflow, asks to orchestrate, init, implement a spec/issue, run a parallel workflow, or verify/ship under the confidence gate—even without naming vf. SPEC-FIRST: ask clarifying questions BEFORE anything that writes or dispatches. /vf with no args → load references/grill.md and grill the user toward a concrete spec. Wraps vf init / run / orchestrate / units / verify / skills / discover / doctor / hooks."
 ---
 
 # Driving work through VibeFlow (`vf`)
@@ -16,12 +15,30 @@ loops) is the anti-pattern this skill exists to stop.
 This SKILL.md is the slim index. Load a reference file only when the task needs it
 (progressive disclosure) — do not carry the full detail in every turn.
 
+## When to use
+
+Use when a task involves VibeFlow workflow setup, orchestration, agent dispatch, or gated verification.
+
+## When not to use
+
+Do not use this skill to bypass the SPEC-FIRST gate or replace evidence with a self-reported completion claim.
+
+## Steps
+
+1. Apply the SPEC-FIRST gate, choose the matching flow, load only needed references, then run the flow.
+
+## Verification
+
+- `vf verify` exits 0 after typecheck, lint, tests, evidence, scope, and normative gates pass.
+- `vf skills validate` passes for canonical project skills.
+
 ## 0. SPEC-FIRST GATE (before any writing/dispatching command)
 
 `vf init`, `vf run --yes`, and `vf orchestrate --yes` all WRITE or DISPATCH. Never
 run them blind. First reflect the task back as a short spec and get confirmation.
 Ask only the questions whose answers you don't already have:
 
+## 0.1 Spec questions
 1. **Goal** — one sentence: what does "done" look like? (becomes the workflow goal)
 2. **Scope** — which files/dirs may change? what is off-limits? (drives per-unit scope)
 3. **Engine** — claude, codex, or copilot? (default: copilot). Cheap mechanical work → codex.
