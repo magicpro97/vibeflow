@@ -66,7 +66,53 @@ import {
   isConversationPrivateContextSourceRecordRef,
   isConversationPrivateContextStageKind,
 } from "../../src/orchestrator/conversation/conversation-private-context-broker-contract.js";
-import { ConversationPrivateContextBrokerConflictError } from "../../src/orchestrator/conversation/conversation-private-context-broker-validation.js";
+import {
+  draftStageRequestDigestV2,
+  messageStageRequestDigestV2,
+} from "../../src/orchestrator/conversation/conversation-private-context-broker-records.js";
+import {
+  ConversationPrivateContextBrokerConflictError,
+  assertConversationPrivateRangesSelectionV2,
+  assertStageConversationDraftPrivateContextRequestV2,
+  assertStageConversationMessagePrivateContextRequestV2,
+} from "../../src/orchestrator/conversation/conversation-private-context-broker-validation.js";
+
+const privateRangeDigestInput = {
+  owner_principal_digest: `sha256:${"a".repeat(64)}`,
+  root_session_id: "root-session",
+  staged_authority_digest: `sha256:${"b".repeat(64)}`,
+  create_idempotency_key_digest: `sha256:${"c".repeat(64)}`,
+  source_kind: "private-file-range" as const,
+};
+
+const privateRanges = [
+  { repo_relative_path: "src/cli.ts", start_line: 4, end_line: 8 },
+  { repo_relative_path: "src/server.ts", start_line: 10, end_line: 12 },
+] as const;
+
+const messagePrivateRangeRequest = {
+  schema_version: "1.0" as const,
+  enqueue_idempotency_key: "message-private",
+  source_kind: "private-file-range" as const,
+  ranges: privateRanges,
+};
+
+const draftPrivateRangeRequest = {
+  schema_version: "1.0" as const,
+  create_idempotency_key: "draft-private",
+  source_kind: "private-file-range" as const,
+  ranges: privateRanges,
+};
+
+const expectPrivateRangeRequestToReject = (ranges: readonly unknown[]): void => {
+  expect(() =>
+    assertStageConversationMessagePrivateContextRequestV2({
+      ...messagePrivateRangeRequest,
+      ranges,
+    }),
+  ).toThrow("invalid private context stage request");
+};
+
 import {
   CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS as WIRE_BROKER_FIELDS,
   CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION as WIRE_BROKER_SCHEMA_VERSION,
@@ -94,6 +140,117 @@ const expectFrozenVocabulary = <Value extends string>(
 };
 
 describe("conversation private-context broker typed contract", () => {
+  test("accepts exact V2 aggregate requests and deterministic digests", () => {
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.MESSAGE_STAGE_REQUEST_V2).toEqual([
+      "schema_version",
+      "enqueue_idempotency_key",
+      "source_kind",
+      "ranges",
+    ]);
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.DRAFT_STAGE_REQUEST_V2).toEqual([
+      "schema_version",
+      "create_idempotency_key",
+      "source_kind",
+      "ranges",
+    ]);
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.MESSAGE_STAGE_REQUEST_V2).not.toContain(
+      "repo_relative_path",
+    );
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.MESSAGE_STAGE_REQUEST_V2).not.toContain(
+      "start_line",
+    );
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.MESSAGE_STAGE_REQUEST_V2).not.toContain(
+      "end_line",
+    );
+    expect(() =>
+      assertConversationPrivateRangesSelectionV2({ ranges: privateRanges }),
+    ).not.toThrow();
+    expect(() =>
+      assertStageConversationMessagePrivateContextRequestV2(messagePrivateRangeRequest),
+    ).not.toThrow();
+    expect(() =>
+      assertStageConversationDraftPrivateContextRequestV2(draftPrivateRangeRequest),
+    ).not.toThrow();
+    const messageDigest = messageStageRequestDigestV2({
+      ...privateRangeDigestInput,
+      ranges: privateRanges,
+    });
+    expect(messageDigest).toBe(
+      messageStageRequestDigestV2({
+        ...privateRangeDigestInput,
+        ranges: structuredClone(privateRanges),
+      }),
+    );
+    expect(messageDigest).not.toBe(
+      messageStageRequestDigestV2({
+        ...privateRangeDigestInput,
+        ranges: privateRanges.slice().reverse(),
+      }),
+    );
+    expect(
+      draftStageRequestDigestV2({
+        create_idempotency_key_digest: privateRangeDigestInput.create_idempotency_key_digest,
+        owner_principal_digest: privateRangeDigestInput.owner_principal_digest,
+        source_kind: privateRangeDigestInput.source_kind,
+        ranges: privateRanges,
+      }),
+    ).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.MESSAGE_STAGE_REQUEST_V2).not.toBe(
+      CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.MESSAGE_STAGE_REQUEST,
+    );
+    expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.DRAFT_STAGE_REQUEST_V2).not.toBe(
+      CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.DRAFT_STAGE_REQUEST,
+    );
+  });
+
+  test("rejects noncanonical path insertion order", () => {
+    expectPrivateRangeRequestToReject([
+      { repo_relative_path: "src/z.ts", start_line: 1, end_line: 1 },
+      { repo_relative_path: "src/a.ts", start_line: 1, end_line: 1 },
+    ]);
+  });
+
+  test("rejects invalid V2 range shape, bounds, duplicates, overlaps, and aggregate limits", () => {
+    expectPrivateRangeRequestToReject([]);
+    expectPrivateRangeRequestToReject([{ ...privateRanges[0], end_line: 0 }]);
+    expectPrivateRangeRequestToReject([
+      { ...privateRanges[0], repo_relative_path: "../secret.ts" },
+    ]);
+    expectPrivateRangeRequestToReject([privateRanges[0], privateRanges[0]]);
+    expectPrivateRangeRequestToReject([
+      { repo_relative_path: privateRanges[0].repo_relative_path, start_line: 12, end_line: 15 },
+      privateRanges[0],
+    ]);
+    expectPrivateRangeRequestToReject(
+      Array.from(
+        { length: CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.maxRanges + 1 },
+        (_, index) => ({
+          repo_relative_path: `src/${index}.ts`,
+          start_line: 1,
+          end_line: 1,
+        }),
+      ),
+    );
+    expectPrivateRangeRequestToReject(
+      Array.from(
+        { length: CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.maxFiles + 1 },
+        (_, index) => ({
+          repo_relative_path: `src/file-${index.toString().padStart(2, "0")}.ts`,
+          start_line: 1,
+          end_line: 1,
+        }),
+      ),
+    );
+    expectPrivateRangeRequestToReject([
+      { repo_relative_path: "src/a.ts", start_line: 1, end_line: 200 },
+      { repo_relative_path: "src/b.ts", start_line: 1, end_line: 200 },
+      { repo_relative_path: "src/c.ts", start_line: 1, end_line: 200 },
+      { repo_relative_path: "src/d.ts", start_line: 1, end_line: 200 },
+      { repo_relative_path: "src/e.ts", start_line: 1, end_line: 200 },
+      { repo_relative_path: "src/f.ts", start_line: 1, end_line: 1 },
+    ]);
+  });
+
   test("freezes each closed vocabulary and keeps its inferred value list in parity", () => {
     expectFrozenVocabulary(
       CONVERSATION_PRIVATE_CONTEXT_BROKER_RECORD_KIND,

@@ -10,10 +10,14 @@ import type { ConversationCreateParticipant } from "./types.js";
 
 export type {
   DiscardConversationDraftPrivateContextRequestV1,
+  ConversationPrivateRangeV2,
+  ConversationPrivateRangesSelectionV2,
   DiscardConversationMessagePrivateContextRequestV1,
   PublicConversationPrivateContextPresenceV1,
   StageConversationDraftPrivateContextRequestV1,
+  StageConversationDraftPrivateContextRequestV2,
   StageConversationMessagePrivateContextRequestV1,
+  StageConversationMessagePrivateContextRequestV2,
 } from "./conversation-private-context-broker-wire.js";
 
 export type ConversationHomeCreateRequestV1 =
