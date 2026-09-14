@@ -1,9 +1,19 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { canonicalJsonBytes, digestV1 } from "../src/durability/index.js";
 import { CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS } from "../src/orchestrator/conversation/conversation-private-context-broker-contract.js";
+import { PRIVATE_FILE_RANGES_STAGING_DIGEST_DOMAIN } from "../src/orchestrator/conversation/private-file-ranges-staging-contract.js";
 import {
   PRIVATE_FILE_RANGES_STAGING_STORAGE,
   PrivateFileRangesStagingStoreV1,
@@ -14,6 +24,16 @@ const stamp = "2026-09-14T00:00:00.000Z";
 
 function recordDirectory(root: string): string {
   return join(root, "actions", "v1", PRIVATE_FILE_RANGES_STAGING_STORAGE.RECORDS_DIRECTORY);
+}
+
+function framePath(root: string, handoffId: string): string {
+  return join(
+    root,
+    "actions",
+    "v1",
+    PRIVATE_FILE_RANGES_STAGING_STORAGE.FRAMES_DIRECTORY,
+    `${handoffId}.frames`,
+  );
 }
 
 async function fixture(): Promise<{ root: string; artifactRoot: string }> {
@@ -182,6 +202,79 @@ test("aggregate digest changes when member source content changes", async () => 
     });
 
     expect(first.aggregate_digest).not.toBe(second.aggregate_digest);
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("content rejects same-length forged range content with unchanged member digest", async () => {
+  const value = await fixture();
+  try {
+    const store = new PrivateFileRangesStagingStoreV1(value.artifactRoot, value.root);
+    const binding = store.stage({
+      handoff_id: createPrivateFileRangesHandoffId(),
+      ranges: [{ repo_relative_path: "src/a.ts", start_line: 1, end_line: 1 }],
+      staged_at: stamp,
+    });
+    const path = join(recordDirectory(value.artifactRoot), `${binding.handoff_id}.json`);
+    const record = JSON.parse(await Bun.file(path).text()) as {
+      ranges: Array<{ content: string; content_utf8_sha256: string }>;
+      record_digest: string;
+    };
+    const originalRange = record.ranges[0];
+    if (!originalRange) throw new Error("test fixture range missing");
+    const originalDigest = originalRange.content_utf8_sha256;
+    record.ranges[0] = { ...originalRange, content: "b-one\n" };
+    const { record_digest: _recordDigest, ...preimage } = record;
+    record.record_digest = digestV1(PRIVATE_FILE_RANGES_STAGING_DIGEST_DOMAIN.RECORD, preimage);
+    writeFileSync(path, canonicalJsonBytes(record as never), { mode: 0o600 });
+
+    expect(record.ranges[0]?.content.length).toBe("a-one\n".length);
+    expect(record.ranges[0]?.content_utf8_sha256).toBe(originalDigest);
+    expect(() =>
+      store.content({ ...binding, handoff_record_digest: record.record_digest }),
+    ).toThrow("aggregate content is corrupt");
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("fails closed when aggregate frame journal is missing", async () => {
+  const value = await fixture();
+  try {
+    const store = new PrivateFileRangesStagingStoreV1(value.artifactRoot, value.root);
+    const request = {
+      handoff_id: createPrivateFileRangesHandoffId(),
+      ranges: [{ repo_relative_path: "src/a.ts", start_line: 1, end_line: 1 }],
+      staged_at: stamp,
+    } as const;
+    const binding = store.stage(request);
+    unlinkSync(framePath(value.artifactRoot, binding.handoff_id));
+
+    expect(() => store.readFrames(binding.handoff_id)).toThrow("frame journal is missing");
+    expect(() => store.content(binding)).toThrow("frame journal is missing");
+    expect(() => store.stage(request)).toThrow("frame journal is missing");
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a record copied to a different handoff ID path", async () => {
+  const value = await fixture();
+  try {
+    const store = new PrivateFileRangesStagingStoreV1(value.artifactRoot, value.root);
+    const original = store.stage({
+      handoff_id: createPrivateFileRangesHandoffId(),
+      ranges: [{ repo_relative_path: "src/a.ts", start_line: 1, end_line: 1 }],
+      staged_at: stamp,
+    });
+    const copiedId = createPrivateFileRangesHandoffId();
+    copyFileSync(
+      join(recordDirectory(value.artifactRoot), `${original.handoff_id}.json`),
+      join(recordDirectory(value.artifactRoot), `${copiedId}.json`),
+    );
+
+    expect(() => store.readRecord(copiedId)).toThrow("record is corrupt");
   } finally {
     await rm(value.root, { recursive: true, force: true });
   }

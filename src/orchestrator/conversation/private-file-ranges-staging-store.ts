@@ -168,6 +168,8 @@ export class PrivateFileRangesStagingStoreV1 {
       const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
       assertPrivateFileRangesStagingRecordV1(value);
       const record = value;
+      if (record.handoff_id !== id)
+        throw new Error("private file ranges staging record identity changed");
       const { record_digest: _digest, ...preimage } = record;
       if (
         !canonicalJsonBytes(record).equals(bytes) ||
@@ -189,8 +191,11 @@ export class PrivateFileRangesStagingStoreV1 {
         PRIVATE_FILE_RANGES_STAGING_LIMIT.MAX_RECORD_BYTES *
           PRIVATE_FILE_RANGES_STAGING_LIMIT.MAX_FRAMES,
       ) === null
-    )
+    ) {
+      if (this.readRecord(id))
+        throw new Error("private file ranges staging frame journal is missing");
       return [];
+    }
     const decoded = readVffrFile(path, codec(id)).map((item) =>
       structuredClone(item.payload as unknown as PrivateFileRangesStagingFrameV1),
     );
@@ -229,6 +234,7 @@ export class PrivateFileRangesStagingStoreV1 {
     if (current) {
       if (current.request_digest !== wantedRequestDigest)
         throw new Error("private file ranges staging request changed");
+      this.readFrames(input.handoff_id);
       return this.binding(current);
     }
     const stagedRanges: PrivateFileRangesStagingRangeV1[] = [];
@@ -317,8 +323,18 @@ export class PrivateFileRangesStagingStoreV1 {
       canonicalJsonBytes(this.binding(record)).compare(canonicalJsonBytes(binding)) !== 0
     )
       throw new Error("private file ranges handoff binding changed");
-    this.readFrames(binding.handoff_id);
     const ranges = structuredClone(record.ranges);
+    for (const range of ranges) {
+      if (
+        Buffer.byteLength(range.content, "utf8") !== range.content_byte_length ||
+        digestV1(PRIVATE_FILE_RANGES_STAGING_DIGEST_DOMAIN.CONTENT, {
+          schema_version: "1.0",
+          content: range.content,
+        }) !== range.content_utf8_sha256
+      )
+        throw new Error("private file ranges aggregate content is corrupt");
+    }
+    this.readFrames(binding.handoff_id);
     if (aggregateContentDigest(ranges) !== record.aggregate_digest)
       throw new Error("private file ranges aggregate content is corrupt");
     return {
