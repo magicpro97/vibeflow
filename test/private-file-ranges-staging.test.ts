@@ -16,6 +16,7 @@ import { CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS } from "../src/orchestrator/
 import { PRIVATE_FILE_RANGES_STAGING_DIGEST_DOMAIN } from "../src/orchestrator/conversation/private-file-ranges-staging-contract.js";
 import {
   PRIVATE_FILE_RANGES_STAGING_STORAGE,
+  type PrivateFileRangesStagingRecordV1,
   PrivateFileRangesStagingStoreV1,
   createPrivateFileRangesHandoffId,
 } from "../src/orchestrator/conversation/private-file-ranges-staging-store.js";
@@ -254,6 +255,39 @@ test("fails closed when aggregate frame journal is missing", async () => {
     expect(() => store.readFrames(binding.handoff_id)).toThrow("frame journal is missing");
     expect(() => store.content(binding)).toThrow("frame journal is missing");
     expect(() => store.stage(request)).toThrow("frame journal is missing");
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("validates frame journal when record appears during lock acquisition", async () => {
+  const value = await fixture();
+  try {
+    const request = {
+      handoff_id: createPrivateFileRangesHandoffId(),
+      ranges: [{ repo_relative_path: "src/a.ts", start_line: 1, end_line: 1 }],
+      staged_at: stamp,
+    } as const;
+    const racedRecordStore = new PrivateFileRangesStagingStoreV1(value.artifactRoot, value.root);
+    racedRecordStore.stage(request);
+    unlinkSync(framePath(value.artifactRoot, request.handoff_id));
+
+    class ReadRecordRaceStore extends PrivateFileRangesStagingStoreV1 {
+      private readCount = 0;
+
+      override readRecord(id: string): PrivateFileRangesStagingRecordV1 | null {
+        this.readCount += 1;
+        return this.readCount === 1 ? null : super.readRecord(id);
+      }
+
+      get reads(): number {
+        return this.readCount;
+      }
+    }
+
+    const store = new ReadRecordRaceStore(value.artifactRoot, value.root);
+    expect(() => store.stage(request)).toThrow("frame journal is missing");
+    expect(store.reads).toBe(3);
   } finally {
     await rm(value.root, { recursive: true, force: true });
   }

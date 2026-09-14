@@ -288,6 +288,7 @@ export class PrivateFileRangesStagingStoreV1 {
       if (raced) {
         if (raced.request_digest !== wantedRequestDigest)
           throw new Error("private file ranges staging request changed");
+        this.readFrames(input.handoff_id);
         return this.binding(raced);
       }
       createOrVerifyPrivateFile(

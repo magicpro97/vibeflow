@@ -68,3 +68,45 @@ Commands and actual outputs:
   - Exit 0; no whitespace errors.
 
 Commit scope: two Task 3 source/test files and this report only. `vf verify` not run, per instruction.
+
+## Fix round 2
+
+Scoped review found raced aggregate replay could return a binding without validating its frame journal. The fix validates `readFrames(input.handoff_id)` in the raced-record branch before returning.
+
+### Strict TDD evidence
+
+RED regression command:
+
+```bash
+bun test test/private-file-ranges-staging.test.ts --test-name-pattern 'validates frame journal when record appears during lock acquisition'
+```
+
+- Exit 1.
+- 0 pass, 9 filtered out, 1 fail, 1 expect() call.
+- Expected `frame journal is missing`; received function did not throw and returned binding. This exercised the pre-lock `readRecord` seam, then the raced-record branch, proving the branch skipped journal validation.
+
+GREEN regression command:
+
+```bash
+bun test test/private-file-ranges-staging.test.ts --test-name-pattern 'validates frame journal when record appears during lock acquisition'
+```
+
+- 1 pass, 9 filtered out, 0 fail, 2 expect() calls.
+
+### Fix round 2 verification
+
+Commands and actual outputs:
+
+- `bun test test/private-file-ranges-staging.test.ts test/orchestrator/private-file-range-staging.test.ts test/server-home-private-file-range-route.test.ts`
+  - 19 pass, 0 fail, 80 expect() calls, 3 files.
+- `bunx biome check src/orchestrator/conversation/private-file-ranges-staging-store.ts test/private-file-ranges-staging.test.ts`
+  - Exit 0; checked 2 files, no errors.
+- `bun run typecheck`
+  - Exit 0; `tsc --noEmit`.
+- `bun run file-size:check`
+  - Exit 0; Task 3 source files remain under 400 lines.
+  - Existing warnings only for waived out-of-scope files: `src/commands/hooks.ts`, `src/commands/state.ts`, `src/server.ts`, and `src/skills/registry-channel.ts`.
+- `git diff --check`
+  - Exit 0; no whitespace errors.
+
+Changed files: `src/orchestrator/conversation/private-file-ranges-staging-store.ts`, `test/private-file-ranges-staging.test.ts`, and this report. `vf verify` not run, per instruction; parent agent is running it.
