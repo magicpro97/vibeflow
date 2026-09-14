@@ -195,6 +195,28 @@ describe("conversation private-context broker typed contract", () => {
         ranges: privateRanges,
       }),
     ).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    const draftDigest = draftStageRequestDigestV2({
+      create_idempotency_key_digest: privateRangeDigestInput.create_idempotency_key_digest,
+      owner_principal_digest: privateRangeDigestInput.owner_principal_digest,
+      source_kind: privateRangeDigestInput.source_kind,
+      ranges: privateRanges,
+    });
+    expect(
+      draftStageRequestDigestV2({
+        create_idempotency_key_digest: privateRangeDigestInput.create_idempotency_key_digest,
+        owner_principal_digest: privateRangeDigestInput.owner_principal_digest,
+        source_kind: privateRangeDigestInput.source_kind,
+        ranges: structuredClone(privateRanges),
+      }),
+    ).toBe(draftDigest);
+    expect(
+      draftStageRequestDigestV2({
+        create_idempotency_key_digest: privateRangeDigestInput.create_idempotency_key_digest,
+        owner_principal_digest: privateRangeDigestInput.owner_principal_digest,
+        source_kind: privateRangeDigestInput.source_kind,
+        ranges: privateRanges.slice().reverse(),
+      }),
+    ).not.toBe(draftDigest);
     expect(CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.MESSAGE_STAGE_REQUEST_V2).not.toBe(
       CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.MESSAGE_STAGE_REQUEST,
     );
@@ -210,7 +232,45 @@ describe("conversation private-context broker typed contract", () => {
     ]);
   });
 
-  test("rejects invalid V2 range shape, bounds, duplicates, overlaps, and aggregate limits", () => {
+  test("rejects overlapping same-path ranges in canonical order", () => {
+    expect(() =>
+      assertConversationPrivateRangesSelectionV2({
+        ranges: [
+          { repo_relative_path: "src/cli.ts", start_line: 4, end_line: 8 },
+          { repo_relative_path: "src/cli.ts", start_line: 8, end_line: 12 },
+        ],
+      }),
+    ).toThrow("private context ranges overlap");
+  });
+
+  test("rejects V1 locator and unknown top-level keys in both V2 envelopes", () => {
+    const requests = [
+      {
+        request: messagePrivateRangeRequest,
+        assertRequest: assertStageConversationMessagePrivateContextRequestV2,
+      },
+      {
+        request: draftPrivateRangeRequest,
+        assertRequest: assertStageConversationDraftPrivateContextRequestV2,
+      },
+    ];
+    for (const { request, assertRequest } of requests) {
+      for (const [field, value] of [
+        ["repo_relative_path", "src/legacy.ts"],
+        ["start_line", 1],
+        ["end_line", 1],
+      ] as const) {
+        expect(() => assertRequest({ ...request, [field]: value })).toThrow(
+          "invalid private context stage request",
+        );
+      }
+      expect(() => assertRequest({ ...request, unknown_top_level_key: true })).toThrow(
+        "invalid private context stage request",
+      );
+    }
+  });
+
+  test("rejects invalid V2 range shape, bounds, duplicates, and aggregate limits", () => {
     expectPrivateRangeRequestToReject([]);
     expectPrivateRangeRequestToReject([{ ...privateRanges[0], end_line: 0 }]);
     expectPrivateRangeRequestToReject([
@@ -218,18 +278,22 @@ describe("conversation private-context broker typed contract", () => {
     ]);
     expectPrivateRangeRequestToReject([privateRanges[0], privateRanges[0]]);
     expectPrivateRangeRequestToReject([
-      { repo_relative_path: privateRanges[0].repo_relative_path, start_line: 12, end_line: 15 },
-      privateRanges[0],
+      {
+        repo_relative_path: privateRanges[0].repo_relative_path,
+        start_line: 1,
+        end_line: CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.maxFileRangeLines + 1,
+      },
     ]);
+    const canonicalMaxRangePaths = Array.from(
+      { length: CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.maxRanges + 1 },
+      (_, index) => `src/${index.toString().padStart(2, "0")}.ts`,
+    ).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
     expectPrivateRangeRequestToReject(
-      Array.from(
-        { length: CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.maxRanges + 1 },
-        (_, index) => ({
-          repo_relative_path: `src/${index}.ts`,
-          start_line: 1,
-          end_line: 1,
-        }),
-      ),
+      canonicalMaxRangePaths.map((repo_relative_path) => ({
+        repo_relative_path,
+        start_line: 1,
+        end_line: 1,
+      })),
     );
     expectPrivateRangeRequestToReject(
       Array.from(
