@@ -73,9 +73,14 @@ jobs:
       - name: Run Web UI e2e
         run: bun run test:e2e
 
-  windows-owned-process:
+  windows:
+    strategy:
+      matrix:
+        include:
+          - suite: owned-process
+          - suite: package-smoke
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       VF_REQUIRE_LIVE_WINDOWS: "1"
     steps:
@@ -86,49 +91,46 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      - uses: actions/setup-node@v4
+        if: matrix.suite == 'package-smoke'
+        with:
+          node-version: 20
       - run: bun ci
       - name: Assert a real Windows runtime
         # File-based (not an inline `bun -e`): bun 1.4.0 on Windows runners
         # can crash in its eval path (Bun "Features:" crash banner, exit 1)
-        # even when the condition is false. The committed script uses the
-        # same module path as the `bun test` smoke step below and fails only
-        # when the live runtime is not win32.
+        # even when the condition is false. The committed script runs on
+        # every native Windows matrix row.
         run: bun run scripts/assert-win32.ts
       - name: Windows PID, Job Object, release, and orphan smoke
+        if: matrix.suite == 'owned-process'
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
-
-  windows-package-smoke:
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          clean: true
-          ref: ${{ github.sha }}
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: bun ci
       - name: Build shipped artifact
+        if: matrix.suite == 'package-smoke'
         run: bun run build
+      - name: Smoke test built CLI through Node
+        if: matrix.suite == 'package-smoke'
+        run: node dist/cli.js --version
       - name: Pack and install shipped artifact in isolated path
+        if: matrix.suite == 'package-smoke'
         shell: pwsh
         run: |
           $root = Join-Path $env:RUNNER_TEMP "vf package smoke"
           New-Item -ItemType Directory -Force $root | Out-Null
-          $json = npm pack --pack-destination $root --json | ConvertFrom-Json
+          $packOutput = & npm pack --pack-destination $root --json 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "npm pack failed with $LASTEXITCODE`n$($packOutput -join "`n")" }
+          $json = ($packOutput -join "`n") | ConvertFrom-Json
           $tarball = Join-Path $root $json[0].filename
           $prefix = Join-Path $root "prefix"
           New-Item -ItemType Directory -Force $prefix | Out-Null
-          npm install --global --prefix $prefix $tarball --ignore-scripts
+          $installOutput = & npm install --global --prefix $prefix $tarball --ignore-scripts 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "npm install failed with $LASTEXITCODE`n$($installOutput -join "`n")" }
           $vf = Join-Path $prefix "vf.cmd"
           if (-not (Test-Path $vf)) { throw "npm did not create Windows vf.cmd shim" }
           & $vf --version
           if ($LASTEXITCODE -ne 0) { throw "installed vf --version failed with $LASTEXITCODE" }
       - name: Exercise installed package worktree path
+        if: matrix.suite == 'package-smoke'
         run: bun test --timeout 30000 test/package-portability.test.ts
 
   landing:
@@ -201,8 +203,7 @@ jobs:
   release-prerequisites:
     needs:
       - check
-      - windows-owned-process
-      - windows-package-smoke
+      - windows
       - landing
       - skill-validation
       - skill-security
@@ -213,14 +214,13 @@ jobs:
       - name: Require every same-SHA release gate
         env:
           CHECK_RESULT: ${{ needs.check.result }}
-          WINDOWS_RESULT: ${{ needs.windows-owned-process.result }}
-          WINDOWS_PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
           LANDING_RESULT: ${{ needs.landing.result }}
           SKILL_VALIDATION_RESULT: ${{ needs.skill-validation.result }}
           SKILL_SECURITY_RESULT: ${{ needs.skill-security.result }}
           DOMAIN_INTEGRITY_RESULT: ${{ needs.domain-integrity.result }}
         run: |
-          node -e "const names=['CHECK_RESULT','WINDOWS_RESULT','WINDOWS_PACKAGE_RESULT','LANDING_RESULT','SKILL_VALIDATION_RESULT','SKILL_SECURITY_RESULT','DOMAIN_INTEGRITY_RESULT']; for (const name of names) if (process.env[name] !== 'success') throw new Error(name + ': ' + (process.env[name] || 'unset')); console.log('Release prerequisites passed for ' + process.env.GITHUB_SHA)"
+          node -e "const names=['CHECK_RESULT','WINDOWS_RESULT','LANDING_RESULT','SKILL_VALIDATION_RESULT','SKILL_SECURITY_RESULT','DOMAIN_INTEGRITY_RESULT']; for (const name of names) if (process.env[name] !== 'success') throw new Error(name + ': ' + (process.env[name] || 'unset')); console.log('Release prerequisites passed for ' + process.env.GITHUB_SHA)"
 
   release-please:
     needs: release-prerequisites
