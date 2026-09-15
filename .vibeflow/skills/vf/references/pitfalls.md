@@ -117,6 +117,19 @@ Powered by VibeFlow.
   after source/test/docs changes; `--quick` is diagnostic only and never evidence for a mergeable
   PR. If the hook reports failure, fix the first failing gate, refresh normative proofs, regenerate
   review evidence against the remote tip, then retry push. Never use `--no-verify`.
+
+- **Normative preimages go stale after any source/test change.** `vf verify` and the normative matrix
+  intentionally reject old production digests; this is not a reason to weaken the matrix. After the
+  final source/test tree is committed, run `bun run scripts/refresh-normative-proofs.ts`, inspect the
+  generated manifest/matrix diff, then rerun the exact normative proof command and `vf verify`. Do not
+  refresh midway through an active writer round, or generated evidence will describe the wrong HEAD.
+
+- **Review evidence binds exact HEAD and requires a clean worktree.** A missing record or a record for
+  an earlier SHA makes `vf verify` fail even when code tests pass. Finish and commit code first, classify
+  and restore generated hook/config noise explicitly, then create evidence with
+  `vf review evidence --base <full-SHA> --result <review-result.json>` from that clean exact HEAD and
+  validate with `vf review check --base <full-SHA>`. Never use generic pass JSON or evidence from a stale
+  review package.
 - **Home 400-line gate counts `split(/\r?\n/).length`, so a trailing newline adds one.** A file with N content lines plus a final newline reports N+1 and fails at exactly 400. When trimming a `.vue`/`.ts` file to fit the gate, leave at least one spare line (398 content lines / 399 split entries) or the gate flips red on CI even though `wc -l` looks fine.
 
 - **Suggestion dismiss loops when a watch signature depends on the state it resets.** Refactoring the composer's raw `suggestions` computed into `visibleSuggestions` (which includes the dismissed flag) made the suggestion-signature watcher see a change on every dismiss and immediately clear the flag — Escape never closed the listbox (CI e2e caught it). Keep watch signatures derived from RAW matcher output (draft only), never from a derived value the watcher itself mutates.
