@@ -117,7 +117,7 @@ jobs:
         run: |
           $root = Join-Path $env:RUNNER_TEMP "vf package smoke"
           New-Item -ItemType Directory -Force $root | Out-Null
-          $packOutput = & npm pack --pack-destination $root --json 2>&1
+          $packOutput = & npm pack --pack-destination $root --json 2>$null
           if ($LASTEXITCODE -ne 0) { throw "npm pack failed with $LASTEXITCODE`n$($packOutput -join "`n")" }
           $json = ($packOutput -join "`n") | ConvertFrom-Json
           $tarball = Join-Path $root $json[0].filename

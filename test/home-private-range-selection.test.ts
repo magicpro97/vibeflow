@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { assertConversationPrivateRangesSelectionV2 } from "../src/orchestrator/conversation/conversation-private-context-broker-validation.js";
 import {
   PRIVATE_RANGE_SELECTION_LIMITS,
   addFile,
@@ -27,10 +28,14 @@ describe("private aggregate range selection", () => {
     const withSecond = commitRange(withFirst, "src/server.ts", range(20, 22));
     const withCli = commitRange(addFile(withSecond, "src/cli.ts"), "src/cli.ts", range(4, 8));
 
-    expect(selectionRanges(withCli)).toEqual([
+    const canonicalRanges = selectionRanges(withCli);
+    expect(() =>
+      assertConversationPrivateRangesSelectionV2({ ranges: canonicalRanges }),
+    ).not.toThrow();
+    expect(canonicalRanges).toEqual([
+      { repo_relative_path: "src/cli.ts", start_line: 4, end_line: 8 },
       { repo_relative_path: "src/server.ts", start_line: 10, end_line: 12 },
       { repo_relative_path: "src/server.ts", start_line: 20, end_line: 22 },
-      { repo_relative_path: "src/cli.ts", start_line: 4, end_line: 8 },
     ]);
     expect(selectActiveFile(withCli, "src/server.ts").activeFile).toBe("src/server.ts");
     expect(selectionSummary(withCli)).toEqual({ files: 2, ranges: 3, lines: 11 });
@@ -59,7 +64,7 @@ describe("private aggregate range selection", () => {
     ]);
   });
 
-  test("does not merge separate files and orders each file by insertion order", () => {
+  test("does not merge separate files and orders paths canonically", () => {
     const selection = selectionWithFiles("z.ts", "a.ts");
 
     expect(
@@ -71,9 +76,9 @@ describe("private aggregate range selection", () => {
         ),
       ),
     ).toEqual([
-      { repo_relative_path: "z.ts", start_line: 8, end_line: 9 },
       { repo_relative_path: "a.ts", start_line: 1, end_line: 2 },
       { repo_relative_path: "a.ts", start_line: 20, end_line: 20 },
+      { repo_relative_path: "z.ts", start_line: 8, end_line: 9 },
     ]);
   });
 
@@ -92,8 +97,8 @@ describe("private aggregate range selection", () => {
       files: ["server.ts", "cli.ts"],
       activeFile: "cli.ts",
       ranges: [
-        { repo_relative_path: "server.ts", start_line: 8, end_line: 10 },
         { repo_relative_path: "cli.ts", start_line: 4, end_line: 6 },
+        { repo_relative_path: "server.ts", start_line: 8, end_line: 10 },
       ],
     });
   });

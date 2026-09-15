@@ -21,7 +21,7 @@ import {
   createPrivateFileRangesHandoffId,
 } from "../src/orchestrator/conversation/private-file-ranges-staging-store.js";
 
-const stamp = "2026-09-14T00:00:00.000Z";
+const stamp = "2027-09-14T00:00:00.000Z";
 
 function recordDirectory(root: string): string {
   return join(root, "actions", "v1", PRIVATE_FILE_RANGES_STAGING_STORAGE.RECORDS_DIRECTORY);
@@ -185,6 +185,24 @@ test("replays identical aggregate requests and conflicts on changed ranges", asy
   }
 });
 
+test("rejects expired handoffs on replay and content reads", async () => {
+  const value = await fixture();
+  try {
+    const store = new PrivateFileRangesStagingStoreV1(value.artifactRoot, value.root);
+    const request = {
+      handoff_id: createPrivateFileRangesHandoffId(),
+      ranges: [{ repo_relative_path: "src/a.ts", start_line: 1, end_line: 1 }],
+      staged_at: "2020-01-01T00:00:00.000Z",
+      ttl_ms: 1,
+    } as const;
+    const binding = store.stage(request);
+
+    expect(() => store.content(binding)).toThrow("handoff expired");
+    expect(() => store.stage(request)).toThrow("handoff expired");
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
 test("aggregate digest changes when member source content changes", async () => {
   const value = await fixture();
   try {
@@ -260,6 +278,32 @@ test("fails closed when aggregate frame journal is missing", async () => {
   }
 });
 
+test("fails closed for an empty or orphaned aggregate frame journal", async () => {
+  const value = await fixture();
+  try {
+    const store = new PrivateFileRangesStagingStoreV1(value.artifactRoot, value.root);
+    const emptyRequest = {
+      handoff_id: createPrivateFileRangesHandoffId(),
+      ranges: [{ repo_relative_path: "src/a.ts", start_line: 1, end_line: 1 }],
+      staged_at: stamp,
+    } as const;
+    const emptyBinding = store.stage(emptyRequest);
+    writeFileSync(framePath(value.artifactRoot, emptyBinding.handoff_id), Buffer.alloc(0), {
+      mode: 0o600,
+    });
+    expect(() => store.readFrames(emptyBinding.handoff_id)).toThrow("VFFR journal is empty");
+
+    const orphanRequest = {
+      ...emptyRequest,
+      handoff_id: createPrivateFileRangesHandoffId(),
+    } as const;
+    const orphanBinding = store.stage(orphanRequest);
+    unlinkSync(join(recordDirectory(value.artifactRoot), `${orphanBinding.handoff_id}.json`));
+    expect(() => store.readFrames(orphanBinding.handoff_id)).toThrow("authority changed");
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
 test("validates frame journal when record appears during lock acquisition", async () => {
   const value = await fixture();
   try {

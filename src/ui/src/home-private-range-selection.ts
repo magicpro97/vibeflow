@@ -75,9 +75,15 @@ function normalizeRange(
   return { repo_relative_path: path, start_line: startLine, end_line: endLine };
 }
 
-function fileIndex(selection: PrivateRangeSelection, path: string): number {
-  const index = selection.files.indexOf(path);
-  return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+function bytewise(left: string, right: string): number {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftBytes[index] ?? 0) - (rightBytes[index] ?? 0);
+    if (difference) return difference;
+  }
+  return leftBytes.length - rightBytes.length;
 }
 
 export function mergeRanges(
@@ -116,14 +122,10 @@ export function mergeRanges(
   return merged;
 }
 
-function orderRanges(
-  selection: PrivateRangeSelection,
-  ranges: readonly PrivateRangeSelectionRange[],
-): PrivateRangeSelectionRange[] {
+function orderRanges(ranges: readonly PrivateRangeSelectionRange[]): PrivateRangeSelectionRange[] {
   return [...ranges].sort(
     (left, right) =>
-      fileIndex(selection, left.repo_relative_path) -
-        fileIndex(selection, right.repo_relative_path) ||
+      bytewise(left.repo_relative_path, right.repo_relative_path) ||
       left.start_line - right.start_line ||
       left.end_line - right.end_line,
   );
@@ -140,7 +142,7 @@ export function commitRange(
 ): PrivateRangeSelection {
   if (!selection.files.includes(path)) throw new Error("private range file is not selected");
   const next = normalizeRange(path, range);
-  const ranges = orderRanges(selection, mergeRanges([...selection.ranges, next]));
+  const ranges = orderRanges(mergeRanges([...selection.ranges, next]));
   if (ranges.length > PRIVATE_RANGE_SELECTION_LIMITS.maxRanges)
     throw new Error("private range selection exceeds maximum range count");
   if (totalLines(ranges) > PRIVATE_RANGE_SELECTION_LIMITS.maxTotalLines)
@@ -180,5 +182,5 @@ export function selectionSummary(selection: PrivateRangeSelection): {
 }
 
 export function selectionRanges(selection: PrivateRangeSelection): PrivateRangeSelectionRange[] {
-  return orderRanges(selection, mergeRanges(selection.ranges));
+  return orderRanges(mergeRanges(selection.ranges));
 }

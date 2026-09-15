@@ -234,6 +234,7 @@ export class PrivateFileRangesStagingStoreV1 {
     if (current) {
       if (current.request_digest !== wantedRequestDigest)
         throw new Error("private file ranges staging request changed");
+      this.assertNotExpired(current.expires_at);
       this.readFrames(input.handoff_id);
       return this.binding(current);
     }
@@ -288,6 +289,7 @@ export class PrivateFileRangesStagingStoreV1 {
       if (raced) {
         if (raced.request_digest !== wantedRequestDigest)
           throw new Error("private file ranges staging request changed");
+        this.assertNotExpired(raced.expires_at);
         this.readFrames(input.handoff_id);
         return this.binding(raced);
       }
@@ -300,6 +302,10 @@ export class PrivateFileRangesStagingStoreV1 {
       return this.binding(record);
     });
   }
+  private assertNotExpired(expiresAt: string): void {
+    if (Date.parse(expiresAt) <= Date.now()) throw new Error("private file ranges handoff expired");
+  }
+
   private binding(record: PrivateFileRangesStagingRecordV1): PrivateFileRangesHandoffBindingV1 {
     const binding = {
       schema_version: "1.0" as const,
@@ -324,6 +330,7 @@ export class PrivateFileRangesStagingStoreV1 {
       canonicalJsonBytes(this.binding(record)).compare(canonicalJsonBytes(binding)) !== 0
     )
       throw new Error("private file ranges handoff binding changed");
+    this.assertNotExpired(record.expires_at);
     const ranges = structuredClone(record.ranges);
     for (const range of ranges) {
       if (
