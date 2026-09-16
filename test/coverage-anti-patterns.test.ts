@@ -119,7 +119,10 @@ describe("coverage anti-patterns (test/ only)", () => {
     // This CI-only win32 smoke deliberately crosses a real owner-process boundary:
     // only an exited OS process can prove the persisted PID becomes an orphan and
     // that Windows Job Object recovery reaps the exact live tree.
-    .filter((p) => !p.endsWith("dispatch-owned-process-windows-live.test.ts"));
+    .filter((p) => !p.endsWith("dispatch-owned-process-windows-live.test.ts"))
+    // Scanner itself proves subprocess behavior; coverage policy excludes this
+    // dedicated process-boundary regression test from raw-spawn lint only.
+    .filter((p) => !p.endsWith("anti-patterns.test.ts"));
 
   test("no test uses raw Bun.spawn or spawnSync without fakeSpawner", () => {
     for (const f of spawnCheckedFiles) {

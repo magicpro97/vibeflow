@@ -115,7 +115,12 @@ export function prepareSessionLaunch(input: {
     const baseInvocation =
       input.config.protocol === ENGINE_SESSION_PROTOCOL.BRIDGE
         ? bridgeSessionInvocation(input.spawn)
-        : sessionInvocation(input.spawn, input.nativeSessionId, promptFile?.pointerPrompt);
+        : sessionInvocation(
+            input.spawn,
+            input.nativeSessionId,
+            promptFile?.pointerPrompt,
+            input.spawn.attachments,
+          );
     const invocation = promptFile
       ? {
           ...baseInvocation,

@@ -347,3 +347,4 @@ export interface HomeApiErrorBody {
 }
 import type { Engine } from "../../core/agent-contract.js";
 import type { CapabilityScope, CapabilityStatusV1 } from "../../core/capability-contract.js";
+export type ControlCenterCapability = HomeCapabilityItem;

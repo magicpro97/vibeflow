@@ -1,4 +1,5 @@
 const { describe, expect, test } = await import(String("bun:test"));
+import { readFileSync } from "node:fs";
 import {
   emptyComposerSuggestionHint,
   matchHomeComposerSuggestions,
@@ -24,6 +25,23 @@ describe("home composer empty suggestion hints", () => {
     expect(emptyComposerSuggestionHint("build a page", [])).toBeNull();
     expect(emptyComposerSuggestionHint("/install", [])).toBeNull();
   });
+});
+
+test("suggestion popover stays above scrollable timeline", () => {
+  const composer = readFileSync(new URL("../components/HomeComposer.vue", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../home.css", import.meta.url), "utf8");
+  expect(composer).toContain('class="home-suggestions"');
+  expect(composer).toContain('<Teleport to="body">');
+  expect(composer).toContain(':style="suggestionStyle"');
+  expect(css).toMatch(/\.home-suggestions\s*\{[\s\S]*?position: fixed;/u);
+});
+
+test("private range panel closes from Escape", () => {
+  const panel = readFileSync(
+    new URL("../components/HomePrivateRangePanel.vue", import.meta.url),
+    "utf8",
+  );
+  expect(panel).toContain('@keydown.esc.stop="closePrivateRangePanel"');
 });
 
 describe("home composer suggestion matching", () => {

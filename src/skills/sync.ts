@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { ENGINES, type Engine, c } from "../core.js";
+import { ENGINE_CONFIGS } from "../workflow-artifacts/types.js";
 import { skillBundleHash } from "./bundle-hash.js";
 import { sharedCatalogDir } from "./catalog.js";
 import { parseRegistryLock } from "./registry-channel.js";
@@ -19,13 +20,6 @@ import { validateSkillDir } from "./validator.js";
 // shared catalog (issue #631) — mirrors discoverSkills' resolution order in
 // registry.ts (project-local first, shared catalog after).
 const CANONICAL = join(".vibeflow", "skills");
-const ENGINE_MIRROR: Record<Engine, string> = {
-  claude: join(".claude", "skills"),
-  codex: join(".agents", "skills"),
-  copilot: join(".github", "skills"),
-  opencode: join(".opencode", "skills"),
-  antigravity: join(".agents", "skills"),
-};
 
 function mirrorsFor(engines?: readonly Engine[]): string[] {
   if (!engines || engines.length === 0) {
@@ -33,11 +27,16 @@ function mirrorsFor(engines?: readonly Engine[]): string[] {
     // copilot-only. Surface that loudly so the user knows other engines
     // were not mirrored in this pass.
     c.yellow("⚠ defaulting to copilot; re-run with --engine <name> for other engines");
-    return [ENGINE_MIRROR.copilot];
+    return [ENGINE_CONFIGS.copilot.skillRoot];
   }
   return engines
     .filter((e): e is Engine => (ENGINES as readonly string[]).includes(e))
-    .map((e) => ENGINE_MIRROR[e]);
+    .map((e) => ENGINE_CONFIGS[e].skillRoot);
+}
+
+function pointerTarget(body: string): string | undefined {
+  const match = body.match(/Canonical skill lives at:\n+`([^`]+)`/u);
+  return match?.[1];
 }
 
 export type SyncMode = "pointer" | "full";
@@ -221,8 +220,7 @@ export function verifySkillSync(
   engines?: Engine[],
   opts: { catalogDir?: string; fromRegistry?: boolean } = {},
 ): SkillSyncResult {
-  // When --from-registry is set and no explicit engine, verify ALL mirrors
-  const resolvedEngines: Engine[] | undefined =
+  const resolvedEngines =
     opts.fromRegistry && (!engines || engines.length === 0)
       ? (ENGINES as unknown as Engine[])
       : engines;
@@ -231,16 +229,12 @@ export function verifySkillSync(
   const warnings: string[] = [];
   const synced: string[] = [];
   let names = skillNames(repo, { catalogDir: opts.catalogDir });
+  const canonical = join(repo, CANONICAL);
+  const catalog = opts.catalogDir ?? sharedCatalogDir();
   if (opts.fromRegistry) {
     const reg = requiredSkillNames(repo, { catalogDir: opts.catalogDir });
-    if (reg.names.length) {
-      names = [...new Set([...names, ...reg.names])];
-    }
-    // Missing registry-pinned skills ARE errors, not just warnings
+    if (reg.names.length) names = [...new Set([...names, ...reg.names])];
     errors.push(...reg.errors.map((e) => `registry-pinned: ${e}`));
-
-    // Bundle hash verification for each installed skill
-    const catalog = opts.catalogDir ?? sharedCatalogDir();
     const lock = parseRegistryLock(repo);
     for (const reg of lock.registries) {
       for (const sk of reg.installed ?? []) {
@@ -251,7 +245,7 @@ export function verifySkillSync(
           continue;
         }
         const catDir = join(catalog, sk.name);
-        if (!existsSync(catDir)) continue; // already reported by requiredSkillNames
+        if (!existsSync(catDir)) continue;
         const actual = skillBundleHash(catDir);
         if (actual !== sk.bundleHash) {
           errors.push(
@@ -269,7 +263,27 @@ export function verifySkillSync(
       if (!existsSync(dst)) {
         errors.push(`${mirror}/${name}/SKILL.md missing`);
       } else {
-        synced.push(`${mirror}/${name}`);
+        const body = readFileSync(dst, "utf8");
+        const sourceIsLocal = existsSync(join(repo, CANONICAL, name, "SKILL.md"));
+        const source = sourceIsLocal
+          ? join(repo, CANONICAL, name, "SKILL.md")
+          : join(catalog, name, "SKILL.md");
+        const sourceBody = existsSync(source) ? readFileSync(source, "utf8") : "";
+        const target = pointerTarget(body);
+        const expected = sourceIsLocal
+          ? `.vibeflow/skills/${name}/SKILL.md`
+          : `~/.vibeflow/skills/${name}/SKILL.md`;
+        if (target !== undefined) {
+          if (target !== expected) {
+            errors.push(`${mirror}/${name}/SKILL.md points at wrong canonical path`);
+          } else {
+            synced.push(`${mirror}/${name}`);
+          }
+        } else if (body === sourceBody && sourceBody !== "") {
+          synced.push(`${mirror}/${name}`);
+        } else {
+          errors.push(`${mirror}/${name}/SKILL.md differs from canonical source`);
+        }
       }
     }
   }

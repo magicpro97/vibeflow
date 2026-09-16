@@ -9,7 +9,7 @@
 // We use REAL git in a tmpdir (not mocked git) per the RCA rule from
 // the prior failure. The TS wrapper is unit-tested via the
 // `runCommandSync` inject seam (same pattern as `commands-review.test.ts`).
-// The end-to-end real-git test exercises the helper script.
+// The end-to-end real-git test exercises the Node helper.
 //
 // Coverage targets:
 //   (a) worktree() with no action → exit 2 (usage)
@@ -122,18 +122,14 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
     const run = fakeRun({ status: 0, stdout: "", stderr: "" }, calls);
     const code = worktreeCreate(["feature"], {}, { runCommandSync: run, repoDir: dir });
     expect(code).toBe(0);
-    // The helper script is invoked with branch + path as argv.
+    // The Node helper is invoked with script path, branch, and path as argv.
     expect(calls.length).toBe(1);
     const c0 = calls[0];
     if (!c0) throw new Error("expected one call");
-    expect(c0.args[0]).toBe("feature");
-    // `defaultWorktreePath(branch, dir)` joins `dir` (raw tmpdir
-    // path) to `vf-wt-<branch>`. The worktree module itself uses
-    // `cwd()` which resolves the tmpdir symlink (e.g. on macOS
-    // `/var/folders/...` -> `/private/var/folders/...`). Compare
-    // against the resolved path so the test works on both
-    // symlinked and non-symlinked tmpdirs.
-    expect(c0.args[1]).toBe(defaultWorktreePath("feature", dir));
+    expect(c0.cmd).toBe(process.execPath);
+    expect(c0.args[0]).toBe(join(process.cwd(), "scripts", "create-worktree.mjs"));
+    expect(c0.args[1]).toBe("feature");
+    expect(c0.args[2]).toBe(defaultWorktreePath("feature", dir));
   });
 
   test("(f) worktreeCreate() with helper exit 1 → exit 1 (relays stderr)", () => {
@@ -241,11 +237,23 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
     expect(p.replace(/\\/g, "/")).toBe("/tmp/parent/vf-wt-mybranch");
   });
 
-  test("(p) buildCreateArgs: includes --base when given", () => {
+  test("(p) buildCreateArgs: uses Node script argv with --base when given", () => {
     const r = buildCreateArgs("feature", "/tmp/wt", "main", dir);
-    expect(r.args).toEqual(["feature", "/tmp/wt", "--base", "main"]);
+    expect(r.cmd).toBe(process.execPath);
+    expect(r.args).toEqual([
+      join(process.cwd(), "scripts", "create-worktree.mjs"),
+      "feature",
+      "/tmp/wt",
+      "--base",
+      "main",
+    ]);
     const r2 = buildCreateArgs("feature", "/tmp/wt", undefined, dir);
-    expect(r2.args).toEqual(["feature", "/tmp/wt"]);
+    expect(r2.cmd).toBe(process.execPath);
+    expect(r2.args).toEqual([
+      join(process.cwd(), "scripts", "create-worktree.mjs"),
+      "feature",
+      "/tmp/wt",
+    ]);
   });
 
   // ---- (z-create) worktree() dispatches to worktreeCreate for "create" action ----
@@ -259,9 +267,9 @@ describe("vf worktree (A6 #172) — TS wrapper, inject-driven", () => {
     expect(calls.length).toBe(1);
     const c0 = calls[0];
     if (!c0) throw new Error("expected one call");
-    expect(c0.args[0]).toBe("feature");
-    // cmd is the full path to the helper script (platform-dependent).
-    expect(c0.cmd).toMatch(/create-worktree\.sh$/);
+    expect(c0.cmd).toBe(process.execPath);
+    expect(c0.args[0]).toMatch(/create-worktree\.mjs$/);
+    expect(c0.args[1]).toBe("feature");
   });
 });
 
@@ -298,83 +306,58 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
     return { repoDir, wtDir };
   }
 
-  /** Plant a tmpdir git repo AND copy the helper script into
-   *  `<repoDir>/scripts/create-worktree.sh`. The TS wrapper
-   *  resolves the helper via `buildCreateArgs` =
-   *  `join(cwd(), "scripts", "create-worktree.sh")`, so the
-   *  test must chdir into a dir where that path resolves. */
-  function plantRepoWithScripts(): { repoDir: string; wtDir: string } {
+  test("(q) create + remove in a temp repo; verify node_modules is a symlink to the parent's", () => {
     const { repoDir, wtDir } = plantRepo();
-    const srcScript = join(process.cwd(), "scripts", "create-worktree.sh");
-    const dstDir = join(repoDir, "scripts");
-    mkdirSync(dstDir, { recursive: true });
-    const { copyFileSync } = require("node:fs") as typeof import("node:fs");
-    copyFileSync(srcScript, join(dstDir, "create-worktree.sh"));
-    // The helper has its shebang + execution perms in the repo
-    // tree; preserve them in the copy.
-    const { statSync, chmodSync } = require("node:fs") as typeof import("node:fs");
-    const s = statSync(srcScript);
-    chmodSync(join(dstDir, "create-worktree.sh"), s.mode);
-    return { repoDir, wtDir };
-  }
+    // The Node helper is invoked through process.execPath.
+    const helper = join(process.cwd(), "scripts", "create-worktree.mjs");
+    execFileSync(process.execPath, [helper, "a6test", wtDir], {
+      cwd: repoDir,
+      stdio: "ignore",
+    });
 
-  (process.platform === "win32" ? test.skip : test)(
-    "(q) create + remove in a temp repo; verify node_modules is a symlink to the parent's",
-    () => {
-      const { repoDir, wtDir } = plantRepo();
-      // Run the helper directly (it's a real bash script). The TS
-      // wrapper just shells out to it; verifying the helper's real
-      // behavior covers the A6 spec's "Test:" requirement.
-      const helper = join(process.cwd(), "scripts", "create-worktree.sh");
-      execFileSync("bash", [helper, "a6test", wtDir], {
-        cwd: repoDir,
-        stdio: "ignore",
-      });
+    // After the create: the worktree exists, node_modules in the
+    // worktree is a SYMLINK to <repoDir>/node_modules, and `git
+    // worktree list` shows the new branch.
+    expect(existsSync(join(wtDir, "README.md"))).toBe(true);
+    const lstat = lstatSync(join(wtDir, "node_modules"));
+    expect(lstat.isSymbolicLink()).toBe(true);
+    const linkTarget = readlinkSync(join(wtDir, "node_modules"));
+    // The helper uses an absolute symlink to the parent's
+    // node_modules. `linkTarget` is the stored symlink value —
+    // on macOS the parent's path may already be resolved
+    // (`/private/var/folders/...`) or unresolved (`/var/folders/...`)
+    // depending on how the helper was invoked. Compare via
+    // realpath so the test works on both.
+    const expectedParent = join(repoDir, "node_modules");
+    if (linkTarget.startsWith("/")) {
+      // Absolute symlink — compare via realpath to handle the
+      // macOS /var vs /private/var symlink case.
+      const { realpathSync } = require("node:fs") as typeof import("node:fs");
+      expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
+    } else {
+      // Relative symlink — resolve relative to the worktree.
+      const resolved = join(wtDir, "node_modules", linkTarget);
+      expect(resolved).toBe(expectedParent);
+    }
 
-      // After the create: the worktree exists, node_modules in the
-      // worktree is a SYMLINK to <repoDir>/node_modules, and `git
-      // worktree list` shows the new branch.
-      expect(existsSync(join(wtDir, "README.md"))).toBe(true);
-      const lstat = lstatSync(join(wtDir, "node_modules"));
-      expect(lstat.isSymbolicLink()).toBe(true);
-      const linkTarget = readlinkSync(join(wtDir, "node_modules"));
-      // The helper uses an absolute symlink to the parent's
-      // node_modules. `linkTarget` is the stored symlink value —
-      // on macOS the parent's path may already be resolved
-      // (`/private/var/folders/...`) or unresolved (`/var/folders/...`)
-      // depending on how the helper was invoked. Compare via
-      // realpath so the test works on both.
-      const expectedParent = join(repoDir, "node_modules");
-      if (linkTarget.startsWith("/")) {
-        // Absolute symlink — compare via realpath to handle the
-        // macOS /var vs /private/var symlink case.
-        const { realpathSync } = require("node:fs") as typeof import("node:fs");
-        expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
-      } else {
-        // Relative symlink — resolve relative to the worktree.
-        const resolved = join(wtDir, "node_modules", linkTarget);
-        expect(resolved).toBe(expectedParent);
-      }
-
-      // Remove the worktree.
-      execFileSync("git", ["worktree", "remove", "--force", wtDir], {
-        cwd: repoDir,
-        stdio: "ignore",
-      });
-      expect(existsSync(wtDir)).toBe(false);
-    },
-  );
+    // Remove the worktree.
+    execFileSync("git", ["worktree", "remove", "--force", wtDir], {
+      cwd: repoDir,
+      stdio: "ignore",
+    });
+    expect(existsSync(wtDir)).toBe(false);
+  });
 
   test("(r) create refuses to clobber an existing worktree path", () => {
     const { repoDir, wtDir } = plantRepo();
     // Plant a directory at the target path BEFORE running the
     // helper. The helper's preflight check should refuse to clobber.
     mkdirSync(wtDir, { recursive: true });
-    const helper = join(process.cwd(), "scripts", "create-worktree.sh");
+    const helper = join(process.cwd(), "scripts", "create-worktree.mjs");
     let code = 0;
     let stderr = "";
     try {
-      execFileSync("bash", [helper, "a6test", wtDir], {
+      execFileSync(process.execPath, [helper, "a6test", wtDir], {
         cwd: repoDir,
         stdio: "pipe",
       });
@@ -397,8 +380,8 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
     execFileSync("git", ["-C", repoDir, "commit", "-m", "base"], { stdio: "ignore" });
     execFileSync("git", ["-C", repoDir, "checkout", "main"], { stdio: "ignore" });
 
-    const helper = join(process.cwd(), "scripts", "create-worktree.sh");
-    execFileSync("bash", [helper, "feature", wtDir, "--base", "base"], {
+    const helper = join(process.cwd(), "scripts", "create-worktree.mjs");
+    execFileSync(process.execPath, [helper, "feature", wtDir, "--base", "base"], {
       cwd: repoDir,
       stdio: "ignore",
     });
@@ -412,58 +395,55 @@ describe("vf worktree (A6 #172) — E2E with real git + real helper script", () 
     });
   });
 
-  // --- E2E via the TS wrapper (not just the bash helper) ---
-  // The (q) test above exercises the bash helper directly. These
+  // --- E2E via the TS wrapper (not just the Node helper) ---
+  // The (q) test above exercises the Node helper directly. These
   // two tests exercise the TS entry point (`worktree(["create",
   // ...])` / `worktree(["remove", ...])`) end-to-end against a
   // real tmpdir repo, per the Codex review gap: "the TS path is
   // covered by inject tests (j/k) but never against a real `git
   // worktree list --porcelain`."
 
-  (process.platform === "win32" ? test.skip : test)(
-    "(t) E2E [TS wrapper] worktree create: exit 0, caller cwd unchanged, worktree exists, node_modules is a symlink",
-    () => {
-      const callerCwd = process.cwd();
-      const { repoDir } = plantRepoWithScripts();
-      const wtDir = join(repoDir, "vf-wt-a6test");
+  test("(t) E2E [TS wrapper] worktree create: exit 0, caller cwd unchanged, worktree exists, node_modules is a symlink", () => {
+    const callerCwd = process.cwd();
+    const { repoDir } = plantRepo();
+    const wtDir = join(repoDir, "vf-wt-a6test");
 
-      try {
-        // Explicit repoDir — the caller's process.cwd() must stay
-        // unchanged and every git/helper invocation uses repoDir.
-        const code = worktree(["create", "a6test"], {}, { repoDir });
-        expect(code).toBe(0);
-        expect(process.cwd()).toBe(callerCwd);
+    try {
+      // The wrapper passes the worktree repo as cwd; helper itself
+      // resolves parent node_modules from that repo.
+      const code = worktree(["create", "a6test"], {}, { repoDir });
+      expect(code).toBe(0);
+      expect(process.cwd()).toBe(callerCwd);
 
-        // The worktree path must exist after create.
-        expect(existsSync(wtDir)).toBe(true);
-        // A6 spec: "verify node_modules is a symlink to the parent's."
-        const lstat = lstatSync(join(wtDir, "node_modules"));
-        expect(lstat.isSymbolicLink()).toBe(true);
-        const linkTarget = readlinkSync(join(wtDir, "node_modules"));
-        const expectedParent = join(repoDir, "node_modules");
-        if (linkTarget.startsWith("/")) {
-          const { realpathSync } = require("node:fs") as typeof import("node:fs");
-          expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
-        } else {
-          expect(join(wtDir, "node_modules", linkTarget)).toBe(expectedParent);
-        }
-      } finally {
-        try {
-          execFileSync("git", ["worktree", "remove", "--force", wtDir], {
-            cwd: repoDir,
-            stdio: "ignore",
-          });
-        } catch {
-          // best-effort: worktree may not have been created
-        }
-        expect(process.cwd()).toBe(callerCwd);
+      // The worktree path must exist after create.
+      expect(existsSync(wtDir)).toBe(true);
+      // A6 spec: "verify node_modules is a symlink to the parent's."
+      const lstat = lstatSync(join(wtDir, "node_modules"));
+      expect(lstat.isSymbolicLink()).toBe(true);
+      const linkTarget = readlinkSync(join(wtDir, "node_modules"));
+      const expectedParent = join(repoDir, "node_modules");
+      if (linkTarget.startsWith("/")) {
+        const { realpathSync } = require("node:fs") as typeof import("node:fs");
+        expect(realpathSync(linkTarget)).toBe(realpathSync(expectedParent));
+      } else {
+        expect(join(wtDir, "node_modules", linkTarget)).toBe(expectedParent);
       }
-    },
-  );
+    } finally {
+      try {
+        execFileSync("git", ["worktree", "remove", "--force", wtDir], {
+          cwd: repoDir,
+          stdio: "ignore",
+        });
+      } catch {
+        // best-effort: worktree may not have been created
+      }
+      expect(process.cwd()).toBe(callerCwd);
+    }
+  });
 
   test("(u) E2E [TS wrapper] worktree remove: exit 0, worktree gone, branch pruned from list", () => {
     const callerCwd = process.cwd();
-    const { repoDir, wtDir } = plantRepoWithScripts();
+    const { repoDir, wtDir } = plantRepo();
     const baseSha = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();

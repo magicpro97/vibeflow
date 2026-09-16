@@ -83,7 +83,32 @@ Source of truth: `src/dispatch.ts` (`engineCommand`) and `src/dispatch/prompt.ts
 - **Session id:** `sessionID` on the first `step_start` event (forward scan).
 - **Fixture:** N/A (opencode output format is stable, no known traps).
 
-## Conversation turn delivery
+## Attachment support matrix
+
+Uploads are stored as `.vibeflow/attachments/<name>`. The UI classifies allowed
+extensions into text, image, and document kinds, then projects the repo-relative
+path into engine argv. This table is the user-facing contract:
+
+| Engine | Kinds | CLI flag | Notes |
+| ------ | ----- | -------- | ----- |
+| claude | text | `--append-system-prompt-file <path>` | Repeatable; not an image/document reader |
+| copilot | image, document | `--attachment <path>` | Repeatable; flags must precede `-p` |
+| codex | image | `--image <path>` | Repeatable; text files use another engine |
+| opencode | text, image, document | `--file <path>` | Broad fallback for mixed selections |
+| antigravity | none verified | none | Attach surface stays hidden until support is proven |
+
+Auto mode accepts the union of all support-matrix extensions so the native file
+picker cannot hide a file before its engine is chosen. For one file, Auto chooses
+the first ready capable engine, then falls back to a support-matrix candidate while
+readiness is unknown. For multiple selected files, Auto keeps one engine capable of
+every selected kind; mixed image + text therefore uses OpenCode when available.
+Readiness gates dispatch, not picker visibility.
+
+Private ranges are separate: they require text and stage an exact line window through
+`VF-PRIVATE-FILE-RANGES/1`; they do not upload or pass the whole attachment to an
+engine. In Web UI, select an uploaded text attachment from `Private range file`,
+preview numbered lines, and select start/end. Repo path remains explicit fallback.
+
 
 The conversation runtime prefixes every delivered turn with `VF-TURN/1` and materializes a
 canonical JSON envelope for the selected participant. When exact resume authority is proven for

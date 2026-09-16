@@ -5,6 +5,7 @@ import {
   CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
   CONVERSATION_PRIVATE_CONTEXT_IDENTIFIER_PREFIX,
   type ConversationPrivateContextSourceKindV1,
+  type ConversationPrivateRangeV2,
 } from "./conversation-private-context-broker-contract.js";
 import type {
   PrivateConversationDraftContextStageV1,
@@ -74,6 +75,31 @@ export function draftStageRequestDigest(input: {
   end_line: number;
 }): string {
   return digestV1(CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.DRAFT_STAGE_REQUEST, {
+    schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+    ...input,
+  });
+}
+
+export function messageStageRequestDigestV2(input: {
+  owner_principal_digest: string;
+  root_session_id: string;
+  staged_authority_digest: string;
+  source_kind: ConversationPrivateContextSourceKindV1;
+  ranges: readonly ConversationPrivateRangeV2[];
+}): string {
+  return digestV1(CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.MESSAGE_STAGE_REQUEST_V2, {
+    schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
+    ...input,
+  });
+}
+
+export function draftStageRequestDigestV2(input: {
+  owner_principal_digest: string;
+  create_idempotency_key_digest: string;
+  source_kind: ConversationPrivateContextSourceKindV1;
+  ranges: readonly ConversationPrivateRangeV2[];
+}): string {
+  return digestV1(CONVERSATION_PRIVATE_CONTEXT_BROKER_DIGEST_DOMAIN.DRAFT_STAGE_REQUEST_V2, {
     schema_version: CONVERSATION_PRIVATE_CONTEXT_BROKER_SCHEMA_VERSION,
     ...input,
   });

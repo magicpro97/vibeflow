@@ -1033,27 +1033,16 @@ describe("preflight: engine-binary resolution (issue #87: shim variants for all 
     }
   });
 
-  test("checkEngine resolves through .ps1 shim (covers the .ps1 variant in WINDOWS_SHIM_VARIANTS)", () => {
+  test("resolveEngineBinary rejects PowerShell shim until launch adapter exists", () => {
+    const origPlatform = process.platform;
     const origWhich = Bun.which;
-    (Bun as unknown as { which: typeof Bun.which }).which = ((name: string) => {
-      if (name === "claude") return undefined;
-      if (name === "claude.cmd") return undefined;
-      if (name === "claude.bat") return undefined;
-      if (name === "claude.ps1") return "C:\\shims\\claude.ps1";
-      return origWhich(name);
-    }) as typeof Bun.which;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    (Bun as unknown as { which: typeof Bun.which }).which = ((name: string) =>
+      name === "claude.ps1" ? "C:\\Program Files\\vf\\claude.ps1" : undefined) as typeof Bun.which;
     try {
-      withPlatform("win32", () => {
-        const { spawn, calls } = recordingSpawner((cmd) => {
-          if (cmd === "claude.ps1")
-            return { status: 0, stdout: JSON.stringify({ result: "READY" }) };
-          return { status: 1, stdout: "", code: "ENOENT", stderr: "spawn ENOENT" };
-        });
-        const r = checkEngine("claude", opts({ spawner: spawn }));
-        expect(r.level).toBe("ready");
-        expect(calls.some((c) => c.cmd === "claude.ps1")).toBe(true);
-      });
+      expect(resolveEngineBinary("claude")).toBeUndefined();
     } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
       (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
     }
   });

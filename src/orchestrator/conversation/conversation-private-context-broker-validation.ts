@@ -10,6 +10,8 @@ import {
   CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD,
   type ConversationPrivateContextBrokerErrorCodeV1,
   type ConversationPrivateContextStageIdempotencyFieldV1,
+  type StageConversationDraftPrivateContextRequestV2,
+  type StageConversationMessagePrivateContextRequestV2,
   isConversationPrivateContextBrokerErrorCode,
   isConversationPrivateContextBrokerSchemaVersion,
   isConversationPrivateContextCreateEngine,
@@ -21,10 +23,12 @@ import {
   isConversationPrivateContextSourceKind,
   isConversationPrivateContextSourceRecordRef,
 } from "./conversation-private-context-broker-contract.js";
+import { assertConversationPrivateRangesV2 } from "./conversation-private-context-broker-range-validation.js";
 import {
   draftStageRecordDigest,
   messageStageRecordDigest,
 } from "./conversation-private-context-broker-records.js";
+export { assertConversationPrivateRangesSelectionV2 } from "./conversation-private-context-broker-range-validation.js";
 import type {
   ConversationHomeCreateRequestV1,
   DiscardConversationDraftPrivateContextRequestV1,
@@ -92,6 +96,26 @@ function stage(value: unknown, key: ConversationPrivateContextStageIdempotencyFi
   validateIdempotencyKey(value[key]);
 }
 
+function stageV2(value: unknown, key: ConversationPrivateContextStageIdempotencyFieldV1): void {
+  const fields =
+    key === CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.MESSAGE
+      ? CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.MESSAGE_STAGE_REQUEST_V2
+      : CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS.DRAFT_STAGE_REQUEST_V2;
+  if (
+    !queueRecord(value) ||
+    !queueExactKeys(value, fields) ||
+    !isConversationPrivateContextBrokerSchemaVersion(value.schema_version) ||
+    !isConversationPrivateContextSourceKind(value.source_kind)
+  )
+    throw new Error("invalid private context stage request");
+  try {
+    assertConversationPrivateRangesV2(value);
+    validateIdempotencyKey(value[key]);
+  } catch {
+    throw new Error("invalid private context stage request");
+  }
+}
+
 function discard(value: unknown, key: ConversationPrivateContextStageIdempotencyFieldV1): void {
   const fields =
     key === CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.MESSAGE
@@ -116,6 +140,12 @@ export function assertStageConversationMessagePrivateContextRequestV1(
   stage(value, CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.MESSAGE);
 }
 
+export function assertStageConversationMessagePrivateContextRequestV2(
+  value: unknown,
+): asserts value is StageConversationMessagePrivateContextRequestV2 {
+  stageV2(value, CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.MESSAGE);
+}
+
 export function assertDiscardConversationMessagePrivateContextRequestV1(
   value: unknown,
 ): asserts value is DiscardConversationMessagePrivateContextRequestV1 {
@@ -126,6 +156,12 @@ export function assertStageConversationDraftPrivateContextRequestV1(
   value: unknown,
 ): asserts value is StageConversationDraftPrivateContextRequestV1 {
   stage(value, CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.DRAFT);
+}
+
+export function assertStageConversationDraftPrivateContextRequestV2(
+  value: unknown,
+): asserts value is StageConversationDraftPrivateContextRequestV2 {
+  stageV2(value, CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.DRAFT);
 }
 
 export function assertDiscardConversationDraftPrivateContextRequestV1(

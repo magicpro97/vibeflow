@@ -1,8 +1,9 @@
-// UI-only projections copied from backend contracts unless explicitly re-exported below.
-// Keep this module free of Node/Bun imports.
+// UI-only projections copied from backend contracts; keep Node/Bun imports out.
 
+import type { Engine } from "../../core/agent-contract.js";
 import type * as HookContract from "../../core/hook-contract.js";
 import type * as LogContract from "../../core/log-contract.js";
+import type { SKILL_MCP_TRANSPORT } from "../../core/skill-contract.js";
 import type * as SkillContract from "../../core/skill-contract.js";
 import type * as WorkflowContract from "../../core/workflow-contract.js";
 import type { LogEvent as SharedLogEvent } from "../../logbus/types.js";
@@ -179,7 +180,19 @@ export interface PolicyPreview {
   relaxation: boolean;
 }
 
+export interface RepoDetection {
+  repo: string;
+  isGit: boolean;
+  engines: Record<Engine, boolean>;
+  clis: Record<Engine, boolean>;
+}
+export type UserMcpServerView = {
+  transport?: (typeof SKILL_MCP_TRANSPORT)[keyof typeof SKILL_MCP_TRANSPORT];
+  command?: string;
+  url?: string;
+};
 export interface VibeSettings {
+  enabledEngines?: Engine[];
   tools: { codegraph: boolean; lsp: boolean };
   toolPriority: ToolTier[];
   lspServers?: string[];
@@ -187,9 +200,9 @@ export interface VibeSettings {
   memory: boolean;
   notifications?: boolean;
   hooks?: HookConfig;
-  /** #556: env-scrub policy for spawned engine subprocesses (read-only in the UI). */
   envPolicy?: { deny?: string[]; allow?: string[] };
-  /** #689: curator scheduling + severity prefs. */
+  /** #548: user-declared MCP servers surfaced in the control center. */
+  mcpServers?: Record<string, UserMcpServerView>;
   curator?: CuratorSettings;
   updatedAt?: string;
 }

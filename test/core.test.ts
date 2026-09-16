@@ -105,6 +105,29 @@ describe("core.writeFileSafe (atomic writeFileSafe)", () => {
     expect(leftover).toEqual([]);
   });
 
+  test("writeFileSafe: uses a unique staging suffix for concurrent writes", () => {
+    const target = join(dir, "state.json");
+    const stagingPaths: string[] = [];
+    let suffix = 0;
+    writeFileSafe(target, "one", {
+      randomUUID: () => `uuid-${suffix++}`,
+      now: () => 1,
+      writeFileSync: (path, data) => {
+        stagingPaths.push(path);
+        fsWriteFileSync(path, data);
+      },
+    });
+    writeFileSafe(target, "two", {
+      randomUUID: () => `uuid-${suffix++}`,
+      now: () => 1,
+      writeFileSync: (path, data) => {
+        stagingPaths.push(path);
+        fsWriteFileSync(path, data);
+      },
+    });
+    expect(new Set(stagingPaths).size).toBe(2);
+  });
+
   test("writeFileSafe: creates missing parent directories recursively", () => {
     const target = join(dir, "a", "b", "c", "state.json");
     writeFileSafe(target, '{"x":42}');

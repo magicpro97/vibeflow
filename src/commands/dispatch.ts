@@ -30,6 +30,7 @@ import {
   isWorkUnitStatus,
 } from "../core/workflow-contract.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
+import { loadRelevantAntiPatterns } from "../skills/anti-patterns.js";
 import { loadAuthoritativeSpec, writeSpecSnapshot } from "../spec-freshness.js";
 import type { Engine, ProjectContext, WorkUnit, WorkflowState } from "./_shared.js";
 import {
@@ -82,7 +83,11 @@ export function applyDispatch(
     name: baseCtx.name,
   };
   const units = state.work_units.map((u) => u.name);
-  const prompt = dispatchPrompt(engine, ctx, units);
+  const antiPatterns = loadRelevantAntiPatterns(
+    base,
+    state.work_units.flatMap((u) => u.scope ?? []),
+  );
+  const prompt = dispatchPrompt(engine, ctx, units, { antiPatterns });
   const rel = `${CTX_DIR}/dispatch/${engine}.md`;
   writeFileSafe(join(base, rel), prompt);
   // Task 4: snapshot the authoritative spec the engine is briefed on, so the

@@ -78,10 +78,34 @@ export interface ConversationPrivateRangeSelectionV1 {
   end_line: number;
 }
 
+export interface ConversationPrivateRangeV2 {
+  repo_relative_path: string;
+  start_line: number;
+  end_line: number;
+}
+
+export interface ConversationPrivateRangesSelectionV2 {
+  ranges: readonly ConversationPrivateRangeV2[];
+}
+
 export interface StageConversationMessagePrivateContextRequestV1
   extends ConversationPrivateRangeSelectionV1 {
   schema_version: ConversationPrivateContextBrokerSchemaVersionV1;
   enqueue_idempotency_key: string;
+  source_kind: ConversationPrivateContextSourceKindV1;
+}
+
+export interface StageConversationMessagePrivateContextRequestV2
+  extends ConversationPrivateRangesSelectionV2 {
+  schema_version: ConversationPrivateContextBrokerSchemaVersionV1;
+  enqueue_idempotency_key: string;
+  source_kind: ConversationPrivateContextSourceKindV1;
+}
+
+export interface StageConversationDraftPrivateContextRequestV2
+  extends ConversationPrivateRangesSelectionV2 {
+  schema_version: ConversationPrivateContextBrokerSchemaVersionV1;
+  create_idempotency_key: string;
   source_kind: ConversationPrivateContextSourceKindV1;
 }
 
@@ -137,6 +161,7 @@ export const CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD = Object.freeze({
   REPO_RELATIVE_PATH: "repo_relative_path",
   START_LINE: "start_line",
   END_LINE: "end_line",
+  RANGES: "ranges",
   TOPIC: "topic",
   POLICY: "policy",
   PARTICIPANTS: "participants",
@@ -245,6 +270,21 @@ export const CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS = Object.freeze({
     field.START_LINE,
     field.END_LINE,
   ] as const satisfies readonly (keyof StageConversationDraftPrivateContextRequestV1)[]),
+  RANGES_SELECTION: Object.freeze([
+    field.RANGES,
+  ] as const satisfies readonly (keyof ConversationPrivateRangesSelectionV2)[]),
+  MESSAGE_STAGE_REQUEST_V2: Object.freeze([
+    field.SCHEMA_VERSION,
+    CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.MESSAGE,
+    field.SOURCE_KIND,
+    field.RANGES,
+  ] as const satisfies readonly (keyof StageConversationMessagePrivateContextRequestV2)[]),
+  DRAFT_STAGE_REQUEST_V2: Object.freeze([
+    field.SCHEMA_VERSION,
+    CONVERSATION_PRIVATE_CONTEXT_STAGE_IDEMPOTENCY_FIELD.DRAFT,
+    field.SOURCE_KIND,
+    field.RANGES,
+  ] as const satisfies readonly (keyof StageConversationDraftPrivateContextRequestV2)[]),
   MESSAGE_DISCARD_REQUEST: Object.freeze([
     field.SCHEMA_VERSION,
     field.IDEMPOTENCY_KEY,

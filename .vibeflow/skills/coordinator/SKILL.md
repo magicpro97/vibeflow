@@ -1,27 +1,28 @@
 ---
 name: coordinator
 description: Coordinate non-trivial VibeFlow work through compact contracts, distinct writable CLI executors, coordinator-first clarification, exact-head review, and verified promotion.
-when_to_load: Load for vf coord, vf init, multi-agent work, Hermes recovery, or any non-trivial delegated implementation.
-scope: project
-project.id: magicpro97/vibeflow
-status: verified
-capabilities:
-  - lead agent delegate implementation
-  - route executor clarification
-  - peer-only context handoff
-  - detached candidate verification
-  - content-addressed promotion
-triggers:
-  - delegates implementation to codex
-  - implementing cli
-  - send codex the implementation
-  - executor asks coordinator
-  - autopilot agent delegation
-  - recover delegated workflow
-requires:
-  filesystem: write
-  network: true
-  shell: true
+metadata:
+  when_to_load: Load for vf coord, vf init, multi-agent work, Hermes recovery, or any non-trivial delegated implementation.
+  scope: project
+  project.id: magicpro97/vibeflow
+  status: verified
+  capabilities:
+    - lead agent delegate implementation
+    - route executor clarification
+    - peer-only context handoff
+    - detached candidate verification
+    - content-addressed promotion
+  triggers:
+    - delegates implementation to codex
+    - implementing cli
+    - send codex the implementation
+    - executor asks coordinator
+    - autopilot agent delegation
+    - recover delegated workflow
+  requires:
+    filesystem: write
+    network: true
+    shell: true
 ---
 
 # Coordinator

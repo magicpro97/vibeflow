@@ -55,7 +55,7 @@ export function ensureInitUpdated(base: string): InitUpdateResult {
   let synced: string[] = [];
 
   if (seeded || needsVersionUpdate) {
-    const result = syncSkillMirrors(base, { engines: INIT_SKILL_MIRROR_ENGINES });
+    const result = syncSkillMirrors(base, { engines: INIT_SKILL_MIRROR_ENGINES, mode: "full" });
     synced = result.synced;
   }
 

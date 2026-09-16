@@ -4,6 +4,7 @@
     id="home-private-range-panel"
     class="home-private-range-panel"
     aria-labelledby="home-private-range-title"
+    @keydown.esc.stop="closePrivateRangePanel"
   >
     <div class="home-private-range-panel__copy">
       <strong id="home-private-range-title">
@@ -16,7 +17,30 @@
     </div>
     <div class="home-private-range-grid">
       <label>
-        <span>Path</span>
+        <span>File source</span>
+        <select
+          v-if="textAttachments.length && !usePathFallback"
+          ref="privateAttachmentSelect"
+          aria-label="Private range file"
+          name="private-range-attachment"
+          :value="selectedAttachmentName"
+          @change="selectAttachment(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">Choose attached file</option>
+          <option v-for="name in textAttachments" :key="name" :value="name">{{ name }}</option>
+        </select>
+        <button
+          v-if="textAttachments.length"
+          type="button"
+          class="home-private-range-panel__source-toggle"
+          @click="usePathFallback = !usePathFallback"
+        >
+          {{ usePathFallback ? "Choose attached file instead" : "Use repo path instead" }}
+        </button>
+        <span v-if="!textAttachments.length" class="home-private-range-panel__empty-source">Attach a text file above to choose it here.</span>
+      </label>
+      <label v-if="!textAttachments.length || usePathFallback">
+        <span>{{ textAttachments.length ? "Path fallback" : "Path" }}</span>
         <input
           ref="privatePathInput"
           v-model="privateRangeDraft.path"
@@ -26,6 +50,9 @@
           spellcheck="false"
           placeholder="src/server.ts"
         />
+        <span v-if="attachmentNames.length" class="home-private-range-panel__from-attach">
+          Unsupported attachment types are excluded from private ranges.
+        </span>
       </label>
       <label>
         <span>Start line</span>
@@ -105,10 +132,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { api } from "../api.js";
 import { useHomePrivateRangeComposer } from "../composables/useHomePrivateRangeComposer.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
+import {
+  canUseAttachmentForPrivateRange,
+  privateRangePathForAttachment,
+} from "../home-attachment.js";
+import { useHomeAttachments } from "../home-attachments.js";
 import {
   type PrivateRangePreviewDraft,
   lineInRange,
@@ -119,6 +151,12 @@ import {
 
 const emit = defineEmits<{ "open-change": [open: boolean] }>();
 const store = useConversationHomeStore();
+const { attachmentNames } = useHomeAttachments();
+const textAttachments = computed(() =>
+  attachmentNames.value.filter(canUseAttachmentForPrivateRange),
+);
+const privateAttachmentSelect = ref<HTMLSelectElement | null>(null);
+const usePathFallback = ref(false);
 const {
   privatePathInput,
   privateRangeOpen,
@@ -132,6 +170,12 @@ const {
 } = useHomePrivateRangeComposer({
   stagePrivateContext: store.stagePrivateContext,
 });
+const selectedAttachmentName = computed(
+  () =>
+    textAttachments.value.find(
+      (name) => privateRangeDraft.path === privateRangePathForAttachment(name),
+    ) ?? "",
+);
 
 const previewContent = ref("");
 const previewLoading = ref(false);
@@ -192,6 +236,43 @@ function pickPreviewLine(line: number) {
   Object.assign(privateRangeDraft, { ...selectRangeOnLine(rangeDraft.value, line) });
 }
 
-watch(privateRangeOpen, (open) => emit("open-change", open), { immediate: true });
+function selectAttachment(name: string) {
+  if (!name) return;
+  useAttachmentPath(name);
+}
+
+function useAttachmentPath(name: string) {
+  Object.assign(privateRangeDraft, {
+    path: privateRangePathForAttachment(name),
+    startLine: 1,
+    endLine: null,
+  });
+}
+
+watch(
+  () => attachmentNames.value.slice(),
+  (names) => {
+    if (
+      privateRangeDraft.path.startsWith(".vibeflow/attachments/") &&
+      !names.includes(privateRangeDraft.path.slice(".vibeflow/attachments/".length))
+    ) {
+      privateRangeDraft.path = "";
+      privateRangeDraft.startLine = "";
+      privateRangeDraft.endLine = "";
+    }
+  },
+);
+
+watch(
+  privateRangeOpen,
+  (open) => {
+    emit("open-change", open);
+    if (open) {
+      usePathFallback.value = false;
+      nextTick(() => privateAttachmentSelect.value?.focus() ?? privatePathInput.value?.focus());
+    }
+  },
+  { immediate: true },
+);
 defineExpose({ open: openPrivateRangePanel });
 </script>

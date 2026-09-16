@@ -175,7 +175,7 @@ export function verify(
     const lock = verifyLockGate(base, { catalogDir: inject.catalogDir });
     const review = checkReviewEvidence(
       base,
-      inject.requireReviewEvidence !== false,
+      inject.requireReviewEvidence === true,
       defaultGit,
       inject.reviewBase,
     );

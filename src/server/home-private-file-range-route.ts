@@ -198,20 +198,20 @@ export async function handleHomePrivateFileRangeRoute(
     return Response.json({ error: "invalid_request" }, { status: 400 });
   }
   const rootLex = resolve(repo);
-  const target = resolve(rootLex, path);
+  const normalizedPath = path.replaceAll("\\", "/");
+  const target = resolve(rootLex, normalizedPath);
   if (
-    path.startsWith("~") ||
-    path.includes("\\") ||
+    normalizedPath.startsWith("~") ||
     hasControlCharacter(path) ||
     outside(rootLex, target) ||
-    portableRelative(rootLex, target) !== path
+    portableRelative(rootLex, target) !== normalizedPath
   )
     return Response.json({ error: "forbidden" }, { status: 403 });
   let root: string;
   let content: string;
   try {
     root = realpathSync(rootLex);
-    content = readPinnedRepoFile(root, path);
+    content = readPinnedRepoFile(root, normalizedPath);
   } catch (error) {
     if (!(error instanceof PinnedFileReadError))
       return Response.json({ error: "invalid_request" }, { status: 422 });
@@ -229,7 +229,7 @@ export async function handleHomePrivateFileRangeRoute(
     const excerpt = sliceTextByLines(content, startLine, endLine);
     const binding = authority.stage({
       handoff_id: authority.createId(),
-      repo_relative_path: path,
+      repo_relative_path: normalizedPath,
       start_line: excerpt.startLine,
       end_line: excerpt.endLine,
       content: excerpt.content,

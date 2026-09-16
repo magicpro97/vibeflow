@@ -17,7 +17,7 @@ function jobBlock(workflow, jobName) {
 
   let end = lines.length;
   for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^  [a-z0-9][a-z0-9-]*:$/.test(lines[index] ?? "")) {
+    if (/^ {2}[a-z0-9][a-z0-9-]*:$/.test(lines[index] ?? "")) {
       end = index;
       break;
     }
@@ -27,20 +27,50 @@ function jobBlock(workflow, jobName) {
 
 test("release-please waits for the same-SHA native Windows aggregate", () => {
   const workflow = readWorkflow("ci.yml");
-  const windows = jobBlock(workflow, "windows-owned-process");
+  const windows = jobBlock(workflow, "windows");
   const aggregate = jobBlock(workflow, "release-prerequisites");
   const releasePlease = jobBlock(workflow, "release-please");
 
+  assert.match(windows, /^ {4}strategy:\n/m);
+  assert.match(windows, /^ {6}matrix:\n/m);
+  assert.match(windows, /include:\n {10}- suite: owned-process\n {10}- suite: package-smoke/);
+  assert.ok(windows.includes("suite: owned-process"));
+  assert.ok(windows.includes("suite: package-smoke"));
   assert.match(windows, /VF_REQUIRE_LIVE_WINDOWS: "1"/);
-  assert.match(windows, /^          ref: \$\{\{ github\.sha \}\}$/m);
+  assert.match(windows, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
   assert.match(windows, /test\/dispatch-owned-process-windows-live\.test\.ts/);
-  assert.match(aggregate, /^      - windows-owned-process$/m);
-  assert.match(aggregate, /Release prerequisites passed for \$GITHUB_SHA/);
-  assert.match(releasePlease, /^    needs: release-prerequisites$/m);
-  assert.match(releasePlease, /^          ref: \$\{\{ github\.sha \}\}$/m);
+  assert.match(windows, /scripts\/assert-win32\.ts/);
+  assert.match(aggregate, /^ {6}- windows$/m);
+  assert.match(aggregate, /WINDOWS_RESULT/);
+  assert.match(aggregate, /Release prerequisites passed for/);
+  assert.match(releasePlease, /^ {4}needs: release-prerequisites$/m);
+  assert.match(releasePlease, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
   assert.match(releasePlease, /uses: googleapis\/release-please-action@v4/);
   assert.match(releasePlease, /secrets\.VIBEFLOW_BOT_TOKEN \|\| secrets\.GITHUB_TOKEN/);
-  assert.doesNotMatch(releasePlease, /^    needs: (?:check|windows-owned-process)$/m);
+  assert.doesNotMatch(releasePlease, /^ {4}needs: (?:check|windows-owned-process)$/m);
+});
+
+test("Windows coverage matrix gates live and shipped-artifact suites", () => {
+  const workflow = readWorkflow("ci.yml");
+  const windows = jobBlock(workflow, "windows");
+  const aggregate = jobBlock(workflow, "release-prerequisites");
+
+  assert.match(windows, /bun-version: 1\.4\.0/);
+  assert.match(windows, /node-version: 20/);
+  assert.ok(windows.includes("if: matrix.suite == 'package-smoke'"));
+  assert.ok(windows.includes("if: matrix.suite == 'owned-process'"));
+  const buildOffset = windows.indexOf("run: bun run build");
+  const cliSmokeOffset = windows.indexOf("run: node dist/cli.js --version");
+  assert.ok(buildOffset >= 0, "package row must build shipped artifact");
+  assert.ok(cliSmokeOffset > buildOffset, "dist smoke must follow build");
+  assert.ok(windows.includes("vf package smoke"));
+  assert.ok(windows.includes("$packOutput"));
+  assert.ok(windows.includes("$installOutput"));
+  assert.ok(windows.includes("vf.cmd"));
+  assert.match(windows, /npm pack --pack-destination/);
+  assert.match(windows, /npm install --global --prefix/);
+  assert.match(windows, /LASTEXITCODE/);
+  assert.doesNotMatch(aggregate, /WINDOWS_PACKAGE_RESULT/);
 });
 
 test("npm publish cannot bypass same-SHA native Windows release evidence", () => {
@@ -50,14 +80,14 @@ test("npm publish cannot bypass same-SHA native Windows release evidence", () =>
   const aggregate = jobBlock(workflow, "release-prerequisites");
   const publish = jobBlock(workflow, "publish");
 
-  assert.match(verify, /^          ref: \$\{\{ github\.sha \}\}$/m);
-  assert.match(windows, /^          ref: \$\{\{ github\.sha \}\}$/m);
-  assert.match(windows, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+  assert.match(verify, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
+  assert.match(windows, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
+  assert.match(windows, /release checkout is not same SHA/);
   assert.match(windows, /test\/dispatch-owned-process-windows-live\.test\.ts/);
-  assert.match(aggregate, /^      - verify$/m);
-  assert.match(aggregate, /^      - windows-owned-process$/m);
-  assert.match(publish, /^    needs: release-prerequisites$/m);
+  assert.match(aggregate, /^ {6}- verify$/m);
+  assert.match(aggregate, /^ {6}- windows-owned-process$/m);
+  assert.match(publish, /^ {4}needs: release-prerequisites$/m);
   assert.match(publish, /needs\.release-prerequisites\.outputs\.exists/);
-  assert.match(publish, /^          ref: \$\{\{ github\.sha \}\}$/m);
-  assert.doesNotMatch(publish, /^    needs: verify$/m);
+  assert.match(publish, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
+  assert.doesNotMatch(publish, /^ {4}needs: verify$/m);
 });
