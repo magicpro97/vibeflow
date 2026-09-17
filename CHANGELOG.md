@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.17.0](https://github.com/magicpro97/vibeflow/compare/v0.16.0...v0.17.0) (2026-09-17)
+
+
+### Features
+
+* **ui:** attach files per engine support with auto engine pick ([e7e731c](https://github.com/magicpro97/vibeflow/commit/e7e731c47f95189df019e1c7914f93c64384761b))
+
+
+### Bug Fixes
+
+* **ci:** verify Release workflow on merge SHA ([ab99e8a](https://github.com/magicpro97/vibeflow/commit/ab99e8aa8ef301d3f228faf3909b7847307d250e))
+* **ui:** restore conversation cache safely ([d315aa6](https://github.com/magicpro97/vibeflow/commit/d315aa62729bd16d0c3ddfab6a0dd6b0b0041f00))
+
+
+### Documentation
+
+* composer toolbar is available pre-session (creation flow needs ([d315aa6](https://github.com/magicpro97/vibeflow/commit/d315aa62729bd16d0c3ddfab6a0dd6b0b0041f00))
+
 ## [0.16.0](https://github.com/magicpro97/vibeflow/compare/v0.15.0...v0.16.0) (2026-09-03)
 
 
