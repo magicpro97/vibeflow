@@ -80,14 +80,15 @@ test("npm publish cannot bypass same-SHA native Windows release evidence", () =>
   const aggregate = jobBlock(workflow, "release-prerequisites");
   const publish = jobBlock(workflow, "publish");
 
-  assert.match(verify, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
-  assert.match(windows, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
-  assert.match(windows, /release checkout is not same SHA/);
+  assert.match(verify, /^ {10}ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.merge_commit_sha \|\| github\.sha \}\}$/m);
+  assert.match(windows, /^ {10}ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.merge_commit_sha \|\| github\.sha \}\}$/m);
+  assert.match(windows, /git rev-parse HEAD.*RELEASE_SHA/);
+  assert.match(windows, /RELEASE_SHA: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.merge_commit_sha \|\| github\.sha \}\}/);
   assert.match(windows, /test\/dispatch-owned-process-windows-live\.test\.ts/);
   assert.match(aggregate, /^ {6}- verify$/m);
   assert.match(aggregate, /^ {6}- windows-owned-process$/m);
   assert.match(publish, /^ {4}needs: release-prerequisites$/m);
   assert.match(publish, /needs\.release-prerequisites\.outputs\.exists/);
-  assert.match(publish, /^ {10}ref: \$\{\{ github\.sha \}\}$/m);
+  assert.match(publish, /^ {10}ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.merge_commit_sha \|\| github\.sha \}\}$/m);
   assert.doesNotMatch(publish, /^ {4}needs: verify$/m);
 });
