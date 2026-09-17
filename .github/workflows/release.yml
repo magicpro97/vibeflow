@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: true
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: oven-sh/setup-bun@v2
 
       - name: Read local version
@@ -91,18 +91,19 @@ jobs:
     timeout-minutes: 10
     env:
       VF_REQUIRE_LIVE_WINDOWS: "1"
+      RELEASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           clean: true
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
       - run: bun ci
       - name: Assert the release commit on a real Windows runtime
         run: |
-          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw "release checkout is not same SHA" }
+          if ((git rev-parse HEAD) -ne $env:RELEASE_SHA) { throw "release checkout is not same SHA" }
           bun run scripts/assert-win32.ts
       - name: Windows PID, Job Object, release, and orphan release gate
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
@@ -138,7 +139,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: true
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
