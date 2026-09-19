@@ -126,7 +126,8 @@ import {
 } from "../conversation-home-loading.js";
 import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-message-queue-types.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import { nextMentionToken } from "../home-composer-highlight.js";
+import { removeMentionAtKey } from "../home-composer-editing.js";
+import { nextMentionToken, removeComposerMention } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 import HomeAttachmentButton from "./HomeAttachmentButton.vue";
 import HomeAttachments from "./HomeAttachments.vue";
@@ -225,7 +226,6 @@ watch(
   () => store.queueComposerFocusEpoch,
   () => void restoreComposerFocus(),
 );
-
 function resize() {
   const element = textarea.value;
   if (!element) return;
@@ -243,11 +243,11 @@ function insert(value: string) {
   const element = textarea.value;
   const start = element?.selectionStart ?? store.draft.length;
   const end = element?.selectionEnd ?? start;
-  const before = store.draft.slice(0, start);
-  const after = store.draft.slice(end);
+  const before = store.draft.slice(0, start).replace(/\s+$/u, "");
+  const after = store.draft.slice(end).replace(/^\s+/u, "");
   const mention = nextMentionToken(store.draft, value);
-  const leading = before && !/\s$/u.test(before) ? " " : "";
-  const trailing = !after || !/^\s/u.test(after) ? " " : "";
+  const leading = before ? " " : "";
+  const trailing = " ";
   store.draft = `${before}${leading}${mention}${trailing}${after}`;
   const caret = before.length + leading.length + mention.length + trailing.length;
   nextTick(() => {
@@ -256,13 +256,9 @@ function insert(value: string) {
     resize();
   });
 }
-
 function removeMention(value: string) {
   if (store.queuedMessageEdit) return;
-  store.draft = store.draft
-    .split(value)
-    .map((part, index) => (index > 0 ? part.replace(/^\s+/, "") : part))
-    .join("");
+  store.draft = removeComposerMention(store.draft, value);
   nextTick(() => {
     textarea.value?.focus();
     resize();
@@ -276,20 +272,17 @@ async function restoreComposerFocus() {
 async function restoreComposerFocusAfterConfirmation(completion: Promise<boolean>) {
   if (await completion) await restoreComposerFocus();
 }
-
 async function focusQueuedEdit() {
   await restoreComposerFocus();
   const end = store.draft.length;
   textarea.value?.setSelectionRange(end, end);
   resize();
 }
-
 async function cancelQueuedEdit() {
   if (!store.cancelQueuedMessageEdit()) return;
   await restoreComposerFocus();
   resize();
 }
-
 function choose(value: string) {
   const mention = nextMentionToken(store.draft, value);
   store.draft = `${mention} `;
@@ -331,6 +324,16 @@ function onKeydown(event: KeyboardEvent) {
       return;
     }
   }
+  const removal = removeMentionAtKey(event, store.draft, textarea.value);
+  if (removal) {
+    store.draft = removal.draft;
+    nextTick(() => {
+      textarea.value?.focus();
+      textarea.value?.setSelectionRange(removal.caret, removal.caret);
+      resize();
+    });
+    return;
+  }
   if (event.key === "Escape" && store.queuedMessageEdit) {
     event.preventDefault();
     event.stopPropagation();
@@ -349,7 +352,6 @@ function onKeydown(event: KeyboardEvent) {
     void submit();
   }
 }
-
 function dismissSuggestionsWithEscape(event: KeyboardEvent): boolean {
   if (event.key !== "Escape" || !visibleSuggestions.value.length) return false;
   const preservedDraft = suggestionDraftSnapshot.value.length
@@ -371,7 +373,6 @@ function restorePreservedDraft(preservedDraft: string) {
     resize();
   }
 }
-
 function restoreDismissedDraft(event: KeyboardEvent) {
   if (event.key !== "Escape" || pendingEscapeDraft.value === null) return;
   restorePreservedDraft(pendingEscapeDraft.value);

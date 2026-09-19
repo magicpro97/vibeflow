@@ -4,6 +4,8 @@ import {
   findComposerMentions,
   nextMentionToken,
   parseComposerHighlight,
+  removeComposerMention,
+  removeComposerMentionAtCaret,
 } from "../home-composer-highlight.js";
 
 const AGENTS = new Map([
@@ -79,6 +81,55 @@ describe("home composer highlight", () => {
       { kind: "chip-agent", text: "Implementation agent" },
     ]);
   });
+  test("removes an agent token and its separator as one unit", () => {
+    expect(removeComposerMention("before +web_ui@codex after", "+web_ui@codex")).toBe(
+      "before after",
+    );
+    expect(removeComposerMention("+web_ui@codex after", "+web_ui@codex")).toBe("after");
+    expect(removeComposerMention("before +web_ui@codex#2 after", "+web_ui@codex#2")).toBe(
+      "before after",
+    );
+  });
+  test("returns draft unchanged when token is absent", () => {
+    expect(removeComposerMention("plain text", "+web_ui@codex")).toBe("plain text");
+  });
+  test("removes complete chip token when caret is beside it", () => {
+    const draft = "before +web_ui@codex after";
+    const tokenStart = draft.indexOf("+web_ui@codex");
+    const tokenEnd = tokenStart + "+web_ui@codex".length;
+    expect(removeComposerMentionAtCaret(draft, tokenEnd + 1, "backward")).toEqual({
+      draft: "before after",
+      caret: tokenStart,
+    });
+    expect(removeComposerMentionAtCaret(draft, tokenStart, "forward")).toEqual({
+      draft: "before after",
+      caret: tokenStart,
+    });
+  });
+
+  test("ignores caret beyond token without a removal", () => {
+    const draft = "before +web_ui@codex after";
+    expect(removeComposerMentionAtCaret(draft, draft.length, "backward")).toBeNull();
+  });
+  test("does not remove token when caret follows punctuation", () => {
+    const draft = "before +web_ui@codex, after";
+    const tokenEnd = draft.indexOf(",");
+    expect(removeComposerMentionAtCaret(draft, tokenEnd + 1, "backward")).toBeNull();
+  });
+  test("removes the token occurrence beside caret when tokens repeat", () => {
+    const draft = "before +web_ui@codex middle +web_ui@codex after";
+    const tokenStart = draft.lastIndexOf("+web_ui@codex");
+    const tokenEnd = tokenStart + "+web_ui@codex".length;
+    expect(removeComposerMentionAtCaret(draft, tokenEnd + 1, "backward")).toEqual({
+      draft: "before +web_ui@codex middle after",
+      caret: tokenStart,
+    });
+  });
+  test("removes token without leaving separator when token is at either edge", () => {
+    expect(removeComposerMention("before +web_ui@codex ", "+web_ui@codex")).toBe("before");
+    expect(removeComposerMention(" +web_ui@codex after", "+web_ui@codex")).toBe("after");
+  });
+
   test("repeated agent token gets a numeric suffix and labeled chip", () => {
     expect(nextMentionToken("", "+web_ui@codex")).toBe("+web_ui@codex");
     expect(nextMentionToken("+web_ui@codex", "+web_ui@codex")).toBe("+web_ui@codex#2");

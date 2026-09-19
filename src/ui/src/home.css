@@ -1868,20 +1868,45 @@ button:disabled {
   color: var(--home-placeholder);
 }
 .home-composer-chip {
-  display: inline;
-  padding: 0.06rem 0.32rem;
-  border: 1px solid rgb(180 130 60 / 0.5);
+  position: relative;
+  display: inline-block;
+  width: max-content;
+  max-width: 100%;
+  padding: 0;
+  overflow-wrap: anywhere;
   border-radius: 0.4rem;
+  outline: 1px solid rgb(180 130 60 / 0.5);
   background: rgb(180 130 60 / 0.12);
+  color: transparent;
+  font-size: 0;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.home-composer-chip::after {
+  content: attr(data-raw-token);
+  visibility: hidden;
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+.home-composer-chip::before {
+  content: attr(data-label);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center start;
+  padding: 0 0.32rem;
   color: var(--home-ink);
+  font-size: 0.9rem;
   font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .home-composer-chip--remove {
-  border-color: rgb(190 80 60 / 0.55);
+  outline-color: rgb(190 80 60 / 0.55);
   background: rgb(190 80 60 / 0.12);
 }
 .home-composer-chip--mention {
-  border-color: rgb(80 130 190 / 0.5);
+  outline-color: rgb(80 130 190 / 0.5);
   background: rgb(80 130 190 / 0.12);
 }
 .home-composer__toolbar {
