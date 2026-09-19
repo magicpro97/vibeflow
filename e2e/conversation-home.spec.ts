@@ -799,20 +799,52 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
     await expect(page.locator(".home-quote-stack--selection")).toHaveCount(0);
     await composer.press("Escape");
-    await composer.fill("Keep this draft");
+    await composer.fill("Keep   this draft");
     await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(4, 4));
     await page.getByRole("button", { name: "Agent", exact: true }).click();
-    await expect(composer).toHaveValue("Keep this draft");
+    await expect(composer).toHaveValue("Keep   this draft");
     const draftMenu = page.getByRole("listbox", { name: "Toolbar agent suggestions" });
     await expect(draftMenu).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(draftMenu).toHaveCount(0);
-    await expect(composer).toHaveValue("Keep this draft");
+    await expect(composer).toHaveValue("Keep   this draft");
     await page.getByRole("button", { name: "Agent", exact: true }).click();
     await page.getByRole("option", { name: /Implementation agent/ }).click();
     await expect(composer).toHaveValue(
       `Keep +${CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR}@${AGENT_ENGINE.CODEX} this draft`,
     );
+    const highlighted = page.locator(".home-composer__highlight");
+    await expect(highlighted).toHaveText("Keep Implementation agent this draft");
+    await expect(highlighted.locator("span").allTextContents()).resolves.toEqual([
+      "Keep ",
+      "Implementation agent",
+      " this draft",
+    ]);
+    const chipPresentation = await page.locator(".home-composer-chip").evaluate((chip) => {
+      const style = getComputedStyle(chip, "::before");
+      return { content: style.content, fontSize: style.fontSize };
+    });
+    expect(chipPresentation).toEqual({ content: '"Implementation agent"', fontSize: "14.4px" });
+    const chipGeometry = await composer.evaluate((node) => {
+      const chip = document.querySelector<HTMLElement>(".home-composer-chip");
+      const tokenEnd = (node as HTMLTextAreaElement).value.indexOf(" this draft");
+      const context = document.createElement("canvas").getContext("2d");
+      if (!chip || !context) throw new Error("composer geometry unavailable");
+      const style = getComputedStyle(node);
+      context.font = style.font;
+      return {
+        rawTokenWidth: context.measureText((node as HTMLTextAreaElement).value.slice("Keep ".length, tokenEnd)).width,
+        chipWidth: chip.getBoundingClientRect().width,
+      };
+    });
+    expect(Math.abs(chipGeometry.rawTokenWidth - chipGeometry.chipWidth)).toBeLessThan(1.5);
+    const tokenEnd = (await composer.inputValue()).indexOf(" this draft");
+    await composer.evaluate(
+      (node: HTMLTextAreaElement, end) => node.setSelectionRange(end, end),
+      tokenEnd,
+    );
+    await composer.press("Backspace");
+    await expect(composer).toHaveValue("Keep this draft");
 
     const admitted = page.waitForResponse(
       (response) =>
@@ -2437,6 +2469,20 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "New conversation", exact: true }).first().click();
     await expect(page.locator("#home-composer")).toBeVisible();
     await expectHomeComposerViewportFit(page);
+    await page.locator("#home-composer").fill("Before +coordination-executor@codex after");
+    const narrowChipGeometry = await page.locator(".home-composer__highlight").evaluate((highlight) => {
+      const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
+      if (!chip) throw new Error("narrow composer chip unavailable");
+      const highlightBox = highlight.getBoundingClientRect();
+      const chipBox = chip.getBoundingClientRect();
+      return {
+        chipRight: chipBox.right,
+        highlightRight: highlightBox.right,
+        chipHeight: chipBox.height,
+      };
+    });
+    expect(narrowChipGeometry.chipRight).toBeLessThanOrEqual(narrowChipGeometry.highlightRight + 0.5);
+    expect(narrowChipGeometry.chipHeight).toBeGreaterThan(21.6);
     for (const control of [
       page.getByRole("button", { name: /conversation list/ }),
       page.getByRole("button", { name: "Open CLI capabilities" }),
@@ -2466,6 +2512,20 @@ test.describe("AI-first conversation Home", () => {
     });
     await page.waitForTimeout(50);
     await expectHomeComposerViewportFit(page);
+    await page.locator("#home-composer").fill("Before +coordination-executor@codex after");
+    const zoomedChipGeometry = await page.locator(".home-composer__highlight").evaluate((highlight) => {
+      const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
+      if (!chip) throw new Error("zoomed composer chip unavailable");
+      return {
+        chipRight: chip.getBoundingClientRect().right,
+        highlightRight: highlight.getBoundingClientRect().right,
+        labelWhiteSpace: getComputedStyle(chip, "::before").whiteSpace,
+        labelOverflowWrap: getComputedStyle(chip, "::before").overflowWrap,
+      };
+    });
+    expect(zoomedChipGeometry.chipRight).toBeLessThanOrEqual(zoomedChipGeometry.highlightRight + 0.5);
+    expect(zoomedChipGeometry.labelWhiteSpace).toBe("normal");
+    expect(zoomedChipGeometry.labelOverflowWrap).toBe("anywhere");
     await testInfo.attach("home-390x844-text-zoom-200", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",

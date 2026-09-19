@@ -49,6 +49,44 @@ export function nextMentionToken(draft: string, value: string): string {
   return count > 0 ? `${value}#${count + 1}` : value;
 }
 
+export function removeComposerMention(draft: string, token: string): string {
+  const tokenStart = draft.indexOf(token);
+  if (tokenStart < 0) return draft;
+  return removeComposerMentionRange(draft, tokenStart, tokenStart + token.length);
+}
+
+function removeComposerMentionRange(draft: string, tokenStart: number, tokenEnd: number): string {
+  const before = draft.slice(0, tokenStart);
+  const after = draft.slice(tokenEnd);
+  const left = before.replace(/\s+$/u, "");
+  const right = after.replace(/^\s+/u, "");
+  const spacing = left && right ? " " : "";
+  return `${left}${spacing}${right}`;
+}
+
+export type ComposerCaretRemoval = Readonly<{ draft: string; caret: number }>;
+
+export function removeComposerMentionAtCaret(
+  draft: string,
+  caret: number,
+  direction: "backward" | "forward",
+): ComposerCaretRemoval | null {
+  const start = Math.max(0, Math.min(caret, draft.length));
+  for (const match of draft.matchAll(CHIP_TOKEN)) {
+    const tokenStart = match.index ?? 0;
+    const token = match[0];
+    const tokenEnd = tokenStart + token.length;
+    const separatorAfterToken = /\s/u.test(draft[tokenEnd] ?? "");
+    const adjacent =
+      direction === "backward"
+        ? start === tokenEnd || (start === tokenEnd + 1 && separatorAfterToken)
+        : start === tokenStart;
+    if (!adjacent) continue;
+    const nextDraft = removeComposerMentionRange(draft, tokenStart, tokenEnd);
+    return { draft: nextDraft, caret: Math.min(tokenStart, nextDraft.length) };
+  }
+  return null;
+}
 // Mentions currently present in the draft (agent `+role@engine` tokens and
 // `@participant` tokens) — what the Remove toolbar menu can actually remove
 // instead of needing a live participant list.
