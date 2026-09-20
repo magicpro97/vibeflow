@@ -45,7 +45,7 @@ const chipColorClass = (kind: string) => kind.replace("chip-", "");
         :class="`home-composer-chip home-composer-chip--${chipColorClass(segment.kind)}`"
         :data-label="segment.text"
         :data-raw-token="segment.rawToken"
-      >{{ segment.text }}</span>
+      ><span class="home-composer-chip__label">{{ segment.text }}</span></span>
     </template>
   </div>
 </template>

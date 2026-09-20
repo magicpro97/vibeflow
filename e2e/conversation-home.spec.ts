@@ -815,29 +815,47 @@ test.describe("AI-first conversation Home", () => {
     );
     const highlighted = page.locator(".home-composer__highlight");
     await expect(highlighted).toHaveText("Keep Implementation agent this draft");
-    await expect(highlighted.locator("span").allTextContents()).resolves.toEqual([
+    await expect(highlighted.locator(":scope > span").allTextContents()).resolves.toEqual([
       "Keep ",
       "Implementation agent",
       " this draft",
     ]);
+    const chipVisual = page.locator(".home-composer-chip__label");
+    await expect(chipVisual).toHaveCount(1);
     const chipPresentation = await page.locator(".home-composer-chip").evaluate((chip) => {
-      const style = getComputedStyle(chip, "::before");
-      return { content: style.content, fontSize: style.fontSize };
+      const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+      if (!label) throw new Error("chip label unavailable");
+      const outer = getComputedStyle(chip);
+      const visual = getComputedStyle(label);
+      return {
+        labelText: label.textContent,
+        labelFontSize: visual.fontSize,
+        labelBackground: visual.backgroundColor,
+        outerBackground: outer.backgroundColor,
+      };
     });
-    expect(chipPresentation).toEqual({ content: '"Implementation agent"', fontSize: "14.4px" });
+    expect(chipPresentation).toEqual({
+      labelText: "Implementation agent",
+      labelFontSize: "14.4px",
+      labelBackground: "rgba(180, 130, 60, 0.12)",
+      outerBackground: "rgba(0, 0, 0, 0)",
+    });
     const chipGeometry = await composer.evaluate((node) => {
       const chip = document.querySelector<HTMLElement>(".home-composer-chip");
+      const label = chip?.querySelector<HTMLElement>(".home-composer-chip__label");
       const tokenEnd = (node as HTMLTextAreaElement).value.indexOf(" this draft");
       const context = document.createElement("canvas").getContext("2d");
-      if (!chip || !context) throw new Error("composer geometry unavailable");
+      if (!chip || !label || !context) throw new Error("composer geometry unavailable");
       const style = getComputedStyle(node);
       context.font = style.font;
       return {
         rawTokenWidth: context.measureText((node as HTMLTextAreaElement).value.slice("Keep ".length, tokenEnd)).width,
         chipWidth: chip.getBoundingClientRect().width,
+        labelWidth: label.getBoundingClientRect().width,
       };
     });
     expect(Math.abs(chipGeometry.rawTokenWidth - chipGeometry.chipWidth)).toBeLessThan(1.5);
+    expect(chipGeometry.labelWidth).toBeLessThan(chipGeometry.chipWidth);
     const tokenEnd = (await composer.inputValue()).indexOf(" this draft");
     await composer.evaluate(
       (node: HTMLTextAreaElement, end) => node.setSelectionRange(end, end),
@@ -2535,8 +2553,16 @@ test.describe("AI-first conversation Home", () => {
             bottom: box.bottom,
           }));
         })(),
-        labelWhiteSpace: getComputedStyle(chip, "::before").whiteSpace,
-        labelOverflowWrap: getComputedStyle(chip, "::before").overflowWrap,
+        labelWhiteSpace: (() => {
+          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+          if (!label) throw new Error("zoomed composer chip label unavailable");
+          return getComputedStyle(label).whiteSpace;
+        })(),
+        labelOverflowWrap: (() => {
+          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+          if (!label) throw new Error("zoomed composer chip label unavailable");
+          return getComputedStyle(label).overflowWrap;
+        })(),
       };
     });
     expect(zoomedChipGeometry.chipRight).toBeLessThanOrEqual(zoomedChipGeometry.highlightRight + 0.5);
