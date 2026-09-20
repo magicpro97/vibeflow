@@ -6,10 +6,12 @@ import { digestV1 } from "../../../src/durability/index.js";
 import type { ConversationDurableRecord } from "../../../src/orchestrator/conversation/artifact-validation.js";
 import { CatalogCursorCodec } from "../../../src/orchestrator/conversation/catalog-cursor.js";
 import { projectConversationCatalog } from "../../../src/orchestrator/conversation/catalog-projector.js";
+import { createConversationRevisionSummary } from "../../../src/orchestrator/conversation/catalog-row.js";
 import { CONVERSATION_DEFAULT_PROJECT_ID } from "../../../src/orchestrator/conversation/conversation-catalog-contract.js";
 import { ConversationHomeCreateBrokerV1 } from "../../../src/orchestrator/conversation/conversation-home-create-authority.js";
 import { ConversationPrivateContextBrokerV1 } from "../../../src/orchestrator/conversation/conversation-private-context-broker-store.js";
 import type { ConversationHomeCreateRequestV1 } from "../../../src/orchestrator/conversation/conversation-private-context-broker-types.js";
+import { assertConversationProjectId } from "../../../src/orchestrator/conversation/conversation-project-binding.js";
 import { deriveConversationLineages } from "../../../src/orchestrator/conversation/lineage-reader.js";
 import { ProjectRegistryAuthority } from "../../../src/orchestrator/conversation/project-registry-authority.js";
 import { readConversationSourceInventory } from "../../../src/orchestrator/conversation/source-inventory.js";
@@ -54,6 +56,35 @@ test("a manifest-less project_id reads back as the default project, not the repo
   expect("project_id" in record.manifest).toBe(false);
   expect(await projectIdOf(record)).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
   expect(CONVERSATION_DEFAULT_PROJECT_ID).toBe("idea");
+});
+
+test("a path-bearing project_id is rejected at projection, not silently projected", async () => {
+  const record = fixtureRecord("pid-path", { projectId: "checkout-web" });
+  const root = await mkdtemp(join(tmpdir(), "vf-catalog-pid-path-"));
+  try {
+    const artifacts = join(root, "artifacts");
+    const traces = join(root, "trace");
+    installFixture(artifacts, traces, record, "2026-08-25T00:00:30.000Z");
+    const lineages = deriveConversationLineages(
+      readConversationSourceInventory({ artifactRoot: artifacts, traceRoot: traces }),
+    );
+    const node = lineages.lineages[0]?.nodes[0];
+    if (!node) throw new Error("fixture lineage has no root node");
+
+    // The slug grammar is what makes the label safe to project; a manifest that bypasses it
+    // must fail closed here rather than reach the DTO raw. This is the guard the previous
+    // `sanitizePublicText(..., "project_id")` call only appeared to provide.
+    const forged = {
+      ...node,
+      source: {
+        ...node.source,
+        manifest: { ...node.source.manifest, project_id: "/Users/private/secret-repo" },
+      },
+    };
+    expect(() => createConversationRevisionSummary(forged, 0)).toThrow("unsafe catalog project_id");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 const stamp = (second: number) => new Date(Date.UTC(2026, 7, 26, 3, 0, second)).toISOString();
@@ -114,4 +145,42 @@ test("create authority accepts a registered project_id and the default, rejectin
   } finally {
     await rm(value.root, { recursive: true, force: true });
   }
+});
+
+test("a registry that rejects the default id cannot make it unclassified", async () => {
+  const value = await createFixture();
+  try {
+    // The guard is at create, so a registry can never hold the reserved fallback id even
+    // though `assertConversationProjectId` would otherwise short-circuit it by name.
+    expect(() =>
+      value.registry.create({
+        id: CONVERSATION_DEFAULT_PROJECT_ID,
+        name: "Ideas",
+        engine: { cli: "codex", thinking: "medium" },
+      }),
+    ).toThrow(/reserved/);
+    expect(value.registry.get(CONVERSATION_DEFAULT_PROJECT_ID)).toBeUndefined();
+    expect(value.prepare("bound-idea-unregistered", CONVERSATION_DEFAULT_PROJECT_ID)).toBeDefined();
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("binding rejects a non-slug id and fails closed without a registry", () => {
+  const projects = { get: (id: string) => (id === "checkout-web" ? {} : undefined) };
+
+  expect(assertConversationProjectId(projects, undefined)).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
+  expect(assertConversationProjectId(projects, "checkout-web")).toBe("checkout-web");
+  expect(() => assertConversationProjectId(projects, "Bad Slug")).toThrow(
+    "invalid conversation project_id",
+  );
+  expect(() => assertConversationProjectId(projects, "/Users/private/repo")).toThrow(
+    "invalid conversation project_id",
+  );
+  expect(assertConversationProjectId(undefined, CONVERSATION_DEFAULT_PROJECT_ID)).toBe(
+    CONVERSATION_DEFAULT_PROJECT_ID,
+  );
+  expect(() => assertConversationProjectId(undefined, "checkout-web")).toThrow(
+    "unknown project checkout-web",
+  );
 });

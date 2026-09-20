@@ -150,6 +150,7 @@ describe("project registry authority", () => {
     const rows: Array<[string, Partial<ProjectCreateRequestV1>]> = [
       ["invalid slug", { id: "Bad Slug" }],
       ["empty id", { id: "" }],
+      ["reserved id", { id: "idea" }],
       ["empty name", { name: "   " }],
       ["non-array repos", { repos: "./repo" as unknown as string[] }],
       ["blank repo entry", { repos: [""] }],

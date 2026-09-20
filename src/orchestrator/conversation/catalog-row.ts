@@ -22,7 +22,9 @@ import {
 
 /**
  * Public project label for a conversation. The manifest owns the binding; a legacy record
- * written before the field existed falls back to the reserved default project.
+ * written before the field existed falls back to the reserved default project. Callers that
+ * project it forward must path-check it (`isSafeCatalogIdentifier`) or validate the manifest;
+ * the slug grammar is what makes the raw value safe, not the sanitizer.
  */
 export function conversationProjectId(manifest: {
   readonly project_id?: string | undefined;
@@ -43,6 +45,12 @@ export function createConversationRevisionSummary(
   ])
     if (identity !== null && !isSafeCatalogIdentifier(identity))
       throw new Error("unsafe catalog revision identity");
+  // Real path check: the label is slug-constrained, and `isSafeCatalogIdentifier` runs the
+  // sanitizer under a key with no identity/semantic shortcut, so a path-bearing value fails
+  // here instead of being projected. (A `sanitizePublicText(..., "project_id")` call would be
+  // a no-op: the identity-field rule returns before any path replacement.)
+  const projectId = conversationProjectId(source.manifest);
+  if (!isSafeCatalogIdentifier(projectId)) throw new Error("unsafe catalog project_id");
   return {
     schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     conversation_id: node.node.conversation_id,
@@ -53,7 +61,7 @@ export function createConversationRevisionSummary(
     lineage_status: CONVERSATION_LINEAGE_STATUS.VERIFIED,
     topic: sanitizePublicText(source.manifest.topic, "topic", []),
     policy: safePublicRoleReference(source.manifest.policy),
-    project_id: sanitizePublicText(conversationProjectId(source.manifest), "project_id", []),
+    project_id: projectId,
     lifecycle: source.journal_head.lifecycle,
     health: source.journal_head.health,
     participants: structuredClone(source.journal_head.participants),

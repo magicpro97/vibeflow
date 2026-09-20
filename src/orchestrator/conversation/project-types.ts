@@ -14,12 +14,24 @@
 import { resolve } from "node:path";
 import { isExactWireTimestamp } from "../../actions/public-wire-primitives.js";
 import { type Engine, isAgentEngine } from "../../core/agent-contract.js";
+import { CONVERSATION_DEFAULT_PROJECT_ID } from "./conversation-catalog-contract.js";
 
 export const PROJECT_SCHEMA_VERSION = "1.0";
 export type ProjectSchemaVersionV1 = typeof PROJECT_SCHEMA_VERSION;
 
 /** Slug ids are lowercase ASCII with interior hyphens, max 64 characters. */
 export const PROJECT_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Ids the registry must never hold. `idea` is the conversation fallback for an unclassified
+ * conversation (see `CONVERSATION_DEFAULT_PROJECT_ID`), resolved *before* the registry
+ * lookup, so a real project with that id would be indistinguishable from "no project" and
+ * would survive its own deletion. Reserved everywhere — write and read alike — so the
+ * invariant cannot be reintroduced by hand-editing the document.
+ */
+export const PROJECT_RESERVED_IDS: readonly string[] = Object.freeze([
+  CONVERSATION_DEFAULT_PROJECT_ID,
+]);
 
 export const PROJECT_NAME_MAX_LENGTH = 160;
 export const PROJECT_GOAL_MAX_LENGTH = 4000;
@@ -100,6 +112,8 @@ export function assertProjectTimestamp(value: unknown, label: string): string {
 export function assertProjectSlug(value: unknown): string {
   if (typeof value !== "string" || !PROJECT_SLUG_PATTERN.test(value))
     return invalid("project id must match ^[a-z0-9][a-z0-9-]{0,63}$");
+  if (PROJECT_RESERVED_IDS.includes(value))
+    return invalid(`project id ${value} is reserved for the unclassified conversation fallback`);
   return value;
 }
 
