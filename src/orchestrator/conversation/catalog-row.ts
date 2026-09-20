@@ -11,6 +11,7 @@ import {
   CONVERSATION_DEFAULT_PROJECT_ID,
   CONVERSATION_HEAD_STATUS,
   CONVERSATION_LINEAGE_STATUS,
+  isConversationProjectId,
 } from "./conversation-catalog-contract.js";
 import type { ConversationLineageReadV1, ValidatedLineageNodeV1 } from "./lineage-reader.js";
 import {
@@ -22,9 +23,10 @@ import {
 
 /**
  * Public project label for a conversation. The manifest owns the binding; a legacy record
- * written before the field existed falls back to the reserved default project. Callers that
- * project it forward must path-check it (`isSafeCatalogIdentifier`) or validate the manifest;
- * the slug grammar is what makes the raw value safe, not the sanitizer.
+ * written before the field existed falls back to the reserved default project. The value is
+ * gated by the shared `isConversationProjectId` grammar (the same contract the manifest
+ * validator, the create funnel, and the create wire use), so a raw path cannot be projected
+ * and a registry-legal id is never dropped for looking like a credential.
  */
 export function conversationProjectId(manifest: {
   readonly project_id?: string | undefined;
@@ -45,12 +47,11 @@ export function createConversationRevisionSummary(
   ])
     if (identity !== null && !isSafeCatalogIdentifier(identity))
       throw new Error("unsafe catalog revision identity");
-  // Real path check: the label is slug-constrained, and `isSafeCatalogIdentifier` runs the
-  // sanitizer under a key with no identity/semantic shortcut, so a path-bearing value fails
-  // here instead of being projected. (A `sanitizePublicText(..., "project_id")` call would be
-  // a no-op: the identity-field rule returns before any path replacement.)
+  // The field's own contract grammar. `isSafeCatalogIdentifier` is *stricter* than the
+  // registry slug contract (the sanitizer reads `sk-`/`xoxb-` prefixes as credentials), so a
+  // registry-legal id would be dropped here and the whole catalog would go durably degraded.
   const projectId = conversationProjectId(source.manifest);
-  if (!isSafeCatalogIdentifier(projectId)) throw new Error("unsafe catalog project_id");
+  if (!isConversationProjectId(projectId)) throw new Error("unsafe catalog project_id");
   return {
     schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     conversation_id: node.node.conversation_id,

@@ -7,7 +7,10 @@ import type { ConversationDurableRecord } from "../../../src/orchestrator/conver
 import { CatalogCursorCodec } from "../../../src/orchestrator/conversation/catalog-cursor.js";
 import { projectConversationCatalog } from "../../../src/orchestrator/conversation/catalog-projector.js";
 import { createConversationRevisionSummary } from "../../../src/orchestrator/conversation/catalog-row.js";
-import { CONVERSATION_DEFAULT_PROJECT_ID } from "../../../src/orchestrator/conversation/conversation-catalog-contract.js";
+import {
+  CONVERSATION_CATALOG_HEALTH,
+  CONVERSATION_DEFAULT_PROJECT_ID,
+} from "../../../src/orchestrator/conversation/conversation-catalog-contract.js";
 import { ConversationHomeCreateBrokerV1 } from "../../../src/orchestrator/conversation/conversation-home-create-authority.js";
 import { ConversationPrivateContextBrokerV1 } from "../../../src/orchestrator/conversation/conversation-private-context-broker-store.js";
 import type { ConversationHomeCreateRequestV1 } from "../../../src/orchestrator/conversation/conversation-private-context-broker-types.js";
@@ -17,7 +20,10 @@ import { ProjectRegistryAuthority } from "../../../src/orchestrator/conversation
 import { readConversationSourceInventory } from "../../../src/orchestrator/conversation/source-inventory.js";
 import { fixtureRecord, installFixture } from "../../helpers/conversation-catalog-fixture.js";
 
-async function projectIdOf(record: ConversationDurableRecord): Promise<unknown> {
+/** A legal registry slug whose `sk-` prefix the public-text sanitizer reads as a credential. */
+const CREDENTIAL_SHAPED_PROJECT_ID = "sk-migration-2026-refactor";
+
+async function projectionOf(record: ConversationDurableRecord) {
   const root = await mkdtemp(join(tmpdir(), "vf-catalog-pid-"));
   try {
     const artifacts = join(root, "artifacts");
@@ -31,18 +37,22 @@ async function projectIdOf(record: ConversationDurableRecord): Promise<unknown> 
     const headRecords = new Map(
       lineages.lineages.map((lineage) => [lineage.root_session_id, lineage.initial_head_candidate]),
     );
-    const projection = projectConversationCatalog({
+    return projectConversationCatalog({
       inventory,
       lineages,
       cursorCodec: new CatalogCursorCodec(Buffer.alloc(32, 7)),
       scopeId: "project:demo",
       headRecords,
     });
-    expect(projection.response.items).toHaveLength(1);
-    return projection.response.items[0]?.root.project_id;
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+async function projectIdOf(record: ConversationDurableRecord): Promise<unknown> {
+  const projection = await projectionOf(record);
+  expect(projection.response.items).toHaveLength(1);
+  return projection.response.items[0]?.root.project_id;
 }
 
 test("a manifest project_id flows through to the catalog DTO", async () => {
@@ -85,6 +95,32 @@ test("a path-bearing project_id is rejected at projection, not silently projecte
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("a registry-legal id the sanitizer rejects still projects a healthy catalog row", async () => {
+  // `sk-migration-2026-refactor` is a legal registry slug; `isSafeCatalogIdentifier` rejects it
+  // because the sanitizer treats the `sk-` prefix as a credential. The projection must use the
+  // field's own grammar, or the row is dropped and the whole catalog goes durably degraded.
+  const value = await createFixture();
+  try {
+    value.registry.create({
+      id: CREDENTIAL_SHAPED_PROJECT_ID,
+      name: "Migration",
+      engine: { cli: "codex", thinking: "medium" },
+    });
+    expect(value.registry.get(CREDENTIAL_SHAPED_PROJECT_ID)?.id).toBe(CREDENTIAL_SHAPED_PROJECT_ID);
+    expect(value.prepare("bound-credential-shaped", CREDENTIAL_SHAPED_PROJECT_ID)).toBeDefined();
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+
+  const projection = await projectionOf(
+    fixtureRecord("pid-credential-shaped", { projectId: CREDENTIAL_SHAPED_PROJECT_ID }),
+  );
+  expect(projection.diagnostics).toEqual([]);
+  expect(projection.response.catalog_health).toBe(CONVERSATION_CATALOG_HEALTH.READY);
+  expect(projection.response.items).toHaveLength(1);
+  expect(projection.response.items[0]?.root.project_id).toBe(CREDENTIAL_SHAPED_PROJECT_ID);
 });
 
 const stamp = (second: number) => new Date(Date.UTC(2026, 7, 26, 3, 0, second)).toISOString();

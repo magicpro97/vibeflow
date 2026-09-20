@@ -88,3 +88,17 @@ test("session association IDs use the exact public association grammar", () => {
   valid.association_ids = [`vf-lineage-association-${"a".repeat(64)}`];
   expect(() => assertConversationSessionSummaryV1(valid)).not.toThrow();
 });
+
+test("project_id uses the closed project grammar, not free text", () => {
+  const path = committedRow();
+  path.root.project_id = "/Users/alice/private/secret-repo";
+  path.active = structuredClone(path.root);
+  expect(() => assertConversationSessionSummaryV1(path)).toThrow(
+    "invalid conversation revision summary",
+  );
+
+  const credentialShaped = committedRow();
+  credentialShaped.root.project_id = "sk-migration-2026-refactor";
+  credentialShaped.active = structuredClone(credentialShaped.root);
+  expect(() => assertConversationSessionSummaryV1(credentialShaped)).not.toThrow();
+});
