@@ -15,7 +15,16 @@
  *
  * The AI seam is nullable and is consulted ONLY when tier 3 is inconclusive, so a runtime with
  * no seam (or no index) is fully deterministic. Every tier re-checks the registry: neither the
- * index nor the model can bind a project that does not exist.
+ * index nor the model can bind a project that does not exist. Retrieval is filtered to the live
+ * registry *before* the confidence gate, because the index outlives registry entries (chat rows
+ * are never deleted), so a deleted project would otherwise win the tier and shadow a real one.
+ *
+ * `confidence` is per-tier evidence, not one shared scale: `repo`/`mention` are exact (1), `ai`
+ * is the model's own probability (floored by {@link AI_MIN_CONFIDENCE}), and `fts` is the
+ * winner's normalized term coverage — the retrieval gate (score above {@link FTS_MIN_SCORE} and
+ * clear of the runner-up by {@link FTS_MIN_MARGIN}) is what makes an `fts` verdict acceptable,
+ * exactly as the 0.6 floor does for `ai`. Consumers that need "how sure" must read `reason`;
+ * an `fts` confidence is not comparable to an `ai` confidence.
  */
 import {
   AI_MIN_CONFIDENCE,
@@ -77,7 +86,11 @@ export class ProjectClassifierAuthority {
     });
     if (deterministic.reason !== "fallback") return deterministic;
 
-    const hits = this.retrieve(input.message);
+    // The index outlives registry entries (chat rows are never deleted), so retrieval can name
+    // a project that no longer exists. Drop those first: an unregistered winner is not a hit at
+    // all, and leaving it in would both bind a phantom and hide a real runner-up behind it.
+    const registered = new Set(projects.map((project) => project.id));
+    const hits = this.retrieve(input.message).filter((hit) => registered.has(hit.project_id));
     if (isConfidentHit(hits)) {
       const [top] = hits;
       if (top !== undefined)
@@ -86,8 +99,7 @@ export class ProjectClassifierAuthority {
 
     const proposal = await this.ask(input.message, projects, hits);
     if (proposal !== undefined) {
-      const registered = projects.some((project) => project.id === proposal.project_id);
-      if (registered && proposal.confidence >= AI_MIN_CONFIDENCE)
+      if (registered.has(proposal.project_id) && proposal.confidence >= AI_MIN_CONFIDENCE)
         return { project_id: proposal.project_id, confidence: proposal.confidence, reason: "ai" };
     }
     return deterministic;

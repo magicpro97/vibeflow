@@ -21,13 +21,21 @@ import type {
 
 /** Message characters forwarded to the model; a classifier does not need an essay. */
 export const PROPOSAL_MESSAGE_MAX_LENGTH = 2000;
+/** Longest goal/context excerpt per project, so one verbose project cannot crowd out the rest. */
+export const PROPOSAL_PROJECT_FIELD_MAX_LENGTH = 400;
+/**
+ * Total catalogue characters. Without it the prompt grows with the registry: at
+ * `PROJECT_LIMIT` × `PROJECT_CONTEXT_MAX_LENGTH` the catalogue alone reaches ~5 MB, sent to a
+ * bridge call on a 10 s timeout. This bounds the prompt independently of registry size.
+ */
+export const PROPOSAL_CATALOGUE_MAX_LENGTH = 20_000;
 
-/** One line per project: id, name, and the goal/context a match may hinge on. */
+/** One line per project: id, name, and an excerpt of the goal/context a match may hinge on. */
 export function buildProjectProposalPrompt(request: ProjectProposalRequest): string {
-  const catalogue = request.projects
+  const rendered = request.projects
     .map((project) => {
-      const goal = asText(project.goal);
-      const context = asText(project.context);
+      const goal = asText(project.goal).slice(0, PROPOSAL_PROJECT_FIELD_MAX_LENGTH);
+      const context = asText(project.context).slice(0, PROPOSAL_PROJECT_FIELD_MAX_LENGTH);
       const details = [
         goal === "" ? "" : `goal: ${goal}`,
         context === "" ? "" : `context: ${context}`,
@@ -37,6 +45,11 @@ export function buildProjectProposalPrompt(request: ProjectProposalRequest): str
       return `- ${project.id}${details === "" ? "" : ` (${details})`}`;
     })
     .join("\n");
+  // Truncation is marked: a silently clipped list would read as "the registry ends here".
+  const catalogue =
+    rendered.length > PROPOSAL_CATALOGUE_MAX_LENGTH
+      ? `${rendered.slice(0, PROPOSAL_CATALOGUE_MAX_LENGTH)}\n- (catalogue truncated)`
+      : rendered;
   return [
     "You are a project classifier. Decide which project the user message belongs to.",
     "Reply with exactly one line of JSON:",

@@ -7,8 +7,10 @@
  * certain, so the confidence is 1 and no later tier ever runs.
  *
  * Everything below tier 2 lives in `project-classifier-authority.ts`, which threads the FTS
- * index and the AI seam. This module stays pure: no I/O, no index, no AI.
+ * index and the AI seam. This module stays pure apart from the one `realpath` call needed to
+ * canonicalize repo paths: no index, no AI.
  */
+import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { CONVERSATION_DEFAULT_PROJECT_ID } from "./conversation-catalog-contract.js";
 
@@ -82,20 +84,39 @@ function mentionSlugs(message: string): string[] {
 }
 
 /**
+ * Canonical path form shared by both sides of the repo tier — the registry's `repos[]` and the
+ * conversation's `repo_root`. `realpathSync` resolves symlinks (macOS `/tmp` → `/private/tmp`,
+ * any symlinked project dir), so a registry entry stored from an importer-supplied symlink still
+ * matches bootstrap's `realpathSync(resolve(repoRoot))`. A path that does not exist resolves
+ * literally, which still folds `.` and `..`; the caller never sees a throw.
+ */
+export function canonicalRepoPath(value: string): string {
+  const absolute = resolve(value);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+/**
  * The project whose `repos[]` contains the conversation's repo root. An exact path or any
  * descendant counts (a conversation opened in `repo/services/api/src` belongs to the project
- * that imported `repo/services/api`); the most specific import wins.
+ * that imported `repo/services/api`); the most specific import wins. Both sides are canonicalized
+ * identically, so an explicit import is never lost to a canonicalization mismatch. The prefix
+ * compare is byte-exact, so `REAL-PROJ` and `real-proj` are distinct even on a case-insensitive
+ * filesystem — both sides normally come from the same picker, so this has not bitten.
  */
 export function matchProjectRepo(
   projects: readonly ClassifierProject[],
   repoRoot: string | undefined,
 ): string | undefined {
   if (repoRoot === undefined || repoRoot.trim() === "") return undefined;
-  const root = resolve(repoRoot);
+  const root = canonicalRepoPath(repoRoot);
   let winner: { id: string; length: number } | undefined;
   for (const project of projects) {
     for (const repo of project.repos) {
-      const absolute = resolve(repo);
+      const absolute = canonicalRepoPath(repo);
       if (root !== absolute && !root.startsWith(absolute.endsWith(sep) ? absolute : absolute + sep))
         continue;
       if (winner === undefined || absolute.length > winner.length)

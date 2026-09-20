@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ProjectClassifierAuthority } from "../../src/orchestrator/conversation/project-classifier-authority.js";
 import {
   AI_MIN_CONFIDENCE,
@@ -16,7 +19,10 @@ import {
   openProjectIndex,
   searchProjectScores,
 } from "../../src/orchestrator/conversation/project-fts.js";
+import { PROJECT_LIMIT } from "../../src/orchestrator/conversation/project-types.js";
 import {
+  PROPOSAL_CATALOGUE_MAX_LENGTH,
+  PROPOSAL_PROJECT_FIELD_MAX_LENGTH,
   buildProjectProposalPrompt,
   makeProjectProposalFn,
   parseProjectProposal,
@@ -83,6 +89,42 @@ describe("classifyMessage — deterministic tiers", () => {
     expect(classifyMessage("x", { ...ctx(), repo_root: "/tmp/elsewhere" }).reason).toBe("fallback");
   });
 
+  test("repo_root under a descendant path prefix does not match a sibling", () => {
+    // `/Users/me/search-api` must not resolve to the project that imported `/Users/me/search`.
+    expect(classifyMessage("x", { ...ctx(), repo_root: "/Users/me/search-api" }).reason).toBe(
+      "fallback",
+    );
+  });
+
+  test("two projects importing the same repo resolve to the earlier one", () => {
+    const shared: ClassifierProject[] = [
+      { id: "first", repos: ["/Users/me/shared"] },
+      { id: "second", repos: ["/Users/me/shared"] },
+    ];
+    // Equal specificity ⇒ first registered wins; a `>=` comparison would flip this to `second`.
+    expect(
+      classifyMessage("x", { projects: shared, repo_root: "/Users/me/shared" }).project_id,
+    ).toBe("first");
+  });
+
+  test("a symlinked project directory still matches a realpath'd conversation root", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-project-repo-"));
+    try {
+      const real = join(root, "real");
+      mkdirSync(join(real, "nested"), { recursive: true });
+      const link = join(root, "link");
+      symlinkSync(real, link);
+      // Registry stores what the importer handed over (symlink preserved); bootstrap stores the
+      // realpath (`bootstrap.ts` `realpathSync(resolve(repoRoot))`). Both sides must canonicalize
+      // the same way or an explicit import silently loses to the fallback.
+      const projects: ClassifierProject[] = [{ id: "linked", repos: [join(link, "nested")] }];
+      const repoRoot = join(realpathSync(link), "nested");
+      expect(classifyMessage("x", { projects, repo_root: repoRoot }).project_id).toBe("linked");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("repo wins over an @mention of a different project", () => {
     const result = classifyMessage("@infra look here", {
       ...ctx(),
@@ -125,8 +167,27 @@ describe("project FTS5 index (bun:sqlite)", () => {
 
   test("descriptor rows are replaced on reindex, not appended", () => {
     const db = seeded();
-    indexProjectDescriptors(db, PROJECTS);
-    expect(searchProjectScores(db, "kubernetes").map((h) => h.project_id)).toEqual(["infra"]);
+    const edited: ClassifierProject[] = PROJECTS.map((project) =>
+      project.id === "infra"
+        ? { ...project, goal: "Nomad and Consul service mesh operations", context: "" }
+        : project,
+    );
+    indexProjectDescriptors(db, edited);
+    // Descriptors are derived state, so a retired descriptor must be gone. An appending
+    // reindex would leave `kubernetes` matching text the registry no longer holds.
+    expect(searchProjectScores(db, "kubernetes")).toEqual([]);
+    expect(searchProjectScores(db, "nomad consul")[0]?.project_id).toBe("infra");
+  });
+
+  test("reindexing without a project drops that project's descriptor rows", () => {
+    const db = seeded();
+    // A deleted project's descriptor text must stop matching, or the tier keeps naming a
+    // project the registry no longer holds.
+    indexProjectDescriptors(
+      db,
+      PROJECTS.filter((project) => project.id !== "infra"),
+    );
+    expect(searchProjectScores(db, "kubernetes")).toEqual([]);
   });
 
   test("a distinctive query scores its project top with a wide margin", () => {
@@ -156,10 +217,11 @@ describe("project FTS5 index (bun:sqlite)", () => {
     }
   });
 
-  test("FTS5 syntax characters in a query are sanitized, never executed as syntax", () => {
+  test("FTS5 syntax characters in a query are inert, never executed as syntax", () => {
     const db = seeded();
-    // The raw string would be a syntax error if interpolated; quoting each term makes it a
-    // literal search, so this cannot throw and cannot widen the match.
+    // The term split admits only letters/digits, so an operator (`AND`, `NEAR`, `"`) can never
+    // reach `MATCH` as syntax. Quoting each term is belt-and-braces on top of that, so a hostile
+    // query is a plain literal search — it cannot throw and cannot widen the match.
     for (const query of ['"', "NEAR(", "AND OR (", "*", "a -b"]) {
       expect(() => searchProjectScores(db, query)).not.toThrow();
       expect(searchProjectScores(db, query).every((hit) => hit.score <= 100)).toBe(true);
@@ -367,6 +429,66 @@ describe("ProjectClassifierAuthority — tier order", () => {
       "fallback",
     );
   });
+
+  test("the boundary rows drive a real classification, not just the predicate", async () => {
+    const at = (top: number, second: number) =>
+      new ProjectClassifierAuthority({
+        projects: () => PROJECTS,
+        index: {
+          search: () => [
+            { project_id: "infra", score: top },
+            { project_id: "search-api", score: second },
+          ],
+        },
+      });
+    // score == floor is inconclusive even with a wide margin …
+    expect((await at(FTS_MIN_SCORE, 0).classify({ message: "q" })).reason).toBe("fallback");
+    // … a margin exactly at the minimum is a tie, not a win …
+    expect(
+      (await at(FTS_MIN_SCORE + 1, FTS_MIN_SCORE + 1 - FTS_MIN_MARGIN).classify({ message: "q" }))
+        .reason,
+    ).toBe("fallback");
+    // … and one point past both boundaries binds.
+    expect(
+      await at(FTS_MIN_SCORE + 1, FTS_MIN_SCORE - FTS_MIN_MARGIN).classify({ message: "q" }),
+    ).toEqual({ project_id: "infra", confidence: (FTS_MIN_SCORE + 1) / 100, reason: "fts" });
+  });
+
+  test("an FTS winner missing from the registry is not bound", async () => {
+    // The index holds chat rows for projects that may since have been deleted, so retrieval can
+    // name a project the live registry does not contain. It must fall through, never bind.
+    const db = openProjectIndex(":memory:");
+    indexProjectChat(db, "deleted-proj", "kafka consumer rebalance storm");
+    const authorityInstance = new ProjectClassifierAuthority({
+      projects: () => PROJECTS,
+      index: { search: (query) => searchProjectScores(db, query) },
+    });
+    expect(await authorityInstance.classify({ message: "kafka consumer rebalance storm" })).toEqual(
+      { project_id: "idea", confidence: 0, reason: "fallback" },
+    );
+  });
+
+  test("an unregistered FTS winner falls through to the AI tier", async () => {
+    const db = openProjectIndex(":memory:");
+    indexProjectChat(db, "deleted-proj", "kafka consumer rebalance storm");
+    const asked: string[] = [];
+    const authorityInstance = new ProjectClassifierAuthority({
+      projects: () => PROJECTS,
+      index: { search: (query) => searchProjectScores(db, query) },
+      propose: async (request) => {
+        asked.push(request.message);
+        return { project_id: "infra", confidence: 0.9 };
+      },
+    });
+    expect(await authorityInstance.classify({ message: "kafka consumer rebalance storm" })).toEqual(
+      {
+        project_id: "infra",
+        confidence: 0.9,
+        reason: "ai",
+      },
+    );
+    expect(asked).toEqual(["kafka consumer rebalance storm"]);
+  });
 });
 
 describe("project-classify skill seam", () => {
@@ -465,5 +587,30 @@ describe("project-classify skill seam", () => {
       candidates: [],
     });
     expect(prompt).toContain("- bare");
+  });
+
+  test("a verbose project's prose is excerpted, not forwarded whole", () => {
+    const verbose = "z".repeat(PROPOSAL_PROJECT_FIELD_MAX_LENGTH * 4);
+    const prompt = buildProjectProposalPrompt({
+      message: "x",
+      projects: [{ id: "loud", repos: [], goal: verbose, context: verbose }],
+      candidates: [],
+    });
+    expect(prompt).toContain("z".repeat(PROPOSAL_PROJECT_FIELD_MAX_LENGTH));
+    expect(prompt).not.toContain("z".repeat(PROPOSAL_PROJECT_FIELD_MAX_LENGTH + 1));
+  });
+
+  test("a full registry stays inside the catalogue budget and marks truncation", () => {
+    // Worst case the registry admits: every project at its prose limits. The prompt must stay
+    // bounded independently of registry size, not grow to megabytes.
+    const projects: ClassifierProject[] = Array.from({ length: PROJECT_LIMIT }, (_, index) => ({
+      id: `project-${index}`,
+      repos: [],
+      goal: "g".repeat(4000),
+      context: "c".repeat(16000),
+    }));
+    const prompt = buildProjectProposalPrompt({ message: "x", projects, candidates: [] });
+    expect(prompt).toContain("(catalogue truncated)");
+    expect(prompt.length).toBeLessThan(PROPOSAL_CATALOGUE_MAX_LENGTH + 5_000);
   });
 });
