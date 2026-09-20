@@ -1,4 +1,5 @@
 import { validateIdempotencyKey } from "../../actions/idempotency.js";
+import { isConversationProjectId } from "./conversation-catalog-contract.js";
 import { queueExactKeys, queueRecord } from "./conversation-message-queue-validation.js";
 import {
   CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS,
@@ -205,7 +206,8 @@ export function assertConversationHomeCreateRequestV1(
     (value.max_rounds !== undefined &&
       (!Number.isSafeInteger(value.max_rounds) ||
         (value.max_rounds as number) < CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.minRounds ||
-        (value.max_rounds as number) > CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.maxRounds))
+        (value.max_rounds as number) > CONVERSATION_PRIVATE_CONTEXT_BROKER_LIMITS.maxRounds)) ||
+    (value.project_id !== undefined && !isConversationProjectId(value.project_id))
   )
     throw new Error("invalid Home create options");
   if (value.participants === undefined) return;

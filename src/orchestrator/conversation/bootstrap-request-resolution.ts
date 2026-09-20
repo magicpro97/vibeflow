@@ -274,6 +274,7 @@ export function createConversationRequestResolvers({
       evaluatorAutoAdded: selection.evaluatorAutoAdded,
       repoRoot,
       phase,
+      ...(request.project_id === undefined ? {} : { projectId: request.project_id }),
       ...(request.private_file_range
         ? { private_file_range: structuredClone(request.private_file_range) }
         : {}),
@@ -321,6 +322,7 @@ export function createConversationRequestResolvers({
       evaluatorAutoAdded: selection.evaluatorAutoAdded,
       repoRoot,
       phase,
+      ...(request.project_id === undefined ? {} : { projectId: request.project_id }),
       ...(request.private_file_range
         ? { private_file_range: structuredClone(request.private_file_range) }
         : {}),

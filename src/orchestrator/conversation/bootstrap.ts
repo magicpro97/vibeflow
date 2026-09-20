@@ -43,6 +43,7 @@ import { ConversationLineageService } from "./lineage-service.js";
 import { OrchestrateConversationPolicy } from "./orchestrate-policy.js";
 import { PlanConversationPolicy } from "./plan-policy.js";
 import { ConversationPolicyRegistry } from "./policy-registry.js";
+import { ProjectRegistryAuthority } from "./project-registry-authority.js";
 import { ReviewConversationPolicy, createReviewEvidenceAuthority } from "./review-policy.js";
 import { ConversationOrchestrator } from "./service.js";
 import {
@@ -69,6 +70,8 @@ export interface ConversationBootstrapOptions extends ConversationRequestResolut
   repoRoot: string;
   libraries: ConversationBootstrapLibraries;
   stateDir?: string;
+  /** Project registry directory; defaults to `<repoRoot>/.vibeflow/projects`. */
+  projectsDir?: string;
   phase?: number;
   session?: EngineSessionAdapterOptions;
   mirror?: TraceStoreOptions["mirror"];
@@ -106,6 +109,7 @@ export interface ConversationBootstrap {
     traceStore: TraceStore;
     artifactStore: ConversationArtifactStore;
     homeAuthorities: ConversationHomeAuthorities;
+    projects: ProjectRegistryAuthority;
     policies: ConversationPolicyRegistry;
     agentActionCandidates: ConversationAgentActionCandidateAuthorityV1;
     coordinationWorkspaces: ConversationDelegationWorkspaceAuthorityV1;
@@ -155,6 +159,9 @@ export function createConversationBootstrap(
     home: homeAuthorities,
   });
   const now = options.now ?? (() => new Date().toISOString());
+  const projects = new ProjectRegistryAuthority({
+    root: resolve(options.projectsDir ?? join(repoRoot, ".vibeflow", "projects")),
+  });
   const privateContextBroker = new ConversationPrivateContextBrokerV1({
     artifactRoot,
     repoRoot,
@@ -268,6 +275,7 @@ export function createConversationBootstrap(
     coordinationWorkspaces,
     privateContextBroker,
     messageQueueUserAuthority,
+    projects,
     sessionAdapter,
     policies,
     onConversationSourceCommitted: (event) =>
@@ -325,6 +333,7 @@ export function createConversationBootstrap(
       traceStore,
       artifactStore,
       homeAuthorities,
+      projects,
       policies,
       agentActionCandidates,
       coordinationWorkspaces,

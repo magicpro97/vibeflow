@@ -9,6 +9,7 @@ import {
   StaleCatalogCursorError,
 } from "../../src/orchestrator/conversation/catalog-cursor.js";
 import { projectConversationCatalog } from "../../src/orchestrator/conversation/catalog-projector.js";
+import { CONVERSATION_DEFAULT_PROJECT_ID } from "../../src/orchestrator/conversation/conversation-catalog-contract.js";
 import { deriveConversationLineages } from "../../src/orchestrator/conversation/lineage-reader.js";
 import { readConversationSourceInventory } from "../../src/orchestrator/conversation/source-inventory.js";
 import {
@@ -99,7 +100,7 @@ test("catalog projects one safe searchable root row and matches historical revis
     expect(projection.response.source_watermark).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(JSON.stringify(projection.response)).not.toContain(CATALOG_FIXTURE_SECRET);
     expect(JSON.stringify(projection.response)).not.toContain("/Users/private");
-    expect(projection.response.items[0]?.root.project_id).toBe("workspace");
+    expect(projection.response.items[0]?.root.project_id).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
     expect(Object.keys(projection.response.items[0]?.active?.participants[0] ?? {}).sort()).toEqual(
       ["engine", "model", "participant_id", "role_ref"],
     );

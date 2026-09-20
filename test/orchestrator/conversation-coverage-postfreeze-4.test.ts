@@ -170,6 +170,7 @@ function conversationManifest(input: {
     baseline_enabled: false,
     evaluator_auto_added: false,
     repo_root: "/repo",
+    project_id: "idea",
     phase: 3,
     task_text: "prove divergent publication rejection",
     bindings: [

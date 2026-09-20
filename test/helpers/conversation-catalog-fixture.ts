@@ -15,6 +15,8 @@ export interface CatalogFixtureRecordOptions {
   children?: string[];
   topic?: string;
   repoRoot?: string;
+  /** Omitted entirely for a legacy record, which reads back as the default project. */
+  projectId?: string;
 }
 
 export function fixtureRecord(
@@ -36,6 +38,7 @@ export function fixtureRecord(
       baseline_enabled: true,
       evaluator_auto_added: false,
       repo_root: options.repoRoot ?? DEFAULT_REPO_ROOT,
+      ...(options.projectId === undefined ? {} : { project_id: options.projectId }),
       phase: 1,
       task_text: CATALOG_FIXTURE_SECRET,
       bindings: [

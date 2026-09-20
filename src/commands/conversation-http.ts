@@ -57,6 +57,7 @@ export function buildConversationHttpAuthority(
     bootstrap.authorities.artifactStore.rootPath(),
     bootstrap.authorities.homeAuthorities.now,
     bootstrap.authorities.privateContextBroker,
+    bootstrap.authorities.projects,
   );
   const messageQueue: ConversationMessageQueueHttpAuthorityV1["queue"] = {
     assertRoot: (rootSessionId: string) => {
@@ -122,6 +123,7 @@ export function buildConversationHttpAuthority(
               ? {}
               : { participants: structuredClone(request.participants) }),
             ...(request.max_rounds === undefined ? {} : { max_rounds: request.max_rounds }),
+            ...(request.project_id === undefined ? {} : { project_id: request.project_id }),
           },
           ...(prepared.private_file_range
             ? { private_file_range: prepared.private_file_range }

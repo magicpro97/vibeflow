@@ -8,6 +8,7 @@ import type { ConversationAgentActionCandidateAuthorityV1 } from "./conversation
 import type { ConversationDelegationWorkspaceAuthorityV1 } from "./conversation-delegation-workspace.js";
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import type { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
+import type { ConversationProjectIdPort } from "./conversation-project-binding.js";
 import type { ConversationSocialAuthorityV1 } from "./conversation-social-authority.js";
 import type { ConversationUserMessageAuthorityV1 } from "./conversation-user-message-authority.js";
 import type {
@@ -40,6 +41,8 @@ export interface ConversationRuntimeOptions {
   coordinationWorkspaces?: ConversationDelegationWorkspaceAuthorityV1;
   privateContextBroker?: ConversationPrivateContextBrokerV1;
   messageQueueUserAuthority?: ConversationUserMessageAuthorityV1;
+  /** Project registry port; omitted means only the default project can be bound. */
+  projects?: ConversationProjectIdPort;
   /** Test/process-crash seam; throwing leaves durable authority for restart recovery. */
   revisionFault?(point: RevisionCrashPointV1): void;
   resolveCreateRequest?(request: ConversationCreateRequest): Promise<RuntimeCreateRequest>;

@@ -24,6 +24,8 @@ export type ConversationAskCompatibilityRequestV1 =
       kind: typeof CONVERSATION_ASK_COMPATIBILITY_REQUEST_KIND.FRESH;
       question: string;
       engine?: Engine;
+      /** Project to classify the new conversation into; omitted means the default project. */
+      project_id?: string;
       repo_relative_path: string;
       start_line: number;
       end_line: number;
@@ -105,6 +107,7 @@ export class ConversationAskCompatibilityV1 {
             }
           : {}),
         max_rounds: 1,
+        ...(request.project_id === undefined ? {} : { project_id: request.project_id }),
         private_context_present: true,
       },
     });
@@ -122,6 +125,7 @@ export class ConversationAskCompatibilityV1 {
             }
           : {}),
         max_rounds: 1,
+        ...(request.project_id === undefined ? {} : { project_id: request.project_id }),
       },
       ...(prepared.private_file_range ? { private_file_range: prepared.private_file_range } : {}),
       before_publish: (digest) => prepared.beforePublish(digest),

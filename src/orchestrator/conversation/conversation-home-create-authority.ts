@@ -17,6 +17,10 @@ import type { ConversationPrivateContextBrokerV1 } from "./conversation-private-
 import type { ConversationHomeCreateRequestV1 } from "./conversation-private-context-broker-types.js";
 import { assertConversationHomeCreateRequestV1 } from "./conversation-private-context-broker-validation.js";
 import { ConversationPrivateContextBrokerConflictError } from "./conversation-private-context-broker-validation.js";
+import {
+  type ConversationProjectIdPort,
+  assertConversationProjectId,
+} from "./conversation-project-binding.js";
 import type { PrivateFileRangeHandoffBindingV1 } from "./private-file-range-staging-store.js";
 
 export interface ConversationHomeCreateAllocationV1 {
@@ -50,6 +54,8 @@ function requestDigest(
     owner_principal_digest: principalDigest,
     create_idempotency_key_digest: keyDigest,
     topic: request.topic,
+    // Only present when bound, so digests of pre-existing records stay byte-identical.
+    ...(request.project_id === undefined ? {} : { project_id: request.project_id }),
     ...(request.policy === undefined ? {} : { policy: request.policy }),
     ...(request.participants === undefined
       ? {}
@@ -73,10 +79,17 @@ export class ConversationHomeCreateAuthorityV1 {
   constructor(
     artifactRoot: string,
     private readonly now: () => string,
+    private readonly projects?: ConversationProjectIdPort,
   ) {
     const root = ensurePrivateDirectory(join(resolve(artifactRoot), "conversation-drafts", "v1"));
     this.records = ensurePrivateDirectory(join(root, "create-idempotency"));
     this.lockPath = join(root, "create-idempotency.writer.lock");
+  }
+
+  /** Shape check plus the project binding, which needs the registry and so lives here. */
+  assertRequest(request: ConversationHomeCreateRequestV1): void {
+    assertConversationHomeCreateRequestV1(request);
+    assertConversationProjectId(this.projects, request.project_id);
   }
 
   private path(principalDigest: string, keyDigest: string): string {
@@ -119,7 +132,7 @@ export class ConversationHomeCreateAuthorityV1 {
     canonical_request_digest: string;
     created_at: string;
   } | null {
-    assertConversationHomeCreateRequestV1(input.request);
+    this.assertRequest(input.request);
     const keyDigest = createIdempotencyKeyDigest(input.request.idempotency_key);
     const canonicalRequestDigest = requestDigest(input.principal_digest, keyDigest, input.request);
     const lock = acquireProcessLock(this.lockPath, {
@@ -162,7 +175,7 @@ export class ConversationHomeCreateAuthorityV1 {
     canonical_request_digest: string;
     created_at: string;
   } {
-    assertConversationHomeCreateRequestV1(input.request);
+    this.assertRequest(input.request);
     const keyDigest = createIdempotencyKeyDigest(input.request.idempotency_key);
     const canonicalRequestDigest = requestDigest(input.principal_digest, keyDigest, input.request);
     const path = this.path(input.principal_digest, keyDigest);
@@ -255,8 +268,9 @@ export class ConversationHomeCreateBrokerV1 {
     artifactRoot: string,
     now: () => string,
     private readonly privateContext: ConversationPrivateContextBrokerV1,
+    projects?: ConversationProjectIdPort,
   ) {
-    this.creates = new ConversationHomeCreateAuthorityV1(artifactRoot, now);
+    this.creates = new ConversationHomeCreateAuthorityV1(artifactRoot, now, projects);
     this.privateContext.bindDraftCreateAuthority({
       hasBinding: (principalDigest, createIdempotencyKey) =>
         this.creates.hasBinding(principalDigest, createIdempotencyKey),
@@ -267,7 +281,7 @@ export class ConversationHomeCreateBrokerV1 {
     principal_digest: string;
     request: ConversationHomeCreateRequestV1;
   }): PreparedConversationHomeCreateV1 {
-    assertConversationHomeCreateRequestV1(input.request);
+    this.creates.assertRequest(input.request);
     const existing = this.creates.inspect(input);
     const transfer = input.request.private_context_present
       ? this.privateContext.mutations.prepareDraftTransfer({

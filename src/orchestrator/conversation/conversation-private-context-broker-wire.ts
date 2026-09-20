@@ -147,6 +147,7 @@ export interface ConversationHomeCreateWireRequestV1<
   policy?: string;
   participants?: Participant[];
   max_rounds?: number;
+  project_id?: string;
   private_context_present: boolean;
 }
 
@@ -166,6 +167,7 @@ export const CONVERSATION_PRIVATE_CONTEXT_WIRE_FIELD = Object.freeze({
   POLICY: "policy",
   PARTICIPANTS: "participants",
   MAX_ROUNDS: "max_rounds",
+  PROJECT_ID: "project_id",
   ROLE_REF: "role_ref",
   ENGINE: "engine",
   MODEL: "model",
@@ -307,6 +309,7 @@ export const CONVERSATION_PRIVATE_CONTEXT_BROKER_FIELDS = Object.freeze({
     field.POLICY,
     field.PARTICIPANTS,
     field.MAX_ROUNDS,
+    field.PROJECT_ID,
   ] as const satisfies readonly (keyof ConversationHomeCreateWireRequestV1)[]),
   HOME_CREATE_PARTICIPANT: Object.freeze([
     field.ROLE_REF,

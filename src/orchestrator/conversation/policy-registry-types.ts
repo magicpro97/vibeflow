@@ -20,6 +20,8 @@ export interface RuntimeCreateRequest {
   baselineEnabled?: boolean;
   evaluatorAutoAdded?: boolean;
   repoRoot: string;
+  /** Project classification target; omitted means the default project. */
+  projectId?: string;
   phase: number;
   bindings: RuntimeBinding[];
   parent?: { conversationId: string; revisionId: string };

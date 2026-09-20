@@ -2,6 +2,7 @@ import {
   projectRuntimeCreateRequest,
   projectRuntimePreviewRequest,
 } from "./boundary-projection.js";
+import { assertConversationProjectId } from "./conversation-project-binding.js";
 import { snapshotRuntimeValue } from "./emission-authority.js";
 import type { RuntimeCreateRequest, RuntimePreviewRequest } from "./policy-registry.js";
 import type { ConversationRuntime, ConversationRuntimeOptions } from "./runtime.js";
@@ -40,6 +41,7 @@ export class ConversationRequestMaterializer {
       baseline_enabled: request.baselineEnabled ?? true,
       evaluator_auto_added: request.evaluatorAutoAdded ?? false,
       repo_root: request.repoRoot,
+      project_id: assertConversationProjectId(this.options.projects, request.projectId),
       phase: request.phase,
       task_text: request.topic,
       bindings: request.bindings.map((binding) => ({
