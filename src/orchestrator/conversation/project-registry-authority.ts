@@ -1,8 +1,11 @@
 /**
  * Project registry policy: the only sanctioned way to mutate the registry.
  *
- * Every mutation validates the request, reloads the latest manifest, and persists through
- * {@link ProjectRegistryStore}, so duplicate ids and invalid slugs can never reach disk.
+ * Every mutation validates the request, then persists through {@link ProjectRegistryStore}
+ * with a mutator applied to the projects read *inside* the store's write lock, so a caller
+ * holding a stale snapshot composes with concurrent writers instead of clobbering them.
+ * Duplicate-id and field checks therefore hold on the committed list; the store re-validates
+ * that same list before staging it, so a bad entry still cannot reach disk.
  */
 import { ProjectRegistryStore } from "./project-registry-store.js";
 import {
@@ -53,7 +56,7 @@ export class ProjectRegistryAuthority {
   }
 
   list(): ProjectV1[] {
-    return this.store.read().projects.map((project) => structuredClone(project) as ProjectV1);
+    return this.store.read().projects.map((project) => structuredClone(project));
   }
 
   get(id: string): ProjectV1 | undefined {
@@ -72,43 +75,52 @@ export class ProjectRegistryAuthority {
       engine: assertProjectEngineV1(request.engine),
       created_at: new Date().toISOString(),
     };
-    const projects = this.list();
-    if (projects.some((existing) => existing.id === project.id))
-      return reject(`project ${project.id} already exists`);
-    this.store.commit([...projects, project]);
-    return structuredClone(project) as ProjectV1;
+    this.store.commit((current) => {
+      if (current.some((existing) => existing.id === project.id))
+        return reject(`project ${project.id} already exists`);
+      return [...current, project];
+    });
+    return structuredClone(project);
   }
 
   /** Patch fields; `id` and `created_at` are immutable, every other field is optional. */
   update(id: string, patch: ProjectUpdateRequestV1): ProjectV1 {
-    const existing = this.get(id);
-    if (!existing) return reject(`unknown project ${id}`);
+    assertProjectSlug(id);
     if (typeof patch !== "object" || patch === null)
       return reject("project update request must be an object");
-    const updated: ProjectV1 = {
-      ...existing,
-      name:
-        patch.name === undefined
-          ? existing.name
-          : assertText(patch.name, "name", PROJECT_NAME_MAX_LENGTH),
-      goal:
-        patch.goal === undefined
-          ? existing.goal
-          : assertText(patch.goal, "goal", PROJECT_GOAL_MAX_LENGTH),
-      context:
-        patch.context === undefined
-          ? existing.context
-          : assertText(patch.context, "context", PROJECT_CONTEXT_MAX_LENGTH),
-      repos: patch.repos === undefined ? existing.repos : normalizeProjectRepos(patch.repos),
-      engine: patch.engine === undefined ? existing.engine : assertProjectEngineV1(patch.engine),
-    };
-    this.store.commit(this.list().map((project) => (project.id === id ? updated : project)));
-    return structuredClone(updated) as ProjectV1;
+    const manifest = this.store.commit((current) => {
+      const existing = current.find((project) => project.id === id);
+      if (!existing) return reject(`unknown project ${id}`);
+      const updated: ProjectV1 = {
+        ...existing,
+        name:
+          patch.name === undefined
+            ? existing.name
+            : assertText(patch.name, "name", PROJECT_NAME_MAX_LENGTH),
+        goal:
+          patch.goal === undefined
+            ? existing.goal
+            : assertText(patch.goal, "goal", PROJECT_GOAL_MAX_LENGTH),
+        context:
+          patch.context === undefined
+            ? existing.context
+            : assertText(patch.context, "context", PROJECT_CONTEXT_MAX_LENGTH),
+        repos: patch.repos === undefined ? existing.repos : normalizeProjectRepos(patch.repos),
+        engine: patch.engine === undefined ? existing.engine : assertProjectEngineV1(patch.engine),
+      };
+      return current.map((project) => (project.id === id ? updated : project));
+    });
+    // `commit` re-validated the list it persisted, so this is the exact stored project.
+    return structuredClone(
+      manifest.projects.find((project) => project.id === id) ?? reject(`unknown project ${id}`),
+    );
   }
 
   delete(id: string): void {
-    const projects = this.list();
-    if (!projects.some((project) => project.id === id)) reject(`unknown project ${id}`);
-    this.store.commit(projects.filter((project) => project.id !== id));
+    assertProjectSlug(id);
+    this.store.commit((current) => {
+      if (!current.some((project) => project.id === id)) return reject(`unknown project ${id}`);
+      return current.filter((project) => project.id !== id);
+    });
   }
 }

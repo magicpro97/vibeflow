@@ -7,36 +7,38 @@ import {
   ProjectRegistryAuthority,
 } from "../../src/orchestrator/conversation/project-registry-authority.js";
 import {
+  MAX_PROJECT_REGISTRY_BYTES,
   ProjectRegistryCorruptError,
   ProjectRegistryStore,
 } from "../../src/orchestrator/conversation/project-registry-store.js";
 import {
+  PROJECT_LIMIT,
   PROJECT_SCHEMA_VERSION,
   PROJECT_SLUG_PATTERN,
-  PROJECT_THINKING,
+  type ProjectV1,
   ProjectValidationError,
   assertProjectSlug,
-  isProjectThinking,
   normalizeProjectRepos,
 } from "../../src/orchestrator/conversation/project-types.js";
 
 const CREATED_AT = "2026-09-20T00:00:00.000Z";
+const FIXTURE_REPO = resolve(join(tmpdir(), "vf-project-fixture"));
 
 const CREATE: ProjectCreateRequestV1 = {
   id: "hermes",
   name: "Hermes",
   goal: "Ship project classification",
   context: "Local-first orchestrator",
-  repos: ["./repo"],
+  repos: [FIXTURE_REPO],
   engine: { cli: "claude", thinking: "auto" },
 };
 
-const VALID_PROJECT = {
+const VALID_PROJECT: ProjectV1 = {
   id: "hermes",
   name: "Hermes",
   goal: "g",
   context: "c",
-  repos: [resolve(".")],
+  repos: [FIXTURE_REPO],
   engine: { cli: "claude", model: null, thinking: "auto" },
   created_at: CREATED_AT,
 };
@@ -69,6 +71,30 @@ function writeDocument(root: string, document: unknown): void {
   );
 }
 
+function messageOf(run: () => unknown): string {
+  try {
+    run();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return "";
+}
+
+/**
+ * Test seam: a reader whose `list()` returns a snapshot taken before a competing writer
+ * landed. Pre-fix, `create()` derived its payload from this snapshot and dropped the
+ * competing project; post-fix the mutator reads the on-disk state under the write lock.
+ */
+class StaleSnapshotAuthority extends ProjectRegistryAuthority {
+  snapshot: readonly ProjectV1[] | null = null;
+
+  override list(): ProjectV1[] {
+    return this.snapshot === null
+      ? super.list()
+      : this.snapshot.map((project) => structuredClone(project));
+  }
+}
+
 describe("project slug, engine, and repo vocabulary", () => {
   test("slug authority accepts lowercase-hyphen ids and rejects everything else", () => {
     expect(PROJECT_SLUG_PATTERN.test("hermes-2")).toBe(true);
@@ -76,13 +102,6 @@ describe("project slug, engine, and repo vocabulary", () => {
     expect(() => assertProjectSlug("Bad Slug")).toThrow(ProjectValidationError);
     expect(() => assertProjectSlug("-leading")).toThrow(ProjectValidationError);
     expect(() => assertProjectSlug("x".repeat(65))).toThrow(ProjectValidationError);
-  });
-
-  test("thinking is a closed vocabulary", () => {
-    expect(PROJECT_THINKING.AUTO).toBe("auto");
-    expect(isProjectThinking("high")).toBe(true);
-    expect(isProjectThinking("extreme")).toBe(false);
-    expect(isProjectThinking(3)).toBe(false);
   });
 
   test("repo lists normalize to deduplicated absolute paths", () => {
@@ -104,7 +123,7 @@ describe("project registry authority", () => {
       expect(project.name).toBe("Hermes");
       expect(project.goal).toBe("Ship project classification");
       expect(project.context).toBe("Local-first orchestrator");
-      expect(project.repos).toEqual([resolve("./repo")]);
+      expect(project.repos).toEqual([FIXTURE_REPO]);
       expect(project.engine).toEqual({ cli: "claude", model: null, thinking: "auto" });
       expect(Number.isNaN(Date.parse(project.created_at))).toBe(false);
 
@@ -139,7 +158,7 @@ describe("project registry authority", () => {
       ["non-string context", { context: null as unknown as string }],
       ["engine missing", { engine: undefined }],
       ["unknown engine cli", { engine: { cli: "vscode", thinking: "auto" } as never }],
-      ["unknown thinking", { engine: { cli: "claude", thinking: "extreme" } as never }],
+      ["non-string thinking", { engine: { cli: "claude", thinking: 7 } as never }],
       [
         "non-string engine model",
         { engine: { cli: "claude", model: 7, thinking: "auto" } as never },
@@ -184,9 +203,22 @@ describe("project registry authority", () => {
         ProjectValidationError,
       );
       expect(() =>
-        authority.update("hermes", { engine: { cli: "claude", thinking: "nope" } as never }),
+        authority.update("hermes", { engine: { cli: "vscode", thinking: "auto" } as never }),
       ).toThrow(ProjectValidationError);
       expect(authority.get("hermes")).toBeDefined();
+    });
+  });
+
+  test("update and delete validate the slug before reporting an unknown id", () => {
+    scratch((_root, authority) => {
+      for (const id of ["Bad Slug", "", "../../etc/passwd"])
+        for (const run of [() => authority.update(id, { name: "x" }), () => authority.delete(id)]) {
+          expect(run).toThrow(ProjectValidationError);
+          const message = messageOf(run);
+          // The slug rule fires first, so raw caller input never reaches the message sink.
+          expect(message).toContain("project id must match");
+          if (id.length > 0) expect(message).not.toContain(id);
+        }
     });
   });
 
@@ -217,9 +249,100 @@ describe("project registry authority", () => {
       expect(authority.list().map((project) => project.id)).toEqual(["alpha", "beta"]);
     });
   });
+
+  test("a snapshot read before a competing write cannot clobber it", () => {
+    scratch((root) => {
+      const competing = new ProjectRegistryAuthority({ root });
+      const stale = new StaleSnapshotAuthority({ root });
+      stale.snapshot = [];
+
+      competing.create({ ...CREATE, id: "beta" });
+      stale.create({ ...CREATE, id: "alpha" });
+
+      expect(new ProjectRegistryAuthority({ root }).list().map((project) => project.id)).toEqual([
+        "beta",
+        "alpha",
+      ]);
+    });
+  });
+
+  test("concurrent creates from two authorities both survive", () => {
+    scratch((root) => {
+      const first = new ProjectRegistryAuthority({ root });
+      const second = new ProjectRegistryAuthority({ root });
+      const stale = first.list();
+
+      first.create({ ...CREATE, id: "alpha" });
+      second.create({ ...CREATE, id: "beta" });
+
+      expect(stale).toEqual([]);
+      expect(new ProjectRegistryAuthority({ root }).list().map((project) => project.id)).toEqual([
+        "alpha",
+        "beta",
+      ]);
+    });
+  });
 });
 
 describe("project registry store", () => {
+  test("the commit mutator receives the state written by a competing writer", () => {
+    scratch((root, authority) => {
+      const competing = new ProjectRegistryAuthority({ root });
+      const snapshot = authority.list();
+      competing.create({ ...CREATE, id: "beta" });
+
+      const seen: string[][] = [];
+      const manifest = new ProjectRegistryStore({ root }).commit((current) => {
+        seen.push(current.map((project) => project.id));
+        return [...current, { ...VALID_PROJECT, id: "alpha" }];
+      });
+
+      expect(snapshot).toEqual([]);
+      // The stale snapshot is ignored; the preimage seen by the mutator is what is on disk.
+      expect(seen).toEqual([["beta"]]);
+      expect(manifest.projects.map((project) => project.id)).toEqual(["beta", "alpha"]);
+      expect(manifest.revision).toBe(2);
+      expect(new ProjectRegistryAuthority({ root }).list().map((project) => project.id)).toEqual([
+        "beta",
+        "alpha",
+      ]);
+    });
+  });
+
+  test("a commit above the project limit is refused without writing", () => {
+    scratch((root) => {
+      const store = new ProjectRegistryStore({ root });
+      const oversized = Array.from({ length: PROJECT_LIMIT + 1 }, (_unused, index) => ({
+        ...VALID_PROJECT,
+        id: `project-${index}`,
+      }));
+
+      expect(() => store.commit(() => oversized)).toThrow(ProjectValidationError);
+      expect(store.read().revision).toBe(0);
+      expect(store.read().projects).toEqual([]);
+    });
+  });
+
+  test("the committed document is re-validated before it reaches disk", () => {
+    scratch((root) => {
+      const store = new ProjectRegistryStore({ root });
+      expect(() => store.commit(() => [{ ...VALID_PROJECT, name: "  " }])).toThrow(
+        ProjectValidationError,
+      );
+      expect(store.read().projects).toEqual([]);
+    });
+  });
+
+  test("an oversized registry document surfaces as ProjectRegistryCorruptError", () => {
+    scratch((root) => {
+      writeDocument(root, "x".repeat(MAX_PROJECT_REGISTRY_BYTES + 1));
+      expect(() => new ProjectRegistryStore({ root }).read()).toThrow(ProjectRegistryCorruptError);
+      expect(() => new ProjectRegistryAuthority({ root }).list()).toThrow(
+        ProjectRegistryCorruptError,
+      );
+    });
+  });
+
   test("a corrupt registry file surfaces as ProjectRegistryCorruptError", () => {
     const corrupt: Array<[string, unknown]> = [
       ["malformed json", "{ not json"],
@@ -229,12 +352,17 @@ describe("project registry store", () => {
       ["fractional revision", manifest({ revision: 1.5 })],
       ["non-array projects", manifest({ projects: "nope" })],
       ["invalid updated_at", manifest({ updated_at: "yesterday" })],
+      ["non-canonical updated_at", manifest({ updated_at: "2026-02-30T00:00:00.000Z" })],
       ["non-object project", manifest({ projects: [null] })],
       ["invalid project slug", manifest({ projects: [{ ...VALID_PROJECT, id: "Bad Slug" }] })],
       ["empty project name", manifest({ projects: [{ ...VALID_PROJECT, name: "  " }] })],
       ["non-string goal", manifest({ projects: [{ ...VALID_PROJECT, goal: 5 }] })],
       ["non-string context", manifest({ projects: [{ ...VALID_PROJECT, context: null }] })],
       ["invalid created_at", manifest({ projects: [{ ...VALID_PROJECT, created_at: "?" }] })],
+      [
+        "non-canonical created_at",
+        manifest({ projects: [{ ...VALID_PROJECT, created_at: "2026-09-20T00:00:00.000+00:00" }] }),
+      ],
       ["non-array repos", manifest({ projects: [{ ...VALID_PROJECT, repos: "repo" }] })],
       ["blank repo entry", manifest({ projects: [{ ...VALID_PROJECT, repos: [""] }] })],
       [
@@ -252,11 +380,15 @@ describe("project registry store", () => {
         }),
       ],
       [
-        "unknown thinking",
+        "non-string thinking",
         manifest({
-          projects: [
-            { ...VALID_PROJECT, engine: { cli: "claude", model: null, thinking: "extreme" } },
-          ],
+          projects: [{ ...VALID_PROJECT, engine: { cli: "claude", model: null, thinking: 7 } }],
+        }),
+      ],
+      [
+        "blank thinking",
+        manifest({
+          projects: [{ ...VALID_PROJECT, engine: { cli: "claude", model: null, thinking: " " } }],
         }),
       ],
       ["null engine", manifest({ projects: [{ ...VALID_PROJECT, engine: null }] })],

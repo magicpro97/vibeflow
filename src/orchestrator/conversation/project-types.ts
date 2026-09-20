@@ -3,10 +3,16 @@
  *
  * A Project is the classification target for conversations (design:
  * `{ id, name, goal, context, repos[], engine, created_at }`). This module is the single
- * authority for the closed vocabularies and for the persisted document shape; the store
- * owns durability and the authority owns policy.
+ * authority for the persisted document shape; the store owns durability and the authority
+ * owns policy.
+ *
+ * NOTE(privacy, Task 3/5): `repos[]` holds ABSOLUTE filesystem paths and `goal`/`context`
+ * are free-form operator text. Nothing here is public: any DTO, SSE frame, log line, or UI
+ * payload built from a Project must pass through `sanitizePublicText` (or a stricter path
+ * policy) first — never project `repos` raw, or `$HOME` layout leaks.
  */
 import { resolve } from "node:path";
+import { isExactWireTimestamp } from "../../actions/public-wire-primitives.js";
 import { type Engine, isAgentEngine } from "../../core/agent-contract.js";
 
 export const PROJECT_SCHEMA_VERSION = "1.0";
@@ -20,28 +26,19 @@ export const PROJECT_GOAL_MAX_LENGTH = 4000;
 export const PROJECT_CONTEXT_MAX_LENGTH = 16000;
 export const PROJECT_REPO_MAX_LENGTH = 4096;
 export const PROJECT_REPO_LIMIT = 64;
+/**
+ * Sanity bound on registry entry count, matching {@link PROJECT_REPO_LIMIT} in spirit; the
+ * store's `MAX_PROJECT_REGISTRY_BYTES` remains the byte truth for the document itself.
+ */
+export const PROJECT_LIMIT = 256;
 
-/** Reasoning effort vocabulary; mirrors the engine CLI's accepted `--thinking` levels. */
-export const PROJECT_THINKING = Object.freeze({
-  OFF: "off",
-  MINIMAL: "minimal",
-  LOW: "low",
-  MEDIUM: "medium",
-  HIGH: "high",
-  XHIGH: "xhigh",
-  MAX: "max",
-  AUTO: "auto",
-} as const);
-export type ProjectThinking = (typeof PROJECT_THINKING)[keyof typeof PROJECT_THINKING];
-export const PROJECT_THINKINGS: readonly ProjectThinking[] = Object.freeze(
-  Object.values(PROJECT_THINKING),
-);
-
-const memberOf = <Value extends string>(values: readonly Value[], value: unknown): value is Value =>
-  typeof value === "string" && values.some((candidate) => candidate === value);
-
-export const isProjectThinking = (value: unknown): value is ProjectThinking =>
-  memberOf(PROJECT_THINKINGS, value);
+/**
+ * Reasoning-effort label forwarded verbatim to the engine CLI. There is no in-repo authority
+ * for this vocabulary yet (no dispatch surface consumes it; Claude Code exposes
+ * `--effort low|medium|high|xhigh|max` while other engines differ), so it stays bounded text
+ * rather than a closed set that would reject a value an engine actually accepts.
+ */
+export const PROJECT_THINKING_MAX_LENGTH = 64;
 
 export class ProjectValidationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -57,7 +54,7 @@ const invalid = (message: string): never => {
 export interface ProjectEngineV1 {
   readonly cli: Engine;
   readonly model: string | null;
-  readonly thinking: ProjectThinking;
+  readonly thinking: string;
 }
 
 export interface ProjectV1 {
@@ -90,14 +87,12 @@ export function projectEmptyManifest(): ProjectManifestV1 {
   });
 }
 
-const EPHEMERAL_ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-
+/**
+ * Canonical millisecond ISO-8601 UTC, via the repo's single wire-timestamp predicate: the
+ * shape regex alone accepts rollover dates (`2026-02-30…`) and non-canonical offsets.
+ */
 export function assertProjectTimestamp(value: unknown, label: string): string {
-  if (
-    typeof value !== "string" ||
-    !EPHEMERAL_ISO_PATTERN.test(value) ||
-    Number.isNaN(Date.parse(value))
-  )
+  if (!isExactWireTimestamp(value))
     return invalid(`project ${label} must be an ISO-8601 UTC timestamp`);
   return value;
 }
@@ -114,6 +109,10 @@ function assertBoundedString(value: unknown, label: string, maximum: number): st
   return value;
 }
 
+/**
+ * Free-form text that may legitimately be empty, so writes reject whitespace-only input
+ * while reads accept whatever an older document already holds.
+ */
 function assertOptionalText(value: unknown, label: string, maximum: number): string {
   if (typeof value !== "string" || value.length > maximum)
     return invalid(`project ${label} must be a string of at most ${maximum} characters`);
@@ -152,9 +151,11 @@ export function assertProjectEngineV1(value: unknown): ProjectEngineV1 {
   const model = engine.model ?? null;
   if (model !== null && typeof model !== "string")
     return invalid("project engine model must be a string or null");
-  if (!isProjectThinking(engine.thinking))
-    return invalid("project engine thinking is not a known level");
-  return { cli: engine.cli, model, thinking: engine.thinking };
+  return {
+    cli: engine.cli,
+    model,
+    thinking: assertBoundedString(engine.thinking, "engine thinking", PROJECT_THINKING_MAX_LENGTH),
+  };
 }
 
 export function assertProjectV1(value: unknown): ProjectV1 {
@@ -172,6 +173,18 @@ export function assertProjectV1(value: unknown): ProjectV1 {
   };
 }
 
+/**
+ * Validate a whole registry project list. Used on read and again on the exact list a
+ * mutator hands the store, so an entry-count blowup or a bypassed field check fails closed
+ * before the compare-and-swap instead of reaching disk.
+ */
+export function assertProjectCollectionV1(value: unknown): ProjectV1[] {
+  if (!Array.isArray(value)) return invalid("project registry projects must be an array");
+  if (value.length > PROJECT_LIMIT)
+    return invalid(`project registry exceeds the ${PROJECT_LIMIT}-project limit`);
+  return value.map((project) => assertProjectV1(project));
+}
+
 export function assertProjectManifestV1(value: unknown): ProjectManifestV1 {
   if (typeof value !== "object" || value === null)
     return invalid("project registry must be an object");
@@ -181,12 +194,10 @@ export function assertProjectManifestV1(value: unknown): ProjectManifestV1 {
   const revision = manifest.revision;
   if (!Number.isSafeInteger(revision) || (revision as number) < 0)
     return invalid("project registry revision must be a non-negative integer");
-  if (!Array.isArray(manifest.projects))
-    return invalid("project registry projects must be an array");
   return {
     schema_version: PROJECT_SCHEMA_VERSION,
     revision: revision as number,
     updated_at: assertProjectTimestamp(manifest.updated_at, "registry updated_at"),
-    projects: manifest.projects.map((project) => assertProjectV1(project)),
+    projects: assertProjectCollectionV1(manifest.projects),
   };
 }
