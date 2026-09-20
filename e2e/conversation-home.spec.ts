@@ -2519,11 +2519,37 @@ test.describe("AI-first conversation Home", () => {
       return {
         chipRight: chip.getBoundingClientRect().right,
         highlightRight: highlight.getBoundingClientRect().right,
+        chipBox: (() => {
+          const box = chip.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        })(),
+        afterRects: (() => {
+          const after = [...highlight.children].find((child) => child.textContent === " after");
+          if (!after) return [];
+          const range = document.createRange();
+          range.selectNodeContents(after);
+          return [...range.getClientRects()].map((box) => ({
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+          }));
+        })(),
         labelWhiteSpace: getComputedStyle(chip, "::before").whiteSpace,
         labelOverflowWrap: getComputedStyle(chip, "::before").overflowWrap,
       };
     });
     expect(zoomedChipGeometry.chipRight).toBeLessThanOrEqual(zoomedChipGeometry.highlightRight + 0.5);
+    expect(zoomedChipGeometry.afterRects.length).toBeGreaterThan(0);
+    for (const rect of zoomedChipGeometry.afterRects) {
+      const isOutsideChip =
+        rect.right <= zoomedChipGeometry.chipBox.left + 0.5 ||
+        rect.left >= zoomedChipGeometry.chipBox.right - 0.5 ||
+        rect.bottom <= zoomedChipGeometry.chipBox.top + 0.5 ||
+        rect.top >= zoomedChipGeometry.chipBox.bottom - 0.5;
+      expect(isOutsideChip).toBe(true);
+    }
+    expect(zoomedChipGeometry.chipBox.bottom - zoomedChipGeometry.chipBox.top).toBeGreaterThan(43.2);
     expect(zoomedChipGeometry.labelWhiteSpace).toBe("normal");
     expect(zoomedChipGeometry.labelOverflowWrap).toBe("anywhere");
     await testInfo.attach("home-390x844-text-zoom-200", {

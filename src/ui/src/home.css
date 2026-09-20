@@ -1867,13 +1867,18 @@ button:disabled {
 .home-composer textarea::placeholder {
   color: var(--home-placeholder);
 }
+.home-composer-highlight__text {
+  display: inline;
+}
 .home-composer-chip {
   position: relative;
-  display: inline-block;
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr);
   width: max-content;
   max-width: 100%;
   padding: 0;
   overflow-wrap: anywhere;
+  vertical-align: top;
   border-radius: 0.4rem;
   outline: 1px solid rgb(180 130 60 / 0.5);
   background: rgb(180 130 60 / 0.12);
@@ -1883,21 +1888,27 @@ button:disabled {
   line-height: 1.5;
 }
 .home-composer-chip::after {
+  grid-area: 1 / 1;
+  display: block;
   content: attr(data-raw-token);
   visibility: hidden;
   font-size: 0.9rem;
   font-weight: 400;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 .home-composer-chip::before {
   content: attr(data-label);
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center start;
+  position: static;
+  grid-area: 1 / 1;
+  display: block;
+  min-width: 0;
   padding: 0 0.32rem;
   color: var(--home-ink);
   font-size: 0.9rem;
   font-weight: 600;
+  line-height: 1.5;
   white-space: normal;
   overflow-wrap: anywhere;
 }

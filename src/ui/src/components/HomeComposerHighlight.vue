@@ -36,7 +36,10 @@ const chipColorClass = (kind: string) => kind.replace("chip-", "");
 <template>
   <div class="home-composer__highlight" aria-hidden="true">
     <template v-for="(segment, index) in renderSegments" :key="index">
-      <span v-if="segment.kind === 'text'">{{ segment.text }}</span>
+      <span
+        v-if="segment.kind === 'text'"
+        class="home-composer-highlight__text"
+      >{{ segment.text }}</span>
       <span
         v-else
         :class="`home-composer-chip home-composer-chip--${chipColorClass(segment.kind)}`"
