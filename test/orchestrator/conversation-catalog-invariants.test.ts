@@ -23,6 +23,7 @@ function revision(
     lineage_status: "verified",
     topic: "topic",
     policy: "direct",
+    project_id: "repo",
     lifecycle: "ACTIVE",
     health: "healthy",
     participants: [],

@@ -1,10 +1,8 @@
 import { expect, test } from "bun:test";
-import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { conversationManifestPath } from "../../src/orchestrator/conversation/artifact-store.js";
 import {
   CatalogCursorCodec,
   CatalogCursorError,
@@ -13,130 +11,11 @@ import {
 import { projectConversationCatalog } from "../../src/orchestrator/conversation/catalog-projector.js";
 import { deriveConversationLineages } from "../../src/orchestrator/conversation/lineage-reader.js";
 import { readConversationSourceInventory } from "../../src/orchestrator/conversation/source-inventory.js";
-import { traceJournalPath } from "../../src/orchestrator/trace/store.js";
-
-const HASH = "a".repeat(64);
-const SECRET = "SECRET-CANARY-DO-NOT-PROJECT";
-
-function fixtureRecord(
-  id: string,
-  options: { parent?: string; parentRevision?: string; children?: string[]; topic?: string } = {},
-) {
-  return {
-    manifest: {
-      version: "1.0",
-      conversation_id: id,
-      workflow_id: "workflow-shared",
-      revision_id: `revision-${id}`,
-      run_id: `run-${id}`,
-      parent_conversation_id: options.parent ?? null,
-      parent_revision_id: options.parentRevision ?? null,
-      topic: options.topic ?? `Topic ${id}`,
-      policy: "direct",
-      max_rounds: 1,
-      baseline_enabled: true,
-      evaluator_auto_added: false,
-      repo_root: `/Users/private/${SECRET}`,
-      phase: 1,
-      task_text: SECRET,
-      bindings: [
-        {
-          participant_id: `participant-${id}`,
-          input: { roleRef: "direct", engine: "codex", sessionMode: "fresh" },
-        },
-      ],
-      created_at: "2026-08-25T00:00:00.000Z",
-    },
-    binding_authorities: [
-      {
-        participant_id: `participant-${id}`,
-        engine: "codex",
-        model: "gpt-5.4",
-        session_mode: "fresh",
-        role_source: "builtin",
-        role_hash: HASH,
-        skill_hashes: [],
-      },
-    ],
-    resume_bindings: [
-      {
-        participant_id: `participant-${id}`,
-        attemptId: `attempt-${id}`,
-        engine: "codex",
-        nativeSessionId: "123e4567-e89b-42d3-a456-426614174000",
-      },
-    ],
-    child_revisions: Object.fromEntries(
-      (options.children ?? []).map((child, index) => [
-        createHash("sha256").update(`${id}:${index}`).digest("hex"),
-        child,
-      ]),
-    ),
-    artifacts: [],
-    artifact_reservations: {},
-  };
-}
-
-function eventRecord(id: string, seq: number, ts: string, event: unknown) {
-  return {
-    stored_event: {
-      workflow_id: "workflow-shared",
-      conversation_id: id,
-      revision_id: `revision-${id}`,
-      run_id: `run-${id}`,
-      turn_id: `turn-${seq}`,
-      operation_id: `operation-${seq}`,
-      attempt_id: `attempt-${seq}`,
-      event_id: randomUUID(),
-      seq,
-      ts,
-      idempotency_key: `${id}:${seq}`,
-      event,
-    },
-    native_session_id: null,
-  };
-}
-
-function installFixture(
-  artifactRoot: string,
-  traceRoot: string,
-  record: ReturnType<typeof fixtureRecord>,
-  updatedAt: string,
-) {
-  mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
-  mkdirSync(join(traceRoot, "conversations"), { recursive: true, mode: 0o700 });
-  const id = record.manifest.conversation_id;
-  writeFileSync(conversationManifestPath(artifactRoot, id), JSON.stringify(record), {
-    mode: 0o600,
-  });
-  const records = [
-    eventRecord(id, 1, record.manifest.created_at, {
-      type: "conversation_configured",
-      payload: {
-        topic: record.manifest.topic,
-        participants: [
-          {
-            participant_id: `participant-${id}`,
-            role_ref: "direct",
-            engine: "codex",
-            model: "gpt-5.4",
-          },
-        ],
-        policy: "direct",
-        max_rounds: 1,
-      },
-    }),
-    eventRecord(id, 2, updatedAt, {
-      type: "state_change",
-      payload: { lifecycle: "ACTIVE", health: "healthy", terminal: false, reason: null },
-    }),
-  ];
-  writeFileSync(
-    traceJournalPath(traceRoot, id),
-    `${records.map((item) => JSON.stringify(item)).join("\n")}\n`,
-    { mode: 0o600 },
-  );
-}
+import {
+  CATALOG_FIXTURE_SECRET,
+  fixtureRecord,
+  installFixture,
+} from "../helpers/conversation-catalog-fixture.js";
 
 test("catalog projects one safe searchable root row and matches historical revisions", async () => {
   const root = await mkdtemp(join(tmpdir(), "vf-catalog-"));
@@ -148,7 +27,7 @@ test("catalog projects one safe searchable root row and matches historical revis
       traces,
       fixtureRecord("root", {
         children: ["child"],
-        topic: `Original planning token=${SECRET}`,
+        topic: `Original planning token=${CATALOG_FIXTURE_SECRET}`,
       }),
       "2026-08-25T00:00:30.000Z",
     );
@@ -218,7 +97,9 @@ test("catalog projects one safe searchable root row and matches historical revis
     });
     expect(projection.response.catalog_generation).toMatch(/^vf-catalog-generation-[0-9a-f]{64}$/);
     expect(projection.response.source_watermark).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(JSON.stringify(projection.response)).not.toContain(SECRET);
+    expect(JSON.stringify(projection.response)).not.toContain(CATALOG_FIXTURE_SECRET);
+    expect(JSON.stringify(projection.response)).not.toContain("/Users/private");
+    expect(projection.response.items[0]?.root.project_id).toBe("workspace");
     expect(Object.keys(projection.response.items[0]?.active?.participants[0] ?? {}).sort()).toEqual(
       ["engine", "model", "participant_id", "role_ref"],
     );
@@ -361,7 +242,7 @@ test("degraded sources are explicit read-only state, never an authoritative empt
         associationRecords: [
           {
             schema_version: "1.0",
-            extra: SECRET,
+            extra: CATALOG_FIXTURE_SECRET,
           } as never,
         ],
       }),
@@ -371,7 +252,7 @@ test("degraded sources are explicit read-only state, never an authoritative empt
       lineages,
       cursorCodec: new CatalogCursorCodec(Buffer.alloc(32, 1)),
       scopeId: "project:demo",
-      associationRecords: [{ schema_version: "1.0", extra: SECRET }],
+      associationRecords: [{ schema_version: "1.0", extra: CATALOG_FIXTURE_SECRET }],
     });
     expect(invalidAssociation.response.catalog_health).toBe("degraded");
   } finally {

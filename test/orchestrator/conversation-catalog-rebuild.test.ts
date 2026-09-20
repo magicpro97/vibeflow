@@ -27,6 +27,7 @@ function row(root = "root", updatedAt = ISO): ConversationSessionSummaryV1 {
     lineage_status: "verified" as const,
     topic: `Topic ${root}`,
     policy: "direct",
+    project_id: "repo",
     lifecycle: "ACTIVE" as const,
     health: "healthy" as const,
     participants: [],

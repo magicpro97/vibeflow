@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { sanitizePublicText } from "../trace/public-sanitize.js";
 import type { CatalogCursorCodec } from "./catalog-cursor.js";
 import { conversationLockDigest } from "./catalog-lock.js";
@@ -18,6 +19,12 @@ import {
   isLineageAssociationId,
   isSafeCatalogIdentifier,
 } from "./lineage-types.js";
+
+/** Public project label for a conversation: the basename of its source repo root. */
+export function conversationProjectId(repoRoot: string): string {
+  const base = basename(repoRoot.replace(/[\\/]+$/u, ""));
+  return base && base !== "." && base !== "/" ? base : "unassigned";
+}
 
 export function createConversationRevisionSummary(
   node: ValidatedLineageNodeV1,
@@ -42,6 +49,11 @@ export function createConversationRevisionSummary(
     lineage_status: CONVERSATION_LINEAGE_STATUS.VERIFIED,
     topic: sanitizePublicText(source.manifest.topic, "topic", []),
     policy: safePublicRoleReference(source.manifest.policy),
+    project_id: sanitizePublicText(
+      conversationProjectId(source.manifest.repo_root),
+      "project_id",
+      [],
+    ),
     lifecycle: source.journal_head.lifecycle,
     health: source.journal_head.health,
     participants: structuredClone(source.journal_head.participants),
@@ -56,6 +68,7 @@ function searchable(summary: ConversationRevisionSummaryV1): string {
   return [
     summary.topic,
     summary.policy,
+    summary.project_id,
     ...summary.participants.flatMap((participant) => [participant.role_ref, participant.engine]),
   ]
     .join("\n")

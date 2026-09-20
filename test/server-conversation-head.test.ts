@@ -25,6 +25,7 @@ const body: ConversationHeadResponseV1 = {
     lineage_status: "verified",
     topic: "Authoritative child",
     policy: "direct",
+    project_id: "repo",
     lifecycle: "ACTIVE",
     health: "healthy",
     participants: [],
