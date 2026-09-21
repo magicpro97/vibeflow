@@ -34,6 +34,10 @@ import { ConversationDelegationWorkspaceAuthorityV1 } from "./conversation-deleg
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import type { ConversationMessageQueueRuntimeV1 } from "./conversation-message-queue-runtime.js";
 import { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
+import {
+  type ConversationProjectRebinderV1,
+  createConversationProjectRebinder,
+} from "./conversation-project-rebind.js";
 import { ConversationUserMessageAuthorityV1 } from "./conversation-user-message-authority.js";
 import { CoordinateConversationPolicy } from "./coordinate-policy.js";
 import { DebateConversationPolicy } from "./debate-policy.js";
@@ -110,6 +114,8 @@ export interface ConversationBootstrap {
     artifactStore: ConversationArtifactStore;
     homeAuthorities: ConversationHomeAuthorities;
     projects: ProjectRegistryAuthority;
+    /** The chip's confirm: re-binds the active revision's `project_id` and invalidates the catalog. */
+    rebindConversationProject: ConversationProjectRebinderV1;
     policies: ConversationPolicyRegistry;
     agentActionCandidates: ConversationAgentActionCandidateAuthorityV1;
     coordinationWorkspaces: ConversationDelegationWorkspaceAuthorityV1;
@@ -161,6 +167,21 @@ export function createConversationBootstrap(
   const now = options.now ?? (() => new Date().toISOString());
   const projects = new ProjectRegistryAuthority({
     root: resolve(options.projectsDir ?? join(repoRoot, ".vibeflow", "projects")),
+  });
+  /**
+   * The chip's confirm. Composed here because the two things a re-bind must not break — the
+   * lineage head and the catalog notifier — are owned here; `notify` is the same boundary a
+   * committed message uses, so a projection failure cannot fail a re-bind that already landed.
+   */
+  const rebindConversationProject = createConversationProjectRebinder({
+    artifactStore,
+    lineage: {
+      head: (rootSessionId) => homeAuthorities.lineage.readHead(rootSessionId),
+      reservation: (rootSessionId) => homeAuthorities.lineage.readReservation(rootSessionId),
+    },
+    projects,
+    notify: (conversationId, recordedAt) => recordConversationSource?.(conversationId, recordedAt),
+    now,
   });
   const privateContextBroker = new ConversationPrivateContextBrokerV1({
     artifactRoot,
@@ -334,6 +355,7 @@ export function createConversationBootstrap(
       artifactStore,
       homeAuthorities,
       projects,
+      rebindConversationProject,
       policies,
       agentActionCandidates,
       coordinationWorkspaces,

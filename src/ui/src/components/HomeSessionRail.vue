@@ -94,24 +94,27 @@
         role="group"
         :aria-labelledby="groupNameId(folder.project_id)"
       >
-        <button
-          type="button"
-          class="home-session-group__divider"
-          :aria-expanded="!collapsedGroups.has(folder.project_id)"
-          :aria-controls="groupEntriesId(folder.project_id)"
-          :title="folder.name"
-          @click="toggleGroup(folder.project_id)"
-        >
+        <div class="home-session-group__header">
           <h3 :id="groupNameId(folder.project_id)" class="home-session-group__name">
             {{ folder.name }}
             <span class="sr-only">, {{ folder.sessions.length }} conversations</span>
           </h3>
-          <span v-if="folder.goal" class="home-session-group__goal">{{ folder.goal }}</span>
-          <span class="home-session-group__count">{{ folder.sessions.length }}</span>
-          <span class="home-session-group__chevron" aria-hidden="true">
-            {{ collapsedGroups.has(folder.project_id) ? "▸" : "▾" }}
-          </span>
-        </button>
+          <button
+            type="button"
+            class="home-session-group__divider"
+            :aria-expanded="!collapsedGroups.has(folder.project_id)"
+            :aria-controls="groupEntriesId(folder.project_id)"
+            :aria-labelledby="groupNameId(folder.project_id)"
+            :title="folder.name"
+            @click="toggleGroup(folder.project_id)"
+          >
+            <span v-if="folder.goal" class="home-session-group__goal">{{ folder.goal }}</span>
+            <span class="home-session-group__count">{{ folder.sessions.length }}</span>
+            <span class="home-session-group__chevron" aria-hidden="true">
+              {{ collapsedGroups.has(folder.project_id) ? "▸" : "▾" }}
+            </span>
+          </button>
+        </div>
         <hr class="home-session-group__rule" />
         <div
           v-show="!collapsedGroups.has(folder.project_id)"
@@ -183,6 +186,8 @@ let mobileQuery: MediaQueryList | null = null;
  * any other surface, and resetting it on reload is the intended behaviour.
  */
 const collapsedGroups = ref<Set<string>>(new Set());
+/** Collapse state as it stood before a query auto-expanded the matching groups. */
+let collapsedBeforeQuery: Set<string> | null = null;
 const catalogLoading = computed(() =>
   describeHomeCatalogLoading({
     query: store.sessionQuery,
@@ -286,7 +291,17 @@ function syncRailForViewport(): void {
 
 watch(
   () => store.sessionQuery,
-  () => {
+  (query) => {
+    // A query must not hide its own matches: expand what is collapsed while it is active, and
+    // hand the user's prior collapse state back the moment it clears.
+    const active = query.trim() !== "";
+    if (active && collapsedBeforeQuery === null) {
+      collapsedBeforeQuery = collapsedGroups.value;
+      collapsedGroups.value = new Set();
+    } else if (!active && collapsedBeforeQuery !== null) {
+      collapsedGroups.value = collapsedBeforeQuery;
+      collapsedBeforeQuery = null;
+    }
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(() => void store.refreshSessions(), 180);
   },

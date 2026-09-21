@@ -99,6 +99,9 @@ export interface ProjectClassificationPatch {
   };
 }
 
+/** The stored block as the settings document holds it — the shape the store reads and writes. */
+export type ProjectClassificationSlice = ProjectClassificationPatch["projectClassification"];
+
 /** The whole global fieldset → settings patch, or the first message a field failed with. */
 export function buildProjectClassificationPatch(
   draft: ProjectClassificationDraft,

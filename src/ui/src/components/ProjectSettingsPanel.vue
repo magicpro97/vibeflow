@@ -12,7 +12,7 @@
         type="checkbox"
         :checked="draft.enabled"
         :disabled="saving"
-        @change="draft.enabled = ($event.target as HTMLInputElement).checked"
+        @change="onEnabledChange"
       />
     </label>
 
@@ -100,12 +100,17 @@
 
     <p v-if="error" class="home-project-settings__error" role="alert">{{ error }}</p>
     <p v-if="saved" class="home-project-settings__saved" role="status">Saved</p>
+
+    <div class="home-project-settings__actions">
+      <button type="button" class="home-button home-button--primary" :disabled="saving" @click="save">
+        {{ saving ? "Saving…" : "Save project settings" }}
+      </button>
+    </div>
   </fieldset>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { api } from "../api.js";
 import type { HomeProjectRow } from "../conversation-home-projects.js";
 import { conversationProjectApi } from "../conversation-project-api.js";
 import { useProjectClassificationStore } from "../project-classification-store.js";
@@ -113,6 +118,7 @@ import {
   PROJECT_ENGINE_OPTIONS,
   PROJECT_THINKING_SUGGESTIONS,
   type ProjectClassificationDraft,
+  type ProjectClassificationSlice,
   buildProjectClassificationPatch,
   buildProjectEnginePatch,
   projectOverrideRows,
@@ -121,6 +127,11 @@ import {
 /**
  * Project classification settings: the global switch + classifier engine, and one override row
  * per registered project.
+ *
+ * The panel is mounted outside the drawer's review-queue form, so it owns its own submit — the
+ * brief's persistence requirement is met by this button reaching `save()`, which is the only
+ * caller of the settings and registry write paths. The switch additionally persists on change,
+ * because it is a durable gate (`OFF ⇒ the classifier never runs`) rather than a draft value.
  *
  * Inherit is the empty state (a blank row), never a literal "none": a row with every field blank
  * persists nothing, and the row placeholder text mirrors "the default applies". Thinking stays
@@ -178,21 +189,34 @@ const editableOverrides = computed(() =>
   })),
 );
 
-onMounted(async () => {
-  try {
-    const settings = await api.settings.get();
-    const stored = settings.projectClassification;
-    if (stored) {
-      draft.enabled = stored.enabled;
-      draft.cli = stored.engine.cli ?? "";
-      draft.model = stored.engine.model ?? "";
-      draft.thinking = stored.engine.thinking ?? "";
-    }
-    store.setSettings(stored ? { enabled: stored.enabled } : null);
-  } catch (cause) {
-    // A failed settings read keeps the defaults on screen; the save path reports the real error.
-    error.value = cause instanceof Error ? cause.message : String(cause);
+/** The shared store already holds the block read at store init; this only seeds the draft. */
+function seedDraft(stored: ProjectClassificationSlice | null): void {
+  draft.enabled = stored?.enabled ?? true;
+  draft.cli = stored?.engine.cli ?? "";
+  draft.model = stored?.engine.model ?? "";
+  draft.thinking = stored?.engine.thinking ?? "";
+}
+
+/**
+ * The switch is the durable gate: it persists on change through the store, so a reload obeys the
+ * value the user set even if this panel is never reopened. A failed write reverts the switch.
+ */
+async function onEnabledChange(event: Event): Promise<void> {
+  const enabled = (event.target as HTMLInputElement).checked;
+  draft.enabled = enabled;
+  if (await store.setEnabled(enabled)) {
+    saved.value = true;
+    emit("saved");
+    return;
   }
+  draft.enabled = !enabled;
+  error.value = store.settingsError;
+}
+
+onMounted(async () => {
+  await store.loadSettings();
+  seedDraft(store.settings);
+  error.value = store.settingsError;
   await store.refreshProjects();
   syncRows();
 });
@@ -211,8 +235,10 @@ async function save(): Promise<boolean> {
       error.value = global;
       return false;
     }
-    await api.settings.set(global);
-    store.setSettings({ enabled: draft.enabled });
+    if (!(await store.saveSettings(global.projectClassification))) {
+      error.value = store.settingsError;
+      return false;
+    }
     for (const project of store.projects) {
       const row = rows[project.id];
       if (!row) continue;

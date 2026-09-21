@@ -188,6 +188,32 @@ describe("project classification settings coercion", () => {
     ).toEqual({ enabled: true, engine: { cli: null, model: null, thinking: null } });
   });
 
+  test("a model is bounded by its own limit, not the thinking length", () => {
+    // A model identifier is opaque and engine-owned; reusing the 64-character thinking cap would
+    // silently truncate a legitimate model name to null. Both fields coexist under distinct caps.
+    const longModel = "m".repeat(100);
+    expect(
+      coerceProjectClassificationSettings({
+        enabled: true,
+        engine: { cli: "codex", model: longModel, thinking: "high" },
+      }),
+    ).toEqual({ enabled: true, engine: { cli: "codex", model: longModel, thinking: "high" } });
+    // The thinking cap is unchanged at 64: 65 characters still degrades to null.
+    expect(
+      coerceProjectClassificationSettings({
+        enabled: true,
+        engine: { cli: "codex", model: longModel, thinking: "t".repeat(65) },
+      }),
+    ).toEqual({ enabled: true, engine: { cli: "codex", model: longModel, thinking: null } });
+    // And the model's own cap still rejects an absurd name.
+    expect(
+      coerceProjectClassificationSettings({
+        enabled: true,
+        engine: { cli: "codex", model: "m".repeat(201), thinking: "high" },
+      }),
+    ).toEqual({ enabled: true, engine: { cli: "codex", model: null, thinking: "high" } });
+  });
+
   test("a complete block round-trips, including a disabled switch", () => {
     expect(
       coerceProjectClassificationSettings({
@@ -373,6 +399,8 @@ describe("project runtime reset", () => {
         classifyMessage: async () => ({ project_id: "alpha", confidence: 0.9, reason: "ai" }),
         updateProjectEngine: async () => {},
         moveConversation: async () => {},
+        readProjectSettings: async () => null,
+        writeProjectSettings: async () => null,
       },
       activeRootId: () => "root-1",
       activeProjectId: () => "idea",

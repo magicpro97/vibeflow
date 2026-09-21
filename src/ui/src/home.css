@@ -66,13 +66,15 @@
   --rail-group-name: var(--home-ink);
   --rail-group-goal: var(--home-muted);
   --rail-group-count: var(--home-muted);
+  --rail-group-ideas-ink: var(--home-amber-ink);
   --rail-group-ideas-wash: var(--home-tone-warm-panel);
   --rail-entry-indent: 0.5rem;
   --rail-chip-bg: var(--home-amber-soft);
   --rail-chip-border: var(--home-amber);
   --rail-chip-ink: var(--home-ink);
   --rail-chip-action: #fffefa;
-  --rail-chip-ghost: var(--home-muted);
+  /* Chip copy sits on --home-amber-soft, where --home-muted is only 3.9:1; this darker ink clears AA. */
+  --rail-chip-ghost: #6b5b45;
   --rail-chip-shadow: 0 6px 18px rgb(58 47 33 / 0.1);
 }
 
@@ -133,9 +135,10 @@
     --home-inset-line: rgb(255 255 255 / 0.05);
     --home-composer-shadow: 0 10px 30px rgb(0 0 0 / 0.45), 0 1px 0 rgb(255 255 255 / 0.06) inset;
     --home-focus-shadow: 0 12px 34px rgb(0 0 0 / 0.4), 0 0 0 3px rgb(216 145 74 / 0.22);
-    --rail-chip-action: var(--home-ink);
+    /* Dark confirm ink is the ink-on-amber pair from the mockup (5.57:1); --home-ink would be 2.16:1. */
+    --rail-chip-action: #29251f;
+    --rail-chip-ghost: #b8ac9c;
     --rail-chip-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
-    --rail-group-ideas-wash: var(--home-tone-warm-panel);
   }
 }
 :root[data-color-scheme="dark"] {
@@ -194,9 +197,9 @@
   --home-inset-line: rgb(255 255 255 / 0.05);
   --home-composer-shadow: 0 10px 30px rgb(0 0 0 / 0.45), 0 1px 0 rgb(255 255 255 / 0.06) inset;
   --home-focus-shadow: 0 12px 34px rgb(0 0 0 / 0.4), 0 0 0 3px rgb(216 145 74 / 0.22);
-  --rail-chip-action: var(--home-ink);
+  --rail-chip-action: #29251f;
+  --rail-chip-ghost: #b8ac9c;
   --rail-chip-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
-  --rail-group-ideas-wash: var(--home-tone-warm-panel);
 }
 
 * {
@@ -4065,24 +4068,34 @@ button:disabled {
 .home-session-group {
   margin-bottom: 0.55rem;
 }
-.home-session-group__divider {
+/* The name is the divider's accessible name, so it sits in the same row as the control; the
+   button stretches over the goal/count/chevron area and the heading keeps its own hit area. */
+.home-session-group__header {
   display: flex;
   align-items: baseline;
   gap: 0.3rem;
-  width: 100%;
-  padding: 0.55rem 0.2rem 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  text-align: left;
   /* Sticky, because the rail scrolls as one list and the divider is what makes grouping legible. */
   position: sticky;
   top: 0;
   z-index: 1;
   background: var(--home-panel);
 }
-.home-session-group__divider:hover .home-session-group__name,
-.home-session-group__divider:focus-visible .home-session-group__name {
+.home-session-group__divider {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.2rem 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+/* The heading is the divider button's accessible name, so it precedes the button in the DOM —
+   `:has()` is what lets a hover/focus on the control still lift the label. */
+.home-session-group:has(.home-session-group__divider:hover) .home-session-group__name,
+.home-session-group:has(.home-session-group__divider:focus-visible) .home-session-group__name {
   color: var(--home-ink);
 }
 .home-session-group__divider:focus-visible {
@@ -4090,7 +4103,10 @@ button:disabled {
   outline-offset: 1px;
 }
 .home-session-group__name {
+  flex: 1;
+  min-width: 0;
   margin: 0;
+  padding-top: 0.55rem;
   overflow: hidden;
   color: var(--rail-group-name);
   font-size: 0.68rem;
@@ -4133,9 +4149,9 @@ button:disabled {
 }
 /* Only the catch-all tints: it is a bucket, not a peer of the named projects. */
 .home-session-group--ideas .home-session-group__name {
-  color: var(--home-amber-ink);
+  color: var(--rail-group-ideas-ink);
 }
-.home-session-group--ideas .home-session-group__divider {
+.home-session-group--ideas .home-session-group__header {
   background: var(--rail-group-ideas-wash);
 }
 .home-session-group--ideas .home-session-group__rule {
@@ -4143,6 +4159,11 @@ button:disabled {
 }
 
 /* ── Suggestion chip: floats above the composer, never steals focus ─────────────────── */
+/* After the form in DOM (textarea stays the wrap's first focus stop), placed above it here. */
+.home-project-chip,
+.home-project-chip__error {
+  order: -1;
+}
 .home-project-chip {
   display: flex;
   align-items: center;
@@ -4184,7 +4205,7 @@ button:disabled {
   text-underline-offset: 2px;
 }
 .home-project-chip__confidence {
-  color: var(--rail-group-goal);
+  color: var(--rail-chip-ghost);
   font-size: 0.62rem;
   font-weight: 500;
 }

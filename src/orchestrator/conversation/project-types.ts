@@ -52,6 +52,14 @@ export const PROJECT_LIMIT = 256;
  */
 export const PROJECT_THINKING_MAX_LENGTH = 64;
 
+/**
+ * Bound on a model identifier. Models are opaque, engine-owned names (not reasoning labels), so
+ * they get their own bound rather than reusing {@link PROJECT_THINKING_MAX_LENGTH}: the two
+ * fields are unrelated, and a shared cap would silently make one of them wrong if either moves.
+ * Matches the binding preview's own `200`-byte sanity limit in spirit, in characters.
+ */
+export const PROJECT_MODEL_MAX_LENGTH = 200;
+
 export class ProjectValidationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);

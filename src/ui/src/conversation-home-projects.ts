@@ -15,6 +15,7 @@ import {
   type ProjectRailProject,
   isProjectSuggestionVisible,
 } from "./project-rail-group.js";
+import type { ProjectClassificationSlice } from "./project-settings-form.js";
 
 /** Registry row as the rail and the settings panel consume it. */
 export interface HomeProjectRow extends ProjectRailProject {
@@ -55,11 +56,53 @@ export interface HomeProjectClient {
     input: { root_session_id: string; project_id: string },
     signal?: AbortSignal,
   ): Promise<void>;
+  /** The stored `projectClassification` block, or null when the document has none yet. */
+  readProjectSettings(signal?: AbortSignal): Promise<ProjectClassificationSlice | null>;
+  /** Replace-on-write, mirroring the settings document: the block handed in is the block stored. */
+  writeProjectSettings(
+    value: ProjectClassificationSlice,
+    signal?: AbortSignal,
+  ): Promise<ProjectClassificationSlice | null>;
 }
 
 /** Dismissal is remembered per (session, project) so one ignore is final for that proposal. */
 const suggestionKey = (suggestion: HomeProjectSuggestion): string =>
   `${suggestion.root_session_id}\u0000${suggestion.project_id}`;
+
+/**
+ * Where dismissal memory lives. Injectable so the runtime stays testable without a DOM, and
+ * optional so a runtime without a store (tests, non-browser hosts) keeps working in-memory.
+ * The mockup requires the memory to outlive a reload: an ignored proposal must not return on the
+ * next visit, which is exactly what an in-process `Set` cannot promise.
+ */
+export interface HomeProjectDismissalStoreV1 {
+  read(): string[];
+  write(keys: readonly string[]): void;
+}
+
+/** `localStorage`-backed memory, keyed per repo-agnostic conversation surface. */
+export function createBrowserProjectDismissalStore(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  key = "vf-project-dismissals",
+): HomeProjectDismissalStoreV1 {
+  const parse = (): string[] => {
+    try {
+      const value: unknown = JSON.parse(storage.getItem(key) ?? "[]");
+      return Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  };
+  return {
+    read: parse,
+    write(keys) {
+      // Bounded so a long-lived surface cannot grow the entry without limit; the oldest go first.
+      storage.setItem(key, JSON.stringify(keys.slice(-256)));
+    },
+  };
+}
 
 export function createHomeProjectRuntime(options: {
   client: HomeProjectClient;
@@ -69,6 +112,8 @@ export function createHomeProjectRuntime(options: {
   activeProjectId: () => string;
   /** Persisted switch: OFF means the classifier never runs and nothing is proposed. */
   autoClassify: () => boolean;
+  /** Cross-reload dismissal memory; omitted = in-process only. */
+  dismissals?: HomeProjectDismissalStoreV1;
 }) {
   const projects = ref<HomeProjectRow[]>([]);
   /** True once a registry read completed; distinguishes "none" from "not loaded yet". */
@@ -77,7 +122,7 @@ export function createHomeProjectRuntime(options: {
   const suggestion = shallowRef<HomeProjectSuggestion | null>(null);
   const suggestionBusy = ref(false);
   const suggestionError = ref("");
-  const dismissed = new Set<string>();
+  const dismissed = new Set<string>(options.dismissals?.read() ?? []);
 
   async function loadProjects(): Promise<void> {
     try {
@@ -92,24 +137,26 @@ export function createHomeProjectRuntime(options: {
   }
 
   /** The single gate: the server decided the tier, the UI only applies the visibility rule. */
-  function propose(classification: HomeProjectClassification): void {
-    const rootSessionId = options.activeRootId();
-    if (!rootSessionId || !options.autoClassify()) {
+  function propose(
+    classification: HomeProjectClassification,
+    forRootSessionId: string | null = options.activeRootId(),
+  ): void {
+    if (!forRootSessionId || !options.autoClassify()) {
       suggestion.value = null;
       return;
     }
     const currentProjectId = options.activeProjectId();
     const candidate: HomeProjectSuggestion = {
-      root_session_id: rootSessionId,
+      root_session_id: forRootSessionId,
       current_project_id: currentProjectId,
       project_id: classification.project_id,
       confidence: classification.confidence,
       reason: classification.reason,
     };
-    // A deterministic tier (repo/mention) already bound the conversation at creation, and a
-    // fallback proposes nothing; both are filtered here, so no control ever offers a move the
-    // tier ladder did not ask for. Dismissal is checked last: a new proposal for the same
-    // (session, project) pair must not resurrect an ignored one.
+    // A deterministic tier (repo/mention) bound the conversation at creation and a fallback
+    // proposes nothing; both are filtered here, so no control ever offers a move the tier ladder
+    // did not ask for. Dismissal is checked last: a new proposal for the same (session, project)
+    // pair must not resurrect an ignored one.
     if (!isProjectSuggestionVisible(candidate)) {
       suggestion.value = null;
       return;
@@ -121,17 +168,23 @@ export function createHomeProjectRuntime(options: {
     suggestion.value = candidate;
   }
 
+  /**
+   * Classify one sent message and propose. The session is captured *before* the round trip and
+   * passed into `propose`, because re-reading the active session after the await would file a
+   * verdict inferred from the old message against whichever conversation the user has since
+   * switched to — and confirming that chip would then move the wrong conversation.
+   */
   async function classifyAndPropose(message: string): Promise<void> {
     if (!options.autoClassify()) return;
     const rootSessionId = options.activeRootId();
     if (!rootSessionId || message.trim() === "") return;
     try {
-      propose(
-        await options.client.classifyMessage({
-          message,
-          project_id: options.activeProjectId(),
-        }),
-      );
+      const verdict = await options.client.classifyMessage({
+        message,
+        project_id: options.activeProjectId(),
+      });
+      if (options.activeRootId() !== rootSessionId) return;
+      propose(verdict, rootSessionId);
     } catch {
       // Classification is advisory: a failure proposes nothing rather than surfacing an error.
       suggestion.value = null;
@@ -140,7 +193,15 @@ export function createHomeProjectRuntime(options: {
 
   function dismissSuggestion(): void {
     const current = suggestion.value;
-    if (current) dismissed.add(suggestionKey(current));
+    if (current) {
+      dismissed.add(suggestionKey(current));
+      // Best-effort: a storage refusal must not undo a dismissal the user already made.
+      try {
+        options.dismissals?.write([...dismissed]);
+      } catch {
+        /* in-memory memory remains authoritative for this session */
+      }
+    }
     suggestion.value = null;
     suggestionError.value = "";
   }

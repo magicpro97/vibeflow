@@ -2472,6 +2472,159 @@ test.describe("AI-first conversation Home", () => {
     });
   });
 
+  test("offers a project move, files it, and keeps the classification switch durable", async ({
+    page,
+  }) => {
+    const moves: unknown[] = [];
+    let settingsPosted: unknown = null;
+    let enabled = true;
+    const session = homeSession("root-project", "Project chip", [
+      homeParticipant("reviewer", "reviewer"),
+    ]);
+    await page.route("**/api/engines**", (route) =>
+      route.fulfill({ status: 200, json: { engines: [] } }),
+    );
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "generation",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await page.route("**/api/conversation-sessions/root-project/head", async (route) => {
+      await route.fulfill({ status: 200, json: homeHead(session) });
+    });
+    await page.route("**/api/conversation-sessions/root-project/timeline?**", async (route) => {
+      await route.fulfill({ status: 200, json: homeTimeline("root-project", []) });
+    });
+    await page.route("**/api/conversation-sessions/root-project/messages/queue", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, json: homeMessageQueue("root-project") });
+        return;
+      }
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      const queued = {
+        ...homeQueuedMessage("root-project", 1, String(body.content)),
+        target_participants: body.target_participants,
+        quote_refs: body.quote_refs,
+        private_context_present: body.private_context_present,
+      };
+      await route.fulfill({ status: 201, json: queued });
+    });
+    await page.route(
+      "**/api/conversations/root-project-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-project-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: { stream_token: "project-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+        });
+      },
+    );
+    await page.route("**/api/conversations/root-project-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+          schema_version: "1.0",
+          last_public_sequence: 0,
+        }),
+      });
+    });
+    await page.route("**/api/conversation-projects", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: "1.0",
+          projects: [
+            {
+              id: "alpha",
+              name: "alpha-service",
+              goal: "Ship the alpha",
+              engine: { cli: "codex", model: null, thinking: "high" },
+            },
+          ],
+        },
+      });
+    });
+    await page.route("**/api/conversation-projects/classify", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { schema_version: "1.0", project_id: "alpha", confidence: 0.9, reason: "ai" },
+      });
+    });
+    await page.route("**/api/conversation-projects/move", async (route) => {
+      moves.push(route.request().postDataJSON());
+      await route.fulfill({ status: 202, json: { schema_version: "1.0", moved: true } });
+    });
+    await page.route("**/api/settings", async (route) => {
+      if (route.request().method() === "POST") {
+        settingsPosted = route.request().postDataJSON();
+        enabled = Boolean(
+          (settingsPosted as { projectClassification?: { enabled?: boolean } })
+            ?.projectClassification?.enabled,
+        );
+      }
+      await route.fulfill({
+        status: 200,
+        json: {
+          settings: {
+            projectClassification: {
+              enabled,
+              engine: { cli: null, model: null, thinking: null },
+            },
+          },
+          tools: [],
+        },
+      });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Project chip/ }).click();
+
+    // A send produces a verdict; the chip's confirm is what files the conversation.
+    await page.locator("#home-composer").fill("please move this");
+    await page.getByRole("button", { name: "Send message" }).click();
+    const chip = page.getByRole("group", { name: "Project suggestion" });
+    await expect(chip).toBeVisible();
+    await expect(chip).toContainText("alpha-service");
+    // Axe reads blended colors: let the 140ms enter animation settle before auditing contrast.
+    await chip.evaluate(async (node) => {
+      await Promise.all(
+        node
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => {})),
+      );
+    });
+    await expectAxeClean(page, "project suggestion chip");
+
+    await page.getByRole("button", { name: "Move", exact: true }).click();
+    await expect(chip).toHaveCount(0);
+    expect(moves).toHaveLength(1);
+
+    // The switch is a durable gate: toggling it persists the block immediately.
+    await page.getByRole("button", { name: "Open settings" }).click();
+    const toggle = page.getByLabel("Auto-classify new conversations");
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await expect
+      .poll(() => settingsPosted as { projectClassification?: { enabled?: boolean } } | null)
+      .toMatchObject({ projectClassification: { enabled: false } });
+    await expect(page.getByRole("button", { name: "Save project settings" })).toBeVisible();
+  });
+
   test("has no automated accessibility violations in the primary Home", async ({ page }) => {
     await page.goto("/");
     await waitForPage(page);

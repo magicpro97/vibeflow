@@ -6,7 +6,6 @@
     <HomeQueuedMessages :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
     <HomeQuoteSelectionList v-if="!store.queuedMessageEdit" :chips="quoteChips" />
     <HomePrivateRangeSummary @change="openPrivateRangePanel(true)" />
-    <ProjectSuggestionChip />
     <form class="home-composer" aria-label="Message VibeFlow" @submit.prevent="submit">
       <HomeQueueEditStatus
         :queue-sequence="store.queuedMessageEdit?.queue_sequence ?? null"
@@ -109,6 +108,7 @@
       </div>
       <HomePrivateRangePanel ref="privateRangePanel" @open-change="privateRangeOpen = $event" />
     </form>
+    <ProjectSuggestionChip />
     <HomeComposerStatus />
   </div>
 </template>

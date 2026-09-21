@@ -37,8 +37,8 @@ export interface ConversationBrowserHttpAuthorityV1 extends ReturnTypeOfBrowserA
   principal?: ConversationActionRouteAuthorityV1["principal"];
   legacyAdopt?: ConversationLegacyAdoptRouteAuthorityV1["legacyAdopt"];
   messageQueue?: ConversationMessageQueueHttpAuthorityV1["queue"];
-  /** Project registry read + move; absent entirely when the runtime has no registry. */
-  projects?: Omit<ConversationProjectRouteAuthorityV1, "sessions" | "csrf" | "moveProject"> &
+  /** Project registry read + re-bind; absent entirely when the runtime has no registry. */
+  projects?: Omit<ConversationProjectRouteAuthorityV1, "sessions" | "csrf"> &
     Pick<ConversationProjectSurfaceV1, "updateProject" | "classify">;
 }
 

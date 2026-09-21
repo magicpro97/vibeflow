@@ -299,6 +299,33 @@ Two surfaces, one authority — no duplicated controls:
 
 ---
 
+## 8. Implementation amendments (Task 5 Step 1+)
+
+Four things the implementation settled differently, all recorded here so the design doc and the
+code agree:
+
+1. **No create variant.** The classifier's acceptance path (`project-classifier-authority.ts`)
+   only returns *registered* project ids, so the `Tạo project mới` branch could never be reached
+   with a real proposal — it was a control with no backend. Cut (YAGNI); the chip offers a move
+   into a registered project only.
+2. **No Undo.** The `confirmed` toast's `Undo` was cut with it: the server has no durable
+   "move back" either, so an Undo would have been an affordance that cannot keep its promise. A
+   second confirmed move is the reversal, and the announcement names the target
+   (`Đã chuyển sang {name}`).
+3. **One live region, as designed.** The chip's announcement goes through the composer's existing
+   polite region (`HomeComposerStatus.vue`) via the store; it adds no `role="status"` element of
+   its own — that part of §3 is honoured rather than merely sketched.
+4. **Group name is the divider's accessible name.** `<h3>` cannot nest inside `<button>` (button
+   takes phrasing content), so the heading is a *sibling* inside a `.home-session-group__header`
+   row and the divider carries `aria-labelledby` pointing at it. Same reading order, valid content
+   model. The chip is after the form in DOM with `order: -1`, as §3 specified.
+5. **Create-time binding is real.** `resolveConversationProjectId` runs the deterministic
+   (`repo`/`mention`) tiers at manifest materialization, so the "already bound at creation"
+   premise in §6's limitations is code, not a claim. The inferred tiers (`fts`/`ai`) stay out of
+   creation and remain confirmable proposals.
+
+---
+
 ## Approval record
 
 **Approved by user (2026-09-21).** Interactive HTML mockup reviewed at `http://127.0.0.1:8899/ui-mockup-project-rail.html` (served from `docs/ui-mockup-project-rail.html`). Design gate passed → Task 5 Steps 1+ may implement per this mockup. Known limitations box included as designed.

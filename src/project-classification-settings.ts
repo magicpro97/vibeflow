@@ -12,7 +12,10 @@
  * silently pin classification to one CLI and keep using it after the user changes their default.
  */
 import { type Engine, isAgentEngine } from "./core/agent-contract.js";
-import { PROJECT_THINKING_MAX_LENGTH } from "./orchestrator/conversation/project-types.js";
+import {
+  PROJECT_MODEL_MAX_LENGTH,
+  PROJECT_THINKING_MAX_LENGTH,
+} from "./orchestrator/conversation/project-types.js";
 
 /** The classifier engine override; every field may be unset, which means "use the default". */
 export interface ProjectClassificationEngine {
@@ -57,7 +60,7 @@ export function coerceProjectClassificationSettings(raw: unknown): ProjectClassi
   if (obj.engine && typeof obj.engine === "object" && !Array.isArray(obj.engine)) {
     const engine = obj.engine as { cli?: unknown; model?: unknown; thinking?: unknown };
     out.engine.cli = isAgentEngine(engine.cli) ? engine.cli : null;
-    out.engine.model = bounded(engine.model, PROJECT_THINKING_MAX_LENGTH);
+    out.engine.model = bounded(engine.model, PROJECT_MODEL_MAX_LENGTH);
     out.engine.thinking = bounded(engine.thinking, PROJECT_THINKING_MAX_LENGTH);
   }
   return out;

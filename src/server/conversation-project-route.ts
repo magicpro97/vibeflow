@@ -12,6 +12,7 @@
 import { PUBLIC_ERROR_CODE, PUBLIC_RECOVERY_ACTION } from "../actions/public-error-contract.js";
 import { isAgentEngine } from "../core/agent-contract.js";
 import { isConversationProjectId } from "../orchestrator/conversation/conversation-catalog-contract.js";
+import { ConversationProjectRebindError } from "../orchestrator/conversation/conversation-project-rebind.js";
 import type { ClassificationReason } from "../orchestrator/conversation/project-classifier.js";
 import type { ProjectV1 } from "../orchestrator/conversation/project-types.js";
 import type { ConversationSessionAuthority } from "./conversation-auth.js";
@@ -240,6 +241,16 @@ export async function handleConversationProjectRoute(
     await authority.moveProject({ root_session_id: rootSessionId, project_id: projectId });
     return queueNoStore({ schema_version: "1.0", project_id: projectId, moved: true }, 202);
   } catch (error) {
+    // A re-bind refusal carries its own public code and authored copy; everything else keeps the
+    // queue route's mapping. Without this the refusal would collapse into a generic 400.
+    if (error instanceof ConversationProjectRebindError)
+      return conversationReadError(error.code, {
+        message: error.message,
+        retryable: error.code === PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE,
+        ...(error.code === PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE
+          ? { recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY }
+          : {}),
+      });
     return messageQueueRouteError(error);
   }
 }

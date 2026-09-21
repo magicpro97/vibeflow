@@ -96,6 +96,32 @@ function newestSessionAt(folder: ProjectRailFolder): number {
 }
 
 /**
+ * Folder order: newest entry first, then the documented name and id tiebreak.
+ *
+ * The stamps are compared as *finite* values only. `newestSessionAt` answers `-Infinity` when no
+ * stamp parses, and `(-Infinity) - (-Infinity)` is `NaN`; a `NaN` delta makes the comparator skip
+ * the name tiebreak entirely (`NaN !== 0` is true) and the group order follows map insertion —
+ * i.e. whichever project the catalog happened to list first, contradicting the documented order.
+ * Treating "both unparseable" as a tie is what makes all-unparseable input deterministic.
+ */
+export function compareProjectRailFolders(
+  left: ProjectRailFolder,
+  right: ProjectRailFolder,
+): number {
+  if (left.ideas !== right.ideas) return left.ideas ? 1 : -1;
+  const leftNewest = newestSessionAt(left);
+  const rightNewest = newestSessionAt(right);
+  if (leftNewest !== rightNewest) {
+    const delta = rightNewest - leftNewest;
+    // Only `NaN` falls through: it means *both* were unparseable, so the name tiebreak decides.
+    // A genuinely infinite delta is a real ordering (an unparseable folder is the oldest).
+    if (!Number.isNaN(delta)) return delta;
+  }
+  if (left.name !== right.name) return left.name < right.name ? -1 : 1;
+  return left.project_id < right.project_id ? -1 : left.project_id > right.project_id ? 1 : 0;
+}
+
+/**
  * Groups are ordered by their newest entry (desc), ties by name then id; the catch-all is
  * always last because it is a bucket, not a peer of the named projects. Sessions keep the
  * catalog order they arrived in — a group never re-sorts its own entries.
@@ -121,13 +147,7 @@ export function groupConversationsByProject<S extends ProjectRailSession>(
       sessions: items,
     });
   }
-  return folders.sort((left, right) => {
-    if (left.ideas !== right.ideas) return left.ideas ? 1 : -1;
-    const delta = newestSessionAt(right) - newestSessionAt(left);
-    if (delta !== 0) return delta;
-    if (left.name !== right.name) return left.name < right.name ? -1 : 1;
-    return left.project_id < right.project_id ? -1 : left.project_id > right.project_id ? 1 : 0;
-  });
+  return folders.sort(compareProjectRailFolders);
 }
 
 /** Collapsed folders drop out of keyboard traversal, so the order is what the rail shows. */
@@ -149,6 +169,14 @@ export function projectSuggestionConfidenceLabel(
 ): string {
   if (signal.reason !== "ai") return "";
   return `· ${Math.round(signal.confidence * 100)}% chắc chắn`;
+}
+
+/**
+ * The polite announcement for a live proposal. Lives here, not in the chip, because the chip
+ * renders into the composer's existing status region rather than adding a second live region.
+ */
+export function projectSuggestionAnnouncement(name: string): string {
+  return `Đề xuất project: ${name}. Nhấn Tab để chuyển.`;
 }
 
 /**

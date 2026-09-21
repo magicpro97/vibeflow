@@ -112,6 +112,51 @@ describe("project rail grouping", () => {
     expect(projectGoalExcerpt("missing", REGISTRY)).toBe("");
   });
 
+  test("all-unparseable stamps still order by name, never by input order", () => {
+    // `-Infinity - -Infinity` is NaN; a NaN delta would skip the name tiebreak and leave the
+    // group order following map insertion. The documented order must hold regardless.
+    const folders = groupConversationsByProject(
+      [
+        session("root-bravo", "bravo", "not a date"),
+        session("root-alpha", "alpha", ""),
+        session("root-hermes", "hermes", "2026-13-45T99:99:99.999Z"),
+      ],
+      REGISTRY,
+    );
+    expect(folders.map((folder) => folder.project_id)).toEqual(["alpha", "bravo", "hermes"]);
+    // Input order reversed must produce the identical grouping order.
+    const reversed = groupConversationsByProject(
+      [
+        session("root-hermes", "hermes", "2026-13-45T99:99:99.999Z"),
+        session("root-alpha", "alpha", ""),
+        session("root-bravo", "bravo", "not a date"),
+      ],
+      REGISTRY,
+    );
+    expect(reversed.map((folder) => folder.project_id)).toEqual(["alpha", "bravo", "hermes"]);
+  });
+
+  test("a parsable stamp still outranks an unparsable one on the same name", () => {
+    const folders = groupConversationsByProject(
+      [session("root-zzz", "zzz-project", "not a date"), session("root-aaa", "aaa-project", LATE)],
+      [
+        ...REGISTRY,
+        { id: "zzz-project", name: "same-name", goal: "" },
+        { id: "aaa-project", name: "same-name", goal: "" },
+      ],
+    );
+    // Newest first: the parsable stamp wins even though the names tie.
+    expect(folders.map((folder) => folder.project_id)).toEqual(["aaa-project", "zzz-project"]);
+  });
+
+  test("an unparsable stamp is treated as oldest, not as newer than a real one", () => {
+    const folders = groupConversationsByProject(
+      [session("root-old", "bravo", EARLY), session("root-bad", "alpha", "definitely not a date")],
+      REGISTRY,
+    );
+    expect(folders.map((folder) => folder.project_id)).toEqual(["bravo", "alpha"]);
+  });
+
   test("an empty registry groups everything under a single Ideas folder", () => {
     const folders = groupConversationsByProject(
       [session("root-1", "idea", LATE), session("root-2", "idea", EARLY)],

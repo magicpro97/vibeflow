@@ -8,6 +8,11 @@
  * the second is reachable without a write path.
  */
 import { expect, test } from "bun:test";
+import { PUBLIC_ERROR_CODE } from "../src/actions/public-error-contract.js";
+import {
+  CONVERSATION_PROJECT_REBIND_IN_FLIGHT,
+  ConversationProjectRebindError,
+} from "../src/orchestrator/conversation/conversation-project-rebind.js";
 import type { ProjectV1 } from "../src/orchestrator/conversation/project-types.js";
 import {
   CONVERSATION_PROJECT_ROUTE,
@@ -135,10 +140,54 @@ test("a move without a durable re-bind is refused rather than reported as done",
     request("POST", { root_session_id: "root-1", project_id: "alpha" }),
     url,
   );
-  // The runtime has no re-bind yet; the contract is that the chip is told so, verbatim.
+  // A runtime *composed without* a re-binder still answers truthfully rather than faking success;
+  // the production composition supplies one, so this is the degraded-runtime contract only.
   expect(response?.status).toBe(503);
   const body = (await response?.json()) as { error: { message: string } };
   expect(body.error.message).toContain("cannot re-bind");
+});
+
+test("a re-bind refusal keeps its own public code and authored copy", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.MOVE}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      moveProject: () => {
+        throw new ConversationProjectRebindError(
+          PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE,
+          CONVERSATION_PROJECT_REBIND_IN_FLIGHT,
+        );
+      },
+    }),
+    request("POST", { root_session_id: "root-1", project_id: "alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(503);
+  const body = (await response?.json()) as {
+    error: { code: string; message: string; retryable: boolean };
+  };
+  expect(body.error.code).toBe("service_unavailable");
+  expect(body.error.message).toBe(CONVERSATION_PROJECT_REBIND_IN_FLIGHT);
+  expect(body.error.retryable).toBe(true);
+});
+
+test("a re-bind refusal for an unknown project is a client error, not a retryable outage", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.MOVE}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      moveProject: () => {
+        throw new ConversationProjectRebindError(
+          PUBLIC_ERROR_CODE.INVALID_REQUEST,
+          "Unknown project ghost.",
+        );
+      },
+    }),
+    request("POST", { root_session_id: "root-1", project_id: "alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(400);
+  const body = (await response?.json()) as { error: { code: string; retryable: boolean } };
+  expect(body.error.code).toBe("invalid_request");
+  expect(body.error.retryable).toBe(false);
 });
 
 test("a move with a durable re-bind forwards exactly the session and project", async () => {

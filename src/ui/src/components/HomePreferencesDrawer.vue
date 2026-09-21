@@ -6,7 +6,7 @@
         <button ref="closeButton" type="button" aria-label="Close settings" @click="$emit('close')">×</button>
       </header>
       <p class="home-drawer-copy">
-        These changes create a reviewed `conversation.update_settings` proposal. Nothing mutates directly from the browser.
+        Conversation policy changes below create a reviewed `conversation.update_settings` proposal. Project classification settings persist directly.
       </p>
 
       <div v-if="!store.activeRevision" class="home-drawer-state">

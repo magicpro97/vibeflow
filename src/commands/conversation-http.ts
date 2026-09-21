@@ -108,14 +108,14 @@ export function buildConversationHttpAuthority(
         inspect: (input) => composedCapabilityDomain.inspectAdoptCandidates(input),
       },
       messageQueue,
-      // The rail's divider labels and the settings panel's override rows read this registry.
-      // No mover is wired yet: a durable conversation→project re-bind does not exist in the
-      // runtime (the manifest binding is written at create time only), so the move route
-      // answers 503 instead of reporting a move that never landed.
+      // The rail's divider labels and the settings panel's override rows read this registry;
+      // `moveProject` is the chip's confirm and re-binds the active revision through the same
+      // catalog notifier a committed message uses.
       projects: {
         listProjects: () => bootstrap.authorities.projects.list(),
         updateProject: ({ project_id, engine }) =>
           bootstrap.authorities.projects.update(project_id, { engine }),
+        moveProject: bootstrap.authorities.rebindConversationProject,
         classify: async ({ message, repo_root }) => {
           const projects = bootstrap.authorities.projects.list();
           const authority = projectClassifier(projects);

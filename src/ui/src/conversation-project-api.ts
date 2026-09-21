@@ -1,4 +1,3 @@
-import { HOME_API_ERROR_CONTRACT } from "./conversation-home-error-boundary.js";
 /**
  * Browser client for the conversation-project routes: the rail's registry read, the composer
  * chip's classifier verdict, the settings panel's engine override write, and the explicit move.
@@ -7,6 +6,8 @@ import { HOME_API_ERROR_CONTRACT } from "./conversation-home-error-boundary.js";
  * are server authority, and a second implementation in the browser would drift from them. This
  * module only carries the verdict the server returned.
  */
+import { api } from "./api.js";
+import { HOME_API_ERROR_CONTRACT } from "./conversation-home-error-boundary.js";
 import { conversationHomeRequest } from "./conversation-home-http.js";
 import type {
   HomeProjectClassification,
@@ -97,5 +98,20 @@ export const conversationProjectApi: HomeProjectClient = {
       undefined,
       HOME_API_ERROR_CONTRACT.PUBLIC,
     );
+  },
+
+  /**
+   * The global block lives in the settings document, not the project registry, so these go
+   * through the already-composed `/api/settings` surface rather than the conversation route.
+   * The whole block is read and written: the engine fields must survive a switch toggle.
+   */
+  async readProjectSettings(signal) {
+    const body = await api.settings.get(signal);
+    return body.projectClassification ?? null;
+  },
+
+  async writeProjectSettings(value, signal) {
+    const body = await api.settings.set({ projectClassification: value }, signal);
+    return body.projectClassification ?? null;
   },
 };

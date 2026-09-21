@@ -8,8 +8,7 @@
   >
     <span class="home-project-chip__arrow" aria-hidden="true">→</span>
     <span class="home-project-chip__copy">
-      <template v-if="isCreate">Tạo project mới "{{ suggestedName }}"?</template>
-      <template v-else>Move to <span class="home-project-chip__project">{{ suggestedName }}</span>?</template>
+      Move to <span class="home-project-chip__project">{{ suggestedName }}</span>?
     </span>
     <span v-if="confidenceLabel" class="home-project-chip__confidence">{{ confidenceLabel }}</span>
     <button
@@ -17,17 +16,12 @@
       class="home-project-chip__confirm"
       :disabled="busy"
       @click="confirm"
-    >{{ confirmLabel }}</button>
+    >{{ busy ? "Moving…" : "Move" }}</button>
     <button type="button" class="home-project-chip__dismiss" :disabled="busy" @click="dismiss">
-      {{ isCreate ? "Bỏ qua" : "Not now" }}
+      Keep in Ideas
     </button>
   </div>
-  <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-    {{ announcement }}
-  </div>
-  <p v-if="error" class="home-project-chip__error" role="alert">
-    Không chuyển được: {{ error }}
-  </p>
+  <p v-if="error" class="home-project-chip__error" role="alert">Không chuyển được: {{ error }}</p>
 </template>
 
 <script setup lang="ts">
@@ -39,14 +33,18 @@ import { projectSuggestionConfidenceLabel } from "../project-rail-group.js";
  * The composer's suggestion chip. It renders only what the classifier proposed: the visibility
  * gate already ran server-side and again in the runtime, so this component never decides whether
  * a move is warranted — it only offers the confirm the user must press.
+ *
+ * There is no create variant. The classifier's acceptance path (`project-classifier-authority`)
+ * only ever returns a *registered* project id, so an unregistered id cannot reach this chip; the
+ * "Tạo project mới" branch the mockup sketched had no backend and read as a dead control. It is
+ * cut, and a proposal can only ever offer a move into a project the registry holds.
+ *
+ * The announcement is published through the store, which the composer's existing polite status
+ * region renders — the chip adds no second live region.
  */
 const store = useProjectClassificationStore();
 const suggestion = computed(() => store.suggestion);
 
-/** A proposal naming an unregistered project is a create offer, not a move. */
-const isCreate = computed(
-  () => !store.projects.some((project) => project.id === store.suggestion?.project_id),
-);
 const suggestedName = computed(() => {
   const id = store.suggestion?.project_id ?? "";
   return store.projects.find((project) => project.id === id)?.name ?? id;
@@ -56,12 +54,6 @@ const confidenceLabel = computed(() =>
 );
 const busy = computed(() => store.suggestionBusy);
 const error = computed(() => store.suggestionError);
-const confirmLabel = computed(() => (busy.value ? "Moving…" : isCreate.value ? "Tạo" : "Move"));
-const announcement = computed(() => {
-  const current = store.suggestion;
-  if (!current) return "";
-  return `Đề xuất project: ${suggestedName.value}. Nhấn Tab để chuyển.`;
-});
 
 function dismiss(): void {
   store.dismissSuggestion();
