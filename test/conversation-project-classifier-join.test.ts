@@ -91,8 +91,10 @@ describe("the classifier engine join", () => {
   test("neither the project nor the block names an engine: the seam is left unset", () => {
     const { seen, build } = spyFactory();
     buildConversationProjectClassifier(
-      [{ ...ROWS[0], engine: { cli: null, model: null, thinking: "high" } }] as never,
-      { settings: settings(null), project_id: "alpha" },
+      // A reachable "absent settings" input: the global block names no engine and no project is
+      // forwarded, so the resolver has nothing to forward — the seam keeps its own fallback.
+      ROWS,
+      { settings: settings(null) },
       build,
     );
     // Not `engine: undefined`: the key is absent, so the seam keeps its own documented fallback

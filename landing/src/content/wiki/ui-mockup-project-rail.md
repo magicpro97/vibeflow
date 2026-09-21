@@ -196,36 +196,38 @@ suppressed (the send is still settling) and re-evaluated when the turn completes
 ## 4. Settings layout
 
 Two surfaces, one authority — no duplicated controls:
-- **`SettingsPanel.vue`** (modal) gains a `Project classification` fieldset: the global switch
-  and the global engine.
+- **`ProjectSettingsPanel.vue`** (mounted by `HomePreferencesDrawer.vue`) hosts a `Project
+  classification` fieldset: the global switch and the global engine.
 - **Per-project overrides** live in the same fieldset, one collapsible row per registry project,
-  because the registry is unbounded (256) and the modal is `max-w-md` scrollable.
+  because the registry is unbounded (256) and the drawer is scrollable.
 
 ```
-┌ Settings ────────────────────────────────┐
-│ Project classification           [i]     │   ← InfoTip: explains the tier ladder
-│  [x] Auto-classify new conversations     │   ← global switch; OFF ⇒ classifier never runs,
-│      Tier ladder: repo → @mention →       │      no chip, everything stays in Ideas
-│      index → AI (chỉ khi mơ hồ)           │
+┌ Project classification ──────────────────┐
+│ Tier ladder: repo → @mention →            │
+│ index → AI (chỉ khi mơ hồ)                │
+│  [x] Auto-classify new conversations      │   ← global switch; OFF ⇒ classifier never runs,
+│      no chip, everything stays in Ideas   │
 │                                          │
 │  Global engine                           │
 │   CLI      [ Auto (recommended)  ▾ ]     │
 │   Model    [ engine default       ]      │
 │   Thinking [ low ▾ ] medium high xhigh   │
 │                                          │
-│  Per-project override                 ▾  │   ← collapsed; header shows overridden count
+│  Per-project engine override (1)       ▸ │   ← collapsed; header shows overridden count
 │   ┌ vibeflow-hermes-execution  [inherit] │   ← empty = inherit (placeholder, not "None")
 │   │  CLI [ codex ▾ ]  Model [ gpt-x ]    │
 │   │  Thinking [ high ▾ ]                 │
 │   └ vibeflow-v0.15            [inherit]  │
 │      CLI [ — ]  Model [ — ]  Thinking [—]│   ← placeholders mirror "Theo mặc định"
 │                                          │
-│              [ Cancel ]   [ Save ]       │
+│              [ Save project settings ]   │
 └──────────────────────────────────────────┘
 ```
 
-- Row header: project `name` + a muted `{n} repos` count; the whole row is the disclosure
-  button (`aria-expanded`, `aria-controls`).
+- Row: the project `name` (or `id`) as a muted label above three controls (CLI / model /
+  thinking); the disclosure is one shared `Per-project engine override ({n})` button
+  (`aria-expanded`, `aria-controls`) that collapses every row at once — rows are plain `<div>`s,
+  not per-row buttons.
 - **Inherit is the empty state**, shown as a placeholder `Theo mặc định` — never a literal
   "none"/"null" option and never a fake value. An override only persists when the user types one.
 - Thinking is a bounded text input with a datalist (`low|medium|high|xhigh|max`) because the
@@ -259,7 +261,7 @@ Two surfaces, one authority — no duplicated controls:
 | Roving tabindex | one entry has `tabindex="0"` (the focused one, else the active session, else the first visible); the rest `-1`, so Tab leaves the rail instead of walking every conversation |
 | Arrow keys | `ArrowDown`/`ArrowUp` = next/previous **visible entry**, crossing group boundaries and skipping collapsed groups and dividers; `Home`/`End` = first/last visible entry; `ArrowLeft`/`ArrowRight` = collapse/expand the focused entry's group (divider takes focus when it collapses around a focused entry); `Enter`/`Space` = open. This traversal is **new in this implementation** — the pre-grouping rail was a flat list of buttons with no arrow handling at all |
 | Chip | `role="group" aria-label="Project suggestion"`; announce via the existing polite live region; no focus steal; `Esc` dismisses |
-| Settings | existing dialog semantics kept (`role="dialog" aria-modal`, focus trap, Esc). New fieldset uses `<fieldset><legend>`; the auto-classify switch is a real `<input type="checkbox">`; override rows are `<button aria-expanded aria-controls>`; saving announces through the existing toast/status region |
+| Settings | existing drawer semantics kept. The fieldset uses `<fieldset><legend>`; the auto-classify switch is a real `<input type="checkbox">`; the override rows are plain `<div>`s, and the disclosure is one shared `<button aria-expanded aria-controls>`; saving announces through an inline `<p role="status">Saved</p>` (no toast) |
 | Zoom / text scale | 18rem rail keeps `--home-rail-width`; labels wrap-free via ellipsis, never truncating to an unreadable width; groups reflow at 200% zoom by stacking name over count |
 | Motion | 140ms chip enter + 8px row slide; all `transform`/`opacity`; instant under `prefers-reduced-motion` |
 
@@ -307,7 +309,6 @@ Two surfaces, one authority — no duplicated controls:
 
 Six things the implementation settled differently, all recorded here so the design doc and the
 code agree:
-
 1. **No create variant.** The classifier's acceptance path (`project-classifier-authority.ts`)
    only returns *registered* project ids, so the `Tạo project mới` branch could never be reached
    with a real proposal — it was a control with no backend. Cut (YAGNI); the chip offers a move

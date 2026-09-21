@@ -41,7 +41,6 @@ export type ConversationProjectClassifierFactory = (
   projects: readonly ClassifierProject[],
   seams?: ProjectClassifierRuntimeSeams,
 ) => { classify(input: ClassificationInput): Promise<Classification> };
-
 /**
  * The classify join: one registry snapshot plus the stored policy → the tier ladder the route
  * runs, with the resolved engine forwarded into the classifier's AI seam.
@@ -77,6 +76,7 @@ export function buildConversationHttpAuthority(
   host?: string,
   base = cwd(),
   capability: Omit<CapabilityRuntimeFactoryOptionsV1, "projectRoot"> = {},
+  classifierFactory: ConversationProjectClassifierFactory = projectClassifier,
 ): ConversationHttpAuthority {
   const loopback = isConversationLoopbackHost(host ?? "127.0.0.1");
   const key = `${base}:${loopback ? "loopback" : "lan"}`;
@@ -174,11 +174,15 @@ export function buildConversationHttpAuthority(
         // settings save reaches the next verdict without a restart. The join itself lives in
         // `buildConversationProjectClassifier` so it is observable in unit tests.
         classify: async ({ message, repo_root, project_id }) =>
-          buildConversationProjectClassifier(bootstrap.authorities.projects.list(), {
-            settings:
-              readSettings(base).projectClassification ?? DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
-            ...(project_id === undefined ? {} : { project_id }),
-          }).classify({
+          buildConversationProjectClassifier(
+            bootstrap.authorities.projects.list(),
+            {
+              settings:
+                readSettings(base).projectClassification ?? DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+              ...(project_id === undefined ? {} : { project_id }),
+            },
+            classifierFactory,
+          ).classify({
             message,
             ...(repo_root === undefined ? {} : { repo_root }),
           }),

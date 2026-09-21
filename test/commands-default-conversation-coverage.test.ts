@@ -10,7 +10,11 @@ import { buildConversationHttpAuthority } from "../src/commands/conversation-htt
 import { conversationEnvPolicy } from "../src/dispatch/env-filter.js";
 import { type EngineProcess, createSpawnOptionsProjection } from "../src/dispatch/session-types.js";
 import type { ConversationBootstrapOptions } from "../src/orchestrator/conversation/bootstrap.js";
+import { ProjectRegistryAuthority } from "../src/orchestrator/conversation/project-registry-authority.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
+import { writeSettings } from "../src/settings.js";
+import { projectClassifier } from "../src/skills/project-classifier-runtime.js";
+import type { ProjectClassifierRuntimeSeams } from "../src/skills/project-classifier-runtime.js";
 
 const roots: string[] = [];
 const TEST_PRINCIPAL_DIGEST = `sha256:${"1".repeat(64)}`;
@@ -454,5 +458,63 @@ describe("production HTTP composition delegates every shared authority", () => {
     expect((await authority.service.snapshot(created.conversation_id))?.lifecycle).not.toBe(
       "ACTIVE",
     );
+  }, 30_000);
+
+  test("the classify site forwards the stored policy and project_id into the classifier join", async () => {
+    // Pins the composition edge M2 could not see: replacing the site's call with a direct
+    // `projectClassifier(projects, {})` (dropping both the helper and the stored engine) left the
+    // whole suite green. The factory seam is what makes the site observable: a spy records the
+    // exact registry and seams the route hands the join, so a stored engine that silently stops
+    // reaching the AI tier fails here.
+    const root = mkdtempSync(join(tmpdir(), "vf-http-classify-join-"));
+    roots.push(root);
+    const repo = join(root, "repo");
+    const home = join(root, "home");
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"http-classify-join"}\n');
+    const projectsDir = join(repo, ".vibeflow", "projects");
+    new ProjectRegistryAuthority({ root: projectsDir }).create({
+      id: "gamma",
+      name: "gamma-service",
+      engine: { cli: "copilot", model: null, thinking: "high" },
+    });
+    writeSettings(repo, {
+      projectClassification: {
+        enabled: true,
+        engine: { cli: "codex", model: null, thinking: null },
+      },
+    });
+
+    const seen: ProjectClassifierRuntimeSeams[] = [];
+    const factory: typeof projectClassifier = (projects, seams = {}) => {
+      seen.push(seams);
+      return projectClassifier(projects, seams);
+    };
+
+    const authority = buildConversationHttpAuthority(
+      { bootstrap: bootstrapOptions(join(root, "conversation")) },
+      "127.0.0.1",
+      repo,
+      {
+        userHomeRoot: home,
+        userVibeflowRoot: join(home, ".vibeflow"),
+        now: () => "2026-08-26T00:00:00.000Z",
+        vfVersion: "0.15.0",
+        engineVersions: { claude: "1.0.0" },
+      },
+      factory,
+    );
+
+    // The conversation's own project override (gamma → copilot) wins over the global block
+    // (codex), and the resolved engine reaches the join's seams — the exact round-2 defect line.
+    const projects = authority.browser?.projects;
+    if (!projects) throw new Error("project surface was not composed");
+    await projects.classify({
+      message: "gamma service billing",
+      project_id: "gamma",
+    });
+
+    expect(seen).toEqual([{ engine: "copilot" }]);
   }, 30_000);
 });
