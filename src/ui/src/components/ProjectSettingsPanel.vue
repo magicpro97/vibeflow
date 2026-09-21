@@ -42,6 +42,9 @@
         <option v-for="value in thinkingSuggestions" :key="value" :value="value" />
       </datalist>
     </div>
+    <p class="home-project-settings__note">
+      Model and thinking are stored; applied when a dispatch surface consumes them.
+    </p>
     <p v-if="!draft.enabled" class="home-project-settings__note">
       Không dùng khi tự động phân loại đang tắt.
     </p>

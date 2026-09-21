@@ -3,12 +3,18 @@ import {
   type CapabilityRuntimeFactoryOptionsV1,
   productionCapabilityRuntimeV1,
 } from "../capabilities/runtime-factory.js";
-import { cwd } from "../core.js";
+import { type Engine, cwd } from "../core.js";
 import { ConversationAskCompatibilityV1 } from "../orchestrator/conversation/conversation-ask-compatibility.js";
 import { ConversationHomeCreateBrokerV1 } from "../orchestrator/conversation/conversation-home-create-authority.js";
 import { createPrivateFileRangeHandoffId } from "../orchestrator/conversation/private-file-range-staging-store.js";
+import type {
+  Classification,
+  ClassificationInput,
+  ClassifierProject,
+} from "../orchestrator/conversation/project-classifier.js";
 import {
   DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+  type ProjectClassificationSettings,
   resolveProjectClassificationEngine,
 } from "../project-classification-settings.js";
 import {
@@ -19,10 +25,52 @@ import { isConversationLoopbackHost } from "../server/conversation-host.js";
 import type { ConversationMessageQueueHttpAuthorityV1 } from "../server/conversation-message-queue-route.js";
 import type { ConversationHttpAuthority } from "../server/conversation-route.js";
 import { readSettings } from "../settings.js";
-import { projectClassifier } from "../skills/project-classifier-runtime.js";
+import {
+  type ProjectClassifierRuntimeSeams,
+  projectClassifier,
+} from "../skills/project-classifier-runtime.js";
 import { type ConversationCommandDeps, conversationBootstrap } from "./_shared.js";
 
 const AUTHORITIES = new Map<string, ConversationHttpAuthority>();
+
+/** The registry fields the classify join reads: the classifier's catalog row plus its engine. */
+type ClassifierRegistryRow = ClassifierProject & { readonly engine: { readonly cli: Engine } };
+
+/** The classifier factory, as a seam: production is {@link projectClassifier}, tests spy on it. */
+export type ConversationProjectClassifierFactory = (
+  projects: readonly ClassifierProject[],
+  seams?: ProjectClassifierRuntimeSeams,
+) => { classify(input: ClassificationInput): Promise<Classification> };
+
+/**
+ * The classify join: one registry snapshot plus the stored policy → the tier ladder the route
+ * runs, with the resolved engine forwarded into the classifier's AI seam.
+ *
+ * It is a named function because this join is the line no test could see: the engine resolution
+ * (`test/project-classifier-runtime.test.ts`) and the seam's own `engine` spread (same file) are
+ * both pinned, so replacing the call below with `projectClassifier(projects, {})` left every one
+ * of the 8856 tests green. `factory` is the seam that makes the join observable.
+ */
+export function buildConversationProjectClassifier(
+  projects: readonly ClassifierRegistryRow[],
+  policy: {
+    readonly settings: ProjectClassificationSettings;
+    readonly project_id?: string | undefined;
+  },
+  factory: ConversationProjectClassifierFactory = projectClassifier,
+): { classify(input: ClassificationInput): Promise<Classification> } {
+  const project =
+    policy.project_id === undefined
+      ? undefined
+      : projects.find((row) => row.id === policy.project_id);
+  // Precedence lives in the settings module: project override, then the global block, then
+  // "unset" — which must stay an absent key so the seam keeps its own fallback.
+  const engine = resolveProjectClassificationEngine({
+    settings: policy.settings,
+    ...(project === undefined ? {} : { project }),
+  });
+  return factory(projects, { ...(engine === undefined ? {} : { engine }) });
+}
 
 export function buildConversationHttpAuthority(
   deps: ConversationCommandDeps = {},
@@ -123,24 +171,17 @@ export function buildConversationHttpAuthority(
         moveProject: bootstrap.authorities.rebindConversationProject,
         // The AI tier runs on stored policy: the conversation's own project engine override, then
         // the global classifier block, then away from both — so an edited project engine or a
-        // settings save reaches the next verdict without a restart.
-        classify: async ({ message, repo_root, project_id }) => {
-          const projects = bootstrap.authorities.projects.list();
-          const project =
-            project_id === undefined ? undefined : projects.find((row) => row.id === project_id);
-          const engine = resolveProjectClassificationEngine({
+        // settings save reaches the next verdict without a restart. The join itself lives in
+        // `buildConversationProjectClassifier` so it is observable in unit tests.
+        classify: async ({ message, repo_root, project_id }) =>
+          buildConversationProjectClassifier(bootstrap.authorities.projects.list(), {
             settings:
               readSettings(base).projectClassification ?? DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
-            ...(project === undefined ? {} : { project }),
-          });
-          const authority = projectClassifier(projects, {
-            ...(engine === undefined ? {} : { engine }),
-          });
-          return authority.classify({
+            ...(project_id === undefined ? {} : { project_id }),
+          }).classify({
             message,
             ...(repo_root === undefined ? {} : { repo_root }),
-          });
-        },
+          }),
       },
     },
     homeCreate: {

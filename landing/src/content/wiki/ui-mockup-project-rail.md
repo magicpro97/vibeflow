@@ -232,11 +232,15 @@ Two surfaces, one authority — no duplicated controls:
   engine vocabulary differs per CLI (`PROJECT_THINKING_MAX_LENGTH` — the backend deliberately
   does not close the set). No `<select>` that would reject a value a CLI accepts.
 - CLI is the closed set from the engine contract; model stays free text (same reason).
-- States: loading → 4 skeleton rows (existing pattern); load error → the existing red banner +
-  Retry; save → buttons disabled + `Saving…`, then a toast; **failed save keeps the form values**
-  and shows the reason inline under the fieldset (never a silent revert).
+- States (as built): no loading branch — `onMounted` awaits `loadSettings()` before `seedDraft`, so
+  the fields appear seeded and never flash an empty value; a load failure lands in the same alert
+  paragraph as a save failure (inline `<p role="alert">` under the fieldset, no separate banner and
+  no Retry control); save → the button disables and reads `Saving…`, then an inline
+  `<p role="status">Saved</p>` appears (no toast); **failed save keeps the form values** and shows
+  the reason in that alert paragraph (never a silent revert).
 - Disabled-with-reason: with auto-classify OFF, the engine rows stay enabled (they are stored
-  config, applied when classification is next enabled) but carry a muted note
+  config; the CLI is applied when classification is next enabled, while model/thinking are stored
+  for a future dispatch surface — see §8.6) but carry a muted note
   `Không dùng khi tự động phân loại đang tắt`.
 
 ---
@@ -301,7 +305,7 @@ Two surfaces, one authority — no duplicated controls:
 
 ## 8. Implementation amendments (Task 5 Step 1+)
 
-Five things the implementation settled differently, all recorded here so the design doc and the
+Six things the implementation settled differently, all recorded here so the design doc and the
 code agree:
 
 1. **No create variant.** The classifier's acceptance path (`project-classifier-authority.ts`)
@@ -323,6 +327,15 @@ code agree:
    (`repo`/`mention`) tiers at manifest materialization, so the "already bound at creation"
    premise in §6's limitations is code, not a claim. The inferred tiers (`fts`/`ai`) stay out of
    creation and remain confirmable proposals.
+6. **The engine is applied; model/thinking are stored, not yet applied.** Of the three engine
+   fields, only `cli` has a consumer: `resolveProjectClassificationEngine` produces it and the
+   classifier's AI seam forwards it into `runOwnedAiRoute`. `model` and `thinking` are validated,
+   bounded (`PROJECT_MODEL_MAX_LENGTH` / `PROJECT_THINKING_MAX_LENGTH`), persisted, and
+   round-tripped to the server, but **no dispatch surface consumes them** — the owned-AI-route
+   request carries no such fields, and there is no in-repo authority that maps a reasoning label
+   to a CLI flag (`project-types.ts` says so explicitly). They are stored now so the settings
+   document does not have to change shape when a consumer arrives; that consumer is the seam.
+   §4's engine rows and the panel's two labeled inputs carry a note saying exactly this.
 
 ---
 
