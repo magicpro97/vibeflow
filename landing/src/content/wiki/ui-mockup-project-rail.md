@@ -250,10 +250,10 @@ Two surfaces, one authority — no duplicated controls:
 | Group name | `<h3 id="rail-group-{id}" class="home-session-group__name">` — real heading, so screen-reader heading navigation walks the projects; contains `<span class="sr-only">, {n} conversations</span>` so the count is announced without a badge |
 | Goal excerpt | `aria-describedby` on the group, or plain text inside the h3's sibling — kept out of the accessible name so the name stays short |
 | Divider control | `<button aria-expanded="true|false" aria-controls="rail-entries-{id}">`; glyph is `aria-hidden`; `title` mirrors the label |
-| Entries list | `<div id="rail-entries-{id}" role="list">` with `role="listitem"` on rows — role added because the rows are `<button>`, not `<li>`; keeps VoiceOver's count ("4 items") |
+| Entries list | `<div id="rail-entries-{id}" role="list">` with a `role="listitem"` wrapper around each row — role added because the rows are `<button>`, not `<li>`, and `listitem` is not an allowed role on `<button>`; keeps VoiceOver's count ("4 items") |
 | Active session | `aria-current="page"` unchanged on the entry button |
-| Roving tabindex | one entry has `tabindex="0"` (the active one, else the first); the rest `-1` |
-| Arrow keys | `ArrowDown`/`ArrowUp` = next/previous **visible entry**, crossing group boundaries and skipping collapsed groups and dividers — i.e. today's session traversal, unchanged; `Home`/`End` = first/last visible entry; `ArrowLeft`/`ArrowRight` = collapse/expand the focused entry's group (divider takes focus when it collapses around a focused entry); `Enter`/`Space` = open |
+| Roving tabindex | one entry has `tabindex="0"` (the focused one, else the active session, else the first visible); the rest `-1`, so Tab leaves the rail instead of walking every conversation |
+| Arrow keys | `ArrowDown`/`ArrowUp` = next/previous **visible entry**, crossing group boundaries and skipping collapsed groups and dividers; `Home`/`End` = first/last visible entry; `ArrowLeft`/`ArrowRight` = collapse/expand the focused entry's group (divider takes focus when it collapses around a focused entry); `Enter`/`Space` = open. This traversal is **new in this implementation** — the pre-grouping rail was a flat list of buttons with no arrow handling at all |
 | Chip | `role="group" aria-label="Project suggestion"`; announce via the existing polite live region; no focus steal; `Esc` dismisses |
 | Settings | existing dialog semantics kept (`role="dialog" aria-modal`, focus trap, Esc). New fieldset uses `<fieldset><legend>`; the auto-classify switch is a real `<input type="checkbox">`; override rows are `<button aria-expanded aria-controls>`; saving announces through the existing toast/status region |
 | Zoom / text scale | 18rem rail keeps `--home-rail-width`; labels wrap-free via ellipsis, never truncating to an unreadable width; groups reflow at 200% zoom by stacking name over count |
@@ -301,7 +301,7 @@ Two surfaces, one authority — no duplicated controls:
 
 ## 8. Implementation amendments (Task 5 Step 1+)
 
-Four things the implementation settled differently, all recorded here so the design doc and the
+Five things the implementation settled differently, all recorded here so the design doc and the
 code agree:
 
 1. **No create variant.** The classifier's acceptance path (`project-classifier-authority.ts`)

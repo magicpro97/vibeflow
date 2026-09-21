@@ -123,6 +123,8 @@ export function createHomeProjectRuntime(options: {
   const suggestionBusy = ref(false);
   const suggestionError = ref("");
   const dismissed = new Set<string>(options.dismissals?.read() ?? []);
+  /** Highest classification request issued per session; a response only applies when it is last. */
+  const verdictSequence = new Map<string, number>();
 
   async function loadProjects(): Promise<void> {
     try {
@@ -173,21 +175,28 @@ export function createHomeProjectRuntime(options: {
    * passed into `propose`, because re-reading the active session after the await would file a
    * verdict inferred from the old message against whichever conversation the user has since
    * switched to — and confirming that chip would then move the wrong conversation.
+   *
+   * A per-session monotonic token makes the *last request* win, not the last response: two sends
+   * in one session can resolve out of order, and a slow first verdict landing after the second
+   * would otherwise offer a move inferred from a message the user has already superseded.
    */
   async function classifyAndPropose(message: string): Promise<void> {
     if (!options.autoClassify()) return;
     const rootSessionId = options.activeRootId();
     if (!rootSessionId || message.trim() === "") return;
+    const token = (verdictSequence.get(rootSessionId) ?? 0) + 1;
+    verdictSequence.set(rootSessionId, token);
     try {
       const verdict = await options.client.classifyMessage({
         message,
         project_id: options.activeProjectId(),
       });
       if (options.activeRootId() !== rootSessionId) return;
+      if (verdictSequence.get(rootSessionId) !== token) return;
       propose(verdict, rootSessionId);
     } catch {
       // Classification is advisory: a failure proposes nothing rather than surfacing an error.
-      suggestion.value = null;
+      if (verdictSequence.get(rootSessionId) === token) suggestion.value = null;
     }
   }
 
@@ -235,6 +244,9 @@ export function createHomeProjectRuntime(options: {
   function reset(): void {
     suggestion.value = null;
     suggestionError.value = "";
+    // Dropping the sequence invalidates every in-flight verdict: a reset (switch off, or a new
+    // conversation) must not be undone by a response that was already on the wire.
+    verdictSequence.clear();
   }
 
   return {

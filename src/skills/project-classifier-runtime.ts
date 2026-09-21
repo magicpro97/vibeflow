@@ -15,6 +15,8 @@
  * sqlite here", "retrieval threw", "descriptor indexing threw" are all reachable in a test.
  */
 import type { Database } from "bun:sqlite";
+import type { Engine } from "../core/agent-contract.js";
+import type { OwnedAiRouteRunner } from "../dispatch/owned-ai-route.js";
 import {
   ProjectClassifierAuthority,
   type ProjectIndexPort,
@@ -41,13 +43,17 @@ export interface ProjectClassifierRuntimeSeams {
   search?: (db: Database, query: string) => readonly ProjectScore[];
   /** Reasoning seam; omitted = the ambient `VIBEFLOW_AI` bridge (may be absent). */
   propose?: ProjectProposalFn;
+  /**
+   * Engine the AI tier runs on. Sent by the caller because the engine is stored policy — a project
+   * override, then the global classifier block — which this module cannot read. `undefined` keeps
+   * the seam's own fallback (`VF_REVIEW_ENGINE`, then the canonical engine order).
+   */
+  engine?: Engine;
+  /** Runner the proposal seam spawns through; omitted = the canonical owned AI route. */
+  ownedRoute?: OwnedAiRouteRunner;
+  /** Bridge command; omitted = `VIBEFLOW_AI` from the environment. */
+  bridge?: string;
 }
-
-/**
- * The process-wide AI seam, built once: `makeProjectProposalFn` reads the bridge from the
- * environment (stable for the server's lifetime) and the seam itself is stateless.
- */
-const proposalFn = makeProjectProposalFn();
 
 /**
  * The cached production index handle. Opened once per process — one `:memory:` database is
@@ -88,6 +94,19 @@ function indexPort(
   };
 }
 
+/**
+ * The AI seam for one classification: `engine` is the stored policy the caller resolved, and an
+ * absent `VIBEFLOW_AI` bridge still yields no seam at all — classification then stops at tier 3,
+ * deterministically. Only the production default; a caller-injected `propose` wins outright.
+ */
+function defaultProposalFn(seams: ProjectClassifierRuntimeSeams): ProjectProposalFn | undefined {
+  return makeProjectProposalFn({
+    ...(seams.engine === undefined ? {} : { engine: seams.engine }),
+    ...(seams.ownedRoute === undefined ? {} : { ownedRoute: seams.ownedRoute }),
+    ...(seams.bridge === undefined ? {} : { bridge: seams.bridge }),
+  });
+}
+
 /** Build the tier ladder over one registry snapshot. Never throws: every seam is optional. */
 export function projectClassifier(
   projects: readonly ClassifierProject[],
@@ -105,7 +124,7 @@ export function projectClassifier(
       index = undefined;
     }
   }
-  const propose = seams.propose ?? proposalFn;
+  const propose = seams.propose ?? defaultProposalFn(seams);
   return new ProjectClassifierAuthority({
     projects: () => projects,
     ...(index === undefined ? {} : { index }),

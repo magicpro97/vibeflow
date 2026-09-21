@@ -758,6 +758,21 @@ button:disabled {
   display: grid;
   gap: 0.6rem;
 }
+/* A group divider skeleton: hairline rule under a short tracked bar, like the real divider. */
+.home-loading-rail__divider {
+  position: relative;
+  height: 0.72rem;
+  margin-top: 0.3rem;
+  border-radius: 999px;
+  background: var(--home-surface-skeleton);
+  animation: home-pulse 1.5s ease-in-out infinite;
+}
+.home-loading-rail__divider::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -0.36rem;
+  border-top: 1px solid var(--home-line);
+}
 .home-loading-rail article {
   display: grid;
   grid-template-columns: 0.75rem minmax(0, 1fr);

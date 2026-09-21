@@ -80,7 +80,7 @@ describe("conversation project API client", () => {
       expect(
         await conversationProjectApi.classifyMessage({ message: "ship it", project_id: "idea" }),
       ).toEqual({ project_id: "alpha", confidence: 0.31, reason: "fts" });
-      expect(stub.calls[0]?.body).toEqual({ message: "ship it" });
+      expect(stub.calls[0]?.body).toEqual({ message: "ship it", project_id: "idea" });
     } finally {
       stub.restore();
     }

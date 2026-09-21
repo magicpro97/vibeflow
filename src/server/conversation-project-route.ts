@@ -58,12 +58,16 @@ export interface ConversationProjectClassificationV1 {
  * floors (`ai` >= 0.6, an `fts` winner being above the score floor and clear of the runner-up)
  * are server authority. The UI only decides whether a returned verdict may be *shown*.
  *
+ * `project_id` is the conversation's *current* project, forwarded so the AI tier can run on that
+ * project's engine override. It never votes on the verdict — the ladder decides that.
+ *
  * A corrupt or unreadable registry classifies to the fallback instead of failing the request:
  * classification is advisory, so its failure must never take a message turn down.
  */
 export type ConversationProjectClassifierV1 = (input: {
   message: string;
   repo_root?: string;
+  project_id?: string;
 }) => Promise<ConversationProjectClassificationV1>;
 
 /**
@@ -78,6 +82,7 @@ export interface ConversationProjectSurfaceV1 {
   classify(input: {
     message: string;
     repo_root?: string;
+    project_id?: string;
   }): Promise<ConversationProjectClassificationV1>;
 }
 
@@ -176,12 +181,22 @@ export async function handleConversationProjectRoute(
     if (kind === "classify") {
       if (request.method !== "POST") return null;
       const body = await strictQueueBody(request);
-      const { message, repo_root: repoRoot } = (
-        typeof body === "object" && body !== null ? body : {}
-      ) as { message?: unknown; repo_root?: unknown };
+      const {
+        message,
+        repo_root: repoRoot,
+        project_id: projectId,
+      } = (typeof body === "object" && body !== null ? body : {}) as {
+        message?: unknown;
+        repo_root?: unknown;
+        project_id?: unknown;
+      };
       if (typeof message !== "string" || message.trim() === "")
         return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
           message: "Expected a non-empty message to classify.",
+        });
+      if (projectId !== undefined && !isConversationProjectId(projectId))
+        return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
+          message: "Expected project_id to be a project slug when present.",
         });
       if (!authority.classify)
         return conversationReadError(PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE, {
@@ -192,6 +207,7 @@ export async function handleConversationProjectRoute(
       const verdict = await authority.classify({
         message,
         ...(typeof repoRoot === "string" && repoRoot !== "" ? { repo_root: repoRoot } : {}),
+        ...(typeof projectId === "string" ? { project_id: projectId } : {}),
       });
       return queueNoStore({ schema_version: "1.0", ...verdict }, 200);
     }

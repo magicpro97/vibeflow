@@ -104,6 +104,8 @@ export function makeProjectProposalFn(
   const bridge = inject.bridge ?? process.env.VIBEFLOW_AI;
   if (!bridge) return undefined;
   const configured = process.env.VF_REVIEW_ENGINE;
+  // Precedence: the caller's stored policy (a project override, then the global classifier
+  // engine), then the environment's reviewer engine, then the canonical engine order.
   const engine =
     inject.engine ??
     ((configured && (ENGINES as readonly string[]).includes(configured)

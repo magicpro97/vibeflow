@@ -70,7 +70,7 @@ export const conversationProjectApi: HomeProjectClient = {
       await conversationHomeRequest<unknown>(
         "POST",
         `${PROJECTS}/classify`,
-        { message: input.message },
+        { message: input.message, project_id: input.project_id },
         signal,
         undefined,
         HOME_API_ERROR_CONTRACT.PUBLIC,

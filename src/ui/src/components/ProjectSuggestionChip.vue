@@ -1,6 +1,6 @@
 <template>
   <div
-    v-if="suggestion"
+    v-if="suggestion && !settling"
     class="home-project-chip"
     role="group"
     aria-label="Project suggestion"
@@ -26,6 +26,9 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { describeHomeComposerBusy } from "../conversation-home-loading.js";
+import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-message-queue-types.js";
+import { useConversationHomeStore } from "../conversation-home-store.js";
 import { useProjectClassificationStore } from "../project-classification-store.js";
 import { projectSuggestionConfidenceLabel } from "../project-rail-group.js";
 
@@ -41,9 +44,27 @@ import { projectSuggestionConfidenceLabel } from "../project-rail-group.js";
  *
  * The announcement is published through the store, which the composer's existing polite status
  * region renders — the chip adds no second live region.
+ *
+ * While a send is still settling (the composer is submitting, or a queue admission is optimistic)
+ * the chip is suppressed, per §3: a proposal belongs to the state the user has already committed,
+ * and offering a move mid-send would point at a turn whose queue slot is not durable yet.
  */
 const store = useProjectClassificationStore();
+const home = useConversationHomeStore();
 const suggestion = computed(() => store.suggestion);
+/** The composer's own busy contract is the authority for "settling" — no second definition. */
+const settling = computed(
+  () =>
+    describeHomeComposerBusy({
+      hasActiveSession: Boolean(home.activeSession),
+      submitting: home.submitting,
+      savingQueuedEdit: home.queuedMessageEditSaving,
+      queueAdmissionPending: home.queuedMessages.some(
+        (message) => message.kind === HOME_QUEUED_MESSAGE_PROJECTION_KIND.OPTIMISTIC,
+      ),
+      lifecycle: home.activeRevision?.lifecycle ?? null,
+    }).active,
+);
 
 const suggestedName = computed(() => {
   const id = store.suggestion?.project_id ?? "";

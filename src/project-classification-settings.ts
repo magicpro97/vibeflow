@@ -81,3 +81,17 @@ export function mergeProjectClassificationSettings(
 ): ProjectClassificationSettings {
   return coerceProjectClassificationSettings(next.projectClassification ?? current);
 }
+
+/**
+ * The engine the classifier's AI tier should run on, in precedence order: the conversation's own
+ * project engine override, then the global classifier engine, then `undefined` — which means
+ * "unset", so the caller keeps its existing fallback (`VF_REVIEW_ENGINE`, then the canonical
+ * engine order). Returning `undefined` rather than a guessed engine is what keeps a project with
+ * no opinion from silently pinning classification to whatever the global default happens to be.
+ */
+export function resolveProjectClassificationEngine(input: {
+  readonly settings: ProjectClassificationSettings;
+  readonly project?: { readonly engine: { readonly cli: Engine } } | undefined;
+}): Engine | undefined {
+  return input.project?.engine.cli ?? input.settings.engine.cli ?? undefined;
+}

@@ -258,6 +258,58 @@ test("an empty message and a missing classifier are both reported, never guessed
   expect(unavailable?.status).toBe(503);
 });
 
+test("a classify request forwards the conversation's current project so the engine can be resolved", async () => {
+  const seen: Array<{ message: string; project_id?: string }> = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      classify: async (input) => {
+        seen.push(input);
+        return { project_id: "alpha", confidence: 0.9, reason: "ai" };
+      },
+    }),
+    request("POST", { message: "ship the alpha", project_id: "alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(200);
+  expect(seen).toEqual([{ message: "ship the alpha", project_id: "alpha" }]);
+});
+
+test("a classify request without a project is still a valid classification", async () => {
+  const seen: Array<{ message: string; project_id?: string }> = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      classify: async (input) => {
+        seen.push(input);
+        return { project_id: "idea", confidence: 0, reason: "fallback" };
+      },
+    }),
+    request("POST", { message: "ship the alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(200);
+  // The key is absent, not undefined: the classifier reads it as "no project known".
+  expect(seen).toEqual([{ message: "ship the alpha" }]);
+});
+
+test("a classify request naming a non-slug project is refused before the ladder runs", async () => {
+  const seen: unknown[] = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      classify: async (input) => {
+        seen.push(input);
+        return { project_id: "idea", confidence: 0, reason: "fallback" };
+      },
+    }),
+    request("POST", { message: "ship the alpha", project_id: "../escape" }),
+    url,
+  );
+  expect(response?.status).toBe(400);
+  expect(seen).toEqual([]);
+});
+
 test("an unrelated path is left for the rest of the conversation router", async () => {
   expect(
     await handleConversationProjectRoute(

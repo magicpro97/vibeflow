@@ -12,6 +12,7 @@ import {
   applyProjectClassificationSettings,
   coerceProjectClassificationSettings,
   mergeProjectClassificationSettings,
+  resolveProjectClassificationEngine,
 } from "../src/project-classification-settings.js";
 import { handleConversationBrowserRoute } from "../src/server/conversation-browser-route.js";
 import {
@@ -134,6 +135,50 @@ describe("project classifier runtime", () => {
     });
     expect((await authority.classify({ message: "billing" })).reason).toBe("ai");
     expect(asked).toEqual(["billing"]);
+  });
+
+  test("a persisted classifier engine is honoured by the AI tier", async () => {
+    const spawned: string[] = [];
+    const seam = {
+      bridge: "fake-bridge",
+      openIndex: () => null,
+      ownedRoute: async (request: { engine: string }) => {
+        spawned.push(request.engine);
+        return {
+          attemptId: "classify",
+          stdout: '{"project_id":"beta","confidence":0.8}',
+          stderr: "",
+          status: 0,
+          timedOut: false,
+        };
+      },
+    };
+    // The stored engine reaches the spawned bridge instead of the seam's own fallback.
+    const persisted = projectClassifier(PROJECTS, { ...seam, engine: "codex" });
+    expect((await persisted.classify({ message: "billing" })).project_id).toBe("beta");
+    expect(spawned).toEqual(["codex"]);
+
+    // With no stored opinion the seam keeps its own fallback rather than guessing.
+    const absent = projectClassifier(PROJECTS, { ...seam, engine: undefined });
+    expect((await absent.classify({ message: "billing" })).reason).toBe("ai");
+    expect(spawned).toEqual(["codex", "claude"]);
+  });
+
+  test("stored engine resolution prefers the project override over the global block", () => {
+    const settings = {
+      enabled: true,
+      engine: { cli: "codex" as const, model: null, thinking: null },
+    };
+    expect(
+      resolveProjectClassificationEngine({ settings, project: { engine: { cli: "copilot" } } }),
+    ).toBe("copilot");
+    expect(resolveProjectClassificationEngine({ settings })).toBe("codex");
+    // Neither the project nor the global block names an engine: no opinion, not a guess.
+    expect(
+      resolveProjectClassificationEngine({
+        settings: { enabled: true, engine: { cli: null, model: null, thinking: null } },
+      }),
+    ).toBeUndefined();
   });
 
   test("a deterministic tier resolves without ever consulting the model seam", async () => {

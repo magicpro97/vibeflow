@@ -67,7 +67,17 @@
         <li v-for="checkpoint in catalogLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
       </ul>
       <div class="home-loading-rail" aria-hidden="true">
-        <article v-for="index in 4" :key="index">
+        <!-- Shape of the grouped rail: two dividers, five entries — nothing shifts when data lands. -->
+        <span class="home-loading-rail__divider" />
+        <article v-for="index in 3" :key="`a${index}`">
+          <span class="home-loading-rail__dot" />
+          <div class="home-loading-rail__copy">
+            <strong />
+            <small />
+          </div>
+        </article>
+        <span class="home-loading-rail__divider" />
+        <article v-for="index in 2" :key="`b${index}`">
           <span class="home-loading-rail__dot" />
           <div class="home-loading-rail__copy">
             <strong />
@@ -85,6 +95,7 @@
       class="home-session-list"
       aria-label="Conversations grouped by project"
       @keydown="onRailKeydown"
+      @focusin="onRailFocusIn"
     >
       <section
         v-for="folder in railFolders"
@@ -120,29 +131,36 @@
           v-show="!collapsedGroups.has(folder.project_id)"
           :id="groupEntriesId(folder.project_id)"
           class="home-session-group__entries"
+          role="list"
         >
-          <button
+          <div
             v-for="session in folder.sessions"
             :key="session.root_session_id"
-            type="button"
-            class="home-session"
-            :data-root-session="session.root_session_id"
-            :class="{ 'home-session--active': session.root_session_id === store.activeRootId }"
-            :aria-current="session.root_session_id === store.activeRootId ? 'page' : undefined"
-            @click="select(session.root_session_id)"
+            class="home-session-group__entry"
+            role="listitem"
           >
-            <span class="home-session__row">
-              <span class="home-session__title">{{ (session.active ?? session.root).topic }}</span>
-              <span class="home-session__time">{{ relativeTime(session.sort_updated_at) }}</span>
-            </span>
-            <span class="home-session__row home-session__meta">
-              <span class="home-status-dot" :data-state="(session.active ?? session.root).lifecycle" />
-              <span>{{ lifecycleLabel((session.active ?? session.root).lifecycle) }}</span>
-              <span aria-hidden="true">·</span>
-              <span>{{ session.revision_count }} rev</span>
-              <span v-if="(session.active ?? session.root).health === 'degraded'" class="home-degraded">degraded</span>
-            </span>
-          </button>
+            <button
+              type="button"
+              class="home-session"
+              :data-root-session="session.root_session_id"
+              :class="{ 'home-session--active': session.root_session_id === store.activeRootId }"
+              :aria-current="session.root_session_id === store.activeRootId ? 'page' : undefined"
+              :tabindex="rovingTabIndex(session.root_session_id)"
+              @click="select(session.root_session_id)"
+            >
+              <span class="home-session__row">
+                <span class="home-session__title">{{ (session.active ?? session.root).topic }}</span>
+                <span class="home-session__time">{{ relativeTime(session.sort_updated_at) }}</span>
+              </span>
+              <span class="home-session__row home-session__meta">
+                <span class="home-status-dot" :data-state="(session.active ?? session.root).lifecycle" />
+                <span>{{ lifecycleLabel((session.active ?? session.root).lifecycle) }}</span>
+                <span aria-hidden="true">·</span>
+                <span>{{ session.revision_count }} rev</span>
+                <span v-if="(session.active ?? session.root).health === 'degraded'" class="home-degraded">degraded</span>
+              </span>
+            </button>
+          </div>
         </div>
       </section>
     </nav>
@@ -204,6 +222,22 @@ const visibleEntryOrder = computed(() =>
   projectRailEntryOrder(railFolders.value, collapsedGroups.value),
 );
 
+/**
+ * Roving tabindex: exactly one entry is in the tab order so Tab exits the rail instead of walking
+ * every conversation. It follows the focused entry, falling back to the active session and then
+ * to the first visible one, so the rail is reachable by keyboard with no entry focused yet.
+ */
+const rovingRoot = ref<string | null>(null);
+const rovingEntry = computed(() => {
+  const order = visibleEntryOrder.value;
+  if (rovingRoot.value && order.includes(rovingRoot.value)) return rovingRoot.value;
+  const active = store.activeRootId;
+  if (active && order.includes(active)) return active;
+  return order[0] ?? null;
+});
+const rovingTabIndex = (rootSessionId: string): 0 | -1 =>
+  rootSessionId === rovingEntry.value ? 0 : -1;
+
 const groupNameId = (projectId: string) => `rail-group-${projectId}`;
 const groupEntriesId = (projectId: string) => `rail-entries-${projectId}`;
 
@@ -214,12 +248,22 @@ function toggleGroup(projectId: string): void {
   collapsedGroups.value = next;
 }
 
+/** Track focus so the roving tabindex follows the entry the user is on, mouse or keyboard. */
+function onRailFocusIn(event: FocusEvent): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const rootSessionId = target.closest<HTMLElement>("[data-root-session]")?.dataset.rootSession;
+  if (rootSessionId) rovingRoot.value = rootSessionId;
+}
+
 /**
  * Arrow traversal walks the visible entries, crossing group boundaries and skipping collapsed
- * groups — the same session order the flat rail had, so muscle memory survives the grouping.
+ * groups — the session order the folders render in. `Home`/`End` jump to the first/last visible
+ * entry; `ArrowLeft`/`ArrowRight` collapse/expand the focused entry's group.
  */
 function focusEntry(rootSessionId: string | undefined): void {
   if (!rootSessionId) return;
+  rovingRoot.value = rootSessionId;
   railRoot.value
     ?.querySelector<HTMLButtonElement>(`[data-root-session="${CSS.escape(rootSessionId)}"]`)
     ?.focus();
@@ -233,10 +277,15 @@ function onRailKeydown(event: KeyboardEvent): void {
   const order = visibleEntryOrder.value;
   const index = order.indexOf(current);
   if (index < 0) return;
+  if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    focusEntry(event.key === "Home" ? order[0] : order[order.length - 1]);
+    return;
+  }
   const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
   if (step !== 0) {
     event.preventDefault();
-    // Wrap is deliberate: ArrowDown on the last entry returns to the search field's list start.
+    // Wrap is deliberate: ArrowDown on the last entry returns to the first entry of the list.
     const next = order[(index + step + order.length) % order.length];
     focusEntry(next);
     return;

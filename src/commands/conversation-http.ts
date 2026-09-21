@@ -8,12 +8,17 @@ import { ConversationAskCompatibilityV1 } from "../orchestrator/conversation/con
 import { ConversationHomeCreateBrokerV1 } from "../orchestrator/conversation/conversation-home-create-authority.js";
 import { createPrivateFileRangeHandoffId } from "../orchestrator/conversation/private-file-range-staging-store.js";
 import {
+  DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+  resolveProjectClassificationEngine,
+} from "../project-classification-settings.js";
+import {
   ConversationSessionAuthority,
   ConversationStreamTokenAuthority,
 } from "../server/conversation-auth.js";
 import { isConversationLoopbackHost } from "../server/conversation-host.js";
 import type { ConversationMessageQueueHttpAuthorityV1 } from "../server/conversation-message-queue-route.js";
 import type { ConversationHttpAuthority } from "../server/conversation-route.js";
+import { readSettings } from "../settings.js";
 import { projectClassifier } from "../skills/project-classifier-runtime.js";
 import { type ConversationCommandDeps, conversationBootstrap } from "./_shared.js";
 
@@ -116,9 +121,21 @@ export function buildConversationHttpAuthority(
         updateProject: ({ project_id, engine }) =>
           bootstrap.authorities.projects.update(project_id, { engine }),
         moveProject: bootstrap.authorities.rebindConversationProject,
-        classify: async ({ message, repo_root }) => {
+        // The AI tier runs on stored policy: the conversation's own project engine override, then
+        // the global classifier block, then away from both — so an edited project engine or a
+        // settings save reaches the next verdict without a restart.
+        classify: async ({ message, repo_root, project_id }) => {
           const projects = bootstrap.authorities.projects.list();
-          const authority = projectClassifier(projects);
+          const project =
+            project_id === undefined ? undefined : projects.find((row) => row.id === project_id);
+          const engine = resolveProjectClassificationEngine({
+            settings:
+              readSettings(base).projectClassification ?? DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+            ...(project === undefined ? {} : { project }),
+          });
+          const authority = projectClassifier(projects, {
+            ...(engine === undefined ? {} : { engine }),
+          });
           return authority.classify({
             message,
             ...(repo_root === undefined ? {} : { repo_root }),

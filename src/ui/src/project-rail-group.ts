@@ -99,10 +99,11 @@ function newestSessionAt(folder: ProjectRailFolder): number {
  * Folder order: newest entry first, then the documented name and id tiebreak.
  *
  * The stamps are compared as *finite* values only. `newestSessionAt` answers `-Infinity` when no
- * stamp parses, and `(-Infinity) - (-Infinity)` is `NaN`; a `NaN` delta makes the comparator skip
- * the name tiebreak entirely (`NaN !== 0` is true) and the group order follows map insertion —
- * i.e. whichever project the catalog happened to list first, contradicting the documented order.
- * Treating "both unparseable" as a tie is what makes all-unparseable input deterministic.
+ * stamp parses, so two unparseable folders answer the *same* value and the outer `!==` reads them
+ * as a tie — the name → id tiebreak below then decides. That equality is what makes
+ * all-unparseable input deterministic; comparing raw deltas instead would compute
+ * `(-Infinity) - (-Infinity)` = `NaN`, which is `!== 0`, and the group order would silently follow
+ * map insertion order — whichever project the catalog happened to list first.
  */
 export function compareProjectRailFolders(
   left: ProjectRailFolder,
@@ -111,12 +112,9 @@ export function compareProjectRailFolders(
   if (left.ideas !== right.ideas) return left.ideas ? 1 : -1;
   const leftNewest = newestSessionAt(left);
   const rightNewest = newestSessionAt(right);
-  if (leftNewest !== rightNewest) {
-    const delta = rightNewest - leftNewest;
-    // Only `NaN` falls through: it means *both* were unparseable, so the name tiebreak decides.
-    // A genuinely infinite delta is a real ordering (an unparseable folder is the oldest).
-    if (!Number.isNaN(delta)) return delta;
-  }
+  // The `!==` already excludes the both-unparseable case (`-Infinity === -Infinity`), so this
+  // delta is a real difference or a genuine infinity: an unparseable folder is the oldest.
+  if (leftNewest !== rightNewest) return rightNewest - leftNewest;
   if (left.name !== right.name) return left.name < right.name ? -1 : 1;
   return left.project_id < right.project_id ? -1 : left.project_id > right.project_id ? 1 : 0;
 }
