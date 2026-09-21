@@ -1922,6 +1922,14 @@ button:disabled {
   outline-color: rgb(190 80 60 / 0.55);
   background: rgb(190 80 60 / 0.12);
 }
+.home-composer-caret {
+  position: absolute;
+  z-index: 2;
+  width: 0;
+  height: 1.5em;
+  border-left: 2px solid var(--home-ink);
+  pointer-events: none;
+}
 .home-composer-chip--mention .home-composer-chip__label {
   outline-color: rgb(80 130 190 / 0.5);
   background: rgb(80 130 190 / 0.12);

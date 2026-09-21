@@ -1,6 +1,7 @@
 const { describe, expect, test } = await import(String("bun:test"));
 import {
   chipLabelFor,
+  composerMentionAtCaret,
   findComposerMentions,
   nextMentionToken,
   parseComposerHighlight,
@@ -85,6 +86,9 @@ describe("home composer highlight", () => {
     expect(removeComposerMention("before +web_ui@codex after", "+web_ui@codex")).toBe(
       "before after",
     );
+    expect(removeComposerMention("before\n+web_ui@codex\nafter", "+web_ui@codex")).toBe(
+      "before\nafter",
+    );
     expect(removeComposerMention("+web_ui@codex after", "+web_ui@codex")).toBe("after");
     expect(removeComposerMention("before +web_ui@codex#2 after", "+web_ui@codex#2")).toBe(
       "before after",
@@ -92,6 +96,21 @@ describe("home composer highlight", () => {
   });
   test("returns draft unchanged when token is absent", () => {
     expect(removeComposerMention("plain text", "+web_ui@codex")).toBe("plain text");
+  });
+  test("caret identifies chip immediately before separator", () => {
+    const draft = "+coordination-executor@codex +web_ui@codex";
+    const firstEnd = "+coordination-executor@codex".length;
+    expect(composerMentionAtCaret(draft, firstEnd)).toEqual({
+      start: 0,
+      end: firstEnd,
+      afterSeparator: true,
+    });
+    expect(composerMentionAtCaret(draft, draft.length)).toEqual({
+      start: firstEnd + 1,
+      end: draft.length,
+      afterSeparator: false,
+    });
+    expect(composerMentionAtCaret(draft, firstEnd + 2)).toBeNull();
   });
   test("removes complete chip token when caret is beside it", () => {
     const draft = "before +web_ui@codex after";

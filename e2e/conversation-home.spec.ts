@@ -815,7 +815,9 @@ test.describe("AI-first conversation Home", () => {
     );
     const highlighted = page.locator(".home-composer__highlight");
     await expect(highlighted).toHaveText("Keep Implementation agent this draft");
-    await expect(highlighted.locator(":scope > span").allTextContents()).resolves.toEqual([
+    const spans = await highlighted.locator(":scope > span").allTextContents();
+    const visibleSpans = spans.filter((text) => text.length > 0);
+    expect(visibleSpans).toEqual([
       "Keep ",
       "Implementation agent",
       " this draft",
@@ -856,6 +858,38 @@ test.describe("AI-first conversation Home", () => {
     });
     expect(Math.abs(chipGeometry.rawTokenWidth - chipGeometry.chipWidth)).toBeLessThan(1.5);
     expect(chipGeometry.labelWidth).toBeLessThan(chipGeometry.chipWidth);
+
+    const firstToken = `+${CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR}@${AGENT_ENGINE.CODEX}`;
+    const secondToken = `+web_ui@${AGENT_ENGINE.CODEX}`;
+    await composer.fill(`${firstToken} ${secondToken}`);
+    const chipGap = await highlighted.evaluate((node) => {
+      const chips = [...node.querySelectorAll<HTMLElement>(".home-composer-chip")];
+      const labels = chips.map((chip) => chip.querySelector<HTMLElement>(".home-composer-chip__label"));
+      const separator = node.querySelector<HTMLElement>(".home-composer-highlight__text");
+      if (!labels[0] || !labels[1] || !separator) throw new Error("two-chip geometry unavailable");
+      return {
+        visibleGap: labels[1].getBoundingClientRect().left - labels[0].getBoundingClientRect().right,
+        separatorWidth: separator.getBoundingClientRect().width,
+      };
+    });
+    expect(chipGap.visibleGap).toBeLessThanOrEqual(chipGap.separatorWidth + 1.5);
+
+    await composer.evaluate((node: HTMLTextAreaElement, offset) => {
+      node.focus();
+      node.setSelectionRange(offset, offset);
+      node.dispatchEvent(new Event("select", { bubbles: true }));
+    }, firstToken.length);
+    const caret = highlighted.locator(".home-composer-caret");
+    await expect(caret).toHaveCount(1);
+    const caretGeometry = await caret.evaluate((node) => {
+      const label = document.querySelector<HTMLElement>(".home-composer-chip__label");
+      if (!label) throw new Error("chip label unavailable");
+      return { caretLeft: node.getBoundingClientRect().left, labelRight: label.getBoundingClientRect().right };
+    });
+    expect(Math.abs(caretGeometry.caretLeft - caretGeometry.labelRight)).toBeLessThan(1.5);
+    await expect(composer).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+
+    await composer.fill(`Keep ${firstToken} this draft`);
     const tokenEnd = (await composer.inputValue()).indexOf(" this draft");
     await composer.evaluate(
       (node: HTMLTextAreaElement, end) => node.setSelectionRange(end, end),
@@ -2541,11 +2575,20 @@ test.describe("AI-first conversation Home", () => {
           const box = chip.getBoundingClientRect();
           return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
         })(),
+        labelBox: (() => {
+          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+          if (!label) throw new Error("zoomed composer chip label unavailable");
+          const box = label.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        })(),
         afterRects: (() => {
           const after = [...highlight.children].find((child) => child.textContent === " after");
           if (!after) return [];
+          const text = after.firstChild;
+          if (!text) return [];
           const range = document.createRange();
-          range.selectNodeContents(after);
+          range.setStart(text, text.textContent?.startsWith(" ") ? 1 : 0);
+          range.setEnd(text, text.textContent?.length ?? 0);
           return [...range.getClientRects()].map((box) => ({
             left: box.left,
             right: box.right,
@@ -2569,10 +2612,10 @@ test.describe("AI-first conversation Home", () => {
     expect(zoomedChipGeometry.afterRects.length).toBeGreaterThan(0);
     for (const rect of zoomedChipGeometry.afterRects) {
       const isOutsideChip =
-        rect.right <= zoomedChipGeometry.chipBox.left + 0.5 ||
-        rect.left >= zoomedChipGeometry.chipBox.right - 0.5 ||
-        rect.bottom <= zoomedChipGeometry.chipBox.top + 0.5 ||
-        rect.top >= zoomedChipGeometry.chipBox.bottom - 0.5;
+        rect.right <= zoomedChipGeometry.labelBox.left + 0.5 ||
+        rect.left >= zoomedChipGeometry.labelBox.right - 0.5 ||
+        rect.bottom <= zoomedChipGeometry.labelBox.top + 0.5 ||
+        rect.top >= zoomedChipGeometry.labelBox.bottom - 0.5;
       expect(isOutsideChip).toBe(true);
     }
     expect(zoomedChipGeometry.chipBox.bottom - zoomedChipGeometry.chipBox.top).toBeGreaterThan(43.2);

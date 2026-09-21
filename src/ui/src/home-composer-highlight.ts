@@ -58,13 +58,32 @@ export function removeComposerMention(draft: string, token: string): string {
 function removeComposerMentionRange(draft: string, tokenStart: number, tokenEnd: number): string {
   const before = draft.slice(0, tokenStart);
   const after = draft.slice(tokenEnd);
-  const left = before.replace(/\s+$/u, "");
-  const right = after.replace(/^\s+/u, "");
-  const spacing = left && right ? " " : "";
-  return `${left}${spacing}${right}`;
+  const left = before.replace(/[ \t]+$/u, "");
+  const right = after.replace(/^[ \t]+/u, "");
+  const preservedRight = /(?:\r\n|\r|\n)$/.test(left)
+    ? right.replace(/^(?:\r\n|\r|\n)/u, "")
+    : right;
+  const spacing = left && preservedRight && !/[\r\n]$/u.test(left) ? " " : "";
+  return `${left}${spacing}${preservedRight}`;
 }
 
 export type ComposerCaretRemoval = Readonly<{ draft: string; caret: number }>;
+
+export function composerMentionAtCaret(
+  draft: string,
+  caret: number,
+): Readonly<{ start: number; end: number; afterSeparator: boolean }> | null {
+  const position = Math.max(0, Math.min(caret, draft.length));
+  for (const match of draft.matchAll(CHIP_TOKEN)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const afterSeparator = /\s/u.test(draft[end] ?? "");
+    if (position === end || (position === end + 1 && afterSeparator)) {
+      return { start, end, afterSeparator };
+    }
+  }
+  return null;
+}
 
 export function removeComposerMentionAtCaret(
   draft: string,

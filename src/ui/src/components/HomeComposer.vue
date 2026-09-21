@@ -27,7 +27,11 @@
         :aria-owns="visibleSuggestions.length ? suggestionListId : undefined"
         tabindex="-1"
       >
-        <HomeComposerHighlight :draft="store.draft" :participants="store.activeRevision?.participants ?? []" />
+        <HomeComposerHighlight
+          :draft="store.draft"
+          :participants="store.activeRevision?.participants ?? []"
+          :caret-offset="caretOffset"
+        />
         <textarea
           id="home-composer"
           ref="textarea"
@@ -43,6 +47,8 @@
           @beforeinput="onBeforeInput"
           @input="resize"
           @scroll="syncHighlightScroll"
+          @select="syncCaretOffset"
+          @click="syncCaretOffset"
           @keydown="onKeydown"
           @keyup="onKeyup"
         />
@@ -117,6 +123,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
+import { useHomeComposerCaret } from "../composables/useHomeComposerCaret.js";
+import { useHomeComposerLayout } from "../composables/useHomeComposerLayout.js";
 import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
 import {
   describeHomeComposerBusy,
@@ -151,6 +159,11 @@ const store = useConversationHomeStore();
 const { quoteChips } = useHomeComposerQuotes();
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const composing = ref(false);
+const { caretOffset, setCaretOffset, syncCaretOffset } = useHomeComposerCaret(
+  textarea,
+  () => store.draft,
+);
+const { suggestionStyle, syncHighlightScroll } = useHomeComposerLayout(textarea);
 const activeSuggestion = ref(0);
 const suggestionsDismissed = ref(false);
 const pendingEscapeDraft = ref<string | null>(null);
@@ -232,12 +245,6 @@ function resize() {
   element.style.height = "0";
   element.style.height = `${Math.min(element.scrollHeight, 176)}px`;
 }
-function syncHighlightScroll() {
-  const element = textarea.value;
-  if (!element) return;
-  const overlay = document.querySelector<HTMLElement>(".home-composer__highlight");
-  if (overlay) overlay.scrollTop = element.scrollTop;
-}
 function insert(value: string) {
   if (store.queuedMessageEdit) return;
   const element = textarea.value;
@@ -253,6 +260,7 @@ function insert(value: string) {
   nextTick(() => {
     textarea.value?.focus();
     textarea.value?.setSelectionRange(caret, caret);
+    setCaretOffset(caret);
     resize();
   });
 }
@@ -294,17 +302,6 @@ function choose(value: string) {
   });
 }
 const suggestionOptionId = (index: number) => `composer-suggestion-${index}`;
-const suggestionStyle = computed(() => {
-  const rect = textarea.value?.getBoundingClientRect();
-  return rect
-    ? {
-        top: `${rect.top}px`,
-        left: `${rect.left}px`,
-        width: `${rect.width}px`,
-        transform: "translateY(-100%) translateY(-0.35rem)",
-      }
-    : null;
-});
 function onKeydown(event: KeyboardEvent) {
   if (composing.value || event.isComposing || event.keyCode === 229) return;
   if (visibleSuggestions.value.length) {
@@ -330,6 +327,7 @@ function onKeydown(event: KeyboardEvent) {
     nextTick(() => {
       textarea.value?.focus();
       textarea.value?.setSelectionRange(removal.caret, removal.caret);
+      setCaretOffset(removal.caret);
       resize();
     });
     return;
