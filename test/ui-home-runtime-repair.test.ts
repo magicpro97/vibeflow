@@ -57,6 +57,7 @@ function revision(
     lineage_status: "verified",
     topic: "Runtime repair",
     policy: "direct",
+    project_id: "idea",
     lifecycle: "ACTIVE",
     health: "healthy",
     participants,

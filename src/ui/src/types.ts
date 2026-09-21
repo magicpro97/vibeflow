@@ -7,6 +7,7 @@ import type { SKILL_MCP_TRANSPORT } from "../../core/skill-contract.js";
 import type * as SkillContract from "../../core/skill-contract.js";
 import type * as WorkflowContract from "../../core/workflow-contract.js";
 import type { LogEvent as SharedLogEvent } from "../../logbus/types.js";
+import type { ProjectClassificationPatch } from "./project-settings-form.js";
 
 export type { Engine } from "../../core/agent-contract.js";
 export type SkillStatus = SkillContract.SkillStatus;
@@ -73,9 +74,7 @@ export interface WorkflowState {
 
 export type Channel = LogContract.LogChannel;
 export type LogLevel = LogContract.LogLevel;
-
 export type LogEvent = SharedLogEvent;
-
 export type WorkflowDashboardStatus = WorkflowContract.WorkflowDashboardStatus;
 
 export interface WorkflowDashboardItem {
@@ -204,6 +203,7 @@ export interface VibeSettings {
   /** #548: user-declared MCP servers surfaced in the control center. */
   mcpServers?: Record<string, UserMcpServerView>;
   curator?: CuratorSettings;
+  projectClassification?: ProjectClassificationPatch["projectClassification"];
   updatedAt?: string;
 }
 

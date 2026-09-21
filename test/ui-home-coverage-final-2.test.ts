@@ -99,6 +99,7 @@ function revision(
     lineage_status: "verified",
     topic: "Coverage authority",
     policy: "direct",
+    project_id: "idea",
     lifecycle: "ACTIVE",
     health: "healthy",
     participants,

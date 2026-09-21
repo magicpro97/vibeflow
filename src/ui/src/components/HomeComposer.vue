@@ -6,6 +6,7 @@
     <HomeQueuedMessages :editing-available="queueEditAvailable" @edit-requested="focusQueuedEdit" />
     <HomeQuoteSelectionList v-if="!store.queuedMessageEdit" :chips="quoteChips" />
     <HomePrivateRangeSummary @change="openPrivateRangePanel(true)" />
+    <ProjectSuggestionChip />
     <form class="home-composer" aria-label="Message VibeFlow" @submit.prevent="submit">
       <HomeQueueEditStatus
         :queue-sequence="store.queuedMessageEdit?.queue_sequence ?? null"
@@ -106,10 +107,7 @@
           :disabled="!store.draft.trim() || composerBusy.blocksSubmit || !store.online"
         />
       </div>
-      <HomePrivateRangePanel
-        ref="privateRangePanel"
-        @open-change="privateRangeOpen = $event"
-      />
+      <HomePrivateRangePanel ref="privateRangePanel" @open-change="privateRangeOpen = $event" />
     </form>
     <HomeComposerStatus />
   </div>
@@ -128,6 +126,7 @@ import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-messag
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { nextMentionToken } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import { useProjectClassificationStore } from "../project-classification-store.js";
 import HomeAttachmentButton from "./HomeAttachmentButton.vue";
 import HomeAttachments from "./HomeAttachments.vue";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
@@ -142,11 +141,13 @@ import HomeQueueEditStatus from "./HomeQueueEditStatus.vue";
 import HomeQueuedMessages from "./HomeQueuedMessages.vue";
 import HomeQuoteSelectionList from "./HomeQuoteSelectionList.vue";
 import HomeToolbarActions from "./HomeToolbarActions.vue";
+import ProjectSuggestionChip from "./ProjectSuggestionChip.vue";
 const props = withDefaults(defineProps<{ transientUiOpen?: boolean }>(), {
   transientUiOpen: false,
 });
 defineEmits<{ "open-capabilities": [] }>();
 const store = useConversationHomeStore();
+const projectClassification = useProjectClassificationStore();
 const { quoteChips } = useHomeComposerQuotes();
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const composing = ref(false);
@@ -276,7 +277,6 @@ async function restoreComposerFocus() {
 async function restoreComposerFocusAfterConfirmation(completion: Promise<boolean>) {
   if (await completion) await restoreComposerFocus();
 }
-
 async function focusQueuedEdit() {
   await restoreComposerFocus();
   const end = store.draft.length;
@@ -349,7 +349,6 @@ function onKeydown(event: KeyboardEvent) {
     void submit();
   }
 }
-
 function dismissSuggestionsWithEscape(event: KeyboardEvent): boolean {
   if (event.key !== "Escape" || !visibleSuggestions.value.length) return false;
   const preservedDraft = suggestionDraftSnapshot.value.length
@@ -371,7 +370,6 @@ function restorePreservedDraft(preservedDraft: string) {
     resize();
   }
 }
-
 function restoreDismissedDraft(event: KeyboardEvent) {
   if (event.key !== "Escape" || pendingEscapeDraft.value === null) return;
   restorePreservedDraft(pendingEscapeDraft.value);
@@ -388,10 +386,13 @@ function onBeforeInput(event: InputEvent) {
 }
 async function submit() {
   if (composing.value) return;
+  const sent = store.draft;
   await store.submitDraft();
   await nextTick();
   if (store.capabilityTargetRequest?.selection_mode === "explicit") return;
   textarea.value?.focus();
   resize();
+  // Advisory: a verdict is a proposal the user confirms; a failure proposes nothing.
+  void projectClassification.classifyMessage(sent);
 }
 </script>

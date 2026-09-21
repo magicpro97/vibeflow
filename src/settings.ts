@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
 import { ENGINES, type Engine } from "./core/types.js";
 import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
+import * as projectClassification from "./project-classification-settings.js";
 import * as curator from "./skills/curator-settings.js";
 import type { UserMcpServer } from "./tools/index.js";
 
@@ -72,6 +73,8 @@ export interface VibeSettings {
   eval?: { minPassRate?: number; minSamples?: number };
   /** #687: skills configuration. Absent = defaults apply. */
   skills?: SkillsConfig;
+  /** Project classification policy: the auto-classify switch + the classifier engine. */
+  projectClassification?: projectClassification.ProjectClassificationSettings;
   curator?: curator.CuratorSettings;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
@@ -115,6 +118,7 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   notifications: true,
   // #687: default skills policy — auto-resolve on, symlink mirror into all engines.
   skills: { ...DEFAULT_SKILLS_CONFIG, targetEngines: [...DEFAULT_SKILLS_CONFIG.targetEngines] },
+  projectClassification: projectClassification.DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
   curator: { ...curator.DEFAULT_CURATOR_SETTINGS },
   updatedAt: "",
 };
@@ -125,14 +129,7 @@ function isTier(v: unknown): v is ToolTier {
 
 /** Deep copy of the defaults so callers can mutate the result freely. */
 function defaults(): VibeSettings {
-  return {
-    ...DEFAULT_SETTINGS,
-    tools: { ...DEFAULT_SETTINGS.tools },
-    toolPriority: [...DEFAULT_SETTINGS.toolPriority],
-    failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
-    skills: { ...DEFAULT_SKILLS_CONFIG, targetEngines: [...DEFAULT_SKILLS_CONFIG.targetEngines] },
-    curator: { ...curator.DEFAULT_CURATOR_SETTINGS },
-  };
+  return structuredClone(DEFAULT_SETTINGS);
 }
 
 /** Path to the settings file inside a given repo's canonical context dir. */
@@ -323,6 +320,7 @@ function coerce(raw: unknown): VibeSettings {
   // Skills always materialize from defaults.
   const sk = coerceSkillsConfig(obj.skills);
   if (sk) out.skills = sk;
+  projectClassification.applyProjectClassificationSettings(out, obj.projectClassification);
   curator.applyCuratorSettings(out, obj.curator);
   return out;
 }
@@ -380,6 +378,11 @@ export function writeSettings(
   // #687: skills is replace-on-write — coerce the handed block over defaults.
   const skillsCfg = "skills" in next ? coerceSkillsConfig(next.skills) : current.skills;
   if (skillsCfg) merged.skills = skillsCfg;
+  // Replace-on-write like skills: the panel hands a complete block, so a partial one is kept.
+  merged.projectClassification = projectClassification.mergeProjectClassificationSettings(
+    next,
+    current.projectClassification ?? projectClassification.DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+  );
   curator.mergeCuratorSettings(merged, next, current);
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
   return merged;

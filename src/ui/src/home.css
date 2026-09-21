@@ -60,6 +60,20 @@
   --home-inset-line: rgb(255 255 255 / 0.7);
   --home-composer-shadow: 0 10px 30px rgb(66 51 33 / 0.12), 0 1px 0 rgb(255 255 255 / 0.9) inset;
   --home-focus-shadow: 0 12px 34px rgb(66 51 33 / 0.13), 0 0 0 3px rgb(185 95 38 / 0.1);
+  /* Project rail (design: docs/ui-mockup-project-rail.md). Divider = quiet tab index; only
+     the catch-all tints amber. Count uses --home-muted, not --home-faint, for AA contrast. */
+  --rail-group-rule: var(--home-line);
+  --rail-group-name: var(--home-ink);
+  --rail-group-goal: var(--home-muted);
+  --rail-group-count: var(--home-muted);
+  --rail-group-ideas-wash: var(--home-tone-warm-panel);
+  --rail-entry-indent: 0.5rem;
+  --rail-chip-bg: var(--home-amber-soft);
+  --rail-chip-border: var(--home-amber);
+  --rail-chip-ink: var(--home-ink);
+  --rail-chip-action: #fffefa;
+  --rail-chip-ghost: var(--home-muted);
+  --rail-chip-shadow: 0 6px 18px rgb(58 47 33 / 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -119,6 +133,9 @@
     --home-inset-line: rgb(255 255 255 / 0.05);
     --home-composer-shadow: 0 10px 30px rgb(0 0 0 / 0.45), 0 1px 0 rgb(255 255 255 / 0.06) inset;
     --home-focus-shadow: 0 12px 34px rgb(0 0 0 / 0.4), 0 0 0 3px rgb(216 145 74 / 0.22);
+    --rail-chip-action: var(--home-ink);
+    --rail-chip-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+    --rail-group-ideas-wash: var(--home-tone-warm-panel);
   }
 }
 :root[data-color-scheme="dark"] {
@@ -177,6 +194,9 @@
   --home-inset-line: rgb(255 255 255 / 0.05);
   --home-composer-shadow: 0 10px 30px rgb(0 0 0 / 0.45), 0 1px 0 rgb(255 255 255 / 0.06) inset;
   --home-focus-shadow: 0 12px 34px rgb(0 0 0 / 0.4), 0 0 0 3px rgb(216 145 74 / 0.22);
+  --rail-chip-action: var(--home-ink);
+  --rail-chip-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+  --rail-group-ideas-wash: var(--home-tone-warm-panel);
 }
 
 * {
@@ -4037,4 +4057,268 @@ button:disabled {
 .home-engine-pop-leave-to {
   opacity: 0;
   transform: translateY(4px);
+}
+
+/* ── Project rail: folder dividers (design: docs/ui-mockup-project-rail.md) ─────────────
+   A paper card index: the divider is quieter and smaller than the entries it files, and
+   only the catch-all (Ideas) tints amber. */
+.home-session-group {
+  margin-bottom: 0.55rem;
+}
+.home-session-group__divider {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.55rem 0.2rem 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  /* Sticky, because the rail scrolls as one list and the divider is what makes grouping legible. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--home-panel);
+}
+.home-session-group__divider:hover .home-session-group__name,
+.home-session-group__divider:focus-visible .home-session-group__name {
+  color: var(--home-ink);
+}
+.home-session-group__divider:focus-visible {
+  outline: 2px solid var(--home-amber);
+  outline-offset: 1px;
+}
+.home-session-group__name {
+  margin: 0;
+  overflow: hidden;
+  color: var(--rail-group-name);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-session-group__goal {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--rail-group-goal);
+  font-size: 0.64rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-session-group__count {
+  margin-left: auto;
+  color: var(--rail-group-count);
+  font-size: 0.62rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.home-session-group__chevron {
+  color: var(--home-muted);
+  font-size: 0.7rem;
+}
+.home-session-group__rule {
+  margin: 0.15rem 0 0.3rem;
+  border: 0;
+  border-top: 1px solid var(--rail-group-rule);
+}
+.home-session-group__entries {
+  display: flex;
+  flex-direction: column;
+  padding-left: var(--rail-entry-indent);
+}
+/* Only the catch-all tints: it is a bucket, not a peer of the named projects. */
+.home-session-group--ideas .home-session-group__name {
+  color: var(--home-amber-ink);
+}
+.home-session-group--ideas .home-session-group__divider {
+  background: var(--rail-group-ideas-wash);
+}
+.home-session-group--ideas .home-session-group__rule {
+  border-top-color: var(--home-amber);
+}
+
+/* ── Suggestion chip: floats above the composer, never steals focus ─────────────────── */
+.home-project-chip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.55rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--rail-chip-border);
+  border-radius: 0.35rem;
+  background: var(--rail-chip-bg);
+  box-shadow: var(--rail-chip-shadow);
+  color: var(--rail-chip-ink);
+  font-size: 0.74rem;
+  font-weight: 600;
+  animation: home-project-chip-in 140ms ease-out;
+}
+@keyframes home-project-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-project-chip {
+    animation: none;
+  }
+}
+.home-project-chip__arrow {
+  color: var(--home-amber);
+  font-weight: 700;
+}
+.home-project-chip__project {
+  font-weight: 650;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.home-project-chip__confidence {
+  color: var(--rail-group-goal);
+  font-size: 0.62rem;
+  font-weight: 500;
+}
+.home-project-chip__confirm {
+  margin-left: auto;
+  padding: 0.25rem 0.55rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: var(--home-amber);
+  color: var(--rail-chip-action);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.home-project-chip__confirm:disabled,
+.home-project-chip__dismiss:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.home-project-chip__dismiss {
+  padding: 0.25rem;
+  border: 0;
+  background: none;
+  color: var(--rail-chip-ghost);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+.home-project-chip__dismiss:hover {
+  text-decoration: underline;
+}
+.home-project-chip__error {
+  margin: 0 0 0.55rem;
+  color: var(--home-red);
+  font-size: 0.68rem;
+}
+
+/* ── Project classification settings ────────────────────────────────────────────────── */
+.home-project-settings {
+  display: grid;
+  gap: 0.45rem;
+  margin: 1rem 0 0;
+  padding: 0.7rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.5rem;
+}
+.home-project-settings legend {
+  padding: 0 0.35rem;
+  color: var(--home-ink);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.home-project-settings__copy,
+.home-project-settings__note {
+  margin: 0;
+  color: var(--home-muted);
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+.home-project-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+}
+.home-project-settings__row > label,
+.home-project-settings__row > span {
+  color: var(--home-muted);
+}
+.home-project-settings__row input[type="text"],
+.home-project-settings__row select,
+.home-project-settings__override input[type="text"],
+.home-project-settings__override select {
+  min-width: 0;
+  max-width: 12rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.2rem;
+  background: var(--home-field);
+  color: var(--home-ink);
+  font: inherit;
+  font-size: 0.72rem;
+}
+.home-project-settings__overrides {
+  margin-top: 0.3rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--home-line);
+}
+.home-project-settings__overrides-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--home-muted);
+  font: inherit;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.home-project-settings__override {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1.2fr;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+}
+.home-project-settings__override-name {
+  overflow: hidden;
+  color: var(--home-ink);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-project-settings__override input[type="text"],
+.home-project-settings__override select {
+  width: 100%;
+  max-width: none;
+}
+.home-project-settings__error {
+  margin: 0;
+  color: var(--home-red);
+  font-size: 0.68rem;
+}
+.home-project-settings__saved {
+  margin: 0;
+  color: var(--home-muted);
+  font-size: 0.68rem;
 }

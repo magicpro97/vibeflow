@@ -26,6 +26,7 @@ function directRevision(): HomeRevisionSummary {
     lineage_status: "verified",
     topic: "Delegate implementation through the coordinator",
     policy: "direct",
+    project_id: "idea",
     lifecycle: "COMPLETED",
     health: "healthy",
     participants: [

@@ -51,6 +51,7 @@
           </button>
         </footer>
       </form>
+      <ProjectSettingsPanel />
     </aside>
   </Transition>
 </template>
@@ -59,6 +60,7 @@
 import { nextTick, reactive, ref, watch } from "vue";
 import { buildConversationSettingsChanges } from "../conversation-home-settings.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
+import ProjectSettingsPanel from "./ProjectSettingsPanel.vue";
 
 const props = defineProps<{ open: boolean }>();
 defineEmits<{ close: [] }>();

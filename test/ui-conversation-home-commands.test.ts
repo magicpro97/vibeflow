@@ -68,6 +68,7 @@ function revision(rootSessionId: string) {
     lineage_status: "verified" as const,
     topic: `Topic ${rootSessionId}`,
     policy: "direct",
+    project_id: "idea",
     lifecycle: "COMPLETED" as const,
     health: "healthy" as const,
     participants: [],

@@ -14,6 +14,7 @@ import {
 import { isConversationLoopbackHost } from "../server/conversation-host.js";
 import type { ConversationMessageQueueHttpAuthorityV1 } from "../server/conversation-message-queue-route.js";
 import type { ConversationHttpAuthority } from "../server/conversation-route.js";
+import { projectClassifier } from "../skills/project-classifier-runtime.js";
 import { type ConversationCommandDeps, conversationBootstrap } from "./_shared.js";
 
 const AUTHORITIES = new Map<string, ConversationHttpAuthority>();
@@ -107,6 +108,23 @@ export function buildConversationHttpAuthority(
         inspect: (input) => composedCapabilityDomain.inspectAdoptCandidates(input),
       },
       messageQueue,
+      // The rail's divider labels and the settings panel's override rows read this registry.
+      // No mover is wired yet: a durable conversation→project re-bind does not exist in the
+      // runtime (the manifest binding is written at create time only), so the move route
+      // answers 503 instead of reporting a move that never landed.
+      projects: {
+        listProjects: () => bootstrap.authorities.projects.list(),
+        updateProject: ({ project_id, engine }) =>
+          bootstrap.authorities.projects.update(project_id, { engine }),
+        classify: async ({ message, repo_root }) => {
+          const projects = bootstrap.authorities.projects.list();
+          const authority = projectClassifier(projects);
+          return authority.classify({
+            message,
+            ...(repo_root === undefined ? {} : { repo_root }),
+          });
+        },
+      },
     },
     homeCreate: {
       create: async ({ principal_digest, request }) => {

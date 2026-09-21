@@ -426,6 +426,26 @@ describe("production HTTP composition delegates every shared authority", () => {
 
     expect(authority.messageQueueEvents?.rootSessionId("missing-conversation")).toBeNull();
 
+    // The composed project surface: the rail's registry read, the classifier's tier ladder, and
+    // the settings panel's engine write all reach the real registry authority through here.
+    const projects = authority.browser?.projects;
+    expect(projects).toBeDefined();
+    if (!projects) throw new Error("project surface was not composed");
+    expect(projects.listProjects()).toEqual([]);
+    expect((await projects.classify({ message: "anything at all" })).reason).toBe("fallback");
+    expect(await projects.classify({ message: "" })).toEqual({
+      project_id: "idea",
+      confidence: 0,
+      reason: "fallback",
+    });
+    // An unknown project must be rejected by the registry authority, not silently stored.
+    expect(() =>
+      projects.updateProject({
+        project_id: "does-not-exist",
+        engine: { cli: "codex", model: null, thinking: "high" },
+      }),
+    ).toThrow();
+
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const snapshot = await authority.service.snapshot(created.conversation_id);
       if (snapshot?.lifecycle !== "ACTIVE") break;
