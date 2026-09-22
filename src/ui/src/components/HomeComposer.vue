@@ -124,6 +124,7 @@ import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conve
 import { useHomeComposerCaret } from "../composables/useHomeComposerCaret.js";
 import { useHomeComposerLayout } from "../composables/useHomeComposerLayout.js";
 import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
+import { useHomeComposerSuggestionEscape } from "../composables/useHomeComposerSuggestionEscape.js";
 import {
   describeHomeComposerBusy,
   describeHomeComposerDescription,
@@ -169,6 +170,18 @@ const activeSuggestion = ref(0);
 const suggestionsDismissed = ref(false);
 const pendingEscapeDraft = ref<string | null>(null);
 const suggestionDraftSnapshot = ref("");
+const { dismissSuggestionsWithEscape, restoreDismissedDraft } = useHomeComposerSuggestionEscape({
+  readDraft: () => store.draft,
+  writeDraft: (value) => {
+    store.draft = value;
+  },
+  textarea,
+  visibleSuggestionCount: () => visibleSuggestions.value.length,
+  suggestionDraftSnapshot,
+  pendingEscapeDraft,
+  suggestionsDismissed,
+  resize,
+});
 const suggestionListId = "composer-suggestions";
 const privateRangeOpen = ref(false);
 const privateRangePanel = ref<{ open(reset?: boolean): void } | null>(null);
@@ -350,34 +363,6 @@ function onKeydown(event: KeyboardEvent) {
     event.preventDefault();
     void submit();
   }
-}
-function dismissSuggestionsWithEscape(event: KeyboardEvent): boolean {
-  if (event.key !== "Escape" || !visibleSuggestions.value.length) return false;
-  const preservedDraft = suggestionDraftSnapshot.value.length
-    ? suggestionDraftSnapshot.value
-    : store.draft;
-  pendingEscapeDraft.value = preservedDraft;
-  suggestionsDismissed.value = true;
-  restorePreservedDraft(preservedDraft);
-  event.preventDefault();
-  event.stopPropagation();
-  return true;
-}
-function restorePreservedDraft(preservedDraft: string) {
-  if (store.draft !== preservedDraft) store.draft = preservedDraft;
-  const element = textarea.value;
-  if (element && element.value !== preservedDraft) {
-    element.value = preservedDraft;
-    element.setSelectionRange(preservedDraft.length, preservedDraft.length);
-    resize();
-  }
-}
-function restoreDismissedDraft(event: KeyboardEvent) {
-  if (event.key !== "Escape" || pendingEscapeDraft.value === null) return;
-  restorePreservedDraft(pendingEscapeDraft.value);
-  pendingEscapeDraft.value = null;
-  event.preventDefault();
-  event.stopPropagation();
 }
 function onKeyup(event: KeyboardEvent) {
   restoreDismissedDraft(event);
