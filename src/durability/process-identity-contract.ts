@@ -125,6 +125,29 @@ export const PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS = Object.freeze({
   ABSENT: 3,
 } as const);
 
+/**
+ * Probe budgets for the platform start-identity queries.
+ *
+ * POSIX `ps` answers in milliseconds, but a Windows probe pays for a `powershell.exe` cold start
+ * plus the first `Get-CimInstance` module load; on contended or AV-scanned hosts that routinely
+ * exceeds a one-second budget and the probe returns null, which callers surface as
+ * "process start identity is unavailable".
+ */
+export const PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS = Object.freeze({
+  POSIX: 1_000,
+  WINDOWS_COLD_START: 10_000,
+} as const);
+
+/**
+ * Builds the Windows start-identity query.
+ *
+ * Emits through the success stream rather than `[Console]::WriteLine` so the probe still answers
+ * under ConstrainedLanguage mode (AppLocker/WDAC), where `System.Console` is not an allowed type.
+ */
+export function windowsProcessStartIdentityQuery(pid: number): string {
+  return `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($null -eq $p) { exit ${PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS.ABSENT} }; Write-Output ($p.CreationDate.ToUniversalTime().Ticks)`;
+}
+
 const POSITIVE_DECIMAL = new RegExp(PROCESS_START_IDENTITY_PATTERN_SOURCE.POSITIVE_DECIMAL, "u");
 const NONNEGATIVE_DECIMAL = new RegExp(
   PROCESS_START_IDENTITY_PATTERN_SOURCE.NONNEGATIVE_DECIMAL,
