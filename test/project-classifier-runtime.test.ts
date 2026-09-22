@@ -7,6 +7,10 @@
  * reset path when classification is switched off mid-session.
  */
 import { describe, expect, test } from "bun:test";
+import {
+  type ClassifierProject,
+  matchProjectRepo,
+} from "../src/orchestrator/conversation/project-classifier.js";
 import { openProjectIndex } from "../src/orchestrator/conversation/project-fts.js";
 import {
   applyProjectClassificationSettings,
@@ -86,6 +90,35 @@ describe("project classifier runtime", () => {
     const authority = projectClassifier([]);
     const verdict = await authority.classify({ message: "checkout flow" });
     expect(verdict.project_id).toBe("idea");
+  });
+
+  test("an empty registry never consults the model seam: nothing it names could win", async () => {
+    const asked: string[] = [];
+    const authority = projectClassifier([], {
+      propose: async (request) => {
+        asked.push(request.message);
+        return { project_id: "alpha", confidence: 0.9 };
+      },
+    });
+    const verdict = await authority.classify({ message: "please fix the payments retry logic" });
+    // Every accepted verdict is re-checked against the registry, so with nothing registered the
+    // model's answer is discarded by construction — the seam must therefore never run. v1 ships no
+    // project-create surface, so an empty registry is the only state a shipped runtime is in.
+    expect(asked).toEqual([]);
+    expect(verdict).toEqual({ project_id: "idea", confidence: 0, reason: "fallback" });
+  });
+
+  test("an empty registry never opens retrieval either", async () => {
+    let searched = 0;
+    const authority = projectClassifier([], {
+      openIndex: () => openProjectIndex(":memory:"),
+      search: () => {
+        searched += 1;
+        return [];
+      },
+    });
+    expect((await authority.classify({ message: "checkout flow" })).reason).toBe("fallback");
+    expect(searched).toBe(0);
   });
 
   test("a runtime with no index classifies without retrieval evidence", async () => {
@@ -192,6 +225,40 @@ describe("project classifier runtime", () => {
     const verdict = await authority.classify({ message: "anything at @beta" });
     expect(verdict.reason).toBe("mention");
     expect(asked).toEqual([]);
+  });
+});
+
+describe("repo tier canonicalization", () => {
+  test("each raw repo path is resolved once per classification, not once per occurrence", () => {
+    const resolvedPaths: string[] = [];
+    const canonicalize = (value: string) => {
+      resolvedPaths.push(value);
+      return value;
+    };
+    // Two projects importing the same folder, with a duplicate entry inside one of them: four
+    // entries, two distinct raw paths. At documented bounds (256 × 64) the per-entry cost is a
+    // realpath syscall per entry on every send and every create.
+    const projects: ClassifierProject[] = [
+      { id: "alpha", name: "alpha", repos: ["/work/alpha", "/work/shared"] },
+      { id: "beta", name: "beta", repos: ["/work/shared", "/work/beta"] },
+    ];
+    expect(matchProjectRepo(projects, "/work/shared/services/api", canonicalize)).toBe("alpha");
+    expect(resolvedPaths).toEqual([
+      "/work/shared/services/api",
+      "/work/alpha",
+      "/work/shared",
+      "/work/beta",
+    ]);
+  });
+
+  test("the memo does not change which project wins", () => {
+    const projects: ClassifierProject[] = [
+      { id: "alpha", name: "alpha", repos: ["/work/alpha"] },
+      { id: "beta", name: "beta", repos: ["/work/alpha/services/api"] },
+    ];
+    // The most specific import still wins, and an unrelated root still misses.
+    expect(matchProjectRepo(projects, "/work/alpha/services/api/src")).toBe("beta");
+    expect(matchProjectRepo(projects, "/elsewhere")).toBeUndefined();
   });
 });
 

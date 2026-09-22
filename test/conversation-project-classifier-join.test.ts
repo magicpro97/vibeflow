@@ -72,6 +72,24 @@ describe("the classifier engine join", () => {
     });
   });
 
+  test("auto-classify OFF answers the fallback without building the ladder at all", async () => {
+    const { seen, build } = spyFactory();
+    const authority = buildConversationProjectClassifier(
+      ROWS,
+      { settings: { enabled: false, engine: { cli: "claude", model: null, thinking: null } } },
+      build,
+    );
+    // The gate is server-side: OFF means the classifier — and therefore its AI seam — is never
+    // constructed, whatever the browser does. `@alpha` would resolve deterministically if the
+    // ladder ran, so this pins "OFF runs no tier", not "OFF runs the cheap tiers first".
+    expect(seen).toEqual([]);
+    expect(await authority.classify({ message: "@alpha please" })).toEqual({
+      project_id: "idea",
+      confidence: 0,
+      reason: "fallback",
+    });
+  });
+
   test("the global classifier block is the fallback when no project is named", () => {
     const { seen, build } = spyFactory();
     buildConversationProjectClassifier(ROWS, { settings: settings("claude") }, build);

@@ -215,7 +215,11 @@ a grouping key.
 
 Registry writes are server-side and lock-scoped (atomic compare-and-swap, whole-document
 rewrite); the routes that reach them are session-authorized, and mutations additionally require
-the loopback CSRF token. A corrupt or unreadable registry degrades the rail to the catch-all
+the loopback CSRF token. The classify route (`POST /api/conversation-projects/classify`) is
+session-authorized but rate-unlimited, and an admitted request can reach the classifier's AI
+subprocess (10 s timeout, truncated prompt); it short-circuits before retrieval or the model
+seam when auto-classify is off, and when the registry holds no project — the state v1 ships,
+since no route creates one. A corrupt or unreadable registry degrades the rail to the catch-all
 group rather than failing a message turn — classification is advisory, so its failure is never
 allowed to take a send down.
 

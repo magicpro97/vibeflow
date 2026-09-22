@@ -26,12 +26,23 @@
 import { PUBLIC_ERROR_CODE, type PublicErrorCode } from "../../actions/public-error-contract.js";
 import type { ConversationArtifactStore } from "./artifact-store.js";
 import { assertConversationProjectId } from "./conversation-project-binding.js";
+import {
+  DEFERRED_REVISION_PROPOSAL_ID,
+  DeferredRevisionProposalStore,
+} from "./revision-proposal-store.js";
 
 /** The narrow lineage read this module needs: the committed head's active revision, if any. */
 export interface ConversationProjectRebindLineagePortV1 {
   head(rootSessionId: string): { active: { conversation_id: string } | null } | null;
   /** Active revision reservation for the root, or null; a live one blocks the re-bind. */
   reservation?(rootSessionId: string): { status: string } | null;
+  /**
+   * True when a revision proposal that is prepared but not yet committed pins this conversation's
+   * current lock digest ({@link createPendingProposalLockPin} composes that read). Optional: a
+   * runtime without the proposal authority keeps its old behavior, and the commit-time conflict
+   * stays the backstop.
+   */
+  pendingProposalPinsLock?(conversationId: string): boolean;
 }
 
 export interface ConversationProjectRebindInputV1 {
@@ -44,6 +55,50 @@ export const CONVERSATION_PROJECT_REBIND_IN_FLIGHT =
   "A revision operation is already in flight for this conversation.";
 export const CONVERSATION_PROJECT_REBIND_NO_REVISION =
   "This conversation has no durable revision to re-bind.";
+/** Refusal copy for a proposal that is prepared but not yet committed. */
+export const CONVERSATION_PROJECT_REBIND_PROPOSAL_PENDING =
+  "A prepared revision proposal is waiting to be committed for this conversation.";
+
+/**
+ * The guard behind a re-bind: is a revision proposal *prepared but not yet committed* for this
+ * conversation?
+ *
+ * `project_id` is inside the manifest record, which is inside `conversationLockDigest`, so a
+ * re-bind moves the lock out from under any proposal planned against it — committing that proposal
+ * afterwards fails with "deferred revision source changed before commit". The active-reservation
+ * check in {@link createConversationProjectRebinder} covers only half that window: a proposal has
+ * no reservation until it executes, so the prepared-but-uncommitted gap needs its own evidence.
+ *
+ * The predicate is deliberately the *plan's parent conversation*, not a recomputed lock digest:
+ * the plan structurally names the conversation it was prepared against (`revision_plan.parent`),
+ * which is the same conversation this re-bind would rewrite, and it needs no lock authority to
+ * read. It is therefore a conservative superset of "pins the current lock digest": a proposal that
+ * had already gone stale before the move is refused too, and the remedy — commit or cancel it — is
+ * the same either way.
+ *
+ * `pendingProposals` is injected because the action service owns that read: it lists non-terminal
+ * proposals, so a committed or cancelled proposal leaves the list and the guard follows the
+ * proposal's real lifecycle.
+ */
+export function createPendingRevisionProposalGuard(input: {
+  artifactRoot: string;
+  pendingProposals(conversationId: string): readonly { proposal: { proposal_id: string } }[];
+}): (conversationId: string) => boolean {
+  const proposals = new DeferredRevisionProposalStore(input.artifactRoot);
+  return (conversationId) => {
+    const pending = input.pendingProposals(conversationId);
+    if (pending.length === 0) return false;
+    for (const row of pending) {
+      const id = row.proposal.proposal_id;
+      // Other domains (capability actions) keep their own proposal ids and pin nothing here.
+      if (!DEFERRED_REVISION_PROPOSAL_ID.test(id)) continue;
+      // A proposal file that exists but cannot be read is corruption, not an absence: let it
+      // surface rather than move a conversation a live proposal may depend on.
+      if (proposals.read(id)?.revision_plan.parent.conversation_id === conversationId) return true;
+    }
+    return false;
+  };
+}
 
 export class ConversationProjectRebindError extends Error {
   constructor(
@@ -100,6 +155,13 @@ export function createConversationProjectRebinder(
     if (!record)
       return refuse(PUBLIC_ERROR_CODE.NOT_FOUND, CONVERSATION_PROJECT_REBIND_NO_REVISION);
     if (record.project_id === projectId) return;
+    // Checked after the no-op return: a move into the project the conversation already holds
+    // rewrites nothing, so it can break nothing either.
+    if (authority.lineage.pendingProposalPinsLock?.(conversationId))
+      return refuse(
+        PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE,
+        CONVERSATION_PROJECT_REBIND_PROPOSAL_PENDING,
+      );
     try {
       authority.artifactStore.updateRecord(conversationId, (current) => ({
         ...current,

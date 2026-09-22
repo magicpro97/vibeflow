@@ -112,6 +112,13 @@ export function createHomeProjectRuntime(options: {
   activeProjectId: () => string;
   /** Persisted switch: OFF means the classifier never runs and nothing is proposed. */
   autoClassify: () => boolean;
+  /**
+   * Re-read the sessions list the rail groups on. A landed move changes which divider the
+   * conversation sits under, and grouping reads the sessions — not the registry — so refreshing
+   * only the registry would announce a move the rail never shows. Optional: a host without a
+   * sessions list (tests, non-browser) still moves.
+   */
+  refreshSessions?: () => Promise<void> | void;
   /** Cross-reload dismissal memory; omitted = in-process only. */
   dismissals?: HomeProjectDismissalStoreV1;
 }) {
@@ -231,6 +238,15 @@ export function createHomeProjectRuntime(options: {
         project_id: current.project_id,
       });
       suggestion.value = null;
+      // The rail groups the sessions list, so a landed move must re-read it: loading only the
+      // registry would tell the user "moved" while the conversation stays under Ideas. Best-effort
+      // and best-effort *after* the write: a failed refresh must not report a landed move as
+      // failed — the rail catches up at its next trigger.
+      try {
+        await options.refreshSessions?.();
+      } catch {
+        /* the move stands */
+      }
       await loadProjects();
       return true;
     } catch (error) {

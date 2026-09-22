@@ -6,6 +6,7 @@ import { contextHandoffSharedPromptBytes } from "./handoff-selection.js";
 import { validatePublishedRevisionTransition } from "./lineage-published-transition.js";
 import type { RevisionReservationRecordV1 } from "./lineage-reservation.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
+import { manifestRecordDigestMatches } from "./manifest-record-digest.js";
 import { revisionMessageRequest } from "./revision-action-manifest.js";
 import type { ConversationRevisionAuthorityOptions } from "./revision-authority.js";
 import { RevisionCrashFaultError, runRevisionCrashFault } from "./revision-crash-fault.js";
@@ -163,7 +164,7 @@ export async function commitDeferredRevision(input: {
         !record ||
         !manifestAuthority ||
         visibility.operation_id !== storedOperation.operation_id ||
-        visibility.manifest_record_digest !== manifestAuthority.digest ||
+        !manifestRecordDigestMatches(visibility.manifest_record_digest, manifestAuthority.record) ||
         !same(record, manifestAuthority.record) ||
         record.manifest.conversation_id !== storedOperation.child.conversation_id ||
         record.manifest.revision_id !== storedOperation.child.revision_id ||

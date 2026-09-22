@@ -40,6 +40,7 @@ function harness(
   } = {},
 ) {
   const moves: Array<{ root_session_id: string; project_id: string }> = [];
+  const refreshed: string[] = [];
   const client: HomeProjectClient = {
     listProjects: async () => [ROW],
     classifyMessage:
@@ -59,8 +60,11 @@ function harness(
     activeRootId: () => activeRootId ?? null,
     activeProjectId: () => overrides.activeProjectId ?? "idea",
     autoClassify: () => overrides.autoClassify ?? true,
+    refreshSessions: () => {
+      refreshed.push("sessions");
+    },
   });
-  return { runtime, moves };
+  return { runtime, moves, refreshed };
 }
 
 describe("project suggestion gate", () => {
@@ -138,6 +142,17 @@ describe("project suggestion confirm", () => {
     expect(await runtime.confirmSuggestion()).toBe(true);
     expect(moves).toEqual([{ root_session_id: "root-1", project_id: "alpha" }]);
     expect(runtime.suggestion.value).toBeNull();
+  });
+
+  test("a landed move re-reads the sessions the rail groups on", async () => {
+    const { runtime, moves, refreshed } = harness();
+    await runtime.classifyAndPropose("move me");
+    expect(refreshed).toEqual([]);
+    expect(await runtime.confirmSuggestion()).toBe(true);
+    expect(moves).toHaveLength(1);
+    // The rail groups `store.sessions`, not the registry: refreshing only the registry would tell
+    // the user the move landed while the conversation stays under Ideas.
+    expect(refreshed).toEqual(["sessions"]);
   });
 
   test("a refused move keeps the chip with the server's own reason", async () => {

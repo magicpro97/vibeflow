@@ -224,6 +224,20 @@ export async function handleConversationProjectRoute(
           retryable: true,
           recoveryAction: PUBLIC_RECOVERY_ACTION.RETRY,
         });
+      // The registry is the membership authority: `idea` is reserved and never stored, and an
+      // unregistered slug has nothing to patch. Decided here so the refusal is authored instead of
+      // collapsing into the writer's generic `invalid_request`. A registry that cannot be read
+      // proves nothing unknown, so that case falls through to the writer's own failure.
+      let known: readonly ProjectV1[] | null = null;
+      try {
+        known = authority.listProjects();
+      } catch {
+        known = null;
+      }
+      if (known !== null && !known.some((project) => project.id === itemId))
+        return conversationReadError(PUBLIC_ERROR_CODE.INVALID_REQUEST, {
+          message: `Unknown project ${itemId}: the registry does not hold it.`,
+        });
       authority.updateProject({ project_id: itemId, engine });
       return queueNoStore({ schema_version: "1.0", project_id: itemId, engine }, 200);
     }

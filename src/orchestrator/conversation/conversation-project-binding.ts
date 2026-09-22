@@ -63,8 +63,18 @@ export function resolveConversationProjectId(
   input: { topic: string; repo_root: string | undefined },
 ): string {
   if (value !== undefined) return assertConversationProjectId(projects, value);
+  let candidates: readonly ClassifierProject[];
+  try {
+    candidates = projects?.list?.() ?? [];
+  } catch {
+    // A corrupt or unreadable registry degrades this *inferred* binding to the catch-all: a
+    // conversation must still be creatable, and a create is the one path a message turn cannot
+    // retry around. (The explicit `project_id` path above keeps its hard failure: that id is a
+    // caller claim, not a guess, and answering it as `idea` would file it where nobody asked.)
+    return CONVERSATION_DEFAULT_PROJECT_ID;
+  }
   const classification = classifyMessage(input.topic, {
-    projects: projects?.list?.() ?? [],
+    projects: candidates,
     ...(input.repo_root === undefined ? {} : { repo_root: input.repo_root }),
   });
   return classification.reason === "repo" || classification.reason === "mention"

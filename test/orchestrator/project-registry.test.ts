@@ -13,6 +13,7 @@ import {
 } from "../../src/orchestrator/conversation/project-registry-store.js";
 import {
   PROJECT_LIMIT,
+  PROJECT_MODEL_MAX_LENGTH,
   PROJECT_SCHEMA_VERSION,
   PROJECT_SLUG_PATTERN,
   type ProjectV1,
@@ -164,6 +165,16 @@ describe("project registry authority", () => {
         "non-string engine model",
         { engine: { cli: "claude", model: 7, thinking: "auto" } as never },
       ],
+      [
+        "over-long engine model",
+        {
+          engine: {
+            cli: "claude",
+            model: "m".repeat(PROJECT_MODEL_MAX_LENGTH + 1),
+            thinking: "auto",
+          } as never,
+        },
+      ],
     ];
 
     scratch((_root, authority) => {
@@ -172,6 +183,28 @@ describe("project registry authority", () => {
           ProjectValidationError,
         );
       expect(authority.list()).toEqual([]);
+    });
+  });
+
+  test("a model at the bound is stored verbatim and null stays the engine default", () => {
+    scratch((_root, authority) => {
+      const atBound = "m".repeat(PROJECT_MODEL_MAX_LENGTH);
+      const created = authority.create({
+        ...CREATE,
+        engine: { cli: "claude", model: atBound, thinking: "auto" },
+      });
+      expect(created.engine.model).toBe(atBound);
+      expect(
+        authority.update("hermes", { engine: { cli: "claude", model: null, thinking: "auto" } })
+          .engine.model,
+      ).toBeNull();
+      // One character past the bound is a client error, not a 200 that grows the registry until
+      // every read of it is corruption.
+      expect(() =>
+        authority.update("hermes", {
+          engine: { cli: "claude", model: `${atBound}m`, thinking: "auto" },
+        }),
+      ).toThrow(ProjectValidationError);
     });
   });
 

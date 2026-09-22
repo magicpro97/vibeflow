@@ -86,6 +86,12 @@ export class ProjectClassifierAuthority {
     });
     if (deterministic.reason !== "fallback") return deterministic;
 
+    // Nothing retrieval or the model returns could win: every accepted verdict is re-checked
+    // against the registry, and an empty registry holds no id to re-check against. v1 ships no
+    // project-create surface, so this is the only state a shipped registry is in — without the
+    // guard the AI seam would run on every send and its verdict be discarded every time.
+    if (projects.length === 0) return deterministic;
+
     // The index outlives registry entries (chat rows are never deleted), so retrieval can name
     // a project that no longer exists. Drop those first: an unregistered winner is not a hit at
     // all, and leaving it in would both bind a phantom and hide a real runner-up behind it.

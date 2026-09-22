@@ -7,9 +7,14 @@
  * `@mention` match files the conversation before its first message, while `fts`/`ai` never do.
  */
 import { expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CONVERSATION_DEFAULT_PROJECT_ID } from "../../../src/orchestrator/conversation/conversation-catalog-contract.js";
 import { resolveConversationProjectId } from "../../../src/orchestrator/conversation/conversation-project-binding.js";
 import type { ClassifierProject } from "../../../src/orchestrator/conversation/project-classifier.js";
+import { ProjectRegistryAuthority } from "../../../src/orchestrator/conversation/project-registry-authority.js";
+import { ProjectRegistryCorruptError } from "../../../src/orchestrator/conversation/project-registry-store.js";
 
 const ALPHA: ClassifierProject = {
   id: "alpha",
@@ -74,4 +79,60 @@ test("a runtime without a registry list never auto-binds, it fails closed to the
       repo_root: "/work/alpha",
     }),
   ).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
+});
+
+/**
+ * The review's reproduction: a *valid* registry whose file mode was widened (any `rsync`,
+ * `chmod -R`, or backup restore) is corruption to the store. At create time that must degrade the
+ * inferred binding to the catch-all — a conversation is still creatable — instead of taking the
+ * whole create funnel down with `ProjectRegistryCorruptError`.
+ */
+function widenedRegistry(): { root: string; registry: ProjectRegistryAuthority } {
+  const root = mkdtempSync(join(tmpdir(), "vf-binding-corrupt-"));
+  const registry = new ProjectRegistryAuthority({ root });
+  registry.create({
+    id: "alpha",
+    name: "Alpha",
+    goal: "g",
+    engine: { cli: "codex", thinking: "medium" },
+  });
+  chmodSync(join(root, "registry.json"), 0o644);
+  return { root, registry };
+}
+
+test("a corrupt registry degrades the inferred binding instead of failing the create", () => {
+  const { root, registry } = widenedRegistry();
+  try {
+    expect(() => registry.list()).toThrow(ProjectRegistryCorruptError);
+    expect(
+      resolveConversationProjectId(registry, undefined, {
+        topic: "@alpha please",
+        repo_root: "/work/alpha",
+      }),
+    ).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
+    expect(
+      resolveConversationProjectId(registry, undefined, {
+        topic: "just some words",
+        repo_root: "/somewhere/unrelated",
+      }),
+    ).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a caller-supplied project_id still fails hard when the registry is corrupt", () => {
+  const { root, registry } = widenedRegistry();
+  try {
+    // An explicit id is a caller claim, not a guess: answering it as the catch-all would file the
+    // conversation where the caller did not ask for. The hard failure stays.
+    expect(() =>
+      resolveConversationProjectId(registry, "alpha", {
+        topic: "nothing to infer",
+        repo_root: "/somewhere/unrelated",
+      }),
+    ).toThrow(ProjectRegistryCorruptError);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

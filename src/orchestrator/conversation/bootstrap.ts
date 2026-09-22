@@ -37,6 +37,7 @@ import { ConversationPrivateContextBrokerV1 } from "./conversation-private-conte
 import {
   type ConversationProjectRebinderV1,
   createConversationProjectRebinder,
+  createPendingRevisionProposalGuard,
 } from "./conversation-project-rebind.js";
 import { ConversationUserMessageAuthorityV1 } from "./conversation-user-message-authority.js";
 import { CoordinateConversationPolicy } from "./coordinate-policy.js";
@@ -178,6 +179,14 @@ export function createConversationBootstrap(
     lineage: {
       head: (rootSessionId) => homeAuthorities.lineage.readHead(rootSessionId),
       reservation: (rootSessionId) => homeAuthorities.lineage.readReservation(rootSessionId),
+      // The second half of the "don't move under a live revision" window: `reservation` is only
+      // set while an operation executes, whereas a *prepared* proposal pins the lock digest at
+      // propose time. `pending` is the action service's durable non-terminal read, so the guard
+      // follows the proposal's real lifecycle — committing or cancelling it clears the guard.
+      pendingProposalPinsLock: createPendingRevisionProposalGuard({
+        artifactRoot,
+        pendingProposals: homeAuthorities.actions.pending.bind(homeAuthorities.actions),
+      }),
     },
     projects,
     notify: (conversationId, recordedAt) => recordConversationSource?.(conversationId, recordedAt),

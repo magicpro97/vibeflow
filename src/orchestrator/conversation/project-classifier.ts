@@ -106,17 +106,34 @@ export function canonicalRepoPath(value: string): string {
  * identically, so an explicit import is never lost to a canonicalization mismatch. The prefix
  * compare is byte-exact, so `REAL-PROJ` and `real-proj` are distinct even on a case-insensitive
  * filesystem — both sides normally come from the same picker, so this has not bitten.
+ *
+ * Each raw path is resolved once per call: the tier walks every `repos[]` entry of every project
+ * and registry rows routinely repeat (or nest under) the same imported folder, so the memo keeps
+ * the `realpath` syscalls proportional to *distinct* paths rather than entries — at documented
+ * bounds (256 projects × 64 repos) that is the difference between ~27 ms of syscalls and a
+ * handful. Per call on purpose: an entry may name a folder that does not exist yet, and a
+ * longer-lived cache would pin that literal answer. `resolvePath` is the seam that makes the
+ * count observable.
  */
 export function matchProjectRepo(
   projects: readonly ClassifierProject[],
   repoRoot: string | undefined,
+  resolvePath: (value: string) => string = canonicalRepoPath,
 ): string | undefined {
   if (repoRoot === undefined || repoRoot.trim() === "") return undefined;
-  const root = canonicalRepoPath(repoRoot);
+  const memo = new Map<string, string>();
+  const canonicalize = (value: string): string => {
+    const cached = memo.get(value);
+    if (cached !== undefined) return cached;
+    const canonical = resolvePath(value);
+    memo.set(value, canonical);
+    return canonical;
+  };
+  const root = canonicalize(repoRoot);
   let winner: { id: string; length: number } | undefined;
   for (const project of projects) {
     for (const repo of project.repos) {
-      const absolute = canonicalRepoPath(repo);
+      const absolute = canonicalize(repo);
       if (root !== absolute && !root.startsWith(absolute.endsWith(sep) ? absolute : absolute + sep))
         continue;
       if (winner === undefined || absolute.length > winner.length)

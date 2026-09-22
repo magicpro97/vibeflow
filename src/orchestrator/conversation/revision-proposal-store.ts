@@ -13,6 +13,12 @@ import {
 } from "./lineage-revision-operation.js";
 
 const PROPOSAL = /^vf-proposal-[0-9a-f]{64}$/;
+/**
+ * Id shape of a stored deferred revision proposal. Exported so a caller that holds an arbitrary
+ * proposal id (e.g. the project re-bind's pending-proposal guard, which sees every domain's rows)
+ * can tell "not a revision proposal" from "a proposal it cannot read".
+ */
+export const DEFERRED_REVISION_PROPOSAL_ID = PROPOSAL;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const MAX_BYTES = 2 * 1024 * 1024;
 export const DEFERRED_REVISION_PROPOSAL_DIGEST_DOMAIN =

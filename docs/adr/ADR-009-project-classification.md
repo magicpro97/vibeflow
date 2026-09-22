@@ -185,7 +185,10 @@ Positive:
 - The common case costs nothing: an explicit import or an `@mention` classifies exactly, with no
   index lookup and no model call, and a runtime with neither FTS nor a bridge still answers.
 - Classification is advisory. The catalog carries a `project_id`, never a path, and a corrupt
-  registry degrades the rail to the catch-all instead of failing a message turn.
+  registry degrades to the catch-all — the rail groups everything under Ideas, and a create
+  binds the catch-all rather than failing — instead of failing a message turn. Only an
+  *explicit* caller-supplied `project_id` still fails hard against an unreadable registry,
+  because that id is a caller claim rather than a guess.
 - The registry survives concurrent writers and crashes: lock-scoped mutator, atomic
   compare-and-swap, revision counter, explicit corruption error.
 
@@ -201,6 +204,9 @@ Costs:
   slug) so a conversation is never invisible, which means a stale id is visible as a divider
   rather than as an error.
 - `project_id` had to be added to exact-key-asserted DTOs, which touched every catalog fixture.
+- `POST /api/conversation-projects/classify` is rate-unlimited: it is session-authorized and its
+  prompt is truncated, but each admitted request can reach the classifier's AI subprocess (10 s
+  timeout), and a send is enough to trigger one. The exposure is request rate, not prompt size.
 
 ## Deferred and known items
 
@@ -212,7 +218,10 @@ These are recorded here rather than fixed in the classification change, each wit
    byte-identical to the document it was read from. Any digest computed *after* validation is
    therefore not a digest of the stored artifact. Trigger: pinning a manifest digest, or any
    second reader that compares a validated object to its file. Fix: split a pure
-   `normalizeConversationManifest` from the assert.
+   `normalizeConversationManifest` from the assert. *Partially mitigated:* the manifest **record**
+   digest is the one digest that had already been pinned across a release, so its comparison now
+   accepts the pre-`project_id` form (`manifest-record-digest.ts`) instead of failing a prepared
+   revision at upgrade; every other field still compares against the normalized object.
 2. **Legacy `~/.vibeflow/projects.json` versus the per-repo registry root.** The per-repo root was
    chosen deliberately (§1), but the legacy global path is unowned: nothing reads or migrates it,
    and a user who has one gets no feedback. Trigger: the first release that ships project
@@ -233,6 +242,31 @@ These are recorded here rather than fixed in the classification change, each wit
    no live chat feed calls it yet, so tier 3 scores registry text today. Trigger: tier 3 missing
    matches it should have found. Fix: feed committed messages into the index at the same boundary
    that invalidates the catalog.
+
+6. **Tier 3's score is message-length dependent, so the `30` floor is not scale-free.** The score
+   divides each project's IDF-weighted term strength by the idf of *every* query term, so the same
+   evidence decays as the message grows (the reviewer's measurement, one project whose goal names
+   "payments"):
+
+   | query | terms | `alpha` score |
+   | --- | --- | --- |
+   | `payments` | 1 | 100 |
+   | `fix the payments retry` | 4 | 44.9 |
+   | `please fix the payments retry logic before the release` | 9 | 21.4 |
+   | `…because it is dropping events under load` | 17 | 10.4 |
+
+   Tier 3 therefore fires for terse messages, and a one-project registry can bind on a single
+   shared stopword-ish term (`"the service is down"` → `alpha` at 0.5). Normalizing over the
+   *matched* terms' idf (or the top-k terms) rather than the whole query is the fix direction;
+   §3's claim holds for registry size, not for query length. Trigger: an `fts` verdict a longer
+   message should have produced.
+7. **A digest persisted before project binding does not always reproduce after it.** The
+   comparison now accepts the pre-`project_id` form for stored manifest records, but a *lock*
+   digest pinned before the upgrade (`revision_plan.expected_parent_lock_digest` in a proposal
+   prepared but not committed) cannot be reconstructed without redesigning the lock preimage, and
+   is refused at commit with "deferred revision source changed before commit". Trigger: an
+   upgrade with an uncommitted proposal outstanding. Fix: version the lock preimage, or re-plan
+   the proposal instead of replaying it.
 
 ## Rejected alternatives
 

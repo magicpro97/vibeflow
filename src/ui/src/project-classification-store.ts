@@ -43,6 +43,9 @@ export const useProjectClassificationStore = defineStore("project-classification
     // The active revision owns the binding, so a verdict naming it is filtered as a non-move.
     activeProjectId: () => home.activeRevision?.project_id ?? CONVERSATION_DEFAULT_PROJECT_ID,
     autoClassify: () => classificationEnabled.value,
+    // The rail groups the sessions list, so a landed move must re-read it — a chip confirm that
+    // refreshed only the registry would leave the conversation under Ideas.
+    refreshSessions: () => home.refreshSessions(),
     // Survives a reload: the mockup's dismissal contract is "one ignore is final for that
     // proposal", which an in-process Set cannot keep across a visit.
     ...(typeof localStorage === "undefined"

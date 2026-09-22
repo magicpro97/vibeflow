@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { digestV1 } from "../../../src/durability/index.js";
+import { ConversationArtifactStore } from "../../../src/orchestrator/conversation/artifact-store.js";
 import type { ConversationDurableRecord } from "../../../src/orchestrator/conversation/artifact-validation.js";
 import { CatalogCursorCodec } from "../../../src/orchestrator/conversation/catalog-cursor.js";
 import { projectConversationCatalog } from "../../../src/orchestrator/conversation/catalog-projector.js";
@@ -16,7 +18,12 @@ import { ConversationPrivateContextBrokerV1 } from "../../../src/orchestrator/co
 import type { ConversationHomeCreateRequestV1 } from "../../../src/orchestrator/conversation/conversation-private-context-broker-types.js";
 import { assertConversationProjectId } from "../../../src/orchestrator/conversation/conversation-project-binding.js";
 import { deriveConversationLineages } from "../../../src/orchestrator/conversation/lineage-reader.js";
+import {
+  MANIFEST_RECORD_DOMAIN,
+  manifestRecordDigestMatches,
+} from "../../../src/orchestrator/conversation/manifest-record-digest.js";
 import { ProjectRegistryAuthority } from "../../../src/orchestrator/conversation/project-registry-authority.js";
+import { revisionManifestRecord } from "../../../src/orchestrator/conversation/revision-source.js";
 import { readConversationSourceInventory } from "../../../src/orchestrator/conversation/source-inventory.js";
 import { fixtureRecord, installFixture } from "../../helpers/conversation-catalog-fixture.js";
 
@@ -66,6 +73,62 @@ test("a manifest-less project_id reads back as the default project, not the repo
   expect("project_id" in record.manifest).toBe(false);
   expect(await projectIdOf(record)).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
   expect(CONVERSATION_DEFAULT_PROJECT_ID).toBe("idea");
+});
+
+test("a revision prepared before project_id existed still matches the digest pinned for it", () => {
+  // The upgrade boundary. `assertConversationManifest` injects `project_id` in place on read, so a
+  // record written before project binding existed hashes to a different value once normalized —
+  // while the digest computed at prepare time (stored in `visibility.manifest_record_digest`) was
+  // taken over the un-normalized record. `revision-artifact-store` and the two deferred-commit
+  // validators compare exactly those two operands.
+  const root = mkdtempSync(join(tmpdir(), "vf-manifest-digest-legacy-"));
+  try {
+    const store = new ConversationArtifactStore({ dir: join(root, "artifacts") });
+    const parent = fixtureRecord("legacy-parent");
+    store.create(parent.manifest, parent.binding_authorities);
+    // A pre-branch child: the fixture omits `project_id` entirely, as the old writer did.
+    const child = fixtureRecord("legacy-child", {
+      parent: "legacy-parent",
+      parentRevision: "revision-legacy-parent",
+    });
+    // The digest a pre-branch build hashed for the prepared revision: the record as the writer
+    // builds it (no resume bindings, no children) and without the field it had no concept of.
+    const pinned = revisionManifestRecord(child.manifest, child.binding_authorities).digest;
+    const operationId = `vf-operation-${"b".repeat(64)}`;
+
+    // The prepare site: the caller hands back the digest it computed before the upgrade.
+    expect(() =>
+      store.prepareRevision(child.manifest, child.binding_authorities, {
+        operation_id: operationId,
+        manifest_record_digest: pinned,
+        updated_at: "2026-08-25T00:00:30.000Z",
+      }),
+    ).not.toThrow();
+
+    const readBack = store.readPreparedRevision("legacy-child");
+    const marker = store.revisionVisibility("legacy-child");
+    if (!readBack || !marker) throw new Error("fixture revision did not read back");
+    expect(readBack.manifest.project_id).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
+    // The inequality the validators would turn into "published revision artifact authority
+    // changed" / "committed revision publication closure changed" without the tolerance.
+    expect(digestV1(MANIFEST_RECORD_DOMAIN, readBack)).not.toBe(pinned);
+    expect(manifestRecordDigestMatches(marker.manifest_record_digest, readBack)).toBe(true);
+    // A digest recomputed in the current form keeps matching unchanged.
+    expect(manifestRecordDigestMatches(digestV1(MANIFEST_RECORD_DOMAIN, readBack), readBack)).toBe(
+      true,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the legacy digest tolerance cannot mask a record filed into another project", () => {
+  const bound = fixtureRecord("legacy-child-bound", { projectId: "checkout-web" });
+  const { project_id: _projectId, ...legacyManifest } = bound.manifest;
+  const legacyForm = digestV1(MANIFEST_RECORD_DOMAIN, { ...bound, manifest: legacyManifest });
+  // Only the injected *default* is tolerated: deleting a real project id would accept a digest for
+  // a record that differs from this one in the very field a move rewrites.
+  expect(manifestRecordDigestMatches(legacyForm, bound)).toBe(false);
 });
 
 test("a path-bearing project_id is rejected at projection, not silently projected", async () => {

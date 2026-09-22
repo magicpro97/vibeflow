@@ -7,10 +7,11 @@ import { type Engine, cwd } from "../core.js";
 import { ConversationAskCompatibilityV1 } from "../orchestrator/conversation/conversation-ask-compatibility.js";
 import { ConversationHomeCreateBrokerV1 } from "../orchestrator/conversation/conversation-home-create-authority.js";
 import { createPrivateFileRangeHandoffId } from "../orchestrator/conversation/private-file-range-staging-store.js";
-import type {
-  Classification,
-  ClassificationInput,
-  ClassifierProject,
+import {
+  type Classification,
+  type ClassificationInput,
+  type ClassifierProject,
+  classifyMessage,
 } from "../orchestrator/conversation/project-classifier.js";
 import {
   DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
@@ -58,6 +59,11 @@ export function buildConversationProjectClassifier(
   },
   factory: ConversationProjectClassifierFactory = projectClassifier,
 ): { classify(input: ClassificationInput): Promise<Classification> } {
+  // OFF is the durable gate, enforced here rather than in the browser: the classifier — and with
+  // it the AI seam and the retrieval index — is never even constructed, so no tier can run and no
+  // subprocess can spawn. The answer is the shared fallback verdict the ladder itself returns.
+  if (!policy.settings.enabled)
+    return { classify: async (input) => classifyMessage(input.message, { projects: [] }) };
   const project =
     policy.project_id === undefined
       ? undefined

@@ -175,7 +175,8 @@ export function assertProjectEngineV1(value: unknown): ProjectEngineV1 {
     return invalid("project engine model must be a string or null");
   return {
     cli: engine.cli,
-    model,
+    model:
+      model === null ? null : assertBoundedString(model, "engine model", PROJECT_MODEL_MAX_LENGTH),
     thinking: assertBoundedString(engine.thinking, "engine thinking", PROJECT_THINKING_MAX_LENGTH),
   };
 }

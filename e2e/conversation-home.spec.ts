@@ -2485,12 +2485,22 @@ test.describe("AI-first conversation Home", () => {
     await page.route("**/api/engines**", (route) =>
       route.fulfill({ status: 200, json: { engines: [] } }),
     );
+    // The re-bind lands in the catalog's `project_id`, so a re-read after the move reports the new
+    // group. Serving the original binding forever would hide a rail that never re-reads the list.
+    const bound = () =>
+      moves.length === 0
+        ? session
+        : {
+            ...session,
+            root: { ...session.root, project_id: "alpha" },
+            active: { ...session.active, project_id: "alpha" },
+          };
     await page.route("**/api/conversations?**", async (route) => {
       await route.fulfill({
         status: 200,
         json: {
           schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
-          items: [session],
+          items: [bound()],
           next_cursor: null,
           catalog_generation: "generation",
           source_watermark: "watermark",
@@ -2499,7 +2509,7 @@ test.describe("AI-first conversation Home", () => {
       });
     });
     await page.route("**/api/conversation-sessions/root-project/head", async (route) => {
-      await route.fulfill({ status: 200, json: homeHead(session) });
+      await route.fulfill({ status: 200, json: homeHead(bound()) });
     });
     await page.route("**/api/conversation-sessions/root-project/timeline?**", async (route) => {
       await route.fulfill({ status: 200, json: homeTimeline("root-project", []) });
@@ -2618,6 +2628,14 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "Move", exact: true }).click();
     await expect(chip).toHaveCount(0);
     expect(moves).toHaveLength(1);
+    // The rail groups the sessions list, so a landed move must re-read it: without that the chip
+    // reports success while the conversation stays under Ideas until a reload.
+    await expect(
+      page.getByRole("group", { name: /alpha-service/ }).getByRole("button", {
+        name: /Project chip/,
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole("group", { name: /Ideas/ })).toHaveCount(0);
 
     // The switch is a durable gate: toggling it persists the block immediately.
     await page.getByRole("button", { name: "Open settings" }).click();

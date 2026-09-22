@@ -314,7 +314,7 @@ Two surfaces, one authority — no duplicated controls:
 
 ## 8. Implementation amendments (Task 5 Step 1+)
 
-Six things the implementation settled differently, all recorded here so the design doc and the
+Seven things the implementation settled differently, all recorded here so the design doc and the
 code agree:
 1. **No create variant.** The classifier's acceptance path (`project-classifier-authority.ts`)
    only returns *registered* project ids, so the `Tạo project mới` branch could never be reached
@@ -344,6 +344,13 @@ code agree:
    to a CLI flag (`project-types.ts` says so explicitly). They are stored now so the settings
    document does not have to change shape when a consumer arrives; that consumer is the seam.
    §4's engine rows and the panel's two labeled inputs carry a note saying exactly this.
+7. **No clear-to-inherit control on an override row, because the registry cannot hold "unset".**
+   `ProjectEngineV1` requires a complete engine (`cli` from the closed engine set, non-empty
+   `thinking`), so "inherit" has no representable stored value: a row whose every field is blank
+   persists nothing (`buildProjectEnginePatch` returns `null`) and the project's *existing* engine
+   stays exactly as it was. `seedRow` therefore fills each row from `project.engine`, and a clear
+   control would have to invent a value the registry rejects. Recorded rather than built; the fix
+   is a registry schema that admits an absent engine, which §1 deliberately does not have.
 
 ---
 

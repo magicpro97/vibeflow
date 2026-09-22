@@ -123,6 +123,44 @@ test("an unknown engine or a malformed id is a client error, not a silent no-op"
   expect(updates).toEqual([]);
 });
 
+test("a PATCH for an id the registry cannot hold is refused with an authored reason", async () => {
+  const updates: Array<{ project_id: string; engine: ProjectV1["engine"] }> = [];
+  const route = authority({ updateProject: (input) => updates.push(input) });
+  for (const id of ["idea", "ghost"]) {
+    const response = await handleConversationProjectRoute(
+      route,
+      request("PATCH", { engine: { cli: "claude", model: null, thinking: "low" } }),
+      new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}${id}`),
+    );
+    expect(response?.status, id).toBe(400);
+    const body = (await response?.json()) as { error: { code: string; message: string } };
+    expect(body.error.code, id).toBe("invalid_request");
+    expect(body.error.message, id).toContain(id);
+  }
+  // Neither the reserved catch-all nor a slug absent from the registry reaches the writer.
+  expect(updates).toEqual([]);
+});
+
+test("a PATCH on a corrupt registry still reaches the writer's own failure", async () => {
+  const updates: Array<{ project_id: string; engine: ProjectV1["engine"] }> = [];
+  const response = await handleConversationProjectRoute(
+    authority({
+      listProjects: () => {
+        throw new Error("registry corrupt");
+      },
+      updateProject: (input) => updates.push(input),
+    }),
+    request("PATCH", { engine: { cli: "claude", model: null, thinking: "low" } }),
+    new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}alpha`),
+  );
+  // Membership cannot be decided from a registry that failed to read, so the route must not
+  // invent "unknown project" — the updater reports the real reason instead.
+  expect(updates).toEqual([
+    { project_id: "alpha", engine: { cli: "claude", model: null, thinking: "low" } },
+  ]);
+  expect(response?.status).toBe(200);
+});
+
 test("a PATCH without an updater reports that it cannot persist, not success", async () => {
   const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}alpha`);
   const response = await handleConversationProjectRoute(
