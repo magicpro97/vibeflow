@@ -27,7 +27,11 @@
         :aria-owns="visibleSuggestions.length ? suggestionListId : undefined"
         tabindex="-1"
       >
-        <HomeComposerHighlight :draft="store.draft" :participants="store.activeRevision?.participants ?? []" />
+        <HomeComposerHighlight
+          :draft="store.draft"
+          :participants="store.activeRevision?.participants ?? []"
+          :caret-offset="caretOffset"
+        />
         <textarea
           id="home-composer"
           ref="textarea"
@@ -43,6 +47,8 @@
           @beforeinput="onBeforeInput"
           @input="resize"
           @scroll="syncHighlightScroll"
+          @select="syncCaretOffset"
+          @click="syncCaretOffset"
           @keydown="onKeydown"
           @keyup="onKeyup"
         />
@@ -115,6 +121,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
+import { useHomeComposerCaret } from "../composables/useHomeComposerCaret.js";
+import { useHomeComposerLayout } from "../composables/useHomeComposerLayout.js";
 import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
 import {
   describeHomeComposerBusy,
@@ -124,7 +132,8 @@ import {
 } from "../conversation-home-loading.js";
 import { HOME_QUEUED_MESSAGE_PROJECTION_KIND } from "../conversation-home-message-queue-types.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import { nextMentionToken } from "../home-composer-highlight.js";
+import { removeMentionAtKey } from "../home-composer-editing.js";
+import { nextMentionToken, removeComposerMention } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
 import { useProjectClassificationStore } from "../project-classification-store.js";
 import HomeAttachmentButton from "./HomeAttachmentButton.vue";
@@ -151,6 +160,11 @@ const projectClassification = useProjectClassificationStore();
 const { quoteChips } = useHomeComposerQuotes();
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const composing = ref(false);
+const { caretOffset, setCaretOffset, syncCaretOffset } = useHomeComposerCaret(
+  textarea,
+  () => store.draft,
+);
+const { suggestionStyle, syncHighlightScroll } = useHomeComposerLayout(textarea);
 const activeSuggestion = ref(0);
 const suggestionsDismissed = ref(false);
 const pendingEscapeDraft = ref<string | null>(null);
@@ -226,44 +240,34 @@ watch(
   () => store.queueComposerFocusEpoch,
   () => void restoreComposerFocus(),
 );
-
 function resize() {
   const element = textarea.value;
   if (!element) return;
   element.style.height = "0";
   element.style.height = `${Math.min(element.scrollHeight, 176)}px`;
 }
-function syncHighlightScroll() {
-  const element = textarea.value;
-  if (!element) return;
-  const overlay = document.querySelector<HTMLElement>(".home-composer__highlight");
-  if (overlay) overlay.scrollTop = element.scrollTop;
-}
 function insert(value: string) {
   if (store.queuedMessageEdit) return;
   const element = textarea.value;
   const start = element?.selectionStart ?? store.draft.length;
   const end = element?.selectionEnd ?? start;
-  const before = store.draft.slice(0, start);
-  const after = store.draft.slice(end);
+  const before = store.draft.slice(0, start).replace(/\s+$/u, "");
+  const after = store.draft.slice(end).replace(/^\s+/u, "");
   const mention = nextMentionToken(store.draft, value);
-  const leading = before && !/\s$/u.test(before) ? " " : "";
-  const trailing = !after || !/^\s/u.test(after) ? " " : "";
+  const leading = before ? " " : "";
+  const trailing = " ";
   store.draft = `${before}${leading}${mention}${trailing}${after}`;
   const caret = before.length + leading.length + mention.length + trailing.length;
   nextTick(() => {
     textarea.value?.focus();
     textarea.value?.setSelectionRange(caret, caret);
+    setCaretOffset(caret);
     resize();
   });
 }
-
 function removeMention(value: string) {
   if (store.queuedMessageEdit) return;
-  store.draft = store.draft
-    .split(value)
-    .map((part, index) => (index > 0 ? part.replace(/^\s+/, "") : part))
-    .join("");
+  store.draft = removeComposerMention(store.draft, value);
   nextTick(() => {
     textarea.value?.focus();
     resize();
@@ -283,13 +287,11 @@ async function focusQueuedEdit() {
   textarea.value?.setSelectionRange(end, end);
   resize();
 }
-
 async function cancelQueuedEdit() {
   if (!store.cancelQueuedMessageEdit()) return;
   await restoreComposerFocus();
   resize();
 }
-
 function choose(value: string) {
   const mention = nextMentionToken(store.draft, value);
   store.draft = `${mention} `;
@@ -301,17 +303,6 @@ function choose(value: string) {
   });
 }
 const suggestionOptionId = (index: number) => `composer-suggestion-${index}`;
-const suggestionStyle = computed(() => {
-  const rect = textarea.value?.getBoundingClientRect();
-  return rect
-    ? {
-        top: `${rect.top}px`,
-        left: `${rect.left}px`,
-        width: `${rect.width}px`,
-        transform: "translateY(-100%) translateY(-0.35rem)",
-      }
-    : null;
-});
 function onKeydown(event: KeyboardEvent) {
   if (composing.value || event.isComposing || event.keyCode === 229) return;
   if (visibleSuggestions.value.length) {
@@ -330,6 +321,17 @@ function onKeydown(event: KeyboardEvent) {
       if (suggestion) choose(suggestion.value);
       return;
     }
+  }
+  const removal = removeMentionAtKey(event, store.draft, textarea.value);
+  if (removal) {
+    store.draft = removal.draft;
+    nextTick(() => {
+      textarea.value?.focus();
+      textarea.value?.setSelectionRange(removal.caret, removal.caret);
+      setCaretOffset(removal.caret);
+      resize();
+    });
+    return;
   }
   if (event.key === "Escape" && store.queuedMessageEdit) {
     event.preventDefault();

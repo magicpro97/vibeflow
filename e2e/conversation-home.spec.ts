@@ -799,20 +799,104 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
     await expect(page.locator(".home-quote-stack--selection")).toHaveCount(0);
     await composer.press("Escape");
-    await composer.fill("Keep this draft");
+    await composer.fill("Keep   this draft");
     await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(4, 4));
     await page.getByRole("button", { name: "Agent", exact: true }).click();
-    await expect(composer).toHaveValue("Keep this draft");
+    await expect(composer).toHaveValue("Keep   this draft");
     const draftMenu = page.getByRole("listbox", { name: "Toolbar agent suggestions" });
     await expect(draftMenu).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(draftMenu).toHaveCount(0);
-    await expect(composer).toHaveValue("Keep this draft");
+    await expect(composer).toHaveValue("Keep   this draft");
     await page.getByRole("button", { name: "Agent", exact: true }).click();
     await page.getByRole("option", { name: /Implementation agent/ }).click();
     await expect(composer).toHaveValue(
       `Keep +${CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR}@${AGENT_ENGINE.CODEX} this draft`,
     );
+    const highlighted = page.locator(".home-composer__highlight");
+    await expect(highlighted).toHaveText("Keep Implementation agent this draft");
+    const spans = await highlighted.locator(":scope > span").allTextContents();
+    const visibleSpans = spans.filter((text) => text.length > 0);
+    expect(visibleSpans).toEqual([
+      "Keep ",
+      "Implementation agent",
+      " this draft",
+    ]);
+    const chipVisual = page.locator(".home-composer-chip__label");
+    await expect(chipVisual).toHaveCount(1);
+    const chipPresentation = await page.locator(".home-composer-chip").evaluate((chip) => {
+      const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+      if (!label) throw new Error("chip label unavailable");
+      const outer = getComputedStyle(chip);
+      const visual = getComputedStyle(label);
+      return {
+        labelText: label.textContent,
+        labelFontSize: visual.fontSize,
+        labelBackground: visual.backgroundColor,
+        outerBackground: outer.backgroundColor,
+      };
+    });
+    expect(chipPresentation).toEqual({
+      labelText: "Implementation agent",
+      labelFontSize: "14.4px",
+      labelBackground: "rgba(180, 130, 60, 0.12)",
+      outerBackground: "rgba(0, 0, 0, 0)",
+    });
+    const chipGeometry = await composer.evaluate((node) => {
+      const chip = document.querySelector<HTMLElement>(".home-composer-chip");
+      const label = chip?.querySelector<HTMLElement>(".home-composer-chip__label");
+      const tokenEnd = (node as HTMLTextAreaElement).value.indexOf(" this draft");
+      const context = document.createElement("canvas").getContext("2d");
+      if (!chip || !label || !context) throw new Error("composer geometry unavailable");
+      const style = getComputedStyle(node);
+      context.font = style.font;
+      return {
+        rawTokenWidth: context.measureText((node as HTMLTextAreaElement).value.slice("Keep ".length, tokenEnd)).width,
+        chipWidth: chip.getBoundingClientRect().width,
+        labelWidth: label.getBoundingClientRect().width,
+      };
+    });
+    expect(Math.abs(chipGeometry.rawTokenWidth - chipGeometry.chipWidth)).toBeLessThan(1.5);
+    expect(chipGeometry.labelWidth).toBeLessThan(chipGeometry.chipWidth);
+
+    const firstToken = `+${CONVERSATION_ROLE_NAME.COORDINATION_EXECUTOR}@${AGENT_ENGINE.CODEX}`;
+    const secondToken = `+web_ui@${AGENT_ENGINE.CODEX}`;
+    await composer.fill(`${firstToken} ${secondToken}`);
+    const chipGap = await highlighted.evaluate((node) => {
+      const chips = [...node.querySelectorAll<HTMLElement>(".home-composer-chip")];
+      const labels = chips.map((chip) => chip.querySelector<HTMLElement>(".home-composer-chip__label"));
+      const separator = node.querySelector<HTMLElement>(".home-composer-highlight__text");
+      if (!labels[0] || !labels[1] || !separator) throw new Error("two-chip geometry unavailable");
+      return {
+        visibleGap: labels[1].getBoundingClientRect().left - labels[0].getBoundingClientRect().right,
+        separatorWidth: separator.getBoundingClientRect().width,
+      };
+    });
+    expect(chipGap.visibleGap).toBeLessThanOrEqual(chipGap.separatorWidth + 1.5);
+
+    await composer.evaluate((node: HTMLTextAreaElement, offset) => {
+      node.focus();
+      node.setSelectionRange(offset, offset);
+      node.dispatchEvent(new Event("select", { bubbles: true }));
+    }, firstToken.length);
+    const caret = highlighted.locator(".home-composer-caret");
+    await expect(caret).toHaveCount(1);
+    const caretGeometry = await caret.evaluate((node) => {
+      const label = document.querySelector<HTMLElement>(".home-composer-chip__label");
+      if (!label) throw new Error("chip label unavailable");
+      return { caretLeft: node.getBoundingClientRect().left, labelRight: label.getBoundingClientRect().right };
+    });
+    expect(Math.abs(caretGeometry.caretLeft - caretGeometry.labelRight)).toBeLessThan(1.5);
+    await expect(composer).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+
+    await composer.fill(`Keep ${firstToken} this draft`);
+    const tokenEnd = (await composer.inputValue()).indexOf(" this draft");
+    await composer.evaluate(
+      (node: HTMLTextAreaElement, end) => node.setSelectionRange(end, end),
+      tokenEnd,
+    );
+    await composer.press("Backspace");
+    await expect(composer).toHaveValue("Keep this draft");
 
     const admitted = page.waitForResponse(
       (response) =>
@@ -2437,6 +2521,20 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: "New conversation", exact: true }).first().click();
     await expect(page.locator("#home-composer")).toBeVisible();
     await expectHomeComposerViewportFit(page);
+    await page.locator("#home-composer").fill("Before +coordination-executor@codex after");
+    const narrowChipGeometry = await page.locator(".home-composer__highlight").evaluate((highlight) => {
+      const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
+      if (!chip) throw new Error("narrow composer chip unavailable");
+      const highlightBox = highlight.getBoundingClientRect();
+      const chipBox = chip.getBoundingClientRect();
+      return {
+        chipRight: chipBox.right,
+        highlightRight: highlightBox.right,
+        chipHeight: chipBox.height,
+      };
+    });
+    expect(narrowChipGeometry.chipRight).toBeLessThanOrEqual(narrowChipGeometry.highlightRight + 0.5);
+    expect(narrowChipGeometry.chipHeight).toBeGreaterThan(21.6);
     for (const control of [
       page.getByRole("button", { name: /conversation list/ }),
       page.getByRole("button", { name: "Open CLI capabilities" }),
@@ -2466,6 +2564,63 @@ test.describe("AI-first conversation Home", () => {
     });
     await page.waitForTimeout(50);
     await expectHomeComposerViewportFit(page);
+    await page.locator("#home-composer").fill("Before +coordination-executor@codex after");
+    const zoomedChipGeometry = await page.locator(".home-composer__highlight").evaluate((highlight) => {
+      const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
+      if (!chip) throw new Error("zoomed composer chip unavailable");
+      return {
+        chipRight: chip.getBoundingClientRect().right,
+        highlightRight: highlight.getBoundingClientRect().right,
+        chipBox: (() => {
+          const box = chip.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        })(),
+        labelBox: (() => {
+          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+          if (!label) throw new Error("zoomed composer chip label unavailable");
+          const box = label.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        })(),
+        afterRects: (() => {
+          const after = [...highlight.children].find((child) => child.textContent === " after");
+          if (!after) return [];
+          const text = after.firstChild;
+          if (!text) return [];
+          const range = document.createRange();
+          range.setStart(text, text.textContent?.startsWith(" ") ? 1 : 0);
+          range.setEnd(text, text.textContent?.length ?? 0);
+          return [...range.getClientRects()].map((box) => ({
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+          }));
+        })(),
+        labelWhiteSpace: (() => {
+          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+          if (!label) throw new Error("zoomed composer chip label unavailable");
+          return getComputedStyle(label).whiteSpace;
+        })(),
+        labelOverflowWrap: (() => {
+          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+          if (!label) throw new Error("zoomed composer chip label unavailable");
+          return getComputedStyle(label).overflowWrap;
+        })(),
+      };
+    });
+    expect(zoomedChipGeometry.chipRight).toBeLessThanOrEqual(zoomedChipGeometry.highlightRight + 0.5);
+    expect(zoomedChipGeometry.afterRects.length).toBeGreaterThan(0);
+    for (const rect of zoomedChipGeometry.afterRects) {
+      const isOutsideChip =
+        rect.right <= zoomedChipGeometry.labelBox.left + 0.5 ||
+        rect.left >= zoomedChipGeometry.labelBox.right - 0.5 ||
+        rect.bottom <= zoomedChipGeometry.labelBox.top + 0.5 ||
+        rect.top >= zoomedChipGeometry.labelBox.bottom - 0.5;
+      expect(isOutsideChip).toBe(true);
+    }
+    expect(zoomedChipGeometry.chipBox.bottom - zoomedChipGeometry.chipBox.top).toBeGreaterThan(43.2);
+    expect(zoomedChipGeometry.labelWhiteSpace).toBe("normal");
+    expect(zoomedChipGeometry.labelOverflowWrap).toBe("anywhere");
     await testInfo.attach("home-390x844-text-zoom-200", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
