@@ -6,6 +6,7 @@ import {
 } from "../src/dispatch/owned-process-platform.js";
 import { reapOwnedProcessRecord } from "../src/dispatch/owned-process-reaper.js";
 import type { OwnedAttemptProcessRecordV1 } from "../src/dispatch/owned-process-runtime.js";
+import { windowsProcessStartIdentityQuery } from "../src/durability/process-identity-contract.js";
 
 const WINDOWS_TICKS = Object.freeze({
   OWNER: "638602314960000001",
@@ -101,6 +102,17 @@ describe("owned CLI lifecycle on Windows", () => {
     expect(OWNED_SUPERVISOR_SCRIPT).toContain("GetWindowsDirectoryW");
     expect(OWNED_SUPERVISOR_SCRIPT).not.toContain("process.env.SystemRoot");
     expect(OWNED_SUPERVISOR_SCRIPT).not.toContain("process.env.windir");
+  });
+
+  test("the supervisor start-identity query stays in parity with the shared Windows probe", () => {
+    // The supervisor inlines its own copy of the query, so its emit must not drift from the shared
+    // builder, and neither may use System.Console — ConstrainedLanguage mode (AppLocker/WDAC)
+    // blocks that type and the probe would fail as "process start identity is unavailable".
+    const emit = "}; Write-Output ($p.CreationDate.ToUniversalTime().Ticks)";
+
+    expect(windowsProcessStartIdentityQuery(41)).toContain(emit);
+    expect(OWNED_SUPERVISOR_SCRIPT).toContain(emit);
+    expect(OWNED_SUPERVISOR_SCRIPT).not.toContain("[Console]::WriteLine");
   });
 
   test("Windows native root query failure constructs a fail-closed platform", () => {

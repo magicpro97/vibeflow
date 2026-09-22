@@ -40,7 +40,7 @@ const startIdentity = (pid) => {
         [
           "-NoProfile",
           "-Command",
-          "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = " + pid + "\\\"; if ($null -eq $p) { exit " + WINDOWS_QUERY_STATUS.ABSENT + " }; [Console]::WriteLine($p.CreationDate.ToUniversalTime().Ticks)",
+          "$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId = " + pid + "\\\"; if ($null -eq $p) { exit " + WINDOWS_QUERY_STATUS.ABSENT + " }; Write-Output ($p.CreationDate.ToUniversalTime().Ticks)",
         ],
         { encoding: "utf8", timeout: TIMING_MS.WINDOWS_COLD_START_PROBE_TIMEOUT, stdio: ["ignore", "pipe", "ignore"] },
       ).trim();

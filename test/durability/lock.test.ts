@@ -30,7 +30,11 @@ import {
   processStartIdentity,
 } from "../../src/durability/lock-owner.js";
 import { publishStableLockRecord, readStableLockRecord } from "../../src/durability/lock-record.js";
-import { formatPlatformProcessStartIdentity } from "../../src/durability/process-identity-contract.js";
+import {
+  PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS,
+  formatPlatformProcessStartIdentity,
+  windowsProcessStartIdentityQuery,
+} from "../../src/durability/process-identity-contract.js";
 
 const DEAD_PROCESS_IDENTITY = formatPlatformProcessStartIdentity("freebsd", "dead-lock-owner");
 const STALE_PROCESS_IDENTITY = formatPlatformProcessStartIdentity("freebsd", "stale-lock-owner");
@@ -52,13 +56,17 @@ function exactOwner(
 test("Windows lock identity uses an absolute native query and never POSIX ps", () => {
   const identities = new Map<number, string | Error>([[41, "638918820000000000"]]);
   const commands: string[] = [];
+  const queries: string[] = [];
+  const timeouts: (number | undefined)[] = [];
   const runtime: Partial<ProcessLockOwnerRuntime> = {
     platform: "win32",
     host: hostname(),
     windowsSystemRoot: "D:\\Windows",
     kill: (() => true) as typeof process.kill,
-    execFileSync: ((command: string, args: string[]) => {
+    execFileSync: ((command: string, args: string[], options: { timeout?: number }) => {
       commands.push(command);
+      queries.push(args[2] ?? "");
+      timeouts.push(options.timeout);
       const pid = Number((args[2] ?? "").match(/ProcessId = (\d+)/)?.[1]);
       const result = identities.get(pid);
       if (result instanceof Error) throw result;
@@ -70,6 +78,13 @@ test("Windows lock identity uses an absolute native query and never POSIX ps", (
   const owner = exactOwner("win32", identity);
 
   expect(processStartIdentity(owner.pid, runtime)).toBe(identity);
+  // A one-second budget cannot cover a powershell.exe + Get-CimInstance cold start, and a timed-out
+  // probe surfaces as "process start identity is unavailable" on healthy Windows hosts.
+  expect(timeouts[0]).toBe(PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.WINDOWS_COLD_START);
+  expect(timeouts[0]).toBeGreaterThanOrEqual(10_000);
+  // ConstrainedLanguage mode (AppLocker/WDAC) blocks System.Console, so the probe must not use it.
+  expect(queries[0]).toBe(windowsProcessStartIdentityQuery(owner.pid));
+  expect(queries[0]).not.toContain("[Console]");
   expect(processLockOwnerIsAlive(owner, runtime)).toBeTrue();
   expect(commands).toEqual([
     "D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
