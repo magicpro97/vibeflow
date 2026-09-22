@@ -2,7 +2,7 @@
 title: Security Model
 description: Security model — default safety posture, permission classes, protected paths, secrets handling, and audit log.
 category: explanation
-last_updated: 2026-08-27
+last_updated: 2026-09-22
 ---
 
 # Security Model
@@ -17,6 +17,7 @@ last_updated: 2026-08-27
 - [External Skill Trust Model](#external-skill-trust-model)
 - [Shared Catalog Trust Boundary](#shared-catalog-trust-boundary)
 - [Capability Fabric Trust Boundary](#capability-fabric-trust-boundary)
+- [Project Registry Trust Boundary](#project-registry-trust-boundary)
 - [External Skill Security Scan](#external-skill-security-scan-optional)
 - [npm Package Risk Model](#npm-package-risk-model)
 - [Hook Enforcement](#hook-enforcement)
@@ -183,6 +184,45 @@ AI-first Home can propose capability actions and draw from the typed registry, b
 it never loads untrusted plugin JavaScript into the browser. Approved capability
 execution stays inside VibeFlow's local service and owned dispatch runtime, where
 it can be audited before launch and rejected if the typed authority does not match.
+
+## Project registry trust boundary
+
+The Project registry is a private per-repo JSON document:
+
+```text
+<repoRoot>/.vibeflow/projects/registry.json   # private file (mode 0600, dir 0700)
+<repoRoot>/.vibeflow/projects/registry.lock   # write lock
+```
+
+It is the most path-bearing durable file in the conversation surface: each project holds up to
+64 absolute repository paths in `repos[]` plus free-form goal/context text. Writes go through
+the durability layer's private-file discipline (0600 file in a 0700 directory, whole-document
+atomic compare-and-swap); a widened-mode, symlinked, or oversized document is refused on read as
+corruption rather than accepted. Two more rules keep the data from leaking:
+
+- **`repos[]` and `context` never cross the wire.** The rail's read route projects only
+  `id`, `name`, `goal`, and `engine` — no folder list, no context body, no file path. The DTO is
+  pinned by test, so a future field addition that widens it fails the suite instead of shipping.
+- **The root is repo-local.** Registry documents live under `<repoRoot>/.vibeflow/projects`, the
+  same per-checkout scope as conversation state, so two checkouts never share a project list and
+  no global path collision is possible.
+
+`project_id` is the only project value that reaches public conversation DTOs, and it is gated by
+one slug grammar (`^[a-z0-9][a-z0-9-]{0,63}$`) at six boundaries: manifest validator, create
+funnel, create wire, catalog projection, catalog DTO, and registry. Because the pattern admits no
+separator, a project id can never carry filesystem layout, so it is safe as a public label and as
+a grouping key.
+
+Registry writes are server-side and lock-scoped (atomic compare-and-swap, whole-document
+rewrite); the routes that reach them are session-authorized, and mutations additionally require
+the loopback CSRF token. A corrupt or unreadable registry degrades the rail to the catch-all
+group rather than failing a message turn — classification is advisory, so its failure is never
+allowed to take a send down.
+
+Known interplay, recorded in `docs/adr/ADR-009-project-classification.md`: the legacy
+machine-wide `~/.vibeflow/projects.json` is **not** read, written, or migrated by this registry.
+A user who has one gets no feedback from it, and it must not be treated as an authority for any
+repo-local project list.
 
 ## Curator shared synchronization
 

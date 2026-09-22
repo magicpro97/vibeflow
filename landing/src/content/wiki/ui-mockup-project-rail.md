@@ -1,3 +1,10 @@
+---
+title: Rail Redesign for Project-Grouped Conversations
+description: Approved design spec for project-grouped conversation folders, the suggestion chip, and the project classification settings panel.
+category: explanation
+last_updated: 2026-09-22
+---
+
 # Rail redesign — project-grouped conversations (Task 5 Step 0, design only)
 
 **Surface profile:** App / Product UI (B3) + Dashboard density (B2) for the settings table.

@@ -2,7 +2,7 @@
 title: Architecture
 description: High-level architecture of VibeFlow — AI-first Home, conversation runtime, owned async dispatch, and typed capability fabric.
 category: explanation
-last_updated: 2026-08-27
+last_updated: 2026-09-22
 ---
 
 # Architecture
@@ -14,6 +14,7 @@ last_updated: 2026-08-27
 - [Stuck Detection](#stuck-detection)
 - [Crash Recovery](#crash-recovery)
 - [Conversation Turn Delivery](#conversation-turn-delivery)
+- [Project Classification](#project-classification)
 - [Protocol Authority Standard](#protocol-authority-standard)
 - [Tool Adapters](#tool-adapters)
 - [Source Modules](#source-modules)
@@ -221,6 +222,111 @@ CSRF-guarded, with scope caps (1,000 blocks, 1 MB markdown, 100 KB per block).
 See `src/plan-review/`, `src/server/plan-review.ts`, `src/ui/src/lib/plan-render.ts`,
 `src/ui/src/lib/plan-anchor.ts`, and `docs/adr/ADR-007-interactive-plan-review.md`.
 
+## Project classification
+
+Conversations are filed into named **projects**. A project is a durable entity rather than a
+derived `repo_root` path, because the rail's grouping key, the classifier's candidate list, the
+public `project_id` label, and the engine preference must all be one identity that survives a
+folder move and can be named by a user. The full decision record is
+`docs/adr/ADR-009-project-classification.md`.
+
+### Project entity and registry
+
+```text
+ProjectV1 { id, name, goal, context, repos[], engine { cli, model, thinking }, created_at }
+<repoRoot>/.vibeflow/projects/registry.json   # one private JSON document per repo root
+<repoRoot>/.vibeflow/projects/registry.lock   # write lock
+```
+
+The store writes the whole document under a process lock with an atomic stage-then-rename
+compare-and-swap, and callers hand it a mutator instead of a computed list, so the preimage and
+the payload come from one lock-scoped read. An absent document is the empty registry; a corrupt
+one raises `ProjectRegistryCorruptError` rather than resetting the user's projects. Bounds:
+256 projects, 64 repos per project, 4 MiB document. Ids are slugs
+(`^[a-z0-9][a-z0-9-]{0,63}$`), `repos[]` is absolutized and order-preservingly deduped, and
+`id`/`created_at` are immutable on update. The registry root is repo-local like
+`.vibeflow/conversation`: two checkouts never share a project list, and no global path can
+collide with a machine-wide config file.
+
+### `project_id` on conversation summaries
+
+Every conversation manifest carries `project_id`, and `catalog-row.ts` reads that field into
+every catalog DTO and its searchable projection — the value is not derived at read time (the
+former basename-of-`repo_root` derivation was removed). One grammar, `isConversationProjectId`,
+is applied uniformly at six boundaries: manifest validator, create funnel, create wire, catalog
+projection, catalog DTO, and registry. Because the pattern admits no separator, a `project_id`
+cannot carry filesystem layout. Creation runs the deterministic classifier tiers over the new
+conversation's own `repo_root` and topic, so a conversation opened inside an imported repo is
+filed before its first message.
+
+### The four-tier pipeline
+
+Classification is server-side, first hit wins, and the model is consulted last:
+
+```text
+1. repo      repo_root inside a project's repos[] (explicit import)  → confidence 1, tier ladder stops
+2. mention   message names a registered project as @project-slug     → confidence 1, tier ladder stops
+3. fts       bun:sqlite FTS5 index of project descriptors            → binds when score > 30
+              wins if score > 30 AND lead over runner-up > 10           and margin > 10
+4. ai        injected proposal seam (curator bridge);                → binds only at confidence >= 0.6
+              reached ONLY when tier 3 is inconclusive
+5. fallback  nothing resolved it                                     → reserved default project `idea`, 0
+```
+
+The minimize-AI invariant is the tier order: tiers 1–2 are exact, so no later tier — retrieval
+included — ever runs. Tier 3 is deterministic and re-indexed from the live registry on every
+classification, so an edited project cannot keep winning with its previous goal. Tier 4 is
+nullable: with no `bun:sqlite` and no `VIBEFLOW_AI` bridge, classification still answers
+deterministically. `confidence` is per-tier evidence (an `@mention` is `1`; `ai` is the model's
+probability; `fts` is normalized term coverage), so consumers that need "how sure" read `reason`,
+and the suggestion gate branches on it: `fts` may propose at any confidence above 0, `ai` only at
+`>= 0.6`, `repo`/`mention`/`fallback` never propose. Every tier re-checks the live registry, so
+neither the index nor the model can bind a project that does not exist.
+
+### UI surfaces
+
+- **Rail folders** — `HomeSessionRail.vue` renders one divider per project from the pure,
+  browser-safe `project-rail-group.ts`: newest entry first, name then id as tiebreak, the
+  reserved catch-all (`Ideas`) pinned last and tinted.
+- **Suggestion chip** — `ProjectSuggestionChip.vue` in the composer column offers a confirmed
+  move (`POST /api/conversation-projects/move`); nothing under an acceptance floor renders a
+  control that moves a conversation, and dismissals are remembered per (session, project).
+- **Settings panel** — `ProjectSettingsPanel.vue` (inside the preferences drawer) holds the
+  global auto-classify switch, the global classifier engine, and one per-project engine override
+  row per registry project. Inherit is the empty state, shown as a placeholder, never a stored
+  guess.
+
+Routes (session-authorized; writes CSRF-guarded):
+
+| Method | Route | Result |
+|--------|-------|--------|
+| `GET` | `/api/conversation-projects` | Rail labels: `id`, `name`, `goal`, `engine` only |
+| `PATCH` | `/api/conversation-projects/{id}` | Project engine override |
+| `POST` | `/api/conversation-projects/classify` | One classifier verdict (`project_id`, `confidence`, `reason`) |
+| `POST` | `/api/conversation-projects/move` | The chip's confirm; re-binds the active revision |
+
+`repos[]` and `context` never cross the wire. Project `create`/`delete` exist in the registry
+authority but are not exposed by any route or command yet: creation needs the folder-import flow
+and deletion needs decided semantics for the conversations filed under a deleted project.
+
+### Settings persistence
+
+`settings.ts` carries one feature-scoped block, coerced and merged like the curator block:
+
+```text
+projectClassification: {
+  enabled: boolean,                    # durable gate: OFF ⇒ classifier never runs, no chips
+  engine: { cli: Engine | null, model: string | null, thinking: string | null },
+}
+```
+
+Auto-classify is ON by default, and OFF is read from the document at first use (not at drawer
+mount) so a reload cannot resurrect a chip. `null` means "auto" — stored instead of a guessed
+engine name so a project with no opinion never pins classification to one CLI. Precedence is
+`project.engine.cli` → global block → unset. Only `cli` has a consumer today (the classifier's AI
+tier engine); `model`/`thinking` are validated, bounded, persisted, and round-tripped with no
+dispatch surface yet, as recorded in ADR-009.
+
 ## Source modules
 
 The web UI also exposes a read-only diff preview endpoint (`GET /api/dashboard/diff`)
@@ -240,6 +346,13 @@ src/skills/importer.ts      # Context7 + local-dir import (temp → validate →
 src/skills/validator.ts     # Anthropic skill-creator standard validation
 src/ai-init.ts              # writes canonical context files + engine instruction files
 src/plan-review/            # immutable revision store, blocks parser, types
+src/orchestrator/conversation/project-registry-authority.ts # Project registry CRUD + invariants
+src/orchestrator/conversation/project-classifier.ts        # deterministic tiers (repo / @mention)
+src/orchestrator/conversation/project-classifier-authority.ts # tier ladder + FTS/AI gates
+src/orchestrator/conversation/project-fts.ts               # bun:sqlite FTS5 retrieval tier
+src/skills/project-classifier-runtime.ts # tier 3/4 composition (index + AI seam)
+src/server/conversation-project-route.ts # registry read, engine override, classify, move
+src/ui/src/project-rail-group.ts         # pure, browser-safe folder grouping for the rail
 ```
 
 ## Core data flow
