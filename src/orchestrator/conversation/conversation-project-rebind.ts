@@ -38,7 +38,7 @@ export interface ConversationProjectRebindLineagePortV1 {
   reservation?(rootSessionId: string): { status: string } | null;
   /**
    * True when a revision proposal that is prepared but not yet committed pins this conversation's
-   * current lock digest ({@link createPendingProposalLockPin} composes that read). Optional: a
+   * current lock digest ({@link createPendingRevisionProposalGuard} composes that read). Optional: a
    * runtime without the proposal authority keeps its old behavior, and the commit-time conflict
    * stays the backstop.
    */
