@@ -67,7 +67,11 @@ const UNCLASSIFIED: Classification = Object.freeze({
   reason: "fallback",
 });
 
-/** `@slug` is a mention only at a word boundary, so `me@example.com` and `x@infra` never match. */
+/**
+ * `@slug` is a mention only at a word boundary on *both* sides, so `me@example.com` and `x@infra`
+ * never match, and neither does `@infra_beta` — a leading substring of a longer handle the user
+ * actually addressed.
+ */
 const MENTION = /@([a-z0-9][a-z0-9-]*)/g;
 const MENTION_BOUNDARY = /[A-Za-z0-9_.\-@]/;
 
@@ -76,8 +80,14 @@ function mentionSlugs(message: string): string[] {
   for (const match of message.matchAll(MENTION)) {
     const slug = match[1];
     if (slug === undefined) continue;
-    const before = message[(match.index ?? 0) - 1];
+    const index = match.index ?? 0;
+    const before = message[index - 1];
     if (before !== undefined && MENTION_BOUNDARY.test(before)) continue;
+    // The regex stops at the first character a slug cannot contain, so anything the boundary
+    // class accepts after the match (`_`, `.`, `@`, a digit or a capital the slug class rejects)
+    // means this token continues and is not the mention it merely starts with.
+    const after = message[index + match[0].length];
+    if (after !== undefined && MENTION_BOUNDARY.test(after)) continue;
     slugs.push(slug);
   }
   return slugs;

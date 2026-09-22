@@ -46,6 +46,11 @@ export const useProjectClassificationStore = defineStore("project-classification
     // The rail groups the sessions list, so a landed move must re-read it — a chip confirm that
     // refreshed only the registry would leave the conversation under Ideas.
     refreshSessions: () => home.refreshSessions(),
+    // The polite region carries the chip, so a chip a newer send cleared must take its
+    // announcement with it instead of leaving the reader with a proposal that is gone.
+    onSuggestionCleared: () => {
+      home.queueAnnouncement = "";
+    },
     // Survives a reload: the mockup's dismissal contract is "one ignore is final for that
     // proposal", which an in-process Set cannot keep across a visit.
     ...(typeof localStorage === "undefined"
@@ -53,9 +58,22 @@ export const useProjectClassificationStore = defineStore("project-classification
       : { dismissals: createBrowserProjectDismissalStore(localStorage) }),
   });
 
+  /** Drop the chip, its announcement, and every in-flight verdict from the previous session. */
+  function resetRuntime(): void {
+    runtime.reset();
+    home.queueAnnouncement = "";
+  }
+
   watch(classificationEnabled, (enabled) => {
-    if (!enabled) runtime.reset();
+    if (!enabled) resetRuntime();
   });
+
+  // A proposal is bound to the session it was inferred from, so switching sessions must not leave
+  // a chip behind: confirming it would move the conversation the user just left.
+  watch(
+    () => home.activeRootId,
+    () => resetRuntime(),
+  );
 
   /** Registry display name for a project id, falling back to the slug the rail already shows. */
   function displayName(projectId: string): string {
@@ -128,7 +146,17 @@ export const useProjectClassificationStore = defineStore("project-classification
     saveSettings,
     setEnabled,
     refreshProjects: runtime.loadProjects,
-    classifyMessage: runtime.classifyAndPropose,
+    /**
+     * Classify one sent message and offer the move it implies. `admitted` is the send's own
+     * verdict, threaded straight from `submitDraft`: a draft the runtime refused (offline, empty
+     * or invalid intent, quote/private-range misuse) or consumed by a queued-message save-edit
+     * never became a message, so a chip inferred from it would invite the user to move a
+     * conversation that never received it. Only an admitted message reaches the ladder.
+     */
+    classifyMessage(message: string, admitted: boolean): Promise<void> {
+      if (!admitted) return Promise.resolve();
+      return runtime.classifyAndPropose(message);
+    },
     /**
      * The chip publishes into the composer's existing polite region rather than adding a second
      * live region: transport is the home store's announcement channel, which HomeComposerStatus
@@ -158,6 +186,6 @@ export const useProjectClassificationStore = defineStore("project-classification
       if (moved) home.queueAnnouncement = `Đã chuyển sang ${displayName(target)}`;
       return moved;
     },
-    reset: runtime.reset,
+    reset: resetRuntime,
   };
 });

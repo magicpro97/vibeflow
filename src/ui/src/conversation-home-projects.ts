@@ -121,6 +121,13 @@ export function createHomeProjectRuntime(options: {
   refreshSessions?: () => Promise<void> | void;
   /** Cross-reload dismissal memory; omitted = in-process only. */
   dismissals?: HomeProjectDismissalStoreV1;
+  /**
+   * Notified when a newer classification clears the chip it supersedes. The runtime owns the
+   * transition (it alone sees the verdict race); the host owns the polite-region text the chip
+   * was announced with, and that text has to go with the chip — a screen reader must not keep
+   * reading a proposal that is no longer on screen.
+   */
+  onSuggestionCleared?: () => void;
 }) {
   const projects = ref<HomeProjectRow[]>([]);
   /** True once a registry read completed; distinguishes "none" from "not loaded yet". */
@@ -193,6 +200,14 @@ export function createHomeProjectRuntime(options: {
     if (!rootSessionId || message.trim() === "") return;
     const token = (verdictSequence.get(rootSessionId) ?? 0) + 1;
     verdictSequence.set(rootSessionId, token);
+    // The superseded chip comes down *now*, not when the newer verdict lands: it is on screen
+    // while the new request is in flight, and confirming it would move the conversation on the
+    // strength of a message this send has already replaced. A chip for another session is left
+    // alone — this request says nothing about that conversation.
+    if (suggestion.value?.root_session_id === rootSessionId) {
+      suggestion.value = null;
+      options.onSuggestionCleared?.();
+    }
     try {
       const verdict = await options.client.classifyMessage({
         message,

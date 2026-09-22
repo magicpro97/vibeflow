@@ -1549,6 +1549,50 @@ describe("conversation Home command races", () => {
     expect(terminalHomeOperation("cancelled")).toBeFalse();
   });
 
+  test("submitDraft reports whether a natural-language message was admitted", async () => {
+    const harness = commandHarness("root-a");
+    harness.draft.value = "ship the fix";
+    harness.online.value = false;
+    // Offline: the draft stays in memory and nothing was sent.
+    expect(await harness.runtime.submitDraft()).toBeFalse();
+    harness.online.value = true;
+    harness.draft.value = "   ";
+    expect(await harness.runtime.submitDraft()).toBeFalse();
+    harness.draft.value = "+reviewer@unknown";
+    // A refused intent is a draft, not a message.
+    expect(await harness.runtime.submitDraft()).toBeFalse();
+    expect(harness.composerError.value).toContain("Choose one of");
+    // The queue refusing the admission (offline mid-flight, unowned root) is not a send either.
+    harness.queueAdmissionHandler.value = async () => false;
+    harness.draft.value = "ship the fix";
+    expect(await harness.runtime.submitDraft()).toBeFalse();
+    expect(harness.queueAdmissions).toHaveLength(1);
+    harness.queueAdmissionHandler.value = async (admission) => {
+      admission.clearIfCurrent();
+      return true;
+    };
+    harness.draft.value = "ship the fix";
+    expect(await harness.runtime.submitDraft()).toBeTrue();
+    expect(harness.queueAdmissions).toHaveLength(2);
+
+    let saves = 0;
+    const editing = commandHarness("root-a", true, {
+      messageQueue: {
+        enqueue: async () => true,
+        currentEdit: () =>
+          ({ root_session_id: "root-a", queue_item_id: "vf-queued-message-a" }) as never,
+        saveEdit: async () => {
+          saves += 1;
+          return true;
+        },
+      },
+    });
+    editing.draft.value = "replacement";
+    // A queued-message save-edit rewrites a message that was already sent: it is not a send.
+    expect(await editing.runtime.submitDraft()).toBeFalse();
+    expect(saves).toBe(1);
+  });
+
   test("Home production files stay under 400 lines", () => {
     const root = fileURLToPath(new URL("../src/ui/src/", import.meta.url));
     const walk = (directory: string): string[] =>

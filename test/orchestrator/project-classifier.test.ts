@@ -144,6 +144,21 @@ describe("classifyMessage — deterministic tiers", () => {
     expect(classifyMessage("plain question", ctx()).reason).toBe("fallback");
   });
 
+  test("@mention needs a right boundary as well as a left one", () => {
+    // Every one of these *starts* with a registered slug, so a left-only boundary check binds
+    // `infra` to a token the user addressed to something else: a longer slug (`_beta`,
+    // `Beta`), a qualified reference (`.beta`), or a handle chain (`@search-api`).
+    for (const message of ["@infra_beta", "@infraBeta", "@infra.beta", "@infra@search-api"]) {
+      expect(classifyMessage(message, ctx()).reason).toBe("fallback");
+    }
+  });
+
+  test("punctuation that cannot extend a slug still leaves the mention intact", () => {
+    expect(classifyMessage("@infra", ctx()).project_id).toBe("infra");
+    expect(classifyMessage("ping @infra, then wait", ctx()).project_id).toBe("infra");
+    expect(classifyMessage("(see @infra)", ctx()).project_id).toBe("infra");
+  });
+
   test("fallback is the reserved default project at confidence 0", () => {
     expect(classifyMessage("plain question", ctx())).toEqual({
       project_id: "idea",

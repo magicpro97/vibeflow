@@ -43,6 +43,12 @@ export interface ConversationRuntimeOptions {
   messageQueueUserAuthority?: ConversationUserMessageAuthorityV1;
   /** Project registry port; omitted means only the default project can be bound. */
   projects?: ConversationProjectIdPort;
+  /**
+   * Auto-classify switch, read at each materialization. OFF is the durable gate the classifier
+   * itself obeys, and it gates creation too: an implicit create must stay in the catch-all rather
+   * than be filed by a tier the user switched off. Omitted means ON (the pre-switch behavior).
+   */
+  projectClassificationEnabled?: () => boolean;
   /** Test/process-crash seam; throwing leaves durable authority for restart recovery. */
   revisionFault?(point: RevisionCrashPointV1): void;
   resolveCreateRequest?(request: ConversationCreateRequest): Promise<RuntimeCreateRequest>;

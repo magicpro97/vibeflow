@@ -374,12 +374,14 @@ function onBeforeInput(event: InputEvent) {
 async function submit() {
   if (composing.value) return;
   const sent = store.draft;
-  await store.submitDraft();
+  const admitted = await store.submitDraft();
   await nextTick();
   if (store.capabilityTargetRequest?.selection_mode === "explicit") return;
   textarea.value?.focus();
   resize();
-  // Advisory: a verdict is a proposal the user confirms; a failure proposes nothing.
-  void projectClassification.classifyMessage(sent);
+  // Advisory: a verdict is a proposal the user confirms, a failure proposes nothing — and a
+  // draft that was never admitted (offline, refused intent, a save-edit) has nothing to propose
+  // about, so the admission verdict gates the classification too.
+  void projectClassification.classifyMessage(sent, admitted);
 }
 </script>

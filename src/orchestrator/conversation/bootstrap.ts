@@ -77,6 +77,12 @@ export interface ConversationBootstrapOptions extends ConversationRequestResolut
   stateDir?: string;
   /** Project registry directory; defaults to `<repoRoot>/.vibeflow/projects`. */
   projectsDir?: string;
+  /**
+   * Auto-classify switch (`projectClassification.enabled`), read from the settings document by
+   * the command layer that owns `repoRoot`. Passed straight to the materializer, which uses it to
+   * decide whether an implicit create may be filed by the deterministic tiers. Omitted = ON.
+   */
+  projectClassificationEnabled?: () => boolean;
   phase?: number;
   session?: EngineSessionAdapterOptions;
   mirror?: TraceStoreOptions["mirror"];
@@ -306,6 +312,9 @@ export function createConversationBootstrap(
     privateContextBroker,
     messageQueueUserAuthority,
     projects,
+    ...(options.projectClassificationEnabled
+      ? { projectClassificationEnabled: options.projectClassificationEnabled }
+      : {}),
     sessionAdapter,
     policies,
     onConversationSourceCommitted: (event) =>

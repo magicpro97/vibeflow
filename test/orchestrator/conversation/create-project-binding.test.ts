@@ -46,6 +46,17 @@ test("a topic naming a project binds it at creation", () => {
   ).toBe("alpha");
 });
 
+test("a longer handle that merely starts with a registered slug does not bind", () => {
+  // `@alpha_beta` must not bind `alpha` at creation: the user addressed a different handle, and
+  // a mention the ladder does not recognize has to leave the conversation in the catch-all.
+  expect(
+    resolveConversationProjectId(projects, undefined, {
+      topic: "hand this to @alpha_beta",
+      repo_root: "/somewhere/unrelated",
+    }),
+  ).toBe(CONVERSATION_DEFAULT_PROJECT_ID);
+});
+
 test("neither deterministic tier matching leaves the conversation unclassified", () => {
   expect(
     resolveConversationProjectId(projects, undefined, {

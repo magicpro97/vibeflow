@@ -81,4 +81,38 @@ describe("project verdict sequencing", () => {
     await stale;
     expect(runtime.suggestion.value).toBeNull();
   });
+
+  test("a newer send clears the chip it supersedes before its verdict lands", async () => {
+    // Ordering alone is not enough: while the second classification is in flight the *first*
+    // verdict is still on screen, and confirming it would move the conversation on the strength
+    // of a message the newer send has already superseded. The chip goes with the request.
+    const second = createDeferred<Verdict>();
+    const cleared: number[] = [];
+    const runtime = createHomeProjectRuntime({
+      client: {
+        listProjects: async () => [ROW],
+        classifyMessage: (input) =>
+          input.message === "first message"
+            ? Promise.resolve({ project_id: "alpha", confidence: 0.9, reason: "ai" as const })
+            : second.promise,
+        updateProjectEngine: async () => {},
+        moveConversation: async () => {},
+        readProjectSettings: async () => null,
+        writeProjectSettings: async () => null,
+      },
+      activeRootId: () => "root-1",
+      activeProjectId: () => "idea",
+      autoClassify: () => true,
+      onSuggestionCleared: () => cleared.push(1),
+    });
+    await runtime.classifyAndPropose("first message");
+    expect(runtime.suggestion.value?.project_id).toBe("alpha");
+    const pending = runtime.classifyAndPropose("second message");
+    expect(runtime.suggestion.value).toBeNull();
+    second.resolve({ project_id: "bravo", confidence: 0.9, reason: "ai" });
+    await pending;
+    expect(runtime.suggestion.value?.project_id).toBe("bravo");
+    // The host was told, so the polite region carrying the cleared chip follows it.
+    expect(cleared).toHaveLength(1);
+  });
 });

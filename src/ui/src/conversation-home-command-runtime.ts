@@ -17,8 +17,8 @@ import {
 } from "./conversation-home-authoring.js";
 import { createHomeCapabilityTargetRuntime } from "./conversation-home-capability-target-runtime.js";
 import type { HomeCommandRuntimeInput } from "./conversation-home-command-input.js";
+import { createHomeComposerDraftLifecycle } from "./conversation-home-composer-draft-lifecycle.js";
 import { createHomeUnavailableInteractionReporter } from "./conversation-home-interaction-feedback.js";
-import type { HomePrivateContextCapture } from "./conversation-home-private-context-types.js";
 import { createHomeProposalRuntime } from "./conversation-home-proposal-runtime.js";
 import { capabilityRepairCandidate } from "./conversation-home-recovery.js";
 import {
@@ -59,46 +59,8 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
     input.reactionBusy.value = nextBusy;
     input.reactionBusyTokens.value = nextTokens;
   };
-  const sameQuoteSelection = (
-    left: readonly HomeQuoteReference[],
-    right: readonly HomeQuoteReference[],
-  ): boolean =>
-    left.length === right.length &&
-    left.every((item, index) => {
-      const candidate = right[index];
-      return candidate ? sameHomeQuoteRef(item, candidate) : false;
-    });
-
-  const clearSubmittedComposer = (
-    draft: string,
-    quoteRefs: readonly HomeQuoteReference[],
-    privateContext: HomePrivateContextCapture | null,
-  ) => {
-    if (input.draft.value === draft) input.draft.value = "";
-    if (sameQuoteSelection(input.quoteRefs.value, quoteRefs)) input.quoteRefs.value = [];
-    privateContext?.clearIfCurrent();
-  };
-
-  const restoreSubmittedComposer = (
-    draft: string,
-    quoteRefs: readonly HomeQuoteReference[],
-    privateContext: HomePrivateContextCapture | null,
-  ): boolean => {
-    if (
-      input.draft.value !== "" ||
-      input.quoteRefs.value.length > 0 ||
-      input.privateContext.present()
-    )
-      return false;
-    if (privateContext && !privateContext.restoreIfVacant()) return false;
-    input.draft.value = draft;
-    input.quoteRefs.value = quoteRefs.map((reference) => structuredClone(reference));
-    return true;
-  };
-
-  const clearSubmittedDraft = (draft: string) => {
-    if (input.draft.value === draft) input.draft.value = "";
-  };
+  const { clearSubmittedComposer, restoreSubmittedComposer, clearSubmittedDraft } =
+    createHomeComposerDraftLifecycle(input);
 
   const { publishCandidate, transportCandidate, proposeCandidate } = createHomeProposalRuntime({
     activation: input.activation,
@@ -125,28 +87,37 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
   });
   const reportUnavailableInteraction = createHomeUnavailableInteractionReporter(input);
 
-  async function submitDraft(): Promise<void> {
-    if (!input.online.value) return;
+  /**
+   * Submit the composer. The boolean is the send's own verdict — `true` only when a
+   * natural-language message was actually published (enqueued onto a session, or admitted as a
+   * new conversation's topic). A refused draft (offline, empty or invalid intent, quote/private
+   * -range misuse), a queued-message save-edit, a typed action proposal, and a failed admission
+   * all report `false`: the caller must not treat a draft that was never sent as sent. The
+   * composer's suggestion chip is the consumer that depends on this.
+   */
+  async function submitDraft(): Promise<boolean> {
+    if (!input.online.value) return false;
     if (input.messageQueue.currentEdit()) {
+      // A save-edit rewrites a message that was already sent — nothing new is published.
       await input.messageQueue.saveEdit();
-      return;
+      return false;
     }
     const intent = parseComposerIntent(input.draft.value);
     capabilityTargets.reconcileCapabilityTargetDraft();
-    if (intent.kind === HOME_COMPOSER_INTENT_KIND.EMPTY) return;
+    if (intent.kind === HOME_COMPOSER_INTENT_KIND.EMPTY) return false;
     if (intent.kind === HOME_COMPOSER_INTENT_KIND.INVALID) {
       input.composerError.value = intent.message;
-      return;
+      return false;
     }
     if (input.quoteRefs.value.length && intent.kind !== HOME_COMPOSER_INTENT_KIND.MESSAGE) {
       input.composerError.value =
         "Quoted sources only attach to natural-language replies. Remove them before sending a typed action.";
-      return;
+      return false;
     }
     if (input.privateContext.present() && intent.kind !== HOME_COMPOSER_INTENT_KIND.MESSAGE) {
       input.composerError.value =
         "Private file ranges only attach to natural-language goals or replies. Remove the selected range before sending a typed action.";
-      return;
+      return false;
     }
     const submittedDraft = input.draft.value;
     const activeRevision = input.activeRevision.value;
@@ -171,7 +142,9 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
             );
           return canonical;
         });
-        await input.messageQueue.enqueue({
+        // The queue owns admission: an offline or unowned root refuses the message here, and that
+        // refusal is exactly what the caller must hear back.
+        return await input.messageQueue.enqueue({
           ...(privateContext ? { idempotency_key: privateContext.idempotency_key } : {}),
           content: intent.content,
           target_participants: intent.targets,
@@ -185,10 +158,10 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
         });
       } catch (error) {
         input.composerError.value = readableHomeError(error);
+        return false;
       }
-      return;
     }
-    if (input.submitting.value) return;
+    if (input.submitting.value) return false;
     if (intent.kind === HOME_COMPOSER_INTENT_KIND.INSTALL_CAPABILITY) {
       try {
         if (!input.activeRootId.value || !activeRevision)
@@ -202,7 +175,8 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
       } catch (error) {
         input.composerError.value = readableHomeError(error);
       }
-      return;
+      // A capability install proposes an action; it publishes no message.
+      return false;
     }
     const command = captureHomeCommandToken(
       input.activation,
@@ -239,18 +213,20 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
             throw error;
           created = await conversationHomeApi.create(createRequest);
         }
-        if (!isCurrent(command)) return;
+        // The conversation exists from here on, so the topic *was* published — the message is
+        // admitted even if this command has since been superseded.
+        if (!isCurrent(command)) return true;
         clearSubmittedComposer(submittedDraft, [], privateContext);
         input.sessionQuery.value = "";
         await input.refreshSessions("");
-        if (!isCurrent(command)) return;
+        if (!isCurrent(command)) return true;
         const root = input.sessions.value.find(
           (item) =>
             item.root_session_id === created.conversation_id ||
             item.root.conversation_id === created.conversation_id,
         );
         await input.selectSession(root?.root_session_id ?? created.conversation_id);
-        return;
+        return true;
       }
       if (!activeRevision)
         throw new Error("Refresh this conversation before sending so its head can be verified.");
@@ -281,11 +257,14 @@ export function createHomeCommandRuntime(input: HomeCommandRuntimeInput) {
       const proposed = await proposeCandidate(candidate, {
         refreshSelection: false,
       });
-      if (!isCurrent(command) || !proposed) return;
+      if (!isCurrent(command) || !proposed) return false;
       clearSubmittedDraft(submittedDraft);
       if (input.activeRootId.value) await input.refreshActiveSelection();
+      // A typed action is a proposal, not a natural-language message.
+      return false;
     } catch (error) {
       if (isCurrent(command)) input.composerError.value = readableHomeError(error);
+      return false;
     } finally {
       finishSubmitting(command);
     }

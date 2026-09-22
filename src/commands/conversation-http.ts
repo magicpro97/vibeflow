@@ -185,9 +185,20 @@ export function buildConversationHttpAuthority(
         // the global classifier block, then away from both — so an edited project engine or a
         // settings save reaches the next verdict without a restart. The join itself lives in
         // `buildConversationProjectClassifier` so it is observable in unit tests.
-        classify: async ({ message, repo_root, project_id }) =>
-          buildConversationProjectClassifier(
-            bootstrap.authorities.projects.list(),
+        classify: async ({ message, repo_root, project_id }) => {
+          // The registry read is the advisory route's *input*, never its precondition: a widened
+          // or malformed registry must degrade the verdict to the shared fallback (an empty
+          // candidate list also short-circuits the FTS and AI tiers) instead of turning a
+          // proposal into a generic error. The explicit `project_id` path is untouched below —
+          // that id is a caller claim, and the engine resolution still reads the rows it needs.
+          let projects: readonly ClassifierRegistryRow[];
+          try {
+            projects = bootstrap.authorities.projects.list();
+          } catch {
+            projects = [];
+          }
+          return buildConversationProjectClassifier(
+            projects,
             {
               settings:
                 readSettings(base).projectClassification ?? DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
@@ -197,7 +208,8 @@ export function buildConversationHttpAuthority(
           ).classify({
             message,
             ...(repo_root === undefined ? {} : { repo_root }),
-          }),
+          });
+        },
       },
     },
     homeCreate: {

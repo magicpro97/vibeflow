@@ -8,6 +8,7 @@
  */
 const { beforeEach, describe, expect, test } = await import(String("bun:test"));
 import { createPinia, setActivePinia } from "pinia";
+import { nextTick } from "vue";
 import type { HomeProjectRow } from "../conversation-home-projects.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { useProjectClassificationStore } from "../project-classification-store.js";
@@ -76,7 +77,7 @@ describe("project classification store", () => {
       await store.loadSettings();
       expect(store.classificationEnabled).toBe(false);
       // OFF is the durable gate: no classification request is made at all.
-      await store.classifyMessage("ship it");
+      await store.classifyMessage("ship it", true);
       expect(stub.calls.some((call) => call.path.endsWith("/classify"))).toBe(false);
     } finally {
       stub.restore();
@@ -179,6 +180,67 @@ describe("project classification store", () => {
       home.activeRootId = "root-1";
       store.propose({ project_id: "alpha", confidence: 0.9, reason: "ai" });
       expect(home.queueAnnouncement).toContain("alpha-service");
+    } finally {
+      stub.restore();
+    }
+  });
+
+  test("a newer send takes the superseded chip and its announcement down", async () => {
+    const stub = stubFetch(routes());
+    try {
+      const home = useConversationHomeStore();
+      const store = useProjectClassificationStore();
+      await store.loadSettings();
+      await store.refreshProjects();
+      home.activeRootId = "root-1";
+      store.propose({ project_id: "alpha", confidence: 0.9, reason: "ai" });
+      expect(home.queueAnnouncement).toContain("alpha-service");
+      // The chip is cleared as soon as the newer classification is issued, and the polite region
+      // that carries it is one promise with the chip: neither outlives the superseding send.
+      const pending = store.classifyMessage("a newer message", true);
+      expect(store.suggestion).toBeNull();
+      expect(home.queueAnnouncement).toBe("");
+      await pending;
+    } finally {
+      stub.restore();
+    }
+  });
+
+  test("switching conversations drops the chip left over from the previous session", async () => {
+    const stub = stubFetch(routes());
+    try {
+      const home = useConversationHomeStore();
+      const store = useProjectClassificationStore();
+      await store.loadSettings();
+      await store.refreshProjects();
+      home.activeRootId = "root-1";
+      store.propose({ project_id: "alpha", confidence: 0.9, reason: "ai" });
+      expect(store.suggestion?.root_session_id).toBe("root-1");
+      // Confirming a chip captured for the session the user left would move the wrong
+      // conversation, so the switch resets the runtime (and the text that announced the chip).
+      home.activeRootId = "root-2";
+      await nextTick();
+      expect(store.suggestion).toBeNull();
+      expect(home.queueAnnouncement).toBe("");
+    } finally {
+      stub.restore();
+    }
+  });
+
+  test("a draft that was never admitted is not classified", async () => {
+    const stub = stubFetch(routes());
+    try {
+      const home = useConversationHomeStore();
+      const store = useProjectClassificationStore();
+      await store.loadSettings();
+      home.activeRootId = "root-1";
+      // The composer hands the send's own verdict through: an unadmitted draft must not reach the
+      // ladder at all, because a chip inferred from it would move a conversation that never got
+      // the message.
+      await store.classifyMessage("a draft the runtime refused", false);
+      expect(stub.calls.some((call) => call.path.endsWith("/classify"))).toBe(false);
+      await store.classifyMessage("a message that was sent", true);
+      expect(stub.calls.some((call) => call.path.endsWith("/classify"))).toBe(true);
     } finally {
       stub.restore();
     }

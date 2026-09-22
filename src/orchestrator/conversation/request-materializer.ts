@@ -2,6 +2,7 @@ import {
   projectRuntimeCreateRequest,
   projectRuntimePreviewRequest,
 } from "./boundary-projection.js";
+import { CONVERSATION_DEFAULT_PROJECT_ID } from "./conversation-catalog-contract.js";
 import { resolveConversationProjectId } from "./conversation-project-binding.js";
 import { snapshotRuntimeValue } from "./emission-authority.js";
 import type { RuntimeCreateRequest, RuntimePreviewRequest } from "./policy-registry.js";
@@ -41,10 +42,7 @@ export class ConversationRequestMaterializer {
       baseline_enabled: request.baselineEnabled ?? true,
       evaluator_auto_added: request.evaluatorAutoAdded ?? false,
       repo_root: request.repoRoot,
-      project_id: resolveConversationProjectId(this.options.projects, request.projectId, {
-        topic: request.topic,
-        repo_root: request.repoRoot,
-      }),
+      project_id: this.projectId(request),
       phase: request.phase,
       task_text: request.topic,
       bindings: request.bindings.map((binding) => ({
@@ -54,6 +52,22 @@ export class ConversationRequestMaterializer {
       })),
       created_at: createdAt,
     };
+  }
+
+  /**
+   * The manifest's `project_id`. A caller-supplied id is a claim, not an inference, so it is
+   * validated exactly as before — including its hard failure on a corrupt registry. With no id,
+   * the deterministic tiers run only while auto-classify is on: OFF is the durable gate the
+   * classifier obeys on the send path, and honoring it here keeps an implicit create in the
+   * catch-all instead of filing it into a project the user's switch says not to infer.
+   */
+  private projectId(request: RuntimeCreateRequest | RuntimePreviewRequest): string {
+    if (request.projectId === undefined && this.options.projectClassificationEnabled?.() === false)
+      return CONVERSATION_DEFAULT_PROJECT_ID;
+    return resolveConversationProjectId(this.options.projects, request.projectId, {
+      topic: request.topic,
+      repo_root: request.repoRoot,
+    });
   }
 
   async materialize(
