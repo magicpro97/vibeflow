@@ -118,6 +118,8 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
   }
   private path(id: string): string {
     if (!id) fail("conversation id");
+    // A concurrent sandbox recreate can remove the root's parent; rebuild the chain first.
+    mkdirSync(this.root, { recursive: true, mode: 0o700 });
     const directory = join(this.root, "conversations");
     this.ensureDirectory(directory, this.root);
     if (relative(this.root, realpathSync(directory)).startsWith("..")) fail("unsafe conversations");

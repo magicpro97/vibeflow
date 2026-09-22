@@ -318,6 +318,22 @@ const identityTuple = (stored: IdentityEvent) => {
 const sortedIdentityTuples = (values: IdentityEvent[]) =>
   values.map(identityTuple).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 
+test("a store rebuilds a sandbox root that was removed between operations", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "trace-recreate-"));
+  const dir = join(parent, "trace");
+  try {
+    const store = independentStore(dir, "7", []);
+    await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE"));
+    // A concurrent sandbox recreate removes the runtime root — and with it the journal chain.
+    rmSync(parent, { recursive: true, force: true });
+    await expect(store.readConversation(correlation.conversation_id)).resolves.toEqual([]);
+    await store.append(correlation, lifecycleInput("conversation:active", "ACTIVE"));
+    expect(existsSync(traceJournalPath(dir, correlation.conversation_id))).toBe(true);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("independent stores serialize same-key and distinct-key races", async () => {
   const dir = await mkdtemp(join(tmpdir(), "trace-two-store-"));
   try {
