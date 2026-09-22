@@ -6,7 +6,15 @@ import {
 } from "../src/dispatch/owned-process-platform.js";
 import { reapOwnedProcessRecord } from "../src/dispatch/owned-process-reaper.js";
 import type { OwnedAttemptProcessRecordV1 } from "../src/dispatch/owned-process-runtime.js";
-import { windowsProcessStartIdentityQuery } from "../src/durability/process-identity-contract.js";
+import {
+  PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS,
+  windowsProcessStartIdentityQuery,
+} from "../src/durability/process-identity-contract.js";
+
+// A pid that appears nowhere else in the query, so splitting on it isolates the literal
+// segments the supervisor's inlined copy must reproduce verbatim.
+const PARITY_PID = 41;
+const PARITY_ABSENT = String(PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS.ABSENT);
 
 const WINDOWS_TICKS = Object.freeze({
   OWNER: "638602314960000001",
@@ -105,13 +113,22 @@ describe("owned CLI lifecycle on Windows", () => {
   });
 
   test("the supervisor start-identity query stays in parity with the shared Windows probe", () => {
-    // The supervisor inlines its own copy of the query, so its emit must not drift from the shared
-    // builder, and neither may use System.Console — ConstrainedLanguage mode (AppLocker/WDAC)
-    // blocks that type and the probe would fail as "process start identity is unavailable".
-    const emit = "}; Write-Output ($p.CreationDate.ToUniversalTime().Ticks)";
+    // The supervisor inlines its own copy of the query as a JS string literal, so it cannot import
+    // the shared builder and its embedded quotes are escaped. Strip the escaping, then require every
+    // segment of the shared query around its two interpolations (pid, ABSENT) to appear verbatim —
+    // that catches a drifting WMI filter or a dropped null check, not just a changed emit.
+    const flattened = OWNED_SUPERVISOR_SCRIPT.replaceAll("\\", "");
+    const query = windowsProcessStartIdentityQuery(PARITY_PID);
+    // Split on the pid first; only the tail half carries the exit code, so splitting the whole
+    // query on it would also cut "Win32_Process".
+    const [head = "", tail = ""] = query.split(String(PARITY_PID));
+    const segments = [head, ...tail.split(PARITY_ABSENT)];
 
-    expect(windowsProcessStartIdentityQuery(41)).toContain(emit);
-    expect(OWNED_SUPERVISOR_SCRIPT).toContain(emit);
+    expect(segments).toHaveLength(3);
+    for (const segment of segments) expect(flattened).toContain(segment);
+    // ConstrainedLanguage mode (AppLocker/WDAC) does not allow System.Console, so a probe emitting
+    // through it fails as "process start identity is unavailable" on locked-down hosts.
+    expect(query).not.toContain("[Console]::WriteLine");
     expect(OWNED_SUPERVISOR_SCRIPT).not.toContain("[Console]::WriteLine");
   });
 
