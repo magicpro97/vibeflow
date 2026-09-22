@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { OWNED_PROCESS_TIMING_MS } from "../src/dispatch/owned-process-contract.js";
 import { OWNED_SUPERVISOR_SCRIPT } from "../src/dispatch/owned-process-launch.js";
 import {
   createOwnedProcessPlatform,
@@ -7,6 +8,7 @@ import {
 import { reapOwnedProcessRecord } from "../src/dispatch/owned-process-reaper.js";
 import type { OwnedAttemptProcessRecordV1 } from "../src/dispatch/owned-process-runtime.js";
 import {
+  PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS,
   PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS,
   windowsProcessStartIdentityQuery,
 } from "../src/durability/process-identity-contract.js";
@@ -130,6 +132,23 @@ describe("owned CLI lifecycle on Windows", () => {
     // through it fails as "process start identity is unavailable" on locked-down hosts.
     expect(query).not.toContain("[Console]::WriteLine");
     expect(OWNED_SUPERVISOR_SCRIPT).not.toContain("[Console]::WriteLine");
+  });
+
+  test("all three start-identity probes share one timeout authority", () => {
+    // The durability probe, the dispatch probe, and the supervisor's serialized copy each read a
+    // different name for the same budget. They must resolve to the shared contract, or a future
+    // edit to one leaves the others on a stale value — which is how durability was left at 1s.
+    expect(OWNED_PROCESS_TIMING_MS.WINDOWS_COLD_START_PROBE_TIMEOUT).toBe(
+      PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.WINDOWS_COLD_START,
+    );
+    expect(OWNED_PROCESS_TIMING_MS.PLATFORM_PROBE_TIMEOUT).toBe(
+      PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.POSIX,
+    );
+    // The supervisor receives the timings as serialized JSON, so its copy tracks automatically
+    // only while it is serialized from the same object.
+    expect(OWNED_SUPERVISOR_SCRIPT).toContain(
+      `const TIMING_MS = ${JSON.stringify(OWNED_PROCESS_TIMING_MS)};`,
+    );
   });
 
   test("Windows native root query failure constructs a fail-closed platform", () => {
