@@ -11,12 +11,13 @@ import {
   PROCESS_START_IDENTITY_KIND,
   PROCESS_START_IDENTITY_PATTERN_SOURCE,
   PROCESS_START_IDENTITY_PREFIX,
-  PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS,
+  PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS,
   classifyDarwinProcessStartIdentity,
   formatPlatformProcessStartIdentity,
   formatProcessStartIdentity,
   isNativeProcessStartIdentity,
   isProcessStartIdentityGenericPosixPlatform,
+  windowsProcessStartIdentityQuery,
 } from "./process-identity-contract.js";
 
 export interface ProcessLockOwnerV1 {
@@ -201,7 +202,7 @@ function psStartIdentity(
     const result = runtime
       .execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
         encoding: "utf8",
-        timeout: 1_000,
+        timeout: PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.POSIX,
         stdio: ["ignore", "pipe", "ignore"],
       })
       .trim();
@@ -217,19 +218,11 @@ function windowsStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): st
     if (!/^[A-Za-z]:\\[^\0]+$/.test(root)) return null;
     const powershell = windowsPath.join(root, "System32\\WindowsPowerShell\\v1.0\\powershell.exe");
     const ticks = runtime
-      .execFileSync(
-        powershell,
-        [
-          "-NoProfile",
-          "-Command",
-          `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($null -eq $p) { exit ${PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS.ABSENT} }; [Console]::WriteLine($p.CreationDate.ToUniversalTime().Ticks)`,
-        ],
-        {
-          encoding: "utf8",
-          timeout: 1_000,
-          stdio: ["ignore", "pipe", "ignore"],
-        },
-      )
+      .execFileSync(powershell, ["-NoProfile", "-Command", windowsProcessStartIdentityQuery(pid)], {
+        encoding: "utf8",
+        timeout: PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.WINDOWS_COLD_START,
+        stdio: ["ignore", "pipe", "ignore"],
+      })
       .trim();
     return /^[1-9][0-9]{0,19}$/.test(ticks)
       ? formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.WINDOWS, ticks)

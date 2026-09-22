@@ -7,6 +7,7 @@ import {
   RUNTIME_PLATFORM,
   formatProcessStartIdentity,
   isProcessStartIdentity,
+  windowsProcessStartIdentityQuery,
 } from "../durability/process-identity-contract.js";
 import {
   OWNED_PROCESS_PRESENCE_KIND,
@@ -131,11 +132,7 @@ function windowsProbe(pid: number, runtime: OwnedProcessPlatformRuntime): OwnedP
     const creation = runtime
       .execFileSync(
         windowsPowerShell(runtime),
-        [
-          "-NoProfile",
-          "-Command",
-          `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($null -eq $p) { exit ${OWNED_WINDOWS_QUERY_STATUS.ABSENT} }; [Console]::WriteLine($p.CreationDate.ToUniversalTime().Ticks)`,
-        ],
+        ["-NoProfile", "-Command", windowsProcessStartIdentityQuery(pid)],
         {
           encoding: "utf8",
           timeout: OWNED_PROCESS_TIMING_MS.WINDOWS_COLD_START_PROBE_TIMEOUT,
