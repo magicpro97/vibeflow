@@ -517,4 +517,28 @@ describe("production HTTP composition delegates every shared authority", () => {
 
     expect(seen).toEqual([{ engine: "copilot" }]);
   }, 30_000);
+
+  test("an injected classifier factory is never served from the authority cache", async () => {
+    // The cache is keyed by `base:host`. A caller that injects a factory but passes otherwise
+    // cacheable deps must not receive the cached authority built with the production factory:
+    // the spy would never fire and the seam would be silently defeated — its own failure mode.
+    const root = mkdtempSync(join(tmpdir(), "vf-http-classify-cache-"));
+    roots.push(root);
+    const repo = join(root, "repo");
+    mkdirSync(repo, { recursive: true });
+    // Populate the cache exactly as a production caller (no deps, no capability) would.
+    buildConversationHttpAuthority({}, "127.0.0.1", repo, {});
+
+    const seen: ProjectClassifierRuntimeSeams[] = [];
+    const factory: typeof projectClassifier = (projects, seams = {}) => {
+      seen.push(seams);
+      return projectClassifier(projects, seams);
+    };
+    const injected = buildConversationHttpAuthority({}, "127.0.0.1", repo, {}, factory);
+    const projects = injected.browser?.projects;
+    if (!projects) throw new Error("project surface was not composed");
+    await projects.classify({ message: "hello there" });
+
+    expect(seen).toHaveLength(1);
+  }, 30_000);
 });

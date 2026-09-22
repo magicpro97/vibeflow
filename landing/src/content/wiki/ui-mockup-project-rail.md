@@ -224,8 +224,8 @@ Two surfaces, one authority — no duplicated controls:
 └──────────────────────────────────────────┘
 ```
 
-- Row: the project `name` (or `id`) as a muted label above three controls (CLI / model /
-  thinking); the disclosure is one shared `Per-project engine override ({n})` button
+- Row: the project `name` (or `id`) as an emphasized leading label beside three controls (CLI /
+  model / thinking); the disclosure is one shared `Per-project engine override ({n})` button
   (`aria-expanded`, `aria-controls`) that collapses every row at once — rows are plain `<div>`s,
   not per-row buttons.
 - **Inherit is the empty state**, shown as a placeholder `Theo mặc định` — never a literal

@@ -81,7 +81,13 @@ export function buildConversationHttpAuthority(
   const loopback = isConversationLoopbackHost(host ?? "127.0.0.1");
   const key = `${base}:${loopback ? "loopback" : "lan"}`;
   const cacheable =
-    !deps.service && !deps.createService && !deps.bootstrap && Object.keys(capability).length === 0;
+    !deps.service &&
+    !deps.createService &&
+    !deps.bootstrap &&
+    Object.keys(capability).length === 0 &&
+    // An injected factory must never inherit a cached authority built with the production
+    // factory: the seam would be silently defeated (the spy never fires) — its own failure mode.
+    classifierFactory === projectClassifier;
   if (cacheable) {
     const cached = AUTHORITIES.get(key);
     if (cached) return cached;
