@@ -143,7 +143,10 @@ export function windowsHasNoForeignWrite(
   try {
     handle = openForAcl(context.binding, path, isDirectory(kind));
     if (handle === null) return false;
-    return !descriptorAllowsForeignWrite(context.authority.inspect(handle));
+    return !descriptorAllowsForeignWrite(
+      context.authority.inspect(handle),
+      context.authority.currentUserId(),
+    );
   } catch {
     return false;
   } finally {

@@ -1076,6 +1076,7 @@ describe("native Windows record adapters", () => {
         expect(kind).toBe(WINDOWS_AUTHORITY_PATH_KIND.FILE);
         return create({ private: true });
       },
+      currentUserId: () => Buffer.alloc(0),
       verifyNoForeignWrite: (handle) => calls.push(handle),
       verifyHandle: () => undefined,
       migrateToOwnerOnly: () => undefined,
@@ -1114,6 +1115,7 @@ describe("native Windows record adapters", () => {
         if (verifications === 1) throw new Error("permissive Windows authority DACL rejected");
       },
       verifyHandle: () => undefined,
+      currentUserId: () => Buffer.alloc(0),
       migrateToOwnerOnly: (path, kind) => migrated.push(`${path}:${kind}`),
     };
     const lock = createWindowsKernelLockProvider(nativeFixture().binding, stale).tryAcquire(
@@ -1137,6 +1139,7 @@ describe("native Windows record adapters", () => {
       verifyNoForeignWrite: () => {
         throw new Error("permissive Windows authority DACL rejected");
       },
+      currentUserId: () => Buffer.alloc(0),
       verifyHandle: () => undefined,
       migrateToOwnerOnly: () => undefined,
     };

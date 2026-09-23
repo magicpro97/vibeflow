@@ -79,23 +79,36 @@ const FOREIGN_WRITE_MASK =
  *
  * A NULL DACL (not present, or defaulted) grants every principal full access and therefore counts.
  */
-export function descriptorAllowsForeignWrite(view: WindowsPrivateDescriptorView): boolean {
+export function descriptorAllowsForeignWrite(
+  view: WindowsPrivateDescriptorView,
+  self: Buffer,
+): boolean {
   if (!view.daclPresent || view.daclDefaulted) return true;
-  return foreignWriteAce(view) !== null;
+  return foreignWriteAce(view, self) !== null;
 }
 
 /**
  * The first ACE that grants a modifying right to a principal other than the owner, or null when the
  * DACL grants no such right.
  *
+ * `self` is the SID of the account running this process, and `view.owner` is the descriptor's
+ * owner: both are the caller's own principal for this question. The owner is tracked separately
+ * because Windows can record a group there — Administrators is the default owner for the objects a
+ * process started from an elevated token creates — and an ACE naming it still only grants the
+ * caller the right it already holds.
+ *
  * A NULL DACL has no single offending ACE — it grants every principal full access — so callers test
  * daclPresent/daclDefaulted themselves, which is what descriptorAllowsForeignWrite does.
  */
-export function foreignWriteAce(view: WindowsPrivateDescriptorView): WindowsPrivateAce | null {
+export function foreignWriteAce(
+  view: WindowsPrivateDescriptorView,
+  self: Buffer,
+): WindowsPrivateAce | null {
   return (
     view.aces.find(
       (ace) =>
         ace.type === WINDOWS_PRIVATE_SECURITY.ACCESS_ALLOWED_ACE_TYPE &&
+        !ace.sid.equals(self) &&
         !ace.sid.equals(view.owner) &&
         !ROOT_EQUIVALENT_SIDS.some((root) => ace.sid.equals(root)) &&
         (ace.mask & FOREIGN_WRITE_MASK) !== 0,

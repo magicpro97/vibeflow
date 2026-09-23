@@ -88,6 +88,13 @@ describe("Windows private authority", () => {
     // The weaker rule the lock and container paths use accepts an owner-only DACL and rejects one
     // that hands a write right to a foreign principal.
     expect(() => file.authority.verifyNoForeignWrite(7n)).not.toThrow();
+    // The process's own ACE stays exempt when the descriptor records a different owner: a token
+    // whose default owner is the Administrators group still writes its own lock files.
+    const groupOwned = fixture({
+      ...descriptor(),
+      owner: Buffer.from([1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 32, 2, 0, 0]),
+    });
+    expect(() => groupOwned.authority.verifyNoForeignWrite(7n)).not.toThrow();
     const foreign = fixture({
       ...descriptor(),
       aces: [

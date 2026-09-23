@@ -41,6 +41,8 @@ export interface WindowsPrivateAuthority {
    * needs — see verifyHandle for the stricter rule the data files are held to.
    */
   verifyNoForeignWrite(handle: bigint): void;
+  /** The SID of the account running this process, for callers applying their own descriptor policy. */
+  currentUserId(): Buffer;
   /** Reset an existing file/dir's DACL in-place to owner-only + SE_DACL_PROTECTED. */
   migrateToOwnerOnly(path: string, kind: WindowsAuthorityPathKind): void;
 }
@@ -120,15 +122,16 @@ export function createWindowsPrivateAuthority(
     inspect(handle) {
       return bindings.inspect(handle);
     },
+    currentUserId: () => bindings.currentUser().sid,
     verifyNoForeignWrite(handle) {
       const view = bindings.inspect(handle);
-      if (view.daclPresent && !view.daclDefaulted && foreignWriteAce(view) === null) return;
-      const holder = foreignWriteAce(view);
+      const holder = foreignWriteAce(view, bindings.currentUser().sid);
+      if (view.daclPresent && !view.daclDefaulted && holder === null) return;
       durabilityError(
         "unsafe_path",
         holder === null
           ? "permissive Windows authority DACL rejected: the DACL is absent"
-          : `permissive Windows authority DACL rejected: ${formatWindowsSid(holder.sid)} holds mask 0x${(holder.mask >>> 0).toString(16)}`,
+          : `permissive Windows authority DACL rejected: ${formatWindowsSid(holder.sid)} holds mask 0x${(holder.mask >>> 0).toString(16)} (owner ${formatWindowsSid(view.owner)})`,
       );
     },
     verifyHandle(handle, kind) {

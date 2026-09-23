@@ -61,6 +61,7 @@ function fakeAuthority(
   };
   const authority = {
     inspect: typeof descriptor === "function" ? descriptor : () => descriptor,
+    currentUserId: () => OWNER_SID,
     verifyHandle: (handle: bigint, kind: WindowsAuthorityPathKind) => {
       calls.verifyHandle.push([handle, kind]);
     },

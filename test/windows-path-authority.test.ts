@@ -217,6 +217,7 @@ function nativeFixture() {
       daclDefaulted: false,
       aces: [],
     }),
+    currentUserId: () => Buffer.from([1, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0]),
     verifyNoForeignWrite: () => undefined,
     withCreationSecurity: (_kind, create) => create({ tokenUserOnly: true }),
     verifyHandle: (handle, kind) => {
