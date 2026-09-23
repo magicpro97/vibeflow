@@ -1,0 +1,5 @@
+# Orca: copy these gitignored files into every new worktree (each owns a copy)
+# so agents have API keys / local config without re-creating them.
+.env
+.env.local
+.vscode/settings.json

@@ -16,6 +16,7 @@ import {
   unlinkAt,
 } from "./native.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 
 const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefined;
 
@@ -71,7 +72,7 @@ export function syncPrivateDirectory(path: string): void {
   const directory = openPrivateDirectory(path, false);
   withCleanup(() => {
     // B3: skip directory fsync on win32 (FlushFileBuffers on dir handle is EPERM).
-    if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
     assertPinnedDirectory(directory);
   }, [() => closePinnedDirectory(directory)]);
 }
@@ -80,7 +81,7 @@ export function ensurePrivateDirectory(input: string): string {
   const directory = openPrivateDirectory(input, true);
   return withCleanup(() => {
     // B3: skip directory fsync on win32 (FlushFileBuffers on dir handle is EPERM).
-    if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
     assertPinnedDirectory(directory);
     return directory.path;
   }, [() => closePinnedDirectory(directory)]);

@@ -18,6 +18,7 @@ import {
   readPrivateFd,
   validatePrivateFileFd,
 } from "./path.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 
 export type VffrFileFaultPoint =
   | "after-first-frame-link"
@@ -77,7 +78,7 @@ function removeAbandonedStage(directory: PinnedDirectory, name: string): void {
     assertVisibleVffrEntry(directory, stagedName, staged);
     assertPinnedDirectory(directory);
     unlinkAt(directory, stagedName);
-    fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
   }, [() => fs.closeSync(staged)]);
 }
 
@@ -123,7 +124,7 @@ export function openVffrFileForAppendAt(directory: PinnedDirectory, name: string
     if (target.nlink === 2) {
       assertRecognizedPublicationAlias(directory, name, fd);
       unlinkAt(directory, stageName(name));
-      fs.fsyncSync(directory.fd);
+      syncDirectory(directory.fd);
       validatePrivateFileFd(fd, name);
     } else removeAbandonedStage(directory, name);
     assertVisibleVffrEntry(directory, name, fd);
@@ -151,7 +152,7 @@ export function publishFirstVffrFrameAt(
     fault?.("after-first-frame-link");
     unlinkAt(directory, stagedName);
     stagedPresent = false;
-    fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
     assertVisibleVffrEntry(directory, name, fd);
   }, [
     () => {

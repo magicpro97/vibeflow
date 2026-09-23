@@ -19,6 +19,7 @@ import {
   publishStableLockRecord,
   readStableLockRecord,
 } from "./lock-record.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 import {
   type PinnedDirectory,
   assertPinnedDirectory,
@@ -271,7 +272,7 @@ function makeHandle(path: string, owner: ProcessLockOwnerV1, state: LockState): 
       const pending = readStableLockRecord(current.fd, current.name);
       if (pending.payload !== null || pending.generation !== current.pendingReleaseGeneration)
         durabilityError("lock_lost", "process lock release slot was not retained exactly");
-      fs.fsyncSync(current.fd);
+      syncDirectory(current.fd);
       assertPinnedDirectory(current.root);
       finishRelease(current);
     },
@@ -331,7 +332,7 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
     // B3: skip directory fsync on win32 — FlushFileBuffers on a directory handle is invalid
     // (EPERM). NTFS journal provides crash-consistency without an explicit flush.
     // ponytail: on POSIX, fsync of the parent dir makes the lock-file directory entry durable.
-    if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(root.fd);
+    syncDirectory(root.fd);
   } catch (error) {
     const opened = fd;
     return cleanupThenThrow(error, [

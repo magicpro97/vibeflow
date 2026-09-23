@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { dirname, parse, relative, resolve, sep } from "node:path";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import { errnoIs, native, syscallFailure } from "../../durability/native-runtime.js";
+import { syncDirectory } from "../../durability/posix-fs-semantics.js";
 import {
   type PinnedDirectory,
   assertPinnedDirectory,
@@ -68,7 +69,7 @@ function childDirectory(
   if (fd === null && create) {
     if (native().mkdirat(parent.fd, name, 0o700) !== 0 && !errnoIs("EEXIST"))
       syscallFailure(`mkdirat projection directory ${path}`);
-    fs.fsyncSync(parent.fd);
+    syncDirectory(parent.fd);
     fd = tryOpenAt(parent, name, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
   }
   return fd === null ? null : pinned(fd, path);
@@ -192,7 +193,7 @@ export function compareAndSwapProjectionFile(
         renameAt(directory, temporary, name);
         temporary = null;
       }
-      fs.fsyncSync(directory.fd);
+      syncDirectory(directory.fd);
       assertPinnedDirectory(directory);
     } finally {
       if (temporary !== null) unlinkAt(directory, temporary, true);
@@ -245,7 +246,7 @@ export function compareAndSwapTomlOwnedBlock(
         renameAt(directory, temporary, name);
         temporary = null;
       }
-      fs.fsyncSync(directory.fd);
+      syncDirectory(directory.fd);
       assertPinnedDirectory(directory);
     } finally {
       if (temporary !== null) unlinkAt(directory, temporary, true);

@@ -218,6 +218,18 @@ export interface NativeRuntimeInitializationV1 {
 // Module-level fd→path registry for Windows. Not needed on POSIX.
 export const WIN32_FD_PATHS: Map<number, string> = new Map();
 
+/** Map a node:fs error to the POSIX errno the *at() callers branch on. */
+const win32Errno = (error: unknown): number => {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ENOENT") return 2;
+  if (code === "EACCES" || code === "EPERM") return 13;
+  if (code === "EEXIST") return 17;
+  if (code === "ENOTDIR") return 20;
+  if (code === "EISDIR") return 21;
+  if (code === "ENOTEMPTY") return 41;
+  return 0;
+};
+
 // Windows errno emulation: the node:fs bindings don't set POSIX errno.
 // Track the last "errno" from Windows node:fs calls to satisfy errnoIs() checks.
 let win32LastErrno = 0;
@@ -244,8 +256,7 @@ export function loadWindowsBindings(): NativeBindings {
         win32SetErrno(0);
         return fd;
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        win32SetErrno(code === "ENOENT" ? 2 : code === "EEXIST" ? 17 : code === "EACCES" ? 13 : 0);
+        win32SetErrno(win32Errno(error));
         return -1;
       }
     },
@@ -260,8 +271,7 @@ export function loadWindowsBindings(): NativeBindings {
         win32SetErrno(0);
         return 0;
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        win32SetErrno(code === "ENOENT" ? 2 : code === "EEXIST" ? 17 : code === "EACCES" ? 13 : 0);
+        win32SetErrno(win32Errno(error));
         return -1;
       }
     },
@@ -271,15 +281,41 @@ export function loadWindowsBindings(): NativeBindings {
       win32SetErrno(0);
       return 0;
     },
-    renameat(_fromFd, _from, _toFd, _to) {
-      // ponytail: not on the vf init path; renameAt callers are in atomic.ts only.
-      win32SetErrno(0);
-      return -1;
+    renameat(fromFd, from, toFd, to) {
+      const fromBase = WIN32_FD_PATHS.get(fromFd);
+      const toBase = WIN32_FD_PATHS.get(toFd);
+      if (fromBase === undefined || toBase === undefined) {
+        win32SetErrno(2 /* ENOENT */);
+        return -1;
+      }
+      try {
+        // POSIX renameat replaces the destination atomically; fs.renameSync does the same on
+        // Windows (MoveFileEx with MOVEFILE_REPLACE_EXISTING underneath).
+        fs.renameSync(join(fromBase, from), join(toBase, to));
+        win32SetErrno(0);
+        return 0;
+      } catch (error) {
+        win32SetErrno(win32Errno(error));
+        return -1;
+      }
     },
-    linkat(_fromFd, _from, _toFd, _to, _flags) {
-      // ponytail: not on the vf init path.
-      win32SetErrno(0);
-      return -1;
+    linkat(fromFd, from, toFd, to, _flags) {
+      const fromBase = WIN32_FD_PATHS.get(fromFd);
+      const toBase = WIN32_FD_PATHS.get(toFd);
+      if (fromBase === undefined || toBase === undefined) {
+        win32SetErrno(2);
+        return -1;
+      }
+      try {
+        // NTFS supports hard links; linkSync fails with EEXIST when the destination is taken,
+        // which is the O_EXCL-style contract the CAS callers rely on.
+        fs.linkSync(join(fromBase, from), join(toBase, to));
+        win32SetErrno(0);
+        return 0;
+      } catch (error) {
+        win32SetErrno(win32Errno(error));
+        return -1;
+      }
     },
     unlinkat(directoryFd, name, _flags) {
       const base = WIN32_FD_PATHS.get(directoryFd);
@@ -292,8 +328,7 @@ export function loadWindowsBindings(): NativeBindings {
         win32SetErrno(0);
         return 0;
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        win32SetErrno(code === "ENOENT" ? 2 : code === "EACCES" ? 13 : 0);
+        win32SetErrno(win32Errno(error));
         return -1;
       }
     },

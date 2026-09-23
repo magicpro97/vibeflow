@@ -20,6 +20,7 @@ import {
 } from "./frame-file.js";
 import { type VffrDomainRule, vffrRuleFor } from "./frame-rules.js";
 import { nonNegativeSafeInteger, positiveSafeLimit } from "./limits.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 import { assertProcessLockCovers, withLockedParent } from "./lock.js";
 import { assertPinnedDirectory, canonicalDurabilityPath } from "./native.js";
 import { readPrivateFd, writeAll } from "./path.js";
@@ -357,7 +358,7 @@ export function appendVffrFrame(
       fault?.("after-existing-frame-fsync");
       assertVisibleVffrEntry(directory, name, fd);
       assertPinnedDirectory(directory);
-      fs.fsyncSync(directory.fd);
+      syncDirectory(directory.fd);
       assertVisibleVffrEntry(directory, name, fd);
       return decoded[decoded.length - 1] as DecodedVffrFrame;
     }, [() => fs.closeSync(fd)]);

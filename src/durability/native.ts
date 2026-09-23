@@ -18,6 +18,7 @@ import {
   createWindowsKernelLockProvider,
   loadWindowsRecordNativeBindings,
 } from "./windows-kernel-lock.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 
 export interface PinnedDirectory {
   fd: number;
@@ -136,7 +137,7 @@ function openDirectoryAt(parentFd: number, name: string, path: string, create: b
   // invalid (EPERM). Skip fsync on win32. Upgrade path: none — NTFS journal provides
   // crash-consistency at the volume level without an explicit flush.
   // ponytail: on POSIX, fsync of the parent dir makes the dir-entry durable on crash.
-  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(parentFd);
+  syncDirectory(parentFd);
   fd = api.openat(parentFd, name, DIRECTORY_FLAGS, "int", 0);
   if (fd < 0) syscallFailure(`openat created directory ${path}`);
   return fd;
@@ -309,14 +310,21 @@ export function pinnedDirectoryPath(fd: number): string {
  * GetFinalPathNameByHandleW once real HANDLEs are reachable from JS.
  */
 export function pinnedDirectoryPathMatches(fd: number, path: string): boolean {
-  if (process.platform === RUNTIME_PLATFORM.WINDOWS && !WIN32_FD_PATHS.has(fd)) {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
+    // Verify by identity, never by a cached entry: fd numbers are recycled, so a stale
+    // registry hit from a closed fd would otherwise answer for a different directory.
     try {
       const opened = fs.fstatSync(fd, { bigint: true });
       const observed = fs.statSync(path, { bigint: true });
-      return opened.dev === observed.dev && opened.ino === observed.ino;
+      if (opened.dev !== observed.dev || opened.ino !== observed.ino || !opened.isDirectory())
+        return false;
     } catch {
       return false;
     }
+    // Adopt the fd: the *at() shims resolve every relative open through this registry, so a
+    // directory fd that never lands here cannot be descended through.
+    WIN32_FD_PATHS.set(fd, path);
+    return true;
   }
   return pinnedDirectoryPath(fd) === path;
 }
@@ -333,11 +341,16 @@ export function assertPinnedDirectory(directory: PinnedDirectory): void {
       const stat = fs.fstatSync(directory.fd, { bigint: true });
       if (stat.dev !== directory.devBig || stat.ino !== directory.inoBig || !stat.isDirectory())
         durabilityError("unsafe_path", "pinned directory identity changed");
-      return;
+    } else {
+      const stat = fs.fstatSync(directory.fd);
+      if (stat.dev !== directory.dev || stat.ino !== directory.ino || !stat.isDirectory())
+        durabilityError("unsafe_path", "pinned directory identity changed");
     }
-    const stat = fs.fstatSync(directory.fd);
-    if (stat.dev !== directory.dev || stat.ino !== directory.ino || !stat.isDirectory())
-      durabilityError("unsafe_path", "pinned directory identity changed");
+    // Every pin passes through here, including ones whose fd a caller opened itself, so this is
+    // the one place that can keep the *at() shims' fd→path registry complete. Overwrite rather
+    // than fill: fd numbers are recycled and callers close with plain fs.closeSync, so a stale
+    // entry from a previous owner of this number must not survive.
+    WIN32_FD_PATHS.set(directory.fd, directory.path);
     return;
   }
   const stat = fs.fstatSync(directory.fd);
@@ -379,7 +392,15 @@ export function tryOpenAt(
     "int",
     mode,
   );
-  if (fd >= 0) return fd;
+  if (fd >= 0) {
+    // Register descendants opened relatively: WIN32_FD_PATHS is how the *at() shims resolve a
+    // directory fd back to a path, so a fd that never lands here cannot be descended through.
+    // Overwrite unconditionally — callers close these with plain fs.closeSync, so an entry from
+    // a previous owner of this recycled fd number can still be present and must not win.
+    if (process.platform === RUNTIME_PLATFORM.WINDOWS)
+      WIN32_FD_PATHS.set(fd, join(directory.path, name));
+    return fd;
+  }
   if (errnoIs("ENOENT")) return null;
   syscallFailure(`openat file ${name}`);
 }

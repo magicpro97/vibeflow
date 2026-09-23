@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import { isAbsolute, join, parse, resolve } from "node:path";
+import { hasPrivateMode, syncDirectory } from "../../durability/posix-fs-semantics.js";
 import { RUNTIME_PLATFORM } from "../../durability/process-identity-contract.js";
 
 type Reject = (message: string) => never;
@@ -83,7 +84,7 @@ export function ensurePrivateDirectory(input: string, reject: Reject): string {
       !opened.isDirectory() ||
       entry.isSymbolicLink() ||
       !entry.isDirectory() ||
-      (opened.mode & 0o777) !== 0o700 ||
+      !hasPrivateMode(opened, 0o777, 0o700) ||
       !effectiveOwnerMatches(opened) ||
       !effectiveOwnerMatches(entry) ||
       opened.dev !== entry.dev ||
@@ -91,7 +92,7 @@ export function ensurePrivateDirectory(input: string, reject: Reject): string {
     ) {
       reject("unsafe directory");
     }
-    fs.fsyncSync(fd);
+    syncDirectory(fd);
   } finally {
     fs.closeSync(fd);
   }
@@ -130,7 +131,7 @@ export function openPrivateFile(
       !effectiveOwnerMatches(opened) ||
       !effectiveOwnerMatches(observed) ||
       opened.nlink !== 1 ||
-      (opened.mode & 0o777) !== 0o600 ||
+      !hasPrivateMode(opened, 0o777, 0o600) ||
       opened.dev !== observed.dev ||
       opened.ino !== observed.ino ||
       (!allowEmpty && opened.size < 1) ||
@@ -172,12 +173,12 @@ export function syncPrivateDirectory(root: string, reject: Reject): void {
       !observed.isDirectory() ||
       !effectiveOwnerMatches(opened) ||
       !effectiveOwnerMatches(observed) ||
-      (opened.mode & 0o777) !== 0o700 ||
+      !hasPrivateMode(opened, 0o777, 0o700) ||
       opened.dev !== observed.dev ||
       opened.ino !== observed.ino
     )
       reject("unsafe registry directory");
-    fs.fsyncSync(fd);
+    syncDirectory(fd);
   } finally {
     fs.closeSync(fd);
   }

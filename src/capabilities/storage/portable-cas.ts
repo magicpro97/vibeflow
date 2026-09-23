@@ -11,6 +11,7 @@ import {
   tryOpenAt,
   unlinkAt,
 } from "../../durability/native.js";
+import { isNotGroupOrWorldWritable, syncDirectory } from "../../durability/posix-fs-semantics.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import {
   type CapabilityPortableCasLockV1,
@@ -39,7 +40,7 @@ function pinnedParent(path: string): PinnedDirectory {
     if (
       !stat.isDirectory() ||
       (OWNER !== undefined && stat.uid !== OWNER) ||
-      (stat.mode & 0o022) !== 0
+      !isNotGroupOrWorldWritable(stat)
     )
       throw new CapabilityValidationError("portable record parent is not owner-safe", canonical);
     const directory = { fd, path: canonical, dev: stat.dev, ino: stat.ino };
@@ -153,7 +154,7 @@ export function compareAndSwapPortableBytes(
       );
     renameAt(directory, temporary, name);
     staged = false;
-    fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
     options.fault?.("after-publication-fsync");
     assertPinnedDirectory(directory);
     lock.assertHeld();

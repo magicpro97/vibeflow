@@ -10,6 +10,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { hasPrivateMode, syncDirectory } from "../../durability/posix-fs-semantics.js";
 import {
   type CapturedTraceAppendV1,
   TraceIdempotencyConflictError,
@@ -88,7 +89,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
         !entry.isDirectory() ||
         !ownerMatches(opened) ||
         !ownerMatches(entry) ||
-        (privateMode && (opened.mode & 0o777) !== 0o700) ||
+        (privateMode && !hasPrivateMode(opened, 0o777, 0o700)) ||
         opened.dev !== entry.dev ||
         opened.ino !== entry.ino
       )
@@ -111,7 +112,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
     assertNoSymlinkPathComponents(canonical, fail);
     const parentFd = this.directoryFd(parent, privateParent);
     try {
-      fsyncSync(parentFd);
+      syncDirectory(parentFd);
     } finally {
       closeSync(parentFd);
     }
@@ -146,7 +147,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
         !ownerMatches(stat) ||
         !ownerMatches(entry) ||
         stat.nlink !== 1 ||
-        (stat.mode & 0o777) !== 0o600 ||
+        !hasPrivateMode(stat, 0o777, 0o600) ||
         stat.dev !== entry.dev ||
         stat.ino !== entry.ino
       )
@@ -176,7 +177,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
     }
     const directoryFd = this.directoryFd(resolve(path, ".."));
     try {
-      fsyncSync(directoryFd);
+      syncDirectory(directoryFd);
     } finally {
       closeSync(directoryFd);
     }
@@ -200,7 +201,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
         fsyncSync(fd);
         const directoryFd = this.directoryFd(resolve(path, ".."));
         try {
-          fsyncSync(directoryFd);
+          syncDirectory(directoryFd);
         } finally {
           closeSync(directoryFd);
         }
