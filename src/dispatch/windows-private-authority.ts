@@ -10,5 +10,8 @@ export {
   type WindowsPrivateAuthority,
   type WindowsSecurityNativeRuntime,
   createWindowsPrivateAuthority,
+  descriptorAllowsForeignWrite,
+  foreignWriteAce,
+  formatWindowsSid,
   loadWindowsPrivateAuthorityBindings,
 } from "../durability/windows-private-authority.js";

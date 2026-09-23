@@ -18,7 +18,7 @@
         "src/durability"
       ],
       "test_sha256": "2af5cdd495f03c0e0171fcc0cd4b29512a7d94a0160ec04ded260d9acb05372c",
-      "production_sha256": "984520351bfeb076a1c04b174eb336181493236f0fd7ea00c5d5f0b877a61ca0"
+      "production_sha256": "0b4947c42c02b96b97599271bf74a3b8c56049f5310f437327a042083942af76"
     },
     {
       "id": "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
@@ -44,7 +44,7 @@
         "src/durability"
       ],
       "test_sha256": "a6e690df8f1f535905552e31429b911d6aec32996e0ab7810ae37790028747f5",
-      "production_sha256": "105cae2808211bfa454347b431f82ce13c64784b916479fe81b2aaaa82f1832e"
+      "production_sha256": "f061719d230e6b8a7a3cb151349ce96da6de00f617754a2a4050d774e936c3d5"
     },
     {
       "id": "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
@@ -57,7 +57,7 @@
         "src/durability"
       ],
       "test_sha256": "fe61f4c5936fa4bbe186b22a310beda838c57c5d7818350dfda3368c36a8d918",
-      "production_sha256": "105cae2808211bfa454347b431f82ce13c64784b916479fe81b2aaaa82f1832e"
+      "production_sha256": "f061719d230e6b8a7a3cb151349ce96da6de00f617754a2a4050d774e936c3d5"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
@@ -162,7 +162,7 @@
         "src/durability"
       ],
       "test_sha256": "8355f07c58b791316f317a8042119269ae897aaeb6f59b0c20c0dadab818cc86",
-      "production_sha256": "49ad8334d0f2884297197978098fbf351b71dc9b19bc13c889b9e98611be4c7f"
+      "production_sha256": "284964a099ea3c3a0e6368e43b773e9435f7510ac3a843da0a7b8bbb35ab92cc"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
@@ -177,7 +177,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "79b408463d12c5ffe5afc2b1162ff349512ed88da16435be27e23b1f6aca6fdf"
+      "production_sha256": "4ae5d0db60002ccb3e6f593bbb95a0b5309c804b460a390efcc02c8383b10a91"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
@@ -192,7 +192,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "79b408463d12c5ffe5afc2b1162ff349512ed88da16435be27e23b1f6aca6fdf"
+      "production_sha256": "4ae5d0db60002ccb3e6f593bbb95a0b5309c804b460a390efcc02c8383b10a91"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
@@ -207,7 +207,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "79b408463d12c5ffe5afc2b1162ff349512ed88da16435be27e23b1f6aca6fdf"
+      "production_sha256": "4ae5d0db60002ccb3e6f593bbb95a0b5309c804b460a390efcc02c8383b10a91"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
@@ -787,7 +787,7 @@
         "src/durability"
       ],
       "test_sha256": "1cb1ae6f66fff3ddb1a4eb37a978c7a1cee8dfd7b1f20e90c50e6b3432e33bff",
-      "production_sha256": "977ba2673301d11ddae36b6044ceb71eb32c4ef7c871fbe9412fc2d7d329ae86"
+      "production_sha256": "cb65ecc8caf91d9ce49e4486d189a544da1bfdd1d9ab7f6489249d01eb283261"
     }
   ],
   "section_dispositions": [
@@ -2517,6 +2517,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "481d325a8addd5a49b4a5b95734ec2dfbd57d8304c662f6dfca7821ddf625bde"
+    "reviewed_payload_sha256": "47e8315af68ca132aec51baee5834a997efdc6bbea5b0b205e65cf652d858c4f"
   }
 }

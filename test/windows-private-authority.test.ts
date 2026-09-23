@@ -5,10 +5,16 @@ import {
   type WindowsPrivateAuthorityBindings,
   type WindowsPrivateDescriptorView,
   createWindowsPrivateAuthority,
+  formatWindowsSid,
   loadWindowsPrivateAuthorityBindings,
 } from "../src/dispatch/windows-private-authority.js";
 
 const USER_SID = Buffer.from([1, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0]);
+
+test("formatWindowsSid renders the S-1-5-… form and rejects an unreadable buffer", () => {
+  expect(formatWindowsSid(USER_SID)).toBe("S-1-5-21");
+  expect(formatWindowsSid(Buffer.from([1, 2]))).toBe("unreadable SID 0x0102");
+});
 const USER_SDDL = "S-1-5-21";
 
 function descriptor(flags = 0): WindowsPrivateDescriptorView {
@@ -95,8 +101,10 @@ describe("Windows private authority", () => {
       ],
     });
     expect(() => foreign.authority.verifyNoForeignWrite(7n)).toThrow(
-      "permissive Windows authority DACL rejected",
+      /permissive Windows authority DACL rejected: S-1-5-32-554 holds mask 0x1f01ff/,
     );
+    const absent = fixture({ ...descriptor(), daclPresent: false, aces: [] });
+    expect(() => absent.authority.verifyNoForeignWrite(7n)).toThrow("the DACL is absent");
     file.authority.migrateToOwnerOnly("C:\\token", WINDOWS_AUTHORITY_PATH_KIND.FILE);
     // By path, not by handle: see the migrateDacl contract on WindowsPrivateAuthorityBindings.
     expect(file.migrated).toEqual([["C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`]]);
