@@ -49,7 +49,7 @@ describe("windows fs shims", () => {
     const bindings = loadWindowsBindings();
     const { fd, path } = pin();
     fs.writeFileSync(join(path, "present"), "x");
-    const opened = bindings.openat(fd, "present", fs.constants.O_RDONLY, 0, 0);
+    const opened = bindings.openat(fd, "present", fs.constants.O_RDONLY, "int", 0);
     expect(opened).toBeGreaterThanOrEqual(0);
     expect(win32LastErrnoValue()).toBe(0);
     fs.closeSync(opened);
@@ -62,7 +62,7 @@ describe("windows fs shims", () => {
       fd,
       "created",
       fs.constants.O_CREAT | fs.constants.O_RDWR,
-      0,
+      "int",
       0o600,
     );
     expect(created).toBeGreaterThanOrEqual(0);
@@ -74,7 +74,7 @@ describe("windows fs shims", () => {
     const bindings = loadWindowsBindings();
     const { fd, path } = pin();
     fs.writeFileSync(join(path, "readable"), "x");
-    const opened = bindings.openat(fd, "readable", 0, 0, 0);
+    const opened = bindings.openat(fd, "readable", 0, "int", 0);
     expect(opened).toBeGreaterThanOrEqual(0);
     fs.closeSync(opened);
   });
@@ -82,10 +82,10 @@ describe("windows fs shims", () => {
   test("openat reports ENOENT for a missing target and for an unregistered fd", () => {
     const bindings = loadWindowsBindings();
     const { fd } = pin();
-    expect(bindings.openat(fd, "absent", fs.constants.O_RDONLY, 0, 0)).toBe(-1);
+    expect(bindings.openat(fd, "absent", fs.constants.O_RDONLY, "int", 0)).toBe(-1);
     expect(win32LastErrnoValue()).toBe(2);
     win32SetErrno(0);
-    expect(bindings.openat(999_999, "any", fs.constants.O_RDONLY, 0, 0)).toBe(-1);
+    expect(bindings.openat(999_999, "any", fs.constants.O_RDONLY, "int", 0)).toBe(-1);
     expect(win32LastErrnoValue()).toBe(2);
   });
 
@@ -220,7 +220,7 @@ describe("windows fs shims", () => {
       fd,
       "adir",
       fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
-      0,
+      "int",
       0o600,
     );
     expect(result).toBe(-1);
