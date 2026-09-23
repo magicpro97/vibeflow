@@ -8,12 +8,22 @@ function safeCommandName(cmd: string): boolean {
 /** Resolve the first executable path for a command, matching platform PATH lookup. */
 export function resolveCommand(cmd: string): string | undefined {
   if (!safeCommandName(cmd)) return undefined;
-  return Bun.which(cmd) ?? undefined;
+  // Bun snapshots PATH at startup, so pass the live value: a caller (or a test) that prepends a
+  // directory to `process.env.PATH` must see its own PATH resolved against.
+  return Bun.which(cmd, { PATH: process.env.PATH }) ?? undefined;
 }
 
-/** Windows .cmd/.bat shims require shell execution under node:child_process. */
+const WINDOWS_SHIM_SUFFIX = /\.(?:cmd|bat)$/i;
+
+/**
+ * Windows .cmd/.bat shims require shell execution under node:child_process.
+ *
+ * A tokenized command string carries the BARE name (`copilot --json`); the shim suffix only shows
+ * up on the path PATH resolution returns (`...\npm\copilot.cmd`), so the token is resolved too.
+ */
 export function needsShellForCommand(cmd: string): boolean {
-  return process.platform === RUNTIME_PLATFORM.WINDOWS && /\.(?:cmd|bat)$/i.test(cmd);
+  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return false;
+  return WINDOWS_SHIM_SUFFIX.test(cmd) || WINDOWS_SHIM_SUFFIX.test(resolveCommand(cmd) ?? "");
 }
 
 /**

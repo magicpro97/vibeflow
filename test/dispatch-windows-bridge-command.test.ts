@@ -15,6 +15,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { shellLaunchArgv } from "../src/core.js";
 import { runDispatchAsync } from "../src/dispatch.js";
 import { runOwnedAiRoute } from "../src/dispatch/owned-ai-route.js";
 import { RUNTIME_PLATFORM } from "../src/durability/process-identity-contract.js";
@@ -25,6 +26,22 @@ const OWNED_LAUNCH_TIMEOUT_MS = 60_000;
 
 const ENGINE_SCRIPT =
   'process.stdin.resume(); process.stdin.on("end", () => { process.stdout.write("BRIDGE-OK\\n"); process.stderr.write("BRIDGE-STDERR\\n"); });';
+
+/** Bare engine name that exists ONLY as a `.cmd` shim — the shape npm installs on Windows. */
+const SHIM_NAME = "vf-bridge-shim";
+const SHIM_MARKER = "BRIDGE-SHIM-OK";
+/** Reads stdin to EOF (the prompt) so the parent's write cannot EPIPE, then proves it ran. */
+const SHIM_SCRIPT = `@echo off\r\nmore >nul\r\necho ${SHIM_MARKER}\r\n`;
+
+/** Write the shim into `dir` and PREPEND `dir` to PATH; returns a PATH restore thunk. */
+function withShimOnPath(dir: string): () => void {
+  writeFileSync(join(dir, `${SHIM_NAME}.cmd`), SHIM_SCRIPT);
+  const originalPath = process.env.PATH ?? "";
+  process.env.PATH = `${dir};${originalPath}`;
+  return () => {
+    process.env.PATH = originalPath;
+  };
+}
 
 describe("bridge dispatch runs a quoted command string on Windows (#805)", () => {
   windowsOnly(
@@ -76,6 +93,69 @@ describe("bridge dispatch runs a quoted command string on Windows (#805)", () =>
         expect(result.stdout).toContain("BRIDGE-OK");
         expect(result.stderr).toContain("BRIDGE-STDERR");
       } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    OWNED_LAUNCH_TIMEOUT_MS,
+  );
+
+  // Copilot review on PR #815: tokenizing the command string is not enough. `copilot --json` has
+  // no `.cmd` suffix on the TOKEN, so shim detection must resolve the token against PATH — npm
+  // installs engines as `copilot.cmd`, which CreateProcess cannot execute.
+  windowsOnly(
+    "runDispatchAsync bridge mode resolves a bare name to its .cmd shim on PATH",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "vf bridge shim-"));
+      const base = mkdtempSync(join(tmpdir(), "vf-bridge-shim-base-"));
+      const restorePath = withShimOnPath(dir);
+      try {
+        // The launch form this path must choose: the tokenized bare name through cmd.exe —
+        // CreateProcess cannot execute a batch file. Before the fix the token carried no `.cmd`
+        // suffix and shim detection missed it, so the argv was launched directly.
+        expect(shellLaunchArgv(`${SHIM_NAME} --json`, [], false)).toEqual([
+          "cmd.exe",
+          "/c",
+          SHIM_NAME,
+          "--json",
+        ]);
+        const stderr: string[] = [];
+        const result = await runDispatchAsync({
+          engine: "claude",
+          prompt: "prompt",
+          mode: "bridge",
+          bridgeCmd: `${SHIM_NAME} --json`,
+          base,
+          onStderrChunk: (chunk) => stderr.push(chunk),
+        });
+        expect(result.raw).toContain(SHIM_MARKER);
+        expect(result.ok).toBe(true);
+      } finally {
+        restorePath();
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+    OWNED_LAUNCH_TIMEOUT_MS,
+  );
+
+  windowsOnly(
+    "runOwnedAiRoute reaches the same .cmd shim when the command arrives as an argv list",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "vf bridge shim argv-"));
+      const restorePath = withShimOnPath(dir);
+      try {
+        const result = await runOwnedAiRoute({
+          engine: "claude",
+          command: SHIM_NAME,
+          args: ["--json"],
+          input: "prompt",
+          cwd: dir,
+          timeoutMs: 30_000,
+        });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain(SHIM_MARKER);
+      } finally {
+        restorePath();
         rmSync(dir, { recursive: true, force: true });
       }
     },

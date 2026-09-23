@@ -1509,7 +1509,12 @@ describe("shellLaunchArgv — Windows command strings (#805)", () => {
 
   test("Windows: a command string is tokenized instead of reaching cmd.exe", () => {
     const origPlatform = process.platform;
+    const origWhich = Bun.which;
     Object.defineProperty(process, "platform", { value: "win32" });
+    // Pin PATH resolution: on a Windows dev box `bun` is itself an npm `.cmd` shim, which now
+    // (correctly) routes through cmd.exe. This test pins the non-shim tokenization instead.
+    (Bun as unknown as { which: typeof Bun.which }).which = (() =>
+      undefined) as unknown as typeof Bun.which;
     try {
       expect(shellLaunchArgv(`"${WIN_EXE}" "${WIN_SCRIPT}"`, [], false)).toEqual([
         WIN_EXE,
@@ -1523,6 +1528,7 @@ describe("shellLaunchArgv — Windows command strings (#805)", () => {
         "--flag",
       ]);
     } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
       Object.defineProperty(process, "platform", { value: origPlatform });
     }
   });
@@ -1545,6 +1551,32 @@ describe("shellLaunchArgv — Windows command strings (#805)", () => {
         "--version",
       ]);
     } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  // Copilot review on PR #815: tokenizing the command string is not enough — `copilot --json`
+  // carries no `.cmd` suffix on the TOKEN. Shim detection must resolve the token against PATH,
+  // or a bare engine name that npm installed as a `.cmd` shim is launched directly.
+  test("Windows: a bare name resolving to a .cmd shim still routes through cmd.exe", () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    // Simulate `Bun.which("copilot")` returning the .cmd shim path that npm installs.
+    const fakeWhich = (cmd: string) =>
+      cmd === "copilot" ? "C:\\Users\\x\\AppData\\Roaming\\npm\\copilot.cmd" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    try {
+      expect(shellLaunchArgv("copilot --json", [], false)).toEqual([
+        "cmd.exe",
+        "/c",
+        "copilot",
+        "--json",
+      ]);
+      // Only a batch shim needs the shell: a native binary keeps the direct argv.
+      expect(shellLaunchArgv("node.exe --version", [], false)).toEqual(["node.exe", "--version"]);
+    } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
       Object.defineProperty(process, "platform", { value: origPlatform });
     }
   });
