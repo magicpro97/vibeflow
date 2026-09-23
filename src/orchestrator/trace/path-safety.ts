@@ -84,7 +84,7 @@ export function ensurePrivateDirectory(input: string, reject: Reject): string {
       !opened.isDirectory() ||
       entry.isSymbolicLink() ||
       !entry.isDirectory() ||
-      !hasPrivateMode(opened, 0o777, 0o700) ||
+      !hasPrivateMode(opened, 0o777, 0o700, requested) ||
       !effectiveOwnerMatches(opened) ||
       !effectiveOwnerMatches(entry) ||
       opened.dev !== entry.dev ||
@@ -131,7 +131,7 @@ export function openPrivateFile(
       !effectiveOwnerMatches(opened) ||
       !effectiveOwnerMatches(observed) ||
       opened.nlink !== 1 ||
-      !hasPrivateMode(opened, 0o777, 0o600) ||
+      !hasPrivateMode(opened, 0o777, 0o600, path) ||
       opened.dev !== observed.dev ||
       opened.ino !== observed.ino ||
       (!allowEmpty && opened.size < 1) ||
@@ -173,7 +173,7 @@ export function syncPrivateDirectory(root: string, reject: Reject): void {
       !observed.isDirectory() ||
       !effectiveOwnerMatches(opened) ||
       !effectiveOwnerMatches(observed) ||
-      !hasPrivateMode(opened, 0o777, 0o700) ||
+      !hasPrivateMode(opened, 0o777, 0o700, canonical) ||
       opened.dev !== observed.dev ||
       opened.ino !== observed.ino
     )

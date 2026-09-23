@@ -50,3 +50,19 @@ Scope files: src/skills/**
 Detection: manual lifecycle review
 Status: active
 Guidance: Parse pointer targets exactly and resolve full mirrors against their real source.
+
+## [AP-007] Win32 flag OR overflows to a negative int32
+Pattern: SOME_FLAG | 0x80000000 passed to a u32 FFI parameter
+Why: JS bitwise OR yields int32, so any mask with bit 31 set becomes negative; the FFI layer marshals that as garbage and the call fails with ERROR_ACCESS_DENIED(5) rather than a type error.
+Scope files: src/durability/**
+Detection: manual lifecycle review
+Guidance: Coerce every Win32 flag combination containing bit 31 with `>>> 0` before it crosses the FFI boundary.
+Status: active
+
+## [AP-008] Platform check that returns true when it cannot check
+Pattern: if (input === undefined) return true; inside a trust-boundary predicate
+Why: A security predicate whose unknown case is "safe" passes without checking anything; every caller that omits the optional argument silently bypasses the boundary.
+Scope files: src/durability/**, src/orchestrator/**, src/capabilities/**
+Detection: manual lifecycle review
+Guidance: Make the input required so the type system forces each call site to supply it, or fail closed.
+Status: active

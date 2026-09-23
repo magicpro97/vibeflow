@@ -246,6 +246,17 @@ export function createWindowsKernelLockProvider(
   binding: WindowsRecordNativeBindings = loadWindowsRecordNativeBindings(),
   privateAuthority: WindowsPrivateAuthority | null | undefined = null,
 ): WindowsKernelLockProvider {
+  // Migration is by path: SetNamedSecurityInfoW replaces the DACL, while SetSecurityInfo on a
+  // READ_CONTROL|WRITE_DAC handle returns success and changes nothing (measured on Windows 11).
+  const migrateIfNeeded = (path: string): void => {
+    if (!privateAuthority) return;
+    privateAuthority.migrateToOwnerOnly(path, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+  };
+  // A lock file is held to the weaker policy: it may keep the DACL it inherited from the profile
+  // directory (SYSTEM, Administrators, owner), which is what a POSIX 0755 lock directory grants
+  // too. verifyHandle's owner-only rule stays on the data files whose contents are the boundary —
+  // applying it here rejects every pre-existing install on the first CreateFileW that opens an
+  // existing lock instead of creating one (see #807).
   return {
     tryAcquire(path) {
       const create = (security: unknown) => {
@@ -265,76 +276,112 @@ export function createWindowsKernelLockProvider(
           throw nativeError("CreateFileW", binding.lastError());
         return created;
       };
+      let closed = false;
       const handle = privateAuthority
         ? privateAuthority.withCreationSecurity(WINDOWS_AUTHORITY_PATH_KIND.FILE, create)
         : create(null);
-      let closed = false;
-      const close = () => {
-        if (closed) return;
-        closed = true;
-        checked(binding, "CloseHandle", binding.closeHandle(handle));
-      };
-      try {
-        privateAuthority?.verifyHandle(handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
-        const identity = fileIdentity(binding, handle);
-        checked(binding, "FlushFileBuffers", binding.flushFile(handle));
-        const overlapped = newOverlapped();
-        if (
-          binding.lockFile(
-            handle,
-            WINDOWS_NATIVE_RECORD.LOCKFILE_EXCLUSIVE_LOCK |
-              WINDOWS_NATIVE_RECORD.LOCKFILE_FAIL_IMMEDIATELY,
-            0,
-            WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
-            0,
-            overlapped,
-          ) === 0
-        ) {
-          const code = binding.lastError();
-          const primary = nativeError("LockFileEx", code);
-          if (code === WINDOWS_NATIVE_RECORD.ERROR_LOCK_VIOLATION) {
-            close();
-            return null;
-          }
-          return cleanupThenThrow(primary, [close]);
-        }
-        let released = false;
-        return {
-          assertHeld() {
-            if (released || !timingSafeEqual(identity, fileIdentity(binding, handle)))
-              durabilityError("lock_lost", "Windows kernel lock ownership lost");
-          },
-          release() {
-            if (released) durabilityError("lock_lost", "Windows kernel lock is released");
-            released = true;
-            runCleanups([
-              () => checked(binding, "FlushFileBuffers", binding.flushFile(handle)),
-              () =>
-                checked(
-                  binding,
-                  "UnlockFileEx",
-                  binding.unlockFile(
-                    handle,
-                    0,
-                    WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
-                    0,
-                    overlapped,
-                  ),
-                ),
-              close,
-            ]);
-          },
-        };
-      } catch (error) {
-        if (!closed) {
+      if (privateAuthority) {
+        try {
+          privateAuthority.verifyNoForeignWrite(handle);
+        } catch (verifyError) {
+          closed = true;
           try {
-            close();
+            binding.closeHandle(handle);
           } catch {
-            /* Preserve the primary native failure. */
+            /* non-fatal */
           }
+          const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
+          if (!msg.includes("permissive Windows authority DACL rejected")) throw verifyError;
+          // A lock file that does grant write to another principal is repaired in place, then
+          // re-checked: the owner-only migration is a superset of the policy it has to satisfy.
+          migrateIfNeeded(path);
+          const final = create(null);
+          try {
+            privateAuthority.verifyNoForeignWrite(final);
+          } catch {
+            try {
+              binding.closeHandle(final);
+            } catch {
+              /* ignore */
+            }
+            throw verifyError;
+          }
+          return acquireVerifiedHandle(final, binding);
         }
-        throw error;
       }
+      return acquireVerifiedHandle(handle, binding);
     },
   };
+}
+
+function acquireVerifiedHandle(
+  handle: bigint,
+  binding: WindowsRecordNativeBindings,
+): WindowsKernelLock | null {
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    checked(binding, "CloseHandle", binding.closeHandle(handle));
+  };
+  try {
+    const identity = fileIdentity(binding, handle);
+    checked(binding, "FlushFileBuffers", binding.flushFile(handle));
+    const overlapped = newOverlapped();
+    if (
+      binding.lockFile(
+        handle,
+        WINDOWS_NATIVE_RECORD.LOCKFILE_EXCLUSIVE_LOCK |
+          WINDOWS_NATIVE_RECORD.LOCKFILE_FAIL_IMMEDIATELY,
+        0,
+        WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
+        0,
+        overlapped,
+      ) === 0
+    ) {
+      const code = binding.lastError();
+      const primary = nativeError("LockFileEx", code);
+      if (code === WINDOWS_NATIVE_RECORD.ERROR_LOCK_VIOLATION) {
+        close();
+        return null;
+      }
+      return cleanupThenThrow(primary, [close]);
+    }
+    let released = false;
+    return {
+      assertHeld() {
+        if (released || !timingSafeEqual(identity, fileIdentity(binding, handle)))
+          durabilityError("lock_lost", "Windows kernel lock ownership lost");
+      },
+      release() {
+        if (released) durabilityError("lock_lost", "Windows kernel lock is released");
+        released = true;
+        runCleanups([
+          () => checked(binding, "FlushFileBuffers", binding.flushFile(handle)),
+          () =>
+            checked(
+              binding,
+              "UnlockFileEx",
+              binding.unlockFile(
+                handle,
+                0,
+                WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
+                0,
+                overlapped,
+              ),
+            ),
+          close,
+        ]);
+      },
+    };
+  } catch (error) {
+    if (!closed) {
+      try {
+        close();
+      } catch {
+        /* Preserve the primary native failure. */
+      }
+    }
+    throw error;
+  }
 }

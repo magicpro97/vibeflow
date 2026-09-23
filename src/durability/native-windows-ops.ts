@@ -32,8 +32,8 @@ export const windowsPinRuntime = (): WindowsPinRuntimeV1 => ({
  *
  * B4: NTFS file ids need 57 bits, so the bigint pair is authoritative and the Number-typed
  * dev/ino are carried alongside only for callers that predate it.
- * B2: privacy lives in the ACL rather than mode bits, so there is no 0o700 check here; see #807
- * for the ACL verification that is still missing.
+ * B2: privacy is enforced by the ACL (SE_DACL_PROTECTED + owner-only ACE); fchmodat in
+ * windows-fs-shims.ts applies the ACL on directory creation via windowsApplyOwnerAcl.
  */
 export function pinWindowsDirectory(
   fd: number,
@@ -81,15 +81,6 @@ export function tryWindowsAdvisoryLock(
  *
  * Lazy on purpose: constructing it loads Windows FFI, which must not happen at module init on
  * POSIX. `create` is a parameter so the memoization itself is testable without Windows.
- *
- * No privateAuthority is passed. The Bun FFI defect that used to block it is fixed, but
- * verifyHandle demands a DACL of exactly one owner-only ACE, while a lock file under
- * %USERPROFILE% inherits three (SYSTEM, Administrators, user) and CreateFileW applies security
- * attributes only when it CREATES the file. Measured on an existing lock:
- *   NT AUTHORITY\SYSTEM:(I)(F)  BUILTIN\Administrators:(I)(F)  <user>:(I)(F)
- * so enabling it fails closed with "permissive Windows authority DACL rejected" on every
- * pre-existing install. Turning it on needs a policy that accepts the standard inherited ACEs
- * plus a migration for existing lock files: tracked in #807.
  */
 export function memoizedWindowsLockProvider(
   create: () => WindowsKernelLockProvider,

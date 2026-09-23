@@ -3,65 +3,48 @@ import { durabilityError } from "./errors.js";
 import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
 import { loadWindowsPrivateAuthorityBun } from "./windows-private-authority-bun.js";
 import { loadWindowsPrivateAuthorityKoffi } from "./windows-private-authority-koffi.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  WINDOWS_PRIVATE_SECURITY,
+  type WindowsAuthorityPathKind,
+  type WindowsCreationSecurity,
+  type WindowsPrivateAce,
+  type WindowsPrivateAuthorityBindings,
+  type WindowsPrivateDescriptorView,
+  descriptorAllowsForeignWrite,
+  foreignWriteAce,
+  formatWindowsSid,
+} from "./windows-private-contract.js";
 
-export const WINDOWS_AUTHORITY_PATH_KIND = Object.freeze({
-  FILE: "file",
-  DIRECTORY: "directory",
-} as const);
-
-export type WindowsAuthorityPathKind =
-  (typeof WINDOWS_AUTHORITY_PATH_KIND)[keyof typeof WINDOWS_AUTHORITY_PATH_KIND];
-
-export const WINDOWS_PRIVATE_SECURITY = Object.freeze({
-  TOKEN_QUERY: 0x8,
-  TOKEN_USER_CLASS: 1,
-  OWNER_INFORMATION: 0x1,
-  DACL_INFORMATION: 0x4,
-  PROTECTED_DACL_INFORMATION: 0x8000_0000,
-  SE_FILE_OBJECT: 1,
-  SE_DACL_PROTECTED: 0x1000,
-  ACCESS_ALLOWED_ACE_TYPE: 0,
-  OBJECT_INHERIT_ACE: 0x1,
-  CONTAINER_INHERIT_ACE: 0x2,
-  FILE_ALL_ACCESS: 0x001f_01ff,
-  ACL_SIZE_INFORMATION_CLASS: 2,
-  ERROR_INSUFFICIENT_BUFFER: 122,
-  SDDL_REVISION: 1,
-  ACL_INFORMATION_BYTES: 12,
-  ACL_HEADER_BYTES: 8,
-  ACE_HEADER_BYTES: 4,
-  ACCESS_ALLOWED_SID_OFFSET: 8,
-} as const);
-
-export interface WindowsPrivateAce {
-  type: number;
-  flags: number;
-  mask: number;
-  sid: Buffer;
-}
-
-export interface WindowsPrivateDescriptorView {
-  control: number;
-  owner: Buffer;
-  daclPresent: boolean;
-  daclDefaulted: boolean;
-  aces: readonly WindowsPrivateAce[];
-}
-
-export interface WindowsCreationSecurity {
-  attributes: unknown;
-  release(): void;
-}
-
-export interface WindowsPrivateAuthorityBindings {
-  currentUser(): { sid: Buffer; sddl: string };
-  createSecurity(sddl: string): WindowsCreationSecurity;
-  inspect(handle: bigint): WindowsPrivateDescriptorView;
-}
+export {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  WINDOWS_PRIVATE_SECURITY,
+  descriptorAllowsForeignWrite,
+  foreignWriteAce,
+  formatWindowsSid,
+  type WindowsAuthorityPathKind,
+  type WindowsCreationSecurity,
+  type WindowsPrivateAce,
+  type WindowsPrivateAuthorityBindings,
+  type WindowsPrivateDescriptorView,
+};
 
 export interface WindowsPrivateAuthority {
   withCreationSecurity<T>(kind: WindowsAuthorityPathKind, create: (attributes: unknown) => T): T;
   verifyHandle(handle: bigint, kind: WindowsAuthorityPathKind): void;
+  /** Read the owner/DACL view behind a handle, for callers that apply their own policy to it. */
+  inspect(handle: bigint): WindowsPrivateDescriptorView;
+  /**
+   * The weaker policy for containers and lock files: throw unless the descriptor behind the handle
+   * refuses write to every principal but the owner and the root-equivalent SIDs. A path that has
+   * merely inherited the standard DACL passes, which is what an upgrade over an existing install
+   * needs — see verifyHandle for the stricter rule the data files are held to.
+   */
+  verifyNoForeignWrite(handle: bigint): void;
+  /** The SID of the account running this process, for callers applying their own descriptor policy. */
+  currentUserId(): Buffer;
+  /** Reset an existing file/dir's DACL in-place to owner-only + SE_DACL_PROTECTED. */
+  migrateToOwnerOnly(path: string, kind: WindowsAuthorityPathKind): void;
 }
 
 export interface WindowsSecurityNativeRuntime {
@@ -92,6 +75,15 @@ export interface WindowsSecurityNativeRuntime {
     dacl: unknown[],
     sacl: unknown[],
     descriptor: unknown[],
+  ): number;
+  setNamedSecurityInfo(
+    path: Buffer,
+    type: number,
+    info: number,
+    owner: unknown,
+    group: unknown,
+    dacl: unknown,
+    sacl: unknown,
   ): number;
   descriptorControl(descriptor: unknown, control: number[], revision: number[]): number;
   descriptorDacl(
@@ -127,6 +119,21 @@ export function createWindowsPrivateAuthority(
       const security = bindings.createSecurity(descriptorSddl(user.sddl, kind));
       return withCleanup(() => create(security.attributes), [security.release]);
     },
+    inspect(handle) {
+      return bindings.inspect(handle);
+    },
+    currentUserId: () => bindings.currentUser().sid,
+    verifyNoForeignWrite(handle) {
+      const view = bindings.inspect(handle);
+      const holder = foreignWriteAce(view, bindings.currentUser().sid);
+      if (view.daclPresent && !view.daclDefaulted && holder === null) return;
+      durabilityError(
+        "unsafe_path",
+        holder === null
+          ? "permissive Windows authority DACL rejected: the DACL is absent"
+          : `permissive Windows authority DACL rejected: ${formatWindowsSid(holder.sid)} holds mask 0x${(holder.mask >>> 0).toString(16)} (owner ${formatWindowsSid(view.owner)})`,
+      );
+    },
     verifyHandle(handle, kind) {
       const descriptor = bindings.inspect(handle);
       const [ace] = descriptor.aces;
@@ -143,6 +150,9 @@ export function createWindowsPrivateAuthority(
         !ace.sid.equals(user.sid)
       )
         durabilityError("unsafe_path", "permissive Windows authority DACL rejected");
+    },
+    migrateToOwnerOnly(path, kind) {
+      bindings.migrateDacl(path, descriptorSddl(user.sddl, kind));
     },
   };
 }
@@ -237,6 +247,47 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       release: () => runCleanups([attributes.release, () => native.localFree(descriptor[0])]),
     };
   };
+  const migrateDacl = (path: string, sddl: string): void => {
+    const descriptor: unknown[] = [null];
+    if (
+      !native.convertDescriptor(
+        Buffer.from(`${sddl}\0`, "utf16le"),
+        WINDOWS_PRIVATE_SECURITY.SDDL_REVISION,
+        descriptor,
+        [0],
+      )
+    )
+      failed("ConvertStringSecurityDescriptorToSecurityDescriptorW(migrate)");
+    try {
+      const present = [0];
+      const dacl: unknown[] = [null];
+      const defaulted = [0];
+      if (
+        !native.descriptorDacl(descriptor[0], present, dacl, defaulted) ||
+        !present[0] ||
+        !dacl[0]
+      )
+        failed("GetSecurityDescriptorDacl(migrate)");
+      const code = native.setNamedSecurityInfo(
+        Buffer.from(`${path}\0`, "utf16le"),
+        WINDOWS_PRIVATE_SECURITY.SE_FILE_OBJECT,
+        // >>> 0: PROTECTED_DACL_INFORMATION is 0x80000000, so the bitwise OR yields a negative
+        // int32 in JS. Passing that to a u32 FFI parameter reaches Windows as garbage flags and
+        // the call fails with ERROR_ACCESS_DENIED(5).
+        (WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
+          WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
+          0,
+        null,
+        null,
+        dacl[0],
+        null,
+      );
+      if (code !== 0)
+        durabilityError("unsafe_path", `SetNamedSecurityInfoW failed with Windows error ${code}`);
+    } finally {
+      native.localFree(descriptor[0]);
+    }
+  };
   const inspect = (handle: bigint): WindowsPrivateDescriptorView => {
     const owner: unknown[] = [null];
     const dacl: unknown[] = [null];
@@ -312,7 +363,7 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       };
     }, [() => native.localFree(descriptor[0])]);
   };
-  return { currentUser, createSecurity, inspect };
+  return { currentUser, createSecurity, inspect, migrateDacl };
 }
 
 export function loadWindowsPrivateAuthorityBindings(

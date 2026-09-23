@@ -141,6 +141,23 @@ regression coverage. Live Windows evidence is accepted only from a green, exact-
 `windows-latest` CI smoke job; a local macOS/Linux run is not a Windows canary.
 See `docs/ENGINE-COMPAT.md` for adapter-specific resume contracts.
 
+### Windows path privacy (DACL policy)
+
+POSIX mode bits do not exist on Windows, so durability paths prove privacy through their DACL
+instead: exactly one allow ACE for the current user, with `SE_DACL_PROTECTED` set so the three
+ACEs a path normally inherits (SYSTEM, Administrators, owner) cannot creep back in. Paths created
+before this policy are migrated in place on first use rather than rejected, so an existing install
+keeps working.
+
+Three Win32 details this depends on, each measured rather than assumed:
+
+- Migration applies **by path** (`SetNamedSecurityInfoW`). `SetSecurityInfo` on a handle opened
+  with `READ_CONTROL|WRITE_DAC` returns `0` and leaves the DACL untouched.
+- Any flag mask with bit 31 set (`PROTECTED_DACL_INFORMATION` is `0x80000000`) must be coerced
+  with `>>> 0`; JS bitwise OR produces a negative int32 that reaches Win32 as garbage flags.
+- Opening a **directory** with `CreateFileW` requires `FILE_FLAG_BACKUP_SEMANTICS`, otherwise the
+  ACL check fails to obtain a handle and every directory reads as not-private.
+
 ## Conversation Turn Delivery
 
 Public participant input is a canonical JSON envelope prefixed by `VF-TURN/1`. Claude,

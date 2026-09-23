@@ -1065,25 +1065,90 @@ describe("native Windows record adapters", () => {
     const fixture = nativeFixture();
     const calls: unknown[] = [];
     const privacy: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
       withCreationSecurity: (kind, create) => {
         expect(kind).toBe(WINDOWS_AUTHORITY_PATH_KIND.FILE);
         return create({ private: true });
       },
-      verifyHandle: (handle, kind) => calls.push([handle, kind]),
+      currentUserId: () => Buffer.alloc(0),
+      verifyNoForeignWrite: (handle) => calls.push(handle),
+      verifyHandle: () => undefined,
+      migrateToOwnerOnly: () => undefined,
     };
     const lock = createWindowsKernelLockProvider(fixture.binding, privacy).tryAcquire("C:\\lock");
     expect(fixture.calls.create[0]?.[3]).toEqual({ private: true });
-    expect(calls).toEqual([[41n, WINDOWS_AUTHORITY_PATH_KIND.FILE]]);
+    expect(calls).toEqual([41n]);
     lock?.release();
     const permissive: WindowsPrivateAuthority = {
       ...privacy,
-      verifyHandle: () => {
+      verifyNoForeignWrite: () => {
         throw new Error("permissive existing lock metadata");
       },
     };
     expect(() =>
       createWindowsKernelLockProvider(nativeFixture().binding, permissive).tryAcquire("C:\\lock"),
     ).toThrow("permissive existing lock metadata");
+  });
+
+  test("migrates a lock file that grants write to another principal, then re-verifies it", () => {
+    const migrated: string[] = [];
+    let verifications = 0;
+    const stale: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
+      withCreationSecurity: (_kind, create) => create({ private: true }),
+      verifyNoForeignWrite: () => {
+        verifications += 1;
+        // The handle opened at creation grants write to another principal; the in-place migration
+        // is what makes the re-opened handle acceptable.
+        if (verifications === 1) throw new Error("permissive Windows authority DACL rejected");
+      },
+      verifyHandle: () => undefined,
+      currentUserId: () => Buffer.alloc(0),
+      migrateToOwnerOnly: (path, kind) => migrated.push(`${path}:${kind}`),
+    };
+    const lock = createWindowsKernelLockProvider(nativeFixture().binding, stale).tryAcquire(
+      "C:\\lock",
+    );
+    expect(migrated).toEqual([`C:\\lock:${WINDOWS_AUTHORITY_PATH_KIND.FILE}`]);
+    expect(verifications).toBe(2);
+    lock?.release();
+  });
+
+  test("gives up when the lock file still grants a foreign write after migration", () => {
+    const stillPermissive: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
+      withCreationSecurity: (_kind, create) => create({ private: true }),
+      verifyNoForeignWrite: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      currentUserId: () => Buffer.alloc(0),
+      verifyHandle: () => undefined,
+      migrateToOwnerOnly: () => undefined,
+    };
+    const fixture = nativeFixture();
+    expect(() =>
+      createWindowsKernelLockProvider(fixture.binding, stillPermissive).tryAcquire("C:\\lock"),
+    ).toThrow("permissive Windows authority DACL rejected");
+    // Both handles — the creation one and the re-opened one — are closed on the way out.
+    expect(fixture.calls.close).toBe(2);
   });
 
   test("returns busy only for ERROR_LOCK_VIOLATION and closes the HANDLE", () => {

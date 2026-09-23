@@ -31,6 +31,7 @@ import {
   createWindowsKernelLockProvider,
   loadWindowsRecordNativeBindings,
 } from "./windows-kernel-lock.js";
+import { createWindowsPrivateAuthority } from "./windows-private-authority.js";
 
 export {
   type PinnedDirectory,
@@ -56,7 +57,10 @@ const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefi
 const WIN32_KERNEL_LOCKS: Map<number, WindowsKernelLock> = new Map();
 
 const getWinLockProvider = memoizedWindowsLockProvider(() =>
-  createWindowsKernelLockProvider(loadWindowsRecordNativeBindings(), undefined),
+  createWindowsKernelLockProvider(
+    loadWindowsRecordNativeBindings(),
+    createWindowsPrivateAuthority(),
+  ),
 );
 
 export function canonicalDurabilityPath(input: string): string {
@@ -96,21 +100,33 @@ function assertDirectory(fd: number, path: string, privateMode: boolean): Pinned
   return pinned;
 }
 
-function openDirectoryAt(parentFd: number, name: string, path: string, create: boolean): number {
+function openDirectoryAt(
+  parentFd: number,
+  name: string,
+  path: string,
+  create: boolean,
+  privateLeaf = false,
+): number {
   const api = native();
   let fd = api.openat(parentFd, name, DIRECTORY_FLAGS, "int", 0);
   if (fd >= 0) return fd;
   if (!create || !errnoIs("ENOENT")) syscallFailure(`openat directory ${path}`);
   const created = api.mkdirat(parentFd, name, 0o700) === 0;
   if (!created && !errnoIs("EEXIST")) syscallFailure(`mkdirat directory ${path}`);
-  if (created && api.fchmodat(parentFd, name, 0o700, 0) !== 0) {
+  // On Windows fchmodat is the DACL rather than a mode bit, and a private directory that already
+  // exists is still a trust boundary: the context writer creates .vibeflow with plain fs calls, so
+  // the directory this walks into can carry the inherited, group-writable DACL and would then be
+  // rejected as "not owner-safe" on first use. Only the leaf is re-ACL'd — the ancestors are
+  // ordinary filesystem directories and not ours to rewrite.
+  const repair = created || (privateLeaf && process.platform === RUNTIME_PLATFORM.WINDOWS);
+  if (repair && api.fchmodat(parentFd, name, 0o700, 0) !== 0) {
     let primary: unknown;
     try {
       syscallFailure(`fchmodat directory ${path}`);
     } catch (error) {
       primary = error;
     }
-    api.unlinkat(parentFd, name, AT_REMOVEDIR);
+    if (created) api.unlinkat(parentFd, name, AT_REMOVEDIR);
     throw primary;
   }
   // B3: NTFS has no dirent-flush equivalent; FlushFileBuffers on a directory handle is
@@ -141,7 +157,7 @@ export function openPrivateDirectory(input: string, create: boolean): PinnedDire
     for (let index = 0; index < parts.length; index++) {
       const part = parts[index] as string;
       const nextPath = join(cursor, part);
-      const nextFd = openDirectoryAt(fd, part, nextPath, create);
+      const nextFd = openDirectoryAt(fd, part, nextPath, create, index === parts.length - 1);
       let next: PinnedDirectory;
       try {
         next = assertDirectory(nextFd, nextPath, index === parts.length - 1);
@@ -188,10 +204,17 @@ export function openPinnedDescendant(
     durabilityError("lock_lost", "owning lock does not cover target directory");
   let current: PinnedDirectory | null = duplicatePinnedDirectory(root);
   try {
-    for (const part of relationship.split(sep).filter(Boolean)) {
+    const parts = relationship.split(sep).filter(Boolean);
+    for (const [index, part] of parts.entries()) {
       const previous = current;
       const nextPath = join(previous.path, part);
-      const nextFd = openDirectoryAt(previous.fd, part, nextPath, create);
+      const nextFd = openDirectoryAt(
+        previous.fd,
+        part,
+        nextPath,
+        create,
+        index === parts.length - 1,
+      );
       let next: PinnedDirectory;
       try {
         next = assertDirectory(nextFd, nextPath, true);

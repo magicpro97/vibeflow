@@ -116,7 +116,11 @@ export function openPrivateChildDirectoryReadOnly(
   if (fd === null) return missing(path);
   try {
     const stat = fs.fstatSync(fd);
-    if (!stat.isDirectory() || !effectiveOwnerMatches(stat) || !hasPrivateMode(stat, 0o7777, 0o700))
+    if (
+      !stat.isDirectory() ||
+      !effectiveOwnerMatches(stat) ||
+      !hasPrivateMode(stat, 0o7777, 0o700, path)
+    )
       unsafe();
     const directory = { fd, path, dev: stat.dev, ino: stat.ino };
     assertPinnedDirectory(directory);
@@ -158,11 +162,12 @@ function validateOpenedFile(
 ): PrivateFileSnapshotV1 {
   assertPrivateDirectorySnapshot(directory);
   const opened = fs.fstatSync(fd);
+  const path = join(directory.path, name);
   if (
     !opened.isFile() ||
     !effectiveOwnerMatches(opened) ||
     opened.nlink !== 1 ||
-    !hasPrivateMode(opened, 0o7777, 0o600) ||
+    !hasPrivateMode(opened, 0o7777, 0o600, path) ||
     (!allowEmpty && opened.size === 0) ||
     opened.size > maximum
   )
@@ -171,7 +176,7 @@ function validateOpenedFile(
     fd,
     directory,
     name,
-    path: join(directory.path, name),
+    path,
     dev: opened.dev,
     ino: opened.ino,
     size: opened.size,
@@ -229,7 +234,7 @@ export function assertPrivateFileSnapshot(snapshot: PrivateFileSnapshotV1): void
       !observed.isFile() ||
       !effectiveOwnerMatches(observed) ||
       observed.nlink !== 1 ||
-      !hasPrivateMode(observed, 0o7777, 0o600)
+      !hasPrivateMode(observed, 0o7777, 0o600, snapshot.path)
     )
       unsafe();
   } finally {

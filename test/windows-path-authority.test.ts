@@ -210,11 +210,21 @@ function nativeFixture() {
   };
   let verifyFailure: Error | undefined;
   const privacy: WindowsPrivateAuthority = {
+    inspect: () => ({
+      control: 0,
+      owner: Buffer.alloc(0),
+      daclPresent: true,
+      daclDefaulted: false,
+      aces: [],
+    }),
+    currentUserId: () => Buffer.from([1, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0]),
+    verifyNoForeignWrite: () => undefined,
     withCreationSecurity: (_kind, create) => create({ tokenUserOnly: true }),
     verifyHandle: (handle, kind) => {
       calls.security.push([handle, kind]);
       if (verifyFailure) throw verifyFailure;
     },
+    migrateToOwnerOnly: () => undefined,
   };
   return {
     authority: createNativeWindowsPathAuthority(binding, privacy),

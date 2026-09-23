@@ -1,6 +1,11 @@
 import * as fs from "node:fs";
 import { join } from "node:path";
 import type { NativeBindings } from "./native-runtime.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  type WindowsAclOpsOptions,
+  windowsApplyOwnerAcl,
+} from "./windows-acl-ops.js";
 
 /**
  * Windows-specific NativeBindings backed by node:fs with a module-level fd→path registry.
@@ -40,7 +45,11 @@ export function win32LastErrnoValue(): number {
   return win32LastErrno;
 }
 
-export function loadWindowsBindings(): NativeBindings {
+/**
+ * @param acl Injection seam for the Win32 ACL machinery behind fchmodat. Production callers omit
+ *   it; a test supplies fakes so both the applied and the rejected branch run on any platform.
+ */
+export function loadWindowsBindings(acl: WindowsAclOpsOptions = {}): NativeBindings {
   // ponytail: no-op flock — advisory locking is handled via WindowsKernelLockProvider
   // in tryAdvisoryLock/releaseAdvisoryLock in native.ts.
   return {
@@ -78,11 +87,24 @@ export function loadWindowsBindings(): NativeBindings {
         return -1;
       }
     },
-    fchmodat(_directoryFd, _name, _mode, _flags) {
-      // ponytail: no-op on Windows — privacy lives in the ACL, not mode bits (B2).
-      // Upgrade: set DACL via SetNamedSecurityInfoW when ACL enforcement is required.
-      win32SetErrno(0);
-      return 0;
+    fchmodat(directoryFd, name, _mode, _flags) {
+      const base = WIN32_FD_PATHS.get(directoryFd);
+      if (base === undefined) {
+        // Every other *at shim reports the unknown fd through node:fs. This one has no node:fs
+        // call to do it, and reporting success would claim an ACL that was never applied: the
+        // native.ts caller unlinks the directory it cannot secure.
+        win32SetErrno(2 /* ENOENT */);
+        return -1;
+      }
+      const target = join(base, name);
+      try {
+        windowsApplyOwnerAcl(target, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, acl);
+        win32SetErrno(0);
+        return 0;
+      } catch {
+        win32SetErrno(13 /* EACCES */);
+        return -1;
+      }
     },
     renameat(fromFd, from, toFd, to) {
       const fromBase = WIN32_FD_PATHS.get(fromFd);
