@@ -129,6 +129,37 @@ jobs:
           if (-not (Test-Path $vf)) { throw "npm did not create Windows vf.cmd shim" }
           & $vf --version
           if ($LASTEXITCODE -ne 0) { throw "installed vf --version failed with $LASTEXITCODE" }
+      - name: Run vf init through the installed Windows shim
+        if: matrix.suite == 'package-smoke'
+        shell: pwsh
+        # This is the path a Windows user actually takes, and nothing else in CI covered it:
+        # #801 shipped a `vf init` that failed on every Windows machine while CI stayed green,
+        # because the suites above only ever ran `--version` and `git init`.
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "vf package smoke"
+          $vf = Join-Path (Join-Path $root "prefix") "vf.cmd"
+          $project = Join-Path $root "init project"
+          New-Item -ItemType Directory -Force $project | Out-Null
+          Push-Location $project
+          try {
+            & git init --quiet .
+            if ($LASTEXITCODE -ne 0) { throw "git init failed with $LASTEXITCODE" }
+            & $vf init --no-ask --no-ai
+            if ($LASTEXITCODE -ne 0) { throw "vf init failed with $LASTEXITCODE" }
+            foreach ($artifact in @(".vibeflow", "AGENTS.md")) {
+              if (-not (Test-Path (Join-Path $project $artifact))) {
+                throw "vf init reported success but did not write $artifact"
+              }
+            }
+            # Re-running must be idempotent: users hit this every time they re-init a project,
+            # and it is the run that trips stale lock state left by the first one.
+            & $vf init --no-ask --no-ai
+            if ($LASTEXITCODE -ne 0) { throw "second vf init failed with $LASTEXITCODE" }
+            & $vf doctor
+            if ($LASTEXITCODE -ne 0) { throw "vf doctor failed with $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
       - name: Exercise installed package worktree path
         if: matrix.suite == 'package-smoke'
         run: bun test --timeout 30000 test/package-portability.test.ts

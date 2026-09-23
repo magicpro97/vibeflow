@@ -83,7 +83,7 @@ function readAt(directory: PinnedDirectory, name: string, maxBytes: number): Buf
     assertPinnedDirectory(directory);
     return bytes;
   } finally {
-    fs.closeSync(fd);
+    closeTrackedFd(fd);
   }
 }
 

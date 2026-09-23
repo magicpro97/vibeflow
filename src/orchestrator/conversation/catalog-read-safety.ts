@@ -194,7 +194,7 @@ export function tryOpenPrivateFileReadOnlyAt(
   try {
     return validateOpenedFile(directory, name, fd, maximum, allowEmpty);
   } catch (error) {
-    fs.closeSync(fd);
+    closeTrackedFd(fd);
     throw error;
   }
 }
@@ -233,7 +233,7 @@ export function assertPrivateFileSnapshot(snapshot: PrivateFileSnapshotV1): void
     )
       unsafe();
   } finally {
-    fs.closeSync(observedFd);
+    closeTrackedFd(observedFd);
   }
   assertPrivateDirectorySnapshot(snapshot.directory);
 }

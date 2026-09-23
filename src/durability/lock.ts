@@ -262,7 +262,11 @@ function makeHandle(path: string, owner: ProcessLockOwnerV1, state: LockState): 
       const pending = readStableLockRecord(current.fd, current.name);
       if (pending.payload !== null || pending.generation !== current.pendingReleaseGeneration)
         durabilityError("lock_lost", "process lock release slot was not retained exactly");
-      syncDirectory(current.fd);
+      // current.fd is the lock FILE, not a directory: syncDirectory returns without syncing on
+      // Windows, so routing this through it left the emptied owner slot unflushed and a crash
+      // could resurrect stale ownership. Directory durability is current.root.fd's job.
+      fs.fsyncSync(current.fd);
+      syncDirectory(current.root.fd);
       assertPinnedDirectory(current.root);
       finishRelease(current);
     },

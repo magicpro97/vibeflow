@@ -123,7 +123,7 @@ function readAt(directory: PinnedDirectory, name: string): Buffer | null {
     }
     return bytes;
   } finally {
-    fs.closeSync(fd);
+    closeTrackedFd(fd);
   }
 }
 

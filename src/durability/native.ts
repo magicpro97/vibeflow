@@ -22,7 +22,6 @@ import {
   type PinnedDirectory,
   assertPinnedDirectory,
   pinnedDirectoryPath,
-  pinnedDirectoryPathMatches,
 } from "./pinned-directory.js";
 import { syncDirectory } from "./posix-fs-semantics.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
