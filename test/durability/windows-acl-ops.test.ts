@@ -35,7 +35,21 @@ const FILE_GENERIC_READ = 0x0012_0089;
 const FILE_GENERIC_EXECUTE = 0x0012_00a0;
 
 // Every test drives the module through its injection seam, so the suite runs identically on a Linux
-// CI runner and on Windows. The real Win32 round trip is covered by windows-owner-acl.test.ts.
+// CI runner and on Windows. The real Win32 round trip is covered by windows-owner-acl.test.ts and
+// windows-acl-identity.test.ts.
+const IDENTITY_DEV = 7;
+const IDENTITY_INO = 11n;
+
+// FILE_ID_INFO as the identity gate reads it: the volume serial number, then the file id at offset 8.
+function fileIdInfo(dev: number, ino: bigint) {
+  return (_handle: bigint, informationClass: number, output: Buffer): number => {
+    if (informationClass !== WINDOWS_NATIVE_RECORD.FILE_ID_INFO_CLASS) return 0;
+    output.writeUInt32LE(dev, 0);
+    output.writeBigUInt64LE(ino, 8);
+    return 1;
+  };
+}
+
 function fakeBinding(overrides: Partial<Record<string, unknown>> = {}) {
   const calls = { closeHandle: 0, paths: [] as string[] };
   const binding = {
@@ -48,6 +62,7 @@ function fakeBinding(overrides: Partial<Record<string, unknown>> = {}) {
       calls.closeHandle += 1;
       return 1;
     },
+    fileInfo: fileIdInfo(IDENTITY_DEV, IDENTITY_INO),
     ...overrides,
   } as unknown as WindowsRecordNativeBindings;
   return { binding, calls };
@@ -371,5 +386,124 @@ describe("windows acl ops", () => {
     expect(() =>
       windowsApplyOwnerAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, { authority }),
     ).toThrow("SetNamedSecurityInfoW failed");
+  });
+});
+
+describe("windows acl ops identity gate", () => {
+  const identity = { dev: IDENTITY_DEV, ino: Number(IDENTITY_INO) };
+
+  test("accepts a handle that reproduces the identity of the object the caller stat'ed", () => {
+    const { binding } = fakeBinding();
+    const { authority, calls } = fakeAuthority(descriptor([]));
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(
+      windowsHasNoForeignWrite("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(calls.verifyHandle).toHaveLength(1);
+  });
+
+  test("refuses a path that does not hold the object the caller stat'ed", () => {
+    // Both policies, both against a descriptor that would otherwise pass, so the refusal can only
+    // come from the identity.
+    const { binding, calls } = fakeBinding();
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));
+    for (const stale of [
+      { dev: identity.dev, ino: identity.ino + 1 },
+      { dev: identity.dev + 1, ino: identity.ino },
+    ]) {
+      expect(
+        windowsVerifyPathAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+          binding,
+          authority,
+          identity: stale,
+        }),
+      ).toBe(false);
+      expect(
+        windowsHasNoForeignWrite("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+          binding,
+          authority,
+          identity: stale,
+        }),
+      ).toBe(false);
+    }
+    expect(authorityCalls.verifyHandle).toHaveLength(0);
+    expect(calls.closeHandle).toBe(4);
+  });
+
+  test("refuses a handle that cannot report an identity at all", () => {
+    const { binding, calls } = fakeBinding({ fileInfo: () => 0 });
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(false);
+    expect(authorityCalls.verifyHandle).toHaveLength(0);
+    expect(calls.closeHandle).toBe(1);
+  });
+
+  test("repairs the object it verified, on the handle that verified it", () => {
+    const { binding, calls: bindingCalls } = fakeBinding();
+    let checks = 0;
+    const { authority, calls } = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        if (checks++ === 0) throw new Error("permissive Windows authority DACL rejected");
+      },
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(calls.migrated).toEqual(["C:\\tmp\\dir"]);
+    // Verify, repair, verify — all three against the one handle that identified the object, so the
+    // answer after the repair cannot come from a fresh open that landed somewhere else.
+    expect(checks).toBe(2);
+    expect(bindingCalls.closeHandle).toBe(1);
+  });
+
+  test("does not repair a path that no longer holds the object the caller stat'ed", () => {
+    const migrated: string[] = [];
+    const stale = { dev: identity.dev, ino: identity.ino + 1 };
+    const { binding } = fakeBinding();
+    const strict = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      migrateToOwnerOnly: (path: string) => migrated.push(path),
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority: strict.authority,
+        identity: stale,
+      }),
+    ).toBe(false);
+    const weak = fakeAuthority(
+      descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OTHER_SID)]),
+      { migrateToOwnerOnly: (path: string) => migrated.push(path) },
+    );
+    expect(
+      windowsEnsureNoForeignWrite("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority: weak.authority,
+        identity: stale,
+      }),
+    ).toBe(false);
+    expect(migrated).toEqual([]);
   });
 });

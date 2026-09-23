@@ -285,6 +285,14 @@ export function createWindowsKernelLockProvider(
           privateAuthority.verifyNoForeignWrite(handle);
         } catch (verifyError) {
           closed = true;
+          // The rewrite below is by path and an open handle does not hold the name (measured: a
+          // rename and a delete both succeed with it), so the object is pinned first (issue #811).
+          let pinned: Buffer | null = null;
+          try {
+            pinned = fileIdentity(binding, handle);
+          } catch {
+            /* An object the handle cannot identify is not one to repair. */
+          }
           try {
             binding.closeHandle(handle);
           } catch {
@@ -292,11 +300,15 @@ export function createWindowsKernelLockProvider(
           }
           const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
           if (!msg.includes("permissive Windows authority DACL rejected")) throw verifyError;
+          if (pinned === null) throw verifyError;
           // A lock file that does grant write to another principal is repaired in place, then
           // re-checked: the owner-only migration is a superset of the policy it has to satisfy.
           migrateIfNeeded(path);
           const final = create(null);
           try {
+            // A substitute has no pin, so a repair that landed elsewhere is refused, not accepted.
+            if (!timingSafeEqual(pinned, fileIdentity(binding, final)))
+              durabilityError("unsafe_path", "Windows kernel lock identity changed mid-migration");
             privateAuthority.verifyNoForeignWrite(final);
           } catch {
             try {
