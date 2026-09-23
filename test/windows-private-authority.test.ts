@@ -79,6 +79,24 @@ describe("Windows private authority", () => {
   test("exposes the descriptor view and rewrites the DACL by path", () => {
     const file = fixture();
     expect(file.authority.inspect(7n)).toEqual(descriptor());
+    // The weaker rule the lock and container paths use accepts an owner-only DACL and rejects one
+    // that hands a write right to a foreign principal.
+    expect(() => file.authority.verifyNoForeignWrite(7n)).not.toThrow();
+    const foreign = fixture({
+      ...descriptor(),
+      aces: [
+        ...descriptor().aces,
+        {
+          type: WINDOWS_PRIVATE_SECURITY.ACCESS_ALLOWED_ACE_TYPE,
+          flags: 0,
+          mask: WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS,
+          sid: Buffer.from([1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 42, 2, 0, 0]),
+        },
+      ],
+    });
+    expect(() => foreign.authority.verifyNoForeignWrite(7n)).toThrow(
+      "permissive Windows authority DACL rejected",
+    );
     file.authority.migrateToOwnerOnly("C:\\token", WINDOWS_AUTHORITY_PATH_KIND.FILE);
     // By path, not by handle: see the migrateDacl contract on WindowsPrivateAuthorityBindings.
     expect(file.migrated).toEqual([["C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`]]);

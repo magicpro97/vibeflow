@@ -1,6 +1,7 @@
 import { cleanupThenThrow, runCleanups, withCleanup } from "./cleanup.js";
 import { durabilityError } from "./errors.js";
 import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
+import { WINDOWS_FILE_NATIVE } from "./windows-native-contract.js";
 import { loadWindowsPrivateAuthorityBun } from "./windows-private-authority-bun.js";
 import { loadWindowsPrivateAuthorityKoffi } from "./windows-private-authority-koffi.js";
 
@@ -38,6 +39,54 @@ export const WINDOWS_PRIVATE_SECURITY = Object.freeze({
   FILE_FLAG_BACKUP_SEMANTICS: 0x02000000,
   FILE_ATTRIBUTE_NORMAL: 0x80,
 } as const);
+
+// S-1-5-18 (LOCAL SYSTEM) and S-1-5-32-544 (BUILTIN\Administrators) are root-equivalent: they can
+// take ownership of any object and rewrite its DACL, so a write ACE naming them grants nothing a
+// principal without those rights could actually rely on. Exempting them is what makes a standard
+// inherited DACL "not writable by others", exactly as POSIX mode bits ignore root.
+const ROOT_EQUIVALENT_SIDS: readonly Buffer[] = [
+  Buffer.from([0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x12, 0x00, 0x00, 0x00]),
+  Buffer.from([
+    0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x20, 0x00, 0x00, 0x00, 0x20, 0x02, 0x00, 0x00,
+  ]),
+];
+
+// Any right that lets a principal change the object or its permissions: a foreign ACE holding one
+// of these is the Windows equivalent of a group/other write bit.
+//
+// Built from the individual rights rather than FILE_GENERIC_WRITE, which bundles SYNCHRONIZE and
+// STANDARD_RIGHTS_WRITE. Those two are also part of FILE_GENERIC_READ, so the generic mask would
+// flag a plain read/execute grant as a write.
+const FOREIGN_WRITE_MASK =
+  (WINDOWS_FILE_NATIVE.FILE_WRITE_DATA |
+    WINDOWS_FILE_NATIVE.FILE_APPEND_DATA |
+    WINDOWS_FILE_NATIVE.FILE_WRITE_EA |
+    WINDOWS_FILE_NATIVE.FILE_WRITE_ATTRIBUTES |
+    WINDOWS_FILE_NATIVE.DELETE_ACCESS |
+    WINDOWS_FILE_NATIVE.WRITE_DAC |
+    WINDOWS_FILE_NATIVE.WRITE_OWNER) >>>
+  0;
+
+/**
+ * Whether the descriptor grants a modifying right to a principal other than the owner.
+ *
+ * This is the weaker of the two Windows privacy policies, and the one a container or lock file is
+ * held to: POSIX asks the same question of a directory with 0755, which is what the standard
+ * inherited SYSTEM/Administrators/owner DACL is equivalent to. The owner-only policy lives in
+ * verifyHandle and applies to the files whose contents are the trust boundary.
+ *
+ * A NULL DACL (not present, or defaulted) grants every principal full access and therefore counts.
+ */
+export function descriptorAllowsForeignWrite(view: WindowsPrivateDescriptorView): boolean {
+  if (!view.daclPresent || view.daclDefaulted) return true;
+  return view.aces.some(
+    (ace) =>
+      ace.type === WINDOWS_PRIVATE_SECURITY.ACCESS_ALLOWED_ACE_TYPE &&
+      !ace.sid.equals(view.owner) &&
+      !ROOT_EQUIVALENT_SIDS.some((root) => ace.sid.equals(root)) &&
+      (ace.mask & FOREIGN_WRITE_MASK) !== 0,
+  );
+}
 
 export interface WindowsPrivateAce {
   type: number;
@@ -79,6 +128,13 @@ export interface WindowsPrivateAuthority {
   verifyHandle(handle: bigint, kind: WindowsAuthorityPathKind): void;
   /** Read the owner/DACL view behind a handle, for callers that apply their own policy to it. */
   inspect(handle: bigint): WindowsPrivateDescriptorView;
+  /**
+   * The weaker policy for containers and lock files: throw unless the descriptor behind the handle
+   * refuses write to every principal but the owner and the root-equivalent SIDs. A path that has
+   * merely inherited the standard DACL passes, which is what an upgrade over an existing install
+   * needs — see verifyHandle for the stricter rule the data files are held to.
+   */
+  verifyNoForeignWrite(handle: bigint): void;
   /** Reset an existing file/dir's DACL in-place to owner-only + SE_DACL_PROTECTED. */
   migrateToOwnerOnly(path: string, kind: WindowsAuthorityPathKind): void;
 }
@@ -157,6 +213,10 @@ export function createWindowsPrivateAuthority(
     },
     inspect(handle) {
       return bindings.inspect(handle);
+    },
+    verifyNoForeignWrite(handle) {
+      if (descriptorAllowsForeignWrite(bindings.inspect(handle)))
+        durabilityError("unsafe_path", "permissive Windows authority DACL rejected");
     },
     verifyHandle(handle, kind) {
       const descriptor = bindings.inspect(handle);

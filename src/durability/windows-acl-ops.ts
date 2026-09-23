@@ -14,39 +14,12 @@ import {
 } from "./windows-kernel-lock.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
-  WINDOWS_PRIVATE_SECURITY,
   type WindowsAuthorityPathKind,
   type WindowsPrivateAuthority,
   createWindowsPrivateAuthority,
+  descriptorAllowsForeignWrite,
   loadWindowsPrivateAuthorityBindings,
 } from "./windows-private-authority.js";
-
-// S-1-5-18 (LOCAL SYSTEM) and S-1-5-32-544 (BUILTIN\\Administrators) are root-equivalent: they can
-// take ownership of any object and rewrite its DACL, so a write ACE naming them grants nothing a
-// principal without those rights could actually rely on. Exempting them is what makes a standard
-// inherited DACL "not writable by others", exactly as POSIX mode bits ignore root.
-const ROOT_EQUIVALENT_SIDS: readonly Buffer[] = [
-  Buffer.from([0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x12, 0x00, 0x00, 0x00]),
-  Buffer.from([
-    0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x20, 0x00, 0x00, 0x00, 0x20, 0x02, 0x00, 0x00,
-  ]),
-];
-
-// Any right that lets a principal change the object or its permissions: a foreign ACE holding one
-// of these is the Windows equivalent of a group/other write bit.
-//
-// Built from the individual rights rather than FILE_GENERIC_WRITE, which bundles SYNCHRONIZE and
-// STANDARD_RIGHTS_WRITE. Those two are also part of FILE_GENERIC_READ, so the generic mask would
-// flag a plain read/execute grant as a write.
-const MODIFY_ACCESS_MASK =
-  (WINDOWS_NATIVE_RECORD.FILE_WRITE_DATA |
-    WINDOWS_NATIVE_RECORD.FILE_APPEND_DATA |
-    WINDOWS_NATIVE_RECORD.FILE_WRITE_EA |
-    WINDOWS_NATIVE_RECORD.FILE_WRITE_ATTRIBUTES |
-    WINDOWS_NATIVE_RECORD.DELETE_ACCESS |
-    WINDOWS_NATIVE_RECORD.WRITE_DAC |
-    WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
-  0;
 
 /**
  * Injection seam. Production callers pass nothing and get the real Win32 bindings; a test supplies
@@ -170,15 +143,7 @@ export function windowsHasNoForeignWrite(
   try {
     handle = openForAcl(context.binding, path, isDirectory(kind));
     if (handle === null) return false;
-    const descriptor = context.authority.inspect(handle);
-    if (!descriptor.daclPresent) return false;
-    return !descriptor.aces.some(
-      (ace) =>
-        ace.type === WINDOWS_PRIVATE_SECURITY.ACCESS_ALLOWED_ACE_TYPE &&
-        !ace.sid.equals(descriptor.owner) &&
-        !ROOT_EQUIVALENT_SIDS.some((root) => ace.sid.equals(root)) &&
-        (ace.mask & MODIFY_ACCESS_MASK) !== 0,
-    );
+    return !descriptorAllowsForeignWrite(context.authority.inspect(handle));
   } catch {
     return false;
   } finally {

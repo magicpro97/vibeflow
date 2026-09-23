@@ -252,6 +252,11 @@ export function createWindowsKernelLockProvider(
     if (!privateAuthority) return;
     privateAuthority.migrateToOwnerOnly(path, WINDOWS_AUTHORITY_PATH_KIND.FILE);
   };
+  // A lock file is held to the weaker policy: it may keep the DACL it inherited from the profile
+  // directory (SYSTEM, Administrators, owner), which is what a POSIX 0755 lock directory grants
+  // too. verifyHandle's owner-only rule stays on the data files whose contents are the boundary —
+  // applying it here rejects every pre-existing install on the first CreateFileW that opens an
+  // existing lock instead of creating one (see #807).
   return {
     tryAcquire(path) {
       const create = (security: unknown) => {
@@ -277,7 +282,7 @@ export function createWindowsKernelLockProvider(
         : create(null);
       if (privateAuthority) {
         try {
-          privateAuthority.verifyHandle(handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+          privateAuthority.verifyNoForeignWrite(handle);
         } catch (verifyError) {
           closed = true;
           try {
@@ -287,11 +292,12 @@ export function createWindowsKernelLockProvider(
           }
           const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
           if (!msg.includes("permissive Windows authority DACL rejected")) throw verifyError;
-          // Pre-existing file has inherited DACL. Migrate in-place then re-verify.
+          // A lock file that does grant write to another principal is repaired in place, then
+          // re-checked: the owner-only migration is a superset of the policy it has to satisfy.
           migrateIfNeeded(path);
           const final = create(null);
           try {
-            privateAuthority.verifyHandle(final, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+            privateAuthority.verifyNoForeignWrite(final);
           } catch {
             try {
               binding.closeHandle(final);

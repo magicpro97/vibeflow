@@ -217,6 +217,7 @@ function nativeFixture() {
       daclDefaulted: false,
       aces: [],
     }),
+    verifyNoForeignWrite: () => undefined,
     withCreationSecurity: (_kind, create) => create({ tokenUserOnly: true }),
     verifyHandle: (handle, kind) => {
       calls.security.push([handle, kind]);
