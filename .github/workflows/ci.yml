@@ -79,6 +79,10 @@ jobs:
         include:
           - suite: owned-process
           - suite: package-smoke
+          # #803: bare `vf`/`vf ui` shipped dead on Windows because no CI job ever started the
+          # conversation bootstrap there; only `owned-process` and `package-smoke` ran, and both
+          # stop at `--version`/`vf init`. This row runs the entry point itself.
+          - suite: home-ui-bootstrap
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -92,7 +96,7 @@ jobs:
         with:
           bun-version: 1.4.0
       - uses: actions/setup-node@v4
-        if: matrix.suite == 'package-smoke'
+        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap'
         with:
           node-version: 20
       - run: bun ci
@@ -106,8 +110,11 @@ jobs:
         if: matrix.suite == 'owned-process'
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
       - name: Build shipped artifact
-        if: matrix.suite == 'package-smoke'
+        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap'
         run: bun run build
+      - name: Conversation bootstrap through the shipped CLI (real vf ui on Windows)
+        if: matrix.suite == 'home-ui-bootstrap'
+        run: bun test --timeout 30000 test/windows-conversation-bootstrap-live.test.ts
       - name: Smoke test built CLI through Node
         if: matrix.suite == 'package-smoke'
         run: node dist/cli.js --version
