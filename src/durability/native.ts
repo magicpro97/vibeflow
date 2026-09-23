@@ -12,6 +12,13 @@ import {
   syscallFailure,
 } from "./native-runtime.js";
 import {
+  memoizedWindowsLockProvider,
+  pinWindowsDirectory,
+  releaseWindowsAdvisoryLock,
+  tryWindowsAdvisoryLock,
+  windowsPinRuntime,
+} from "./native-windows-ops.js";
+import {
   type PinnedDirectory,
   assertPinnedDirectory,
   pinnedDirectoryPath,
@@ -49,27 +56,9 @@ const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefi
 // is the Windows equivalent. Keyed by Node fd for the same tryAdvisoryLock/releaseAdvisoryLock API.
 const WIN32_KERNEL_LOCKS: Map<number, WindowsKernelLock> = new Map();
 
-// Lazily initialized on Windows to avoid loading FFI on POSIX at module init time.
-let _winLockProvider: WindowsKernelLockProvider | undefined;
-function getWinLockProvider(): WindowsKernelLockProvider {
-  if (!_winLockProvider) {
-    // No privateAuthority: enabling it here breaks every existing install, and not for the
-    // reason the old comment claimed. The Bun FFI defect IS fixed in this change
-    // (createWindowsPrivateAuthority() now constructs fine), but verifyHandle demands a DACL of
-    // exactly one owner-only ACE, while a lock file under %USERPROFILE% inherits three
-    // (SYSTEM, Administrators, user) and CreateFileW applies security attributes only when it
-    // creates the file. Measured on an existing lock:
-    //   NT AUTHORITY\SYSTEM:(I)(F)  BUILTIN\Administrators:(I)(F)  <user>:(I)(F)
-    // so turning it on fails closed with "permissive Windows authority DACL rejected" on any
-    // pre-existing state. Enabling it needs a policy that accepts the standard Windows
-    // inherited ACEs plus a migration for existing lock files: tracked in #807.
-    _winLockProvider = createWindowsKernelLockProvider(
-      loadWindowsRecordNativeBindings(),
-      undefined,
-    );
-  }
-  return _winLockProvider;
-}
+const getWinLockProvider = memoizedWindowsLockProvider(() =>
+  createWindowsKernelLockProvider(loadWindowsRecordNativeBindings(), undefined),
+);
 
 export function canonicalDurabilityPath(input: string): string {
   if (typeof input !== "string" || input.includes("\0"))
@@ -94,27 +83,8 @@ export function canonicalDurabilityPath(input: string): string {
 }
 
 function assertDirectory(fd: number, path: string, privateMode: boolean): PinnedDirectory {
-  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
-    // B4: use bigint fstatSync to get exact 57-bit NTFS inode without rounding.
-    const stat = fs.fstatSync(fd, { bigint: true });
-    if (!stat.isDirectory()) durabilityError("unsafe_path", `unsafe pinned directory: ${path}`);
-    // B2: on Windows, privacy lives in the ACL, not mode bits. Skip the 0o700 check.
-    // ponytail: ACL verification via createWindowsPrivateAuthority/verifyHandle requires a
-    // Win32 HANDLE; uv_get_osfhandle (C-only) is not reachable from JS. The directory is
-    // created with OS-default ACL restricted to the current user (NTFS private by default
-    // in %APPDATA% and %TEMP%). Upgrade: bind GetFinalPathNameByHandleW + real HANDLEs.
-    WIN32_FD_PATHS.set(fd, path);
-    const pinned: PinnedDirectory = {
-      fd,
-      path,
-      dev: Number(stat.dev),
-      ino: Number(stat.ino),
-      devBig: stat.dev,
-      inoBig: stat.ino,
-    };
-    assertPinnedDirectory(pinned);
-    return pinned;
-  }
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS)
+    return pinWindowsDirectory(fd, path, windowsPinRuntime());
   const stat = fs.fstatSync(fd);
   if (
     !stat.isDirectory() ||
@@ -353,13 +323,8 @@ export function unlinkAt(directory: PinnedDirectory, name: string, missingOk = f
 }
 
 export function tryAdvisoryLock(fd: number, lockPath?: string): boolean {
-  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
-    if (!lockPath) durabilityError("invalid_value", "Windows advisory lock requires a path");
-    const lock = getWinLockProvider().tryAcquire(lockPath);
-    if (lock === null) return false;
-    WIN32_KERNEL_LOCKS.set(fd, lock);
-    return true;
-  }
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS)
+    return tryWindowsAdvisoryLock(fd, lockPath, getWinLockProvider(), WIN32_KERNEL_LOCKS);
   if (native().flock(fd, LOCK_EX | LOCK_NB) === 0) return true;
   if (errnoIs("EAGAIN") || errnoIs("EWOULDBLOCK")) return false;
   syscallFailure("advisory writer lock");
@@ -367,10 +332,7 @@ export function tryAdvisoryLock(fd: number, lockPath?: string): boolean {
 
 export function releaseAdvisoryLock(fd: number): void {
   if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
-    const lock = WIN32_KERNEL_LOCKS.get(fd);
-    if (!lock) durabilityError("lock_lost", "Windows kernel lock not found for fd");
-    WIN32_KERNEL_LOCKS.delete(fd);
-    lock.release();
+    releaseWindowsAdvisoryLock(fd, WIN32_KERNEL_LOCKS);
     return;
   }
   if (native().flock(fd, LOCK_UN) !== 0) syscallFailure("advisory writer unlock");
