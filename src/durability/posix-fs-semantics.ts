@@ -9,8 +9,8 @@ import * as fs from "node:fs";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
-  windowsHasNoForeignWrite,
-  windowsVerifyPathAcl,
+  windowsEnsureNoForeignWrite,
+  windowsEnsurePrivateAcl,
 } from "./windows-acl-ops.js";
 import type { WindowsAuthorityPathKind } from "./windows-private-authority.js";
 
@@ -58,7 +58,7 @@ export function hasPrivateMode(
   path: string,
 ): boolean {
   if (!isWindows()) return (stat.mode & mask) === expected;
-  return windowsVerifyPathAcl(path, pathKindOf(stat));
+  return windowsEnsurePrivateAcl(path, pathKindOf(stat));
 }
 
 /**
@@ -70,5 +70,5 @@ export function hasPrivateMode(
  */
 export function isNotGroupOrWorldWritable(stat: fs.Stats, path: string): boolean {
   if (!isWindows()) return (stat.mode & 0o022) === 0;
-  return windowsHasNoForeignWrite(path, pathKindOf(stat));
+  return windowsEnsureNoForeignWrite(path, pathKindOf(stat));
 }

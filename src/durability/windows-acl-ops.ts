@@ -173,3 +173,40 @@ export function windowsApplyOwnerAcl(
 }
 
 export { WINDOWS_AUTHORITY_PATH_KIND };
+
+/**
+ * The answer windowsVerifyPathAcl gives, after repairing the path when the DACL merely needs it.
+ *
+ * The owner-only policy is what the durable files are held to, but state written by an earlier
+ * release — or by any caller that used plain fs calls — carries the inherited DACL its parent
+ * handed it. Rejecting that outright blocks every existing install on first use, so the migration
+ * runs first and the question is asked again; a path that cannot be migrated still answers false.
+ */
+export function windowsEnsurePrivateAcl(
+  path: string,
+  kind: WindowsAuthorityPathKind,
+  options: WindowsAclOpsOptions = {},
+): boolean {
+  if (windowsVerifyPathAcl(path, kind, options)) return true;
+  try {
+    windowsApplyOwnerAcl(path, kind, options);
+  } catch {
+    return false;
+  }
+  return windowsVerifyPathAcl(path, kind, options);
+}
+
+/** The same repair-and-recheck for the weaker rule windowsHasNoForeignWrite answers. */
+export function windowsEnsureNoForeignWrite(
+  path: string,
+  kind: WindowsAuthorityPathKind,
+  options: WindowsAclOpsOptions = {},
+): boolean {
+  if (windowsHasNoForeignWrite(path, kind, options)) return true;
+  try {
+    windowsApplyOwnerAcl(path, kind, options);
+  } catch {
+    return false;
+  }
+  return windowsHasNoForeignWrite(path, kind, options);
+}

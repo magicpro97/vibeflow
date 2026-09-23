@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
   windowsApplyOwnerAcl,
+  windowsEnsureNoForeignWrite,
+  windowsEnsurePrivateAcl,
   windowsHasNoForeignWrite,
   windowsVerifyPathAcl,
 } from "../../src/durability/windows-acl-ops.js";
@@ -206,6 +208,70 @@ describe("windows acl ops", () => {
       }),
     ).toBe(true);
     expect(calls.closeHandle).toBe(1);
+  });
+
+  test("repairs a path whose DACL grants a foreign write before answering", () => {
+    const { binding } = fakeBinding();
+    let inspected = 0;
+    const permissive = descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OTHER_SID)]);
+    const repaired = descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OWNER_SID)]);
+    const { authority, calls } = fakeAuthority(() => (inspected++ === 0 ? permissive : repaired));
+    expect(
+      windowsEnsureNoForeignWrite("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+      }),
+    ).toBe(true);
+    expect(calls.migrated).toEqual(["C:\\tmp\\dir"]);
+  });
+
+  test("repairs a path that is not owner-only before answering", () => {
+    const { binding } = fakeBinding();
+    let checks = 0;
+    const { authority, calls } = fakeAuthority(
+      descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OWNER_SID)]),
+      {
+        verifyHandle: () => {
+          if (checks++ === 0) throw new Error("permissive Windows authority DACL rejected");
+        },
+      },
+    );
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+      }),
+    ).toBe(true);
+    expect(calls.migrated).toEqual(["C:\\tmp\\dir"]);
+  });
+
+  test("answers false when the DACL cannot be repaired", () => {
+    const { binding } = fakeBinding();
+    const foreign = descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OTHER_SID)]);
+    const denied = {
+      migrateToOwnerOnly: () => {
+        throw new Error("access denied");
+      },
+    };
+    const weak = fakeAuthority(foreign, denied);
+    expect(
+      windowsEnsureNoForeignWrite("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority: weak.authority,
+      }),
+    ).toBe(false);
+    const strict = fakeAuthority(foreign, {
+      ...denied,
+      verifyHandle: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority: strict.authority,
+      }),
+    ).toBe(false);
   });
 
   test("a read-only grant to another principal is not a foreign write", () => {

@@ -154,15 +154,18 @@ describe("windowsHasNoForeignWrite (the group/other-write rule)", () => {
     }
   });
 
-  it("is wired into isNotGroupOrWorldWritable", () => {
+  it("is wired into isNotGroupOrWorldWritable, which repairs rather than rejects", () => {
     if (!isWindows) return;
     const { dir, cleanup } = scratch();
     try {
       // Inherited-only container passes, which is what unblocked vf init on a pre-existing
-      // .vibeflow; the same directory fails once a foreign principal can write.
+      // .vibeflow.
       expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
       execFileSync("icacls", [dir, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
-      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(false);
+      // A foreign write is repaired in place instead of reported: the caller is about to use this
+      // directory as a trust boundary, and rejecting it is what left existing installs unusable.
+      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      expect(windowsHasNoForeignWrite(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
     } finally {
       cleanup();
     }
@@ -170,14 +173,14 @@ describe("windowsHasNoForeignWrite (the group/other-write rule)", () => {
 });
 
 describe("posix-fs-semantics on windows consults the ACL", () => {
-  it("is not vacuous: a permissive path fails hasPrivateMode", () => {
+  it("is not vacuous: a path with inherited ACEs is migrated before hasPrivateMode answers", () => {
     if (!isWindows) return;
     const { file, cleanup } = scratch();
     try {
-      // Inherited ACEs: must be rejected. Before #807 this returned true unconditionally.
-      expect(hasPrivateMode(fs.statSync(file), 0o7777, 0o600, file)).toBe(false);
-      windowsApplyOwnerAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+      // Inherited ACEs used to answer vacuously true, and rejecting them outright blocked existing
+      // installs; the ACL is now migrated first, and the answer reflects the migrated DACL.
       expect(hasPrivateMode(fs.statSync(file), 0o7777, 0o600, file)).toBe(true);
+      expect(windowsVerifyPathAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(true);
     } finally {
       cleanup();
     }
