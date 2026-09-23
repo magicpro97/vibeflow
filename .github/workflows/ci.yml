@@ -130,15 +130,21 @@ jobs:
           Set-Location $root
           git init -q .
           $ui = Start-Process -FilePath node -ArgumentList "$env:GITHUB_WORKSPACE/dist/cli.js", "ui", "--port", "0", "--no-open" -PassThru -NoNewWindow -RedirectStandardOutput ui.log -RedirectStandardError ui.err
-          Start-Sleep -Seconds 20
-          if ($ui.HasExited) {
-            Get-Content ui.log, ui.err
-            throw "vf ui exited before booting (code=$($ui.ExitCode))"
+          # Poll rather than sleep a fixed budget: the runner's boot time varies, and the tree is
+          # written by the same bootstrap that #803 rejected before it could run.
+          $deadline = (Get-Date).AddSeconds(60)
+          $tree = ".vibeflow/conversation/trace"
+          while (-not (Test-Path $tree)) {
+            if ($ui.HasExited) {
+              Get-Content ui.log, ui.err
+              throw "vf ui exited before booting (code=$($ui.ExitCode))"
+            }
+            if ((Get-Date) -gt $deadline) {
+              throw "vf ui did not create the private conversation tree within 60s"
+            }
+            Start-Sleep -Milliseconds 500
           }
           Stop-Process -Id $ui.Id -Force
-          if (-not (Test-Path ".vibeflow/conversation/trace")) {
-            throw "the Node runtime did not create the private conversation tree"
-          }
       - name: Pack and install shipped artifact in isolated path
         if: matrix.suite == 'package-smoke'
         shell: pwsh
