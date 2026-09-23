@@ -188,6 +188,7 @@ function askCompatibility(bootstrap: ConversationBootstrap) {
       bootstrap.authorities.artifactStore.rootPath(),
       bootstrap.authorities.homeAuthorities.now,
       bootstrap.authorities.privateContextBroker,
+      bootstrap.authorities.projects,
     ),
     startAllocated: (input) => bootstrap.service.startAllocated(input),
     queue: bootstrap.authorities.messageQueue,

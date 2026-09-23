@@ -1,0 +1,359 @@
+/**
+ * The conversation-project route's observable contract: what the rail can read, what a PATCH
+ * persists, and — important — what the route does when the runtime cannot do the thing.
+ *
+ * The move case is the one that matters most. A durable conversation→project re-bind does not
+ * exist in the runtime, so the route must answer with a refusal rather than a success-shaped
+ * response; "the rail moved it" and "the server says it moved it" are different claims, and only
+ * the second is reachable without a write path.
+ */
+import { expect, test } from "bun:test";
+import { PUBLIC_ERROR_CODE } from "../src/actions/public-error-contract.js";
+import {
+  CONVERSATION_PROJECT_REBIND_IN_FLIGHT,
+  ConversationProjectRebindError,
+} from "../src/orchestrator/conversation/conversation-project-rebind.js";
+import type { ProjectV1 } from "../src/orchestrator/conversation/project-types.js";
+import {
+  CONVERSATION_PROJECT_ROUTE,
+  type ConversationProjectRouteAuthorityV1,
+  handleConversationProjectRoute,
+} from "../src/server/conversation-project-route.js";
+
+const PROJECT: ProjectV1 = {
+  id: "alpha",
+  name: "alpha-service",
+  goal: "Ship the alpha",
+  context: "",
+  repos: ["/work/alpha"],
+  engine: { cli: "codex", model: "gpt-5", thinking: "high" },
+  created_at: "2026-09-01T00:00:00.000Z",
+};
+
+function authority(
+  overrides: Partial<ConversationProjectRouteAuthorityV1> = {},
+): ConversationProjectRouteAuthorityV1 {
+  return {
+    sessions: { authorize: () => true },
+    csrf: () => true,
+    listProjects: () => [PROJECT],
+    ...overrides,
+  };
+}
+
+const request = (method: string, body?: unknown) =>
+  new Request("http://127.0.0.1/x", {
+    method,
+    ...(body === undefined
+      ? {}
+      : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+  });
+
+test("the registry read returns only the rail's fields and is never cached", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.LIST}`);
+  const response = await handleConversationProjectRoute(authority(), request("GET"), url);
+  expect(response?.status).toBe(200);
+  expect(response?.headers.get("cache-control")).toBe("no-store");
+  expect(await response?.json()).toEqual({
+    schema_version: "1.0",
+    projects: [
+      { id: "alpha", name: "alpha-service", goal: "Ship the alpha", engine: PROJECT.engine },
+    ],
+  });
+});
+
+test("an unreadable registry degrades to no projects rather than failing the rail", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.LIST}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      listProjects: () => {
+        throw new Error("registry corrupt");
+      },
+    }),
+    request("GET"),
+    url,
+  );
+  expect(response?.status).toBe(200);
+  expect(await response?.json()).toEqual({ schema_version: "1.0", projects: [] });
+});
+
+test("the registry read requires an authorized session", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.LIST}`);
+  const response = await handleConversationProjectRoute(
+    authority({ sessions: { authorize: () => false } }),
+    request("GET"),
+    url,
+  );
+  expect(response?.status).toBe(401);
+});
+
+test("a PATCH persists the engine override and echoes the stored shape", async () => {
+  const updates: Array<{ project_id: string; engine: ProjectV1["engine"] }> = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}alpha`);
+  const response = await handleConversationProjectRoute(
+    authority({ updateProject: (input) => updates.push(input) }),
+    request("PATCH", { engine: { cli: "claude", model: null, thinking: "low" } }),
+    url,
+  );
+  expect(response?.status).toBe(200);
+  expect(updates).toEqual([
+    { project_id: "alpha", engine: { cli: "claude", model: null, thinking: "low" } },
+  ]);
+  expect(await response?.json()).toEqual({
+    schema_version: "1.0",
+    project_id: "alpha",
+    engine: { cli: "claude", model: null, thinking: "low" },
+  });
+});
+
+test("an unknown engine or a malformed id is a client error, not a silent no-op", async () => {
+  const updates: unknown[] = [];
+  const bad = await handleConversationProjectRoute(
+    authority({ updateProject: (input) => updates.push(input) }),
+    request("PATCH", { engine: { cli: "not-an-engine", model: null, thinking: "low" } }),
+    new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}alpha`),
+  );
+  expect(bad?.status).toBe(400);
+  const unrouted = await handleConversationProjectRoute(
+    authority({ updateProject: (input) => updates.push(input) }),
+    request("PATCH", { engine: { cli: "claude", model: null, thinking: "low" } }),
+    new URL("http://127.0.0.1/api/conversation-projects/not/a/slug"),
+  );
+  expect(unrouted).toBeNull();
+  expect(updates).toEqual([]);
+});
+
+test("a PATCH for an id the registry cannot hold is refused with an authored reason", async () => {
+  const updates: Array<{ project_id: string; engine: ProjectV1["engine"] }> = [];
+  const route = authority({ updateProject: (input) => updates.push(input) });
+  for (const id of ["idea", "ghost"]) {
+    const response = await handleConversationProjectRoute(
+      route,
+      request("PATCH", { engine: { cli: "claude", model: null, thinking: "low" } }),
+      new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}${id}`),
+    );
+    expect(response?.status, id).toBe(400);
+    const body = (await response?.json()) as { error: { code: string; message: string } };
+    expect(body.error.code, id).toBe("invalid_request");
+    expect(body.error.message, id).toContain(id);
+  }
+  // Neither the reserved catch-all nor a slug absent from the registry reaches the writer.
+  expect(updates).toEqual([]);
+});
+
+test("a PATCH on a corrupt registry still reaches the writer's own failure", async () => {
+  const updates: Array<{ project_id: string; engine: ProjectV1["engine"] }> = [];
+  const response = await handleConversationProjectRoute(
+    authority({
+      listProjects: () => {
+        throw new Error("registry corrupt");
+      },
+      updateProject: (input) => updates.push(input),
+    }),
+    request("PATCH", { engine: { cli: "claude", model: null, thinking: "low" } }),
+    new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}alpha`),
+  );
+  // Membership cannot be decided from a registry that failed to read, so the route must not
+  // invent "unknown project" — the updater reports the real reason instead.
+  expect(updates).toEqual([
+    { project_id: "alpha", engine: { cli: "claude", model: null, thinking: "low" } },
+  ]);
+  expect(response?.status).toBe(200);
+});
+
+test("a PATCH without an updater reports that it cannot persist, not success", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.ITEM_PREFIX}alpha`);
+  const response = await handleConversationProjectRoute(
+    authority(),
+    request("PATCH", { engine: { cli: "claude", model: null, thinking: "low" } }),
+    url,
+  );
+  expect(response?.status).toBe(503);
+});
+
+test("a move without a durable re-bind is refused rather than reported as done", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.MOVE}`);
+  const response = await handleConversationProjectRoute(
+    authority(),
+    request("POST", { root_session_id: "root-1", project_id: "alpha" }),
+    url,
+  );
+  // A runtime *composed without* a re-binder still answers truthfully rather than faking success;
+  // the production composition supplies one, so this is the degraded-runtime contract only.
+  expect(response?.status).toBe(503);
+  const body = (await response?.json()) as { error: { message: string } };
+  expect(body.error.message).toContain("cannot re-bind");
+});
+
+test("a re-bind refusal keeps its own public code and authored copy", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.MOVE}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      moveProject: () => {
+        throw new ConversationProjectRebindError(
+          PUBLIC_ERROR_CODE.SERVICE_UNAVAILABLE,
+          CONVERSATION_PROJECT_REBIND_IN_FLIGHT,
+        );
+      },
+    }),
+    request("POST", { root_session_id: "root-1", project_id: "alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(503);
+  const body = (await response?.json()) as {
+    error: { code: string; message: string; retryable: boolean };
+  };
+  expect(body.error.code).toBe("service_unavailable");
+  expect(body.error.message).toBe(CONVERSATION_PROJECT_REBIND_IN_FLIGHT);
+  expect(body.error.retryable).toBe(true);
+});
+
+test("a re-bind refusal for an unknown project is a client error, not a retryable outage", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.MOVE}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      moveProject: () => {
+        throw new ConversationProjectRebindError(
+          PUBLIC_ERROR_CODE.INVALID_REQUEST,
+          "Unknown project ghost.",
+        );
+      },
+    }),
+    request("POST", { root_session_id: "root-1", project_id: "alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(400);
+  const body = (await response?.json()) as { error: { code: string; retryable: boolean } };
+  expect(body.error.code).toBe("invalid_request");
+  expect(body.error.retryable).toBe(false);
+});
+
+test("a move with a durable re-bind forwards exactly the session and project", async () => {
+  const moves: Array<{ root_session_id: string; project_id: string }> = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.MOVE}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      moveProject: (input) => {
+        moves.push(input);
+      },
+    }),
+    request("POST", { root_session_id: "root-1", project_id: "alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(202);
+  expect(moves).toEqual([{ root_session_id: "root-1", project_id: "alpha" }]);
+});
+
+test("a move naming a non-slug project is rejected before the mover runs", async () => {
+  const moves: unknown[] = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.MOVE}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      moveProject: (input) => {
+        moves.push(input);
+      },
+    }),
+    request("POST", { root_session_id: "root-1", project_id: "../escape" }),
+    url,
+  );
+  expect(response?.status).toBe(400);
+  expect(moves).toEqual([]);
+});
+
+test("classification is forwarded to the server's ladder and returned verbatim", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      classify: async () => ({ project_id: "alpha", confidence: 0.31, reason: "fts" }),
+    }),
+    request("POST", { message: "ship the alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(200);
+  expect(await response?.json()).toEqual({
+    schema_version: "1.0",
+    project_id: "alpha",
+    confidence: 0.31,
+    reason: "fts",
+  });
+});
+
+test("an empty message and a missing classifier are both reported, never guessed", async () => {
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const empty = await handleConversationProjectRoute(
+    authority({
+      classify: async () => ({ project_id: "idea", confidence: 0, reason: "fallback" }),
+    }),
+    request("POST", { message: "   " }),
+    url,
+  );
+  expect(empty?.status).toBe(400);
+  const unavailable = await handleConversationProjectRoute(
+    authority(),
+    request("POST", { message: "ship the alpha" }),
+    url,
+  );
+  expect(unavailable?.status).toBe(503);
+});
+
+test("a classify request forwards the conversation's current project so the engine can be resolved", async () => {
+  const seen: Array<{ message: string; project_id?: string }> = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      classify: async (input) => {
+        seen.push(input);
+        return { project_id: "alpha", confidence: 0.9, reason: "ai" };
+      },
+    }),
+    request("POST", { message: "ship the alpha", project_id: "alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(200);
+  expect(seen).toEqual([{ message: "ship the alpha", project_id: "alpha" }]);
+});
+
+test("a classify request without a project is still a valid classification", async () => {
+  const seen: Array<{ message: string; project_id?: string }> = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      classify: async (input) => {
+        seen.push(input);
+        return { project_id: "idea", confidence: 0, reason: "fallback" };
+      },
+    }),
+    request("POST", { message: "ship the alpha" }),
+    url,
+  );
+  expect(response?.status).toBe(200);
+  // The key is absent, not undefined: the classifier reads it as "no project known".
+  expect(seen).toEqual([{ message: "ship the alpha" }]);
+});
+
+test("a classify request naming a non-slug project is refused before the ladder runs", async () => {
+  const seen: unknown[] = [];
+  const url = new URL(`http://127.0.0.1${CONVERSATION_PROJECT_ROUTE.CLASSIFY}`);
+  const response = await handleConversationProjectRoute(
+    authority({
+      classify: async (input) => {
+        seen.push(input);
+        return { project_id: "idea", confidence: 0, reason: "fallback" };
+      },
+    }),
+    request("POST", { message: "ship the alpha", project_id: "../escape" }),
+    url,
+  );
+  expect(response?.status).toBe(400);
+  expect(seen).toEqual([]);
+});
+
+test("an unrelated path is left for the rest of the conversation router", async () => {
+  expect(
+    await handleConversationProjectRoute(
+      authority(),
+      request("GET"),
+      new URL("http://127.0.0.1/api/conversations"),
+    ),
+  ).toBeNull();
+});

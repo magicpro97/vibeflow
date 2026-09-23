@@ -61,6 +61,7 @@ export async function exerciseCapturedHomeStreamAuthority(): Promise<CapturedHom
     lineage_status: "verified",
     topic: "Queued terminal",
     policy: "direct",
+    project_id: "idea",
     lifecycle: "ACTIVE",
     health: "healthy",
     participants: [],

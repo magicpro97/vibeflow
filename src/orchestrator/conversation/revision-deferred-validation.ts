@@ -30,6 +30,7 @@ import type {
   RevisionOperationV1,
   RevisionPreparationPlanV1,
 } from "./lineage-revision-operation.js";
+import { manifestRecordDigestMatches } from "./manifest-record-digest.js";
 import {
   type ConversationRevisionMutationV1,
   isConversationRevisionMutation,
@@ -290,7 +291,7 @@ export function findValidatedPublishedRevisionReplay(input: {
     throw new Error("published revision replay authority changed");
   if (
     visibility.operation_id !== authority.operation.operation_id ||
-    visibility.manifest_record_digest !== artifactAuthority.digest ||
+    !manifestRecordDigestMatches(visibility.manifest_record_digest, artifactAuthority.record) ||
     artifact.manifest.conversation_id !== authority.operation.child.conversation_id ||
     artifact.manifest.revision_id !== authority.operation.child.revision_id ||
     artifact.manifest.parent_conversation_id !== authority.operation.parent.conversation_id ||

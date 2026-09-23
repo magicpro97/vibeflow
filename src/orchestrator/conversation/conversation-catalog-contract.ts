@@ -1,6 +1,23 @@
 /** Dependency-free catalog and lineage vocabularies shared by server and browser DTOs. */
 export const CONVERSATION_CATALOG_SCHEMA_VERSION = "1.0" as const;
 
+/**
+ * Project a conversation belongs to when nothing classified it. `idea` is a reserved
+ * fallback, not a registry entry: the Project registry may legitimately hold no `idea`
+ * project, and every create path resolves a missing `project_id` to this value.
+ */
+export const CONVERSATION_DEFAULT_PROJECT_ID = "idea" as const;
+
+/**
+ * Closed project-id shape: the registry slug grammar (`PROJECT_SLUG_PATTERN`). Because the
+ * pattern admits no separators, a `project_id` can never carry filesystem layout, so the
+ * value is safe to project publicly and safe to use as a grouping key.
+ */
+export const CONVERSATION_PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+export const isConversationProjectId = (value: unknown): value is string =>
+  typeof value === "string" && CONVERSATION_PROJECT_ID_PATTERN.test(value);
+
 export const CONVERSATION_CURSOR_ERROR_CODE = Object.freeze({
   INVALID_CURSOR: "invalid_cursor",
   BINDING_MISMATCH: "cursor_binding_mismatch",

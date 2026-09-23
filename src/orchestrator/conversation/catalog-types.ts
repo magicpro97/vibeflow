@@ -12,6 +12,7 @@ import {
   isConversationCatalogSourceKind,
   isConversationHeadStatus,
   isConversationLineageStatus,
+  isConversationProjectId,
 } from "./conversation-catalog-contract.js";
 export { CONVERSATION_CATALOG_SCHEMA_VERSION } from "./conversation-catalog-contract.js";
 import {
@@ -62,6 +63,7 @@ export interface ConversationRevisionSummaryV1 {
   lineage_status: ConversationLineageStatus;
   topic: string;
   policy: string;
+  project_id: string;
   lifecycle: ConversationLifecycle;
   health: ConversationHealth;
   participants: PublicParticipantSummaryV1[];
@@ -238,6 +240,7 @@ export function assertConversationRevisionSummaryV1(
       "parent_revision_id",
       "participants",
       "policy",
+      "project_id",
       "revision_id",
       "revision_ordinal",
       "schema_version",
@@ -253,6 +256,7 @@ export function assertConversationRevisionSummaryV1(
     !nullableReference(value.parent_revision_id) ||
     !isConversationLineageStatus(value.lineage_status) ||
     !boundedText(value.topic) ||
+    !isConversationProjectId(value.project_id) ||
     !isBoundedLineageReference(value.policy) ||
     !LIFECYCLES.includes(value.lifecycle as ConversationLifecycle) ||
     !HEALTH.has(value.health as ConversationHealth) ||

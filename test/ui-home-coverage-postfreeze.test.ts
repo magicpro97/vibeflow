@@ -100,6 +100,7 @@ function revision(
     lineage_status: "verified",
     topic: `Topic ${rootSessionId}`,
     policy: "direct",
+    project_id: "idea",
     lifecycle: "COMPLETED",
     health: "healthy",
     participants: [],

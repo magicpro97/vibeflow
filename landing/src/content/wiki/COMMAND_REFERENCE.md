@@ -2,7 +2,7 @@
 title: Command Reference
 description: Complete reference of all shipped `vf` CLI commands and their flags, including conversations, orchestration, skills, hooks, and verification.
 category: reference
-last_updated: 2026-08-27
+last_updated: 2026-09-22
 ---
 
 # Command Reference
@@ -274,6 +274,32 @@ Clients must deduplicate by `seq`. Invalid or conflicting cursors return `400`; 
 conversations return `404`; lifecycle or route/body conflicts return `409`; missing session
 or stream authority returns `401`, and a loopback write with a session but no valid CSRF token
 returns `403`.
+
+### Conversation projects (UI/API only in v1)
+
+Conversations are filed into named projects (`project_id`, default `idea`) and the rail groups
+them into per-project folders. **There is no project CRUD in the CLI in v1** — that is a phase
+gate, not an omission. The shipped surfaces are:
+
+| Method | Route | Result |
+|--------|-------|--------|
+| `GET` | `/api/conversation-projects` | Rail labels (`id`, `name`, `goal`, `engine`) |
+| `PATCH` | `/api/conversation-projects/{id}` | Project engine override |
+| `POST` | `/api/conversation-projects/classify` | One verdict: `project_id`, `confidence`, `reason` |
+| `POST` | `/api/conversation-projects/move` | Re-bind a conversation to another project |
+
+Writes use the same conversation session cookie and loopback CSRF token as the rest of the
+workspace, and a project's `repos[]` and `context` never cross the wire: the read route projects
+only `id`, `name`, `goal`, and `engine`. Classification runs server-side in four tiers —
+import/`@project-slug` mention (exact), then a local FTS5 match, then AI only when retrieval is
+inconclusive — and only a confirmed chip in the web workspace moves a conversation. The settings
+panel holds the global auto-classify switch and the global and per-project engine override.
+
+Project registry `create`/`delete` exist in the server authority but are not exposed by any
+route or command yet: creation awaits the folder-import flow, and deletion awaits decided
+semantics for conversations filed under the removed project. CLI commands for project CRUD are
+a future phase; until then the only registry write any shipped surface performs is a project's
+engine override from the settings panel.
 
 ## Orchestrate
 

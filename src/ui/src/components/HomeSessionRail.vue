@@ -67,7 +67,17 @@
         <li v-for="checkpoint in catalogLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
       </ul>
       <div class="home-loading-rail" aria-hidden="true">
-        <article v-for="index in 4" :key="index">
+        <!-- Shape of the grouped rail: two dividers, five entries — nothing shifts when data lands. -->
+        <span class="home-loading-rail__divider" />
+        <article v-for="index in 3" :key="`a${index}`">
+          <span class="home-loading-rail__dot" />
+          <div class="home-loading-rail__copy">
+            <strong />
+            <small />
+          </div>
+        </article>
+        <span class="home-loading-rail__divider" />
+        <article v-for="index in 2" :key="`b${index}`">
           <span class="home-loading-rail__dot" />
           <div class="home-loading-rail__copy">
             <strong />
@@ -80,28 +90,79 @@
       <strong>{{ store.sessionQuery ? "No matches" : "No conversations yet" }}</strong>
       <span>{{ store.sessionQuery ? "Try a shorter search." : "Your first conversation starts in the composer." }}</span>
     </div>
-    <nav v-else class="home-session-list" aria-label="Recent conversations">
-      <button
-        v-for="session in store.sessions"
-        :key="session.root_session_id"
-        type="button"
-        class="home-session"
-        :class="{ 'home-session--active': session.root_session_id === store.activeRootId }"
-        :aria-current="session.root_session_id === store.activeRootId ? 'page' : undefined"
-        @click="select(session.root_session_id)"
+    <nav
+      v-else
+      class="home-session-list"
+      aria-label="Conversations grouped by project"
+      @keydown="onRailKeydown"
+      @focusin="onRailFocusIn"
+    >
+      <section
+        v-for="folder in railFolders"
+        :key="folder.project_id"
+        class="home-session-group"
+        :class="{ 'home-session-group--ideas': folder.ideas }"
+        role="group"
+        :aria-labelledby="groupNameId(folder.project_id)"
       >
-        <span class="home-session__row">
-          <span class="home-session__title">{{ (session.active ?? session.root).topic }}</span>
-          <span class="home-session__time">{{ relativeTime(session.sort_updated_at) }}</span>
-        </span>
-        <span class="home-session__row home-session__meta">
-          <span class="home-status-dot" :data-state="(session.active ?? session.root).lifecycle" />
-          <span>{{ lifecycleLabel((session.active ?? session.root).lifecycle) }}</span>
-          <span aria-hidden="true">·</span>
-          <span>{{ session.revision_count }} rev</span>
-          <span v-if="(session.active ?? session.root).health === 'degraded'" class="home-degraded">degraded</span>
-        </span>
-      </button>
+        <div class="home-session-group__header">
+          <h3 :id="groupNameId(folder.project_id)" class="home-session-group__name">
+            {{ folder.name }}
+            <span class="sr-only">, {{ folder.sessions.length }} conversations</span>
+          </h3>
+          <button
+            type="button"
+            class="home-session-group__divider"
+            :aria-expanded="!collapsedGroups.has(folder.project_id)"
+            :aria-controls="groupEntriesId(folder.project_id)"
+            :aria-labelledby="groupNameId(folder.project_id)"
+            :title="folder.name"
+            @click="toggleGroup(folder.project_id)"
+          >
+            <span v-if="folder.goal" class="home-session-group__goal">{{ folder.goal }}</span>
+            <span class="home-session-group__count">{{ folder.sessions.length }}</span>
+            <span class="home-session-group__chevron" aria-hidden="true">
+              {{ collapsedGroups.has(folder.project_id) ? "▸" : "▾" }}
+            </span>
+          </button>
+        </div>
+        <hr class="home-session-group__rule" />
+        <div
+          v-show="!collapsedGroups.has(folder.project_id)"
+          :id="groupEntriesId(folder.project_id)"
+          class="home-session-group__entries"
+          role="list"
+        >
+          <div
+            v-for="session in folder.sessions"
+            :key="session.root_session_id"
+            class="home-session-group__entry"
+            role="listitem"
+          >
+            <button
+              type="button"
+              class="home-session"
+              :data-root-session="session.root_session_id"
+              :class="{ 'home-session--active': session.root_session_id === store.activeRootId }"
+              :aria-current="session.root_session_id === store.activeRootId ? 'page' : undefined"
+              :tabindex="rovingTabIndex(session.root_session_id)"
+              @click="select(session.root_session_id)"
+            >
+              <span class="home-session__row">
+                <span class="home-session__title">{{ (session.active ?? session.root).topic }}</span>
+                <span class="home-session__time">{{ relativeTime(session.sort_updated_at) }}</span>
+              </span>
+              <span class="home-session__row home-session__meta">
+                <span class="home-status-dot" :data-state="(session.active ?? session.root).lifecycle" />
+                <span>{{ lifecycleLabel((session.active ?? session.root).lifecycle) }}</span>
+                <span aria-hidden="true">·</span>
+                <span>{{ session.revision_count }} rev</span>
+                <span v-if="(session.active ?? session.root).health === 'degraded'" class="home-degraded">degraded</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
     </nav>
     <div v-if="store.paging.catalog.nextCursor" class="home-rail-state">
       <button
@@ -123,18 +184,128 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { describeHomeCatalogLoading } from "../conversation-home-loading.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
+import type { HomeSessionSummary } from "../conversation-home-types.js";
 import { homeConversationLifecycleLabel } from "../conversation-lifecycle-presentation.js";
+import { useProjectClassificationStore } from "../project-classification-store.js";
+import {
+  type ProjectRailFolder,
+  groupConversationsByProject,
+  projectRailEntryOrder,
+} from "../project-rail-group.js";
 
 const store = useConversationHomeStore();
+const projectStore = useProjectClassificationStore();
 const railRoot = ref<HTMLElement | null>(null);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let mobileQuery: MediaQueryList | null = null;
+
+/**
+ * Collapse state lives with the rail, not the store: it is pure presentation, is not shared with
+ * any other surface, and resetting it on reload is the intended behaviour.
+ */
+const collapsedGroups = ref<Set<string>>(new Set());
+/** Collapse state as it stood before a query auto-expanded the matching groups. */
+let collapsedBeforeQuery: Set<string> | null = null;
 const catalogLoading = computed(() =>
   describeHomeCatalogLoading({
     query: store.sessionQuery,
     health: store.catalogHealth,
   }),
 );
+
+/** Folders come from the pure helper so the ordering rules stay testable without a DOM. */
+const railFolders = computed<ProjectRailFolder<HomeSessionSummary>[]>(() =>
+  groupConversationsByProject(store.sessions, projectStore.projects),
+);
+
+const visibleEntryOrder = computed(() =>
+  projectRailEntryOrder(railFolders.value, collapsedGroups.value),
+);
+
+/**
+ * Roving tabindex: exactly one entry is in the tab order so Tab exits the rail instead of walking
+ * every conversation. It follows the focused entry, falling back to the active session and then
+ * to the first visible one, so the rail is reachable by keyboard with no entry focused yet.
+ */
+const rovingRoot = ref<string | null>(null);
+const rovingEntry = computed(() => {
+  const order = visibleEntryOrder.value;
+  if (rovingRoot.value && order.includes(rovingRoot.value)) return rovingRoot.value;
+  const active = store.activeRootId;
+  if (active && order.includes(active)) return active;
+  return order[0] ?? null;
+});
+const rovingTabIndex = (rootSessionId: string): 0 | -1 =>
+  rootSessionId === rovingEntry.value ? 0 : -1;
+
+const groupNameId = (projectId: string) => `rail-group-${projectId}`;
+const groupEntriesId = (projectId: string) => `rail-entries-${projectId}`;
+
+function toggleGroup(projectId: string): void {
+  const next = new Set(collapsedGroups.value);
+  if (next.has(projectId)) next.delete(projectId);
+  else next.add(projectId);
+  collapsedGroups.value = next;
+}
+
+/** Track focus so the roving tabindex follows the entry the user is on, mouse or keyboard. */
+function onRailFocusIn(event: FocusEvent): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const rootSessionId = target.closest<HTMLElement>("[data-root-session]")?.dataset.rootSession;
+  if (rootSessionId) rovingRoot.value = rootSessionId;
+}
+
+/**
+ * Arrow traversal walks the visible entries, crossing group boundaries and skipping collapsed
+ * groups — the session order the folders render in. `Home`/`End` jump to the first/last visible
+ * entry; `ArrowLeft`/`ArrowRight` collapse/expand the focused entry's group.
+ */
+function focusEntry(rootSessionId: string | undefined): void {
+  if (!rootSessionId) return;
+  rovingRoot.value = rootSessionId;
+  railRoot.value
+    ?.querySelector<HTMLButtonElement>(`[data-root-session="${CSS.escape(rootSessionId)}"]`)
+    ?.focus();
+}
+
+function onRailKeydown(event: KeyboardEvent): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const current = target.closest<HTMLElement>("[data-root-session]")?.dataset.rootSession;
+  if (!current) return;
+  const order = visibleEntryOrder.value;
+  const index = order.indexOf(current);
+  if (index < 0) return;
+  if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    focusEntry(event.key === "Home" ? order[0] : order[order.length - 1]);
+    return;
+  }
+  const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+  if (step !== 0) {
+    event.preventDefault();
+    // Wrap is deliberate: ArrowDown on the last entry returns to the first entry of the list.
+    const next = order[(index + step + order.length) % order.length];
+    focusEntry(next);
+    return;
+  }
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  const folder = railFolders.value.find((candidate) =>
+    candidate.sessions.some((session) => session.root_session_id === current),
+  );
+  if (!folder) return;
+  event.preventDefault();
+  const collapsed = collapsedGroups.value.has(folder.project_id);
+  if (event.key === "ArrowRight" && collapsed) toggleGroup(folder.project_id);
+  if (event.key === "ArrowLeft" && !collapsed) {
+    // Collapsing around a focused entry would hide it; the divider takes focus instead.
+    toggleGroup(folder.project_id);
+    railRoot.value
+      ?.querySelector<HTMLButtonElement>(`[aria-controls="${groupEntriesId(folder.project_id)}"]`)
+      ?.focus();
+  }
+}
 
 const lifecycleLabel = homeConversationLifecycleLabel;
 
@@ -169,7 +340,17 @@ function syncRailForViewport(): void {
 
 watch(
   () => store.sessionQuery,
-  () => {
+  (query) => {
+    // A query must not hide its own matches: expand what is collapsed while it is active, and
+    // hand the user's prior collapse state back the moment it clears.
+    const active = query.trim() !== "";
+    if (active && collapsedBeforeQuery === null) {
+      collapsedBeforeQuery = collapsedGroups.value;
+      collapsedGroups.value = new Set();
+    } else if (!active && collapsedBeforeQuery !== null) {
+      collapsedGroups.value = collapsedBeforeQuery;
+      collapsedBeforeQuery = null;
+    }
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(() => void store.refreshSessions(), 180);
   },
@@ -194,6 +375,8 @@ onMounted(() => {
   mobileQuery = window.matchMedia("(max-width: 760px)");
   mobileQuery.addEventListener("change", syncRailForViewport);
   void store.refreshSessions();
+  // Divider labels come from the registry; the rail renders slug labels until it lands.
+  void projectStore.refreshProjects();
 });
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer);

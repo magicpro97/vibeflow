@@ -8,8 +8,10 @@ import {
 } from "./catalog-types.js";
 import {
   CONVERSATION_CATALOG_SCHEMA_VERSION,
+  CONVERSATION_DEFAULT_PROJECT_ID,
   CONVERSATION_HEAD_STATUS,
   CONVERSATION_LINEAGE_STATUS,
+  isConversationProjectId,
 } from "./conversation-catalog-contract.js";
 import type { ConversationLineageReadV1, ValidatedLineageNodeV1 } from "./lineage-reader.js";
 import {
@@ -18,6 +20,19 @@ import {
   isLineageAssociationId,
   isSafeCatalogIdentifier,
 } from "./lineage-types.js";
+
+/**
+ * Public project label for a conversation. The manifest owns the binding; a legacy record
+ * written before the field existed falls back to the reserved default project. The value is
+ * gated by the shared `isConversationProjectId` grammar (the same contract the manifest
+ * validator, the create funnel, and the create wire use), so a raw path cannot be projected
+ * and a registry-legal id is never dropped for looking like a credential.
+ */
+export function conversationProjectId(manifest: {
+  readonly project_id?: string | undefined;
+}): string {
+  return manifest.project_id ?? CONVERSATION_DEFAULT_PROJECT_ID;
+}
 
 export function createConversationRevisionSummary(
   node: ValidatedLineageNodeV1,
@@ -32,6 +47,11 @@ export function createConversationRevisionSummary(
   ])
     if (identity !== null && !isSafeCatalogIdentifier(identity))
       throw new Error("unsafe catalog revision identity");
+  // The field's own contract grammar. `isSafeCatalogIdentifier` is *stricter* than the
+  // registry slug contract (the sanitizer reads `sk-`/`xoxb-` prefixes as credentials), so a
+  // registry-legal id would be dropped here and the whole catalog would go durably degraded.
+  const projectId = conversationProjectId(source.manifest);
+  if (!isConversationProjectId(projectId)) throw new Error("unsafe catalog project_id");
   return {
     schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     conversation_id: node.node.conversation_id,
@@ -42,6 +62,7 @@ export function createConversationRevisionSummary(
     lineage_status: CONVERSATION_LINEAGE_STATUS.VERIFIED,
     topic: sanitizePublicText(source.manifest.topic, "topic", []),
     policy: safePublicRoleReference(source.manifest.policy),
+    project_id: projectId,
     lifecycle: source.journal_head.lifecycle,
     health: source.journal_head.health,
     participants: structuredClone(source.journal_head.participants),
@@ -56,6 +77,7 @@ function searchable(summary: ConversationRevisionSummaryV1): string {
   return [
     summary.topic,
     summary.policy,
+    summary.project_id,
     ...summary.participants.flatMap((participant) => [participant.role_ref, participant.engine]),
   ]
     .join("\n")

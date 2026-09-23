@@ -6,7 +6,7 @@
         <button ref="closeButton" type="button" aria-label="Close settings" @click="$emit('close')">×</button>
       </header>
       <p class="home-drawer-copy">
-        These changes create a reviewed `conversation.update_settings` proposal. Nothing mutates directly from the browser.
+        Conversation policy changes below create a reviewed `conversation.update_settings` proposal. Project classification settings persist directly.
       </p>
 
       <div v-if="!store.activeRevision" class="home-drawer-state">
@@ -51,6 +51,7 @@
           </button>
         </footer>
       </form>
+      <ProjectSettingsPanel />
     </aside>
   </Transition>
 </template>
@@ -59,6 +60,7 @@
 import { nextTick, reactive, ref, watch } from "vue";
 import { buildConversationSettingsChanges } from "../conversation-home-settings.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
+import ProjectSettingsPanel from "./ProjectSettingsPanel.vue";
 
 const props = defineProps<{ open: boolean }>();
 defineEmits<{ close: [] }>();

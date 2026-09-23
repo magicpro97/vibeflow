@@ -38,7 +38,9 @@ import type {
   MessageResponse,
 } from "../orchestrator/conversation/types.js";
 import type { PublicStoredTraceEvent } from "../orchestrator/trace/types.js";
+import { DEFAULT_PROJECT_CLASSIFICATION_SETTINGS } from "../project-classification-settings.js";
 import { syncAttachments } from "../server/handlers.js";
+import { readSettings } from "../settings.js";
 import { verifyLockGate } from "../skills/verify-lock.js";
 import {
   type VerifyReport,
@@ -251,6 +253,12 @@ export function conversationBootstrap(deps: ConversationCommandDeps = {}, base =
   return createConversationBootstrap({
     repoRoot: base,
     libraries: deps.bootstrap?.libraries ?? productionLibraries(base),
+    // The same settings read the `/classify` route performs, at the one funnel every command
+    // share: OFF must gate *creation* too, or an implicit create is filed by a tier the switch
+    // says never runs. Read per materialization (not memoized) so a settings save reaches the
+    // next create without a restart, exactly as it reaches the next verdict.
+    projectClassificationEnabled: () =>
+      (readSettings(base).projectClassification ?? DEFAULT_PROJECT_CLASSIFICATION_SETTINGS).enabled,
     routingContext: async () => ({
       attachments: syncAttachments(base).map((attachment) => attachment.name),
     }),

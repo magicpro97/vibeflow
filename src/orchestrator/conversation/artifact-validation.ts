@@ -13,6 +13,10 @@ import {
   assertPersistedResumeBinding,
 } from "./artifact-resume-validation.js";
 export type { PersistedResumeBinding } from "./artifact-resume-validation.js";
+import {
+  CONVERSATION_DEFAULT_PROJECT_ID,
+  isConversationProjectId,
+} from "./conversation-catalog-contract.js";
 import { CONVERSATION_ARTIFACT_TYPES } from "./conversation-public-wire-contract.js";
 import type {
   ArtifactCreateRequest,
@@ -170,10 +174,8 @@ export function assertConversationManifest(
   value: unknown,
   expectedId?: string,
 ): asserts value is ConversationManifest {
-  if (plain(value) && !Object.hasOwn(value, "baseline_enabled")) value.baseline_enabled = true;
-  if (plain(value) && !Object.hasOwn(value, "evaluator_auto_added")) {
-    value.evaluator_auto_added = false;
-  }
+  // biome-ignore format: production file ceiling
+  if (plain(value)) { if (!Object.hasOwn(value, "baseline_enabled")) value.baseline_enabled = true; if (!Object.hasOwn(value, "evaluator_auto_added")) value.evaluator_auto_added = false; if (!Object.hasOwn(value, "project_id")) value.project_id = CONVERSATION_DEFAULT_PROJECT_ID; }
   const keys = [
     "baseline_enabled",
     "bindings",
@@ -185,6 +187,7 @@ export function assertConversationManifest(
     "parent_revision_id",
     "phase",
     "policy",
+    "project_id",
     "repo_root",
     "revision_id",
     "run_id",
@@ -210,6 +213,7 @@ export function assertConversationManifest(
     (value.max_rounds as number) > MAX_ITEMS ||
     typeof value.baseline_enabled !== "boolean" ||
     typeof value.evaluator_auto_added !== "boolean" ||
+    !isConversationProjectId(value.project_id) ||
     !ref(value.repo_root) ||
     !Number.isSafeInteger(value.phase) ||
     (value.phase as number) < 1 ||

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MaterializedAgentBinding, PreviewAgentBinding } from "../src/agents/binding.js";
@@ -10,7 +10,12 @@ import { buildConversationHttpAuthority } from "../src/commands/conversation-htt
 import { conversationEnvPolicy } from "../src/dispatch/env-filter.js";
 import { type EngineProcess, createSpawnOptionsProjection } from "../src/dispatch/session-types.js";
 import type { ConversationBootstrapOptions } from "../src/orchestrator/conversation/bootstrap.js";
+import { CONVERSATION_DEFAULT_PROJECT_ID } from "../src/orchestrator/conversation/conversation-catalog-contract.js";
+import { ProjectRegistryAuthority } from "../src/orchestrator/conversation/project-registry-authority.js";
 import type { EngineReadiness } from "../src/preflight/types.js";
+import { writeSettings } from "../src/settings.js";
+import { projectClassifier } from "../src/skills/project-classifier-runtime.js";
+import type { ProjectClassifierRuntimeSeams } from "../src/skills/project-classifier-runtime.js";
 
 const roots: string[] = [];
 const TEST_PRINCIPAL_DIGEST = `sha256:${"1".repeat(64)}`;
@@ -426,6 +431,26 @@ describe("production HTTP composition delegates every shared authority", () => {
 
     expect(authority.messageQueueEvents?.rootSessionId("missing-conversation")).toBeNull();
 
+    // The composed project surface: the rail's registry read, the classifier's tier ladder, and
+    // the settings panel's engine write all reach the real registry authority through here.
+    const projects = authority.browser?.projects;
+    expect(projects).toBeDefined();
+    if (!projects) throw new Error("project surface was not composed");
+    expect(projects.listProjects()).toEqual([]);
+    expect((await projects.classify({ message: "anything at all" })).reason).toBe("fallback");
+    expect(await projects.classify({ message: "" })).toEqual({
+      project_id: "idea",
+      confidence: 0,
+      reason: "fallback",
+    });
+    // An unknown project must be rejected by the registry authority, not silently stored.
+    expect(() =>
+      projects.updateProject({
+        project_id: "does-not-exist",
+        engine: { cli: "codex", model: null, thinking: "high" },
+      }),
+    ).toThrow();
+
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const snapshot = await authority.service.snapshot(created.conversation_id);
       if (snapshot?.lifecycle !== "ACTIVE") break;
@@ -434,5 +459,205 @@ describe("production HTTP composition delegates every shared authority", () => {
     expect((await authority.service.snapshot(created.conversation_id))?.lifecycle).not.toBe(
       "ACTIVE",
     );
+  }, 30_000);
+
+  test("the classify site forwards the stored policy and project_id into the classifier join", async () => {
+    // Pins the composition edge M2 could not see: replacing the site's call with a direct
+    // `projectClassifier(projects, {})` (dropping both the helper and the stored engine) left the
+    // whole suite green. The factory seam is what makes the site observable: a spy records the
+    // exact registry and seams the route hands the join, so a stored engine that silently stops
+    // reaching the AI tier fails here.
+    const root = mkdtempSync(join(tmpdir(), "vf-http-classify-join-"));
+    roots.push(root);
+    const repo = join(root, "repo");
+    const home = join(root, "home");
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"http-classify-join"}\n');
+    const projectsDir = join(repo, ".vibeflow", "projects");
+    new ProjectRegistryAuthority({ root: projectsDir }).create({
+      id: "gamma",
+      name: "gamma-service",
+      engine: { cli: "copilot", model: null, thinking: "high" },
+    });
+    writeSettings(repo, {
+      projectClassification: {
+        enabled: true,
+        engine: { cli: "codex", model: null, thinking: null },
+      },
+    });
+
+    const seen: ProjectClassifierRuntimeSeams[] = [];
+    const factory: typeof projectClassifier = (projects, seams = {}) => {
+      seen.push(seams);
+      return projectClassifier(projects, seams);
+    };
+
+    const authority = buildConversationHttpAuthority(
+      { bootstrap: bootstrapOptions(join(root, "conversation")) },
+      "127.0.0.1",
+      repo,
+      {
+        userHomeRoot: home,
+        userVibeflowRoot: join(home, ".vibeflow"),
+        now: () => "2026-08-26T00:00:00.000Z",
+        vfVersion: "0.15.0",
+        engineVersions: { claude: "1.0.0" },
+      },
+      factory,
+    );
+
+    // The conversation's own project override (gamma → copilot) wins over the global block
+    // (codex), and the resolved engine reaches the join's seams — the exact round-2 defect line.
+    const projects = authority.browser?.projects;
+    if (!projects) throw new Error("project surface was not composed");
+    await projects.classify({
+      message: "gamma service billing",
+      project_id: "gamma",
+    });
+
+    expect(seen).toEqual([{ engine: "copilot" }]);
+  }, 30_000);
+
+  test("an injected classifier factory is never served from the authority cache", async () => {
+    // The cache is keyed by `base:host`. A caller that injects a factory but passes otherwise
+    // cacheable deps must not receive the cached authority built with the production factory:
+    // the spy would never fire and the seam would be silently defeated — its own failure mode.
+    const root = mkdtempSync(join(tmpdir(), "vf-http-classify-cache-"));
+    roots.push(root);
+    const repo = join(root, "repo");
+    mkdirSync(repo, { recursive: true });
+    // Populate the cache exactly as a production caller (no deps, no capability) would.
+    buildConversationHttpAuthority({}, "127.0.0.1", repo, {});
+
+    const seen: ProjectClassifierRuntimeSeams[] = [];
+    const factory: typeof projectClassifier = (projects, seams = {}) => {
+      seen.push(seams);
+      return projectClassifier(projects, seams);
+    };
+    const injected = buildConversationHttpAuthority({}, "127.0.0.1", repo, {}, factory);
+    const projects = injected.browser?.projects;
+    if (!projects) throw new Error("project surface was not composed");
+    await projects.classify({ message: "hello there" });
+
+    expect(seen).toHaveLength(1);
+  }, 30_000);
+
+  test("the auto-classify switch gates the materializer, not only the classify route", async () => {
+    // The switch has to reach the create funnel too: with it OFF, an implicit create must not be
+    // filed by the repo tier the user switched off, and with it ON the same create must still bind
+    // the project that imports the conversation's repo root. Only the settings document decides,
+    // so this drives the production composition with each value rather than the materializer seam.
+    const root = mkdtempSync(join(tmpdir(), "vf-http-classify-gate-"));
+    roots.push(root);
+    const repo = join(root, "repo");
+    const home = join(root, "home");
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"http-classify-gate"}\n');
+    new ProjectRegistryAuthority({ root: join(repo, ".vibeflow", "projects") }).create({
+      id: "gamma",
+      name: "gamma-service",
+      repos: [repo],
+      engine: { cli: "copilot", model: null, thinking: "high" },
+    });
+    const authorityOptions = {
+      userHomeRoot: home,
+      userVibeflowRoot: join(home, ".vibeflow"),
+      now: () => "2026-08-26T00:00:00.000Z",
+      vfVersion: "0.15.0",
+      engineVersions: { claude: "1.0.0" },
+    };
+    // OFF first: the create must not be filed by the tier the switch turned off. ON second: the
+    // identical create must still bind the project that imports the conversation's repo root.
+    for (const [enabled, expected] of [
+      [false, CONVERSATION_DEFAULT_PROJECT_ID],
+      [true, "gamma"],
+    ] as const) {
+      writeSettings(repo, {
+        projectClassification: {
+          enabled,
+          engine: { cli: null, model: null, thinking: null },
+        },
+      });
+      const authority = buildConversationHttpAuthority(
+        { bootstrap: bootstrapOptions(join(root, enabled ? "on" : "off")) },
+        "127.0.0.1",
+        repo,
+        authorityOptions,
+      );
+      const created = await authority.homeCreate?.create({
+        principal_digest: TEST_PRINCIPAL_DIGEST,
+        request: {
+          schema_version: "1.0",
+          idempotency_key: `classify-gate-${enabled ? "on" : "off"}`,
+          topic: "tidy the billing retries",
+          private_context_present: false,
+        },
+      });
+      if (!created) throw new Error("Home create authority was not composed");
+      // The rail groups by the catalog row's `project_id`, derived from the manifest: that is the
+      // observable consequence of the gate, not the manifest field alone.
+      expect(
+        authority.browser?.catalog.recoverByConversationId(created.conversation_id).root.project_id,
+      ).toBe(expected);
+      // Let the create's queued turn settle before the fixture root is torn down: yield to the
+      // event loop (no wall-clock guess) until the turn leaves the running lifecycle, or the
+      // teardown below removes the store directory under an in-flight wake.
+      for (let attempt = 0; attempt < 1000; attempt += 1) {
+        if ((await authority.service.snapshot(created.conversation_id))?.lifecycle !== "ACTIVE")
+          break;
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+    }
+  }, 30_000);
+
+  test("a corrupt registry degrades the classify route to its documented fallback", async () => {
+    // The route is advisory: a widened/malformed registry must answer the shared `idea` verdict
+    // rather than take the whole classify endpoint down with the store's corruption error. An
+    // empty candidate list also short-circuits the FTS/AI tiers, so no index or subprocess runs.
+    const root = mkdtempSync(join(tmpdir(), "vf-http-classify-corrupt-"));
+    roots.push(root);
+    const repo = join(root, "repo");
+    const home = join(root, "home");
+    mkdirSync(repo, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"http-classify-corrupt"}\n');
+    const projectsDir = join(repo, ".vibeflow", "projects");
+    new ProjectRegistryAuthority({ root: projectsDir }).create({
+      id: "gamma",
+      name: "gamma-service",
+      repos: [repo],
+      engine: { cli: "copilot", model: null, thinking: "high" },
+    });
+    // Any `rsync`, `chmod -R`, or backup restore widens the registry file; the store calls that
+    // corruption and refuses to read it.
+    chmodSync(join(projectsDir, "registry.json"), 0o644);
+
+    const authority = buildConversationHttpAuthority(
+      { bootstrap: bootstrapOptions(join(root, "conversation")) },
+      "127.0.0.1",
+      repo,
+      {
+        userHomeRoot: home,
+        userVibeflowRoot: join(home, ".vibeflow"),
+        now: () => "2026-08-26T00:00:00.000Z",
+        vfVersion: "0.15.0",
+        engineVersions: { claude: "1.0.0" },
+      },
+    );
+    const projects = authority.browser?.projects;
+    if (!projects) throw new Error("project surface was not composed");
+    // The registry read itself still fails closed — that is the store's contract, unchanged.
+    expect(() => projects.listProjects()).toThrow();
+    await expect(
+      projects.classify({ message: "@gamma tidy the billing retries", repo_root: repo }),
+    ).resolves.toEqual({
+      project_id: CONVERSATION_DEFAULT_PROJECT_ID,
+      confidence: 0,
+      reason: "fallback",
+    });
   }, 30_000);
 });

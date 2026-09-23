@@ -14,6 +14,7 @@ export interface DurableConversationCreateV1 {
     policy?: string;
     participants?: ConversationCreateParticipant[];
     max_rounds?: number;
+    project_id?: string;
   };
   options?: ConversationInvocationOptions;
 }
@@ -85,6 +86,7 @@ export async function executeDurableConversationCreateV1(
     bootstrap.authorities.artifactStore.rootPath(),
     bootstrap.authorities.homeAuthorities.now,
     bootstrap.authorities.privateContextBroker,
+    bootstrap.authorities.projects,
   ).prepare({
     principal_digest: input.principal_digest,
     request: {
@@ -96,6 +98,7 @@ export async function executeDurableConversationCreateV1(
         ? {}
         : { participants: structuredClone(input.request.participants) }),
       ...(input.request.max_rounds === undefined ? {} : { max_rounds: input.request.max_rounds }),
+      ...(input.request.project_id === undefined ? {} : { project_id: input.request.project_id }),
       private_context_present: false,
     },
   });
@@ -115,6 +118,9 @@ export async function executeDurableConversationCreateV1(
           ...(input.request.max_rounds === undefined
             ? {}
             : { max_rounds: input.request.max_rounds }),
+          ...(input.request.project_id === undefined
+            ? {}
+            : { project_id: input.request.project_id }),
         },
         before_publish: (digest) => prepared.beforePublish(digest),
       },

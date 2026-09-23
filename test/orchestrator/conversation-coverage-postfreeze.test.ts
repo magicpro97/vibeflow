@@ -354,6 +354,7 @@ const catalogRow = (
     lineage_status: "verified" as const,
     topic: `Topic ${rootSessionId}`,
     policy: "direct",
+    project_id: "repo",
     lifecycle: "ACTIVE" as const,
     health: "healthy" as const,
     participants: [

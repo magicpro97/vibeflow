@@ -218,6 +218,7 @@ export interface ConversationManifest {
   /** Private resolver decision; legacy records normalize to false. */
   evaluator_auto_added?: boolean;
   repo_root: string;
+  project_id?: string;
   phase: number;
   task_text: string;
   bindings: ConversationBinding[];
@@ -296,6 +297,7 @@ export interface ConversationCreateRequest {
   policy?: string;
   participants?: ConversationCreateParticipant[];
   max_rounds?: number;
+  project_id?: string;
   private_file_range?: PrivateFileRangeHandoffBindingV1;
 }
 

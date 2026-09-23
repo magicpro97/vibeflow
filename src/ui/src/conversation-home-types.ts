@@ -51,6 +51,8 @@ export interface HomeRevisionSummary {
   lineage_status: ConversationLineageStatus;
   topic: string;
   policy: string;
+  /** Project this revision belongs to; the reserved `idea` id means "unclassified". */
+  project_id: string;
   lifecycle: ConversationLifecycle;
   health: ConversationHealthV1;
   participants: HomeParticipant[];

@@ -30,6 +30,7 @@ import {
 import type { RevisionReservationRecordV1 } from "./lineage-reservation.js";
 import type { RevisionPreparationPlanV1 } from "./lineage-revision-operation.js";
 import type { LineageHeadRecordV1, LineageNodeIdentityV1 } from "./lineage-types.js";
+import { MANIFEST_RECORD_DOMAIN } from "./manifest-record-digest.js";
 import { bindingAuthorities } from "./policy-registry.js";
 import {
   ConversationRevisionConflictError,
@@ -348,6 +349,6 @@ export function revisionManifestRecord(
   };
   return {
     record,
-    digest: digestV1("VF-CONVERSATION-MANIFEST-RECORD\0v1\0", record),
+    digest: digestV1(MANIFEST_RECORD_DOMAIN, record),
   };
 }

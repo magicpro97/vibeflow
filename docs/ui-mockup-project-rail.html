@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VibeFlow — Project-Grouped Rail Mockup (Task 5 Step 0)</title>
+<style>
+  :root {
+    --home-paper: #f4efe6;
+    --home-ink: #29251f;
+    --home-muted: #6f6556;
+    --home-line: #d8cfc0;
+    --home-amber: #9c4d18;
+    --home-amber-ink: #7f451f;
+    --home-amber-soft: #f0ddc4;
+    --home-warm-panel: #e9dec9;
+    --home-faint: #b3a896;
+    --rail-group-rule: var(--home-line);
+    --rail-group-name: var(--home-ink);
+    --rail-group-goal: var(--home-muted);
+    --rail-group-count: var(--home-muted);
+    --rail-group-ideas-wash: var(--home-warm-panel);
+    --rail-entry-indent: 0.5rem;
+    --rail-chip-bg: var(--home-amber-soft);
+    --rail-chip-border: var(--home-amber);
+    --rail-chip-ink: var(--home-ink);
+    --rail-chip-action: #fffefa;
+    --rail-chip-ghost: var(--home-muted);
+    --rail-chip-shadow: 0 6px 18px rgb(58 47 33 / 0.10);
+    --xs: 0.15rem; --sm: 0.3rem; --md: 0.55rem; --lg: 0.75rem; --xl: 1rem;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--home-paper); color: var(--home-ink);
+    font-family: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+    font-size: 15px; line-height: 1.45;
+  }
+  .layout { display: flex; min-height: 100vh; gap: 2rem; padding: 2rem; max-width: 1200px; margin: 0 auto; }
+  .stage { flex: 1 1 60%; }
+  .notes { flex: 1 1 40%; font-size: 0.82rem; color: var(--home-muted); border-left: 1px solid var(--home-line); padding-left: 1.5rem; }
+  .notes h3 { text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.68rem; font-weight: 650; color: var(--home-ink); margin: 0 0 0.5rem; }
+  .notes p { margin: 0.3rem 0; }
+  .notes section { margin-bottom: 1.2rem; }
+  /* App frame — the rail */
+  .app { background: var(--home-paper); border: 1px solid var(--home-line); border-radius: 0.5rem; overflow: hidden; }
+  .rail-head { display: flex; justify-content: space-between; align-items: center; padding: var(--lg) var(--xl); border-bottom: 1px solid var(--home-line); }
+  .rail-head .new { background: var(--home-ink); color: var(--home-paper); border: none; border-radius: 0.25rem; padding: 0.35rem 0.7rem; font: inherit; font-size: 0.74rem; font-weight: 600; cursor: pointer; }
+  .rail-head .back { color: var(--home-muted); font-size: 0.78rem; }
+  .rail-search { padding: var(--sm) var(--xl) var(--md); }
+  .rail-search input { width: 100%; border: 1px solid var(--home-line); border-radius: 0.25rem; background: #fff; padding: 0.4rem 0.6rem; font: inherit; font-size: 0.78rem; color: var(--home-ink); }
+  .rail { padding: var(--lg) var(--xl) var(--xl); }
+  /* Group divider */
+  .group { margin-bottom: var(--md); }
+  .group-divider { display: flex; align-items: baseline; gap: var(--sm); padding-top: var(--md); cursor: pointer; user-select: none; }
+  .group-divider .name { font-size: 0.68rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--rail-group-name); }
+  .group-divider .goal { font-size: 0.64rem; font-weight: 500; color: var(--rail-group-goal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; }
+  .group-divider .count { font-size: 0.62rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--rail-group-count); }
+  .group-divider .chev { margin-left: auto; font-size: 0.7rem; color: var(--home-muted); }
+  .group-rule { border: none; border-top: 1px solid var(--rail-group-rule); margin: var(--xs) 0 var(--sm); }
+  /* Ideas variant: amber */
+  .group.ideas .group-divider .name { color: var(--home-amber-ink); }
+  .group.ideas .group-rule { border-top-color: var(--home-amber); }
+  /* Entries */
+  .entries { display: flex; flex-direction: column; padding-left: var(--rail-entry-indent); }
+  .entry { display: flex; flex-direction: column; gap: 0.1rem; text-align: left; background: none; border: none; padding: var(--sm) 0 var(--sm) 0.25rem; cursor: pointer; border-radius: 0.25rem; font: inherit; }
+  .entry:hover { background: rgb(41 37 31 / 0.04); }
+  .entry .title { font-size: 0.78rem; font-weight: 610; color: var(--home-ink); }
+  .entry .meta { font-size: 0.66rem; color: var(--home-muted); display: flex; gap: 0.4rem; align-items: center; }
+  .entry .meta .dot { width: 0.4rem; height: 0.4rem; border-radius: 50%; display: inline-block; }
+  .dot.active { background: var(--home-amber); }
+  /* Suggestion chip */
+  .chip-wrap { position: relative; margin-top: var(--md); }
+  .chip {
+    display: flex; align-items: center; gap: var(--sm); flex-wrap: wrap;
+    background: var(--rail-chip-bg); border: 1px solid var(--rail-chip-border);
+    border-radius: 0.35rem; box-shadow: var(--rail-chip-shadow); padding: 0.45rem 0.6rem;
+    font-size: 0.74rem; font-weight: 600; color: var(--rail-chip-ink);
+    animation: slide-in 0.2s ease;
+  }
+  @keyframes slide-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .chip .arrow { color: var(--home-amber); font-weight: 700; }
+  .chip .proj { font-weight: 650; text-decoration: underline dotted; text-underline-offset: 2px; }
+  .chip .confirm { background: var(--home-amber); color: var(--rail-chip-action); border: none; border-radius: 0.25rem; padding: 0.25rem 0.55rem; font: inherit; font-size: 0.68rem; font-weight: 650; cursor: pointer; }
+  .chip .dismiss { background: none; border: none; color: var(--rail-chip-ghost); font: inherit; font-size: 0.68rem; cursor: pointer; padding: 0.25rem; }
+  .chip .dismiss:hover { text-decoration: underline; }
+  /* Settings panel */
+  .settings { border: 1px solid var(--home-line); border-radius: 0.35rem; margin-top: var(--xl); }
+  .settings-head { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--home-line); }
+  .settings-head h4 { margin: 0; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .settings-body { padding: 0.7rem; display: flex; flex-direction: column; gap: 0.6rem; font-size: 0.76rem; }
+  .row { display: flex; align-items: center; gap: 0.5rem; justify-content: space-between; }
+  .row label { color: var(--home-muted); }
+  .row select, .row input { border: 1px solid var(--home-line); border-radius: 0.2rem; background: #fff; font: inherit; font-size: 0.74rem; padding: 0.25rem 0.4rem; }
+  .toggle { display: inline-flex; width: 2.2rem; height: 1.2rem; border-radius: 0.6rem; background: var(--home-amber); position: relative; cursor: pointer; border: none; }
+  .toggle::after { content: ""; position: absolute; top: 0.15rem; left: 1.15rem; width: 0.9rem; height: 0.9rem; border-radius: 50%; background: #fff; }
+  .per-project { border-top: 1px solid var(--home-line); padding-top: 0.5rem; }
+  .per-project .pp-head { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--home-muted); margin-bottom: 0.3rem; }
+  .pp-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1.2fr; gap: 0.4rem; align-items: center; font-size: 0.72rem; margin-bottom: 0.3rem; }
+  .pp-row .pname { font-weight: 600; color: var(--home-ink); }
+  .pp-row select, .pp-row input { width: 100%; }
+  /* Ideas folder preview inside notes */
+  .preview { background: var(--home-warm-panel); border: 1px solid var(--home-line); border-radius: 0.3rem; padding: 0.5rem 0.6rem; font-size: 0.72rem; }
+  .kbd { font-family: ui-monospace, monospace; font-size: 0.72rem; background: #fff; border: 1px solid var(--home-line); border-radius: 0.2rem; padding: 0.05rem 0.3rem; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="stage">
+    <div class="app">
+      <div class="rail-head">
+        <button class="new">+ New conversation</button>
+        <span class="back">‹</span>
+      </div>
+      <div class="rail-search"><input placeholder="Search conversations…" /></div>
+      <div class="rail">
+        <!-- Group: vibeflow-hermes-execution -->
+        <section class="group" aria-label="Project: vibeflow-hermes-execution">
+          <div class="group-divider">
+            <span class="name">Vibeflow-Hermes-Execution</span>
+            <span class="goal">Complete Draft v7 brainstorming…</span>
+            <span class="count">3</span>
+            <span class="chev">▾</span>
+          </div>
+          <hr class="group-rule" />
+          <div class="entries">
+            <button class="entry"><span class="title">Draft v7 debate round 2</span><span class="meta"><span class="dot active"></span> ACTIVE · 4 rev · 12m</span></button>
+            <button class="entry"><span class="title">Fix SSE reconnect ordering</span><span class="meta"><span class="dot"></span> COMPLETED · 2 rev · 2h</span></button>
+            <button class="entry"><span class="title">Catalog fixture sweep</span><span class="meta"><span class="dot"></span> COMPLETED · 1 rev · 5h</span></button>
+          </div>
+        </section>
+        <!-- Group: sport-host (empty goal → single-line divider) -->
+        <section class="group" aria-label="Project: sport-host">
+          <div class="group-divider">
+            <span class="name">Sport-Host</span>
+            <span class="count">1</span>
+            <span class="chev">▾</span>
+          </div>
+          <hr class="group-rule" />
+          <div class="entries">
+            <button class="entry"><span class="title">Polish orchestrate gate</span><span class="meta"><span class="dot"></span> COMPLETED · 2 rev · 1d</span></button>
+          </div>
+        </section>
+        <!-- Ideas: amber, always last, collapsed -->
+        <section class="group ideas" aria-label="Project: Ideas (unclassified)">
+          <div class="group-divider">
+            <span class="name">Ideas</span>
+            <span class="goal">Unclassified conversations</span>
+            <span class="count">4</span>
+            <span class="chev">▸</span>
+          </div>
+          <hr class="group-rule" />
+          <div class="entries" style="display:none;"></div>
+        </section>
+      </div>
+      <!-- Suggestion chip -->
+      <div class="chip-wrap">
+        <div class="chip" role="status">
+          <span class="arrow">→</span>
+          <span>Move to <span class="proj">vibeflow-v0.15</span>?</span>
+          <button class="confirm">Move</button>
+          <button class="dismiss">Not now</button>
+        </div>
+      </div>
+      <!-- Settings panel -->
+      <div class="settings">
+        <div class="settings-head"><h4>Project settings</h4><button class="toggle" aria-label="Auto-classify"></button></div>
+        <div class="settings-body">
+          <div class="row"><label>Auto-classify</label><select><option>Off</option><option selected>On</option></select></div>
+          <div class="row"><label>Classifier CLI</label><select><option>codex</option><option selected>claude</option><option>copilot</option></select></div>
+          <div class="row"><label>Classifier model</label><input value="claude-opus-4-6" /></div>
+          <div class="row"><label>Thinking effort</label><select><option>low</option><option>medium</option><option selected>high</option><option>max</option></select></div>
+          <div class="per-project">
+            <div class="pp-head">Per-project engine override</div>
+            <div class="pp-row"><span class="pname">vibeflow-hermes-execution</span><select><option>inherit</option><option>codex</option></select><input placeholder="model…" /><select><option>inherit</option><option>high</option></select></div>
+            <div class="pp-row"><span class="pname">sport-host</span><select><option selected>inherit</option><option>codex</option></select><input placeholder="model…" /><select><option selected>inherit</option><option>high</option></select></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <section>
+      <h3>Concept</h3>
+      <p>Paper card index — projects are quiet tabbed dividers; conversations filed under them. Rejected: bold caps + folder emoji reflex.</p>
+      <p>Divider is <em>quieter</em> than the entries (0.68rem vs 0.78rem). Only <strong>Ideas</strong> tints amber.</p>
+    </section>
+    <section>
+      <h3>Grouping rules</h3>
+      <p>Groups ordered by newest entry (sort_updated_at desc), ties by name; <strong>Ideas always last</strong> (catch-all, not peer).</p>
+      <p>Sessions keep catalog order <em>inside</em> each group — the group never re-sorts entries.</p>
+    </section>
+    <section>
+      <h3>Suggestion chip</h3>
+      <p>Appears in composer area after a message when classifier proposes a project. <strong>Never auto-moves</strong> on low confidence.</p>
+      <p>Two variants: <span class="preview">→ Move to &lt;project&gt;? <button class="confirm">Move</button> <button class="dismiss">Not now</button></span> and “Tạo project mới &lt;tên&gt;?” when no match.</p>
+      <p>Keyboard: Tab reaches chip, <span class="kbd">Esc</span> dismisses, Enter on button acts.</p>
+    </section>
+    <section>
+      <h3>A11y</h3>
+      <p>Group = <span class="kbd">section[aria-label]</span>; chip = <span class="kbd">role=status</span> (announceable); all contrast pairs computed (WCAG AA ≥4.5:1, dark-mode pairs included).</p>
+    </section>
+    <section>
+      <h3>Known limitations</h3>
+      <p>repo_root defaults to cwd (never empty) → <em>Unassigned/Ideas</em> is the rare tail, not the primary case.</p>
+      <p>Same-basename clones merge into one group visually (named-project identity is the future upgrade).</p>
+    </section>
+    <section>
+      <h3>Interactive</h3>
+      <p>Click a divider to collapse/expand its entries. Click “Move”. Esc on the chip dismisses.</p>
+    </section>
+  </aside>
+</div>
+<script>
+  // Divider collapse/expand
+  document.querySelectorAll('.group-divider').forEach((d) => {
+    d.addEventListener('click', () => {
+      const entries = d.parentElement.querySelector('.entries');
+      const chev = d.querySelector('.chev');
+      if (!entries) return;
+      const open = entries.style.display !== 'none';
+      entries.style.display = open ? 'none' : 'flex';
+      chev.textContent = open ? '▸' : '▾';
+    });
+  });
+  // Chip dismiss
+  document.querySelector('.chip .dismiss').addEventListener('click', () => {
+    document.querySelector('.chip').style.display = 'none';
+  });
+</script>
+</body>
+</html>

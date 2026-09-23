@@ -8,6 +8,7 @@ import {
   assertConversationManifest,
 } from "./artifact-validation.js";
 import { fail as rejectConversationState } from "./fold-validation.js";
+import { manifestRecordDigestMatches } from "./manifest-record-digest.js";
 import type { ConversationManifest } from "./types.js";
 
 const MAX_VISIBILITY_BYTES = 64 * 1024;
@@ -122,8 +123,7 @@ export class ConversationRevisionArtifactStore {
       artifacts: [],
       artifact_reservations: {},
     };
-    const observedDigest = digestV1("VF-CONVERSATION-MANIFEST-RECORD\0v1\0", record);
-    if (observedDigest !== input.manifest_record_digest)
+    if (!manifestRecordDigestMatches(input.manifest_record_digest, record))
       throw new Error("prepared revision manifest digest mismatch");
     return this.access.withLock(() => {
       const existing = this.access.readRecord(manifest.conversation_id, true);

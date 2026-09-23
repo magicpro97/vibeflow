@@ -112,11 +112,9 @@
           :disabled="!store.draft.trim() || composerBusy.blocksSubmit || !store.online"
         />
       </div>
-      <HomePrivateRangePanel
-        ref="privateRangePanel"
-        @open-change="privateRangeOpen = $event"
-      />
+      <HomePrivateRangePanel ref="privateRangePanel" @open-change="privateRangeOpen = $event" />
     </form>
+    <ProjectSuggestionChip />
     <HomeComposerStatus />
   </div>
 </template>
@@ -126,6 +124,7 @@ import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conve
 import { useHomeComposerCaret } from "../composables/useHomeComposerCaret.js";
 import { useHomeComposerLayout } from "../composables/useHomeComposerLayout.js";
 import { useHomeComposerQuotes } from "../composables/useHomeComposerQuotes.js";
+import { useHomeComposerSuggestionEscape } from "../composables/useHomeComposerSuggestionEscape.js";
 import {
   describeHomeComposerBusy,
   describeHomeComposerDescription,
@@ -137,6 +136,7 @@ import { useConversationHomeStore } from "../conversation-home-store.js";
 import { removeMentionAtKey } from "../home-composer-editing.js";
 import { nextMentionToken, removeComposerMention } from "../home-composer-highlight.js";
 import { matchHomeComposerSuggestions } from "../home-composer-suggestions.js";
+import { useProjectClassificationStore } from "../project-classification-store.js";
 import HomeAttachmentButton from "./HomeAttachmentButton.vue";
 import HomeAttachments from "./HomeAttachments.vue";
 import HomeCapabilityTargetChooser from "./HomeCapabilityTargetChooser.vue";
@@ -151,11 +151,13 @@ import HomeQueueEditStatus from "./HomeQueueEditStatus.vue";
 import HomeQueuedMessages from "./HomeQueuedMessages.vue";
 import HomeQuoteSelectionList from "./HomeQuoteSelectionList.vue";
 import HomeToolbarActions from "./HomeToolbarActions.vue";
+import ProjectSuggestionChip from "./ProjectSuggestionChip.vue";
 const props = withDefaults(defineProps<{ transientUiOpen?: boolean }>(), {
   transientUiOpen: false,
 });
 defineEmits<{ "open-capabilities": [] }>();
 const store = useConversationHomeStore();
+const projectClassification = useProjectClassificationStore();
 const { quoteChips } = useHomeComposerQuotes();
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const composing = ref(false);
@@ -168,6 +170,18 @@ const activeSuggestion = ref(0);
 const suggestionsDismissed = ref(false);
 const pendingEscapeDraft = ref<string | null>(null);
 const suggestionDraftSnapshot = ref("");
+const { dismissSuggestionsWithEscape, restoreDismissedDraft } = useHomeComposerSuggestionEscape({
+  readDraft: () => store.draft,
+  writeDraft: (value) => {
+    store.draft = value;
+  },
+  textarea,
+  visibleSuggestionCount: () => visibleSuggestions.value.length,
+  suggestionDraftSnapshot,
+  pendingEscapeDraft,
+  suggestionsDismissed,
+  resize,
+});
 const suggestionListId = "composer-suggestions";
 const privateRangeOpen = ref(false);
 const privateRangePanel = ref<{ open(reset?: boolean): void } | null>(null);
@@ -350,34 +364,6 @@ function onKeydown(event: KeyboardEvent) {
     void submit();
   }
 }
-function dismissSuggestionsWithEscape(event: KeyboardEvent): boolean {
-  if (event.key !== "Escape" || !visibleSuggestions.value.length) return false;
-  const preservedDraft = suggestionDraftSnapshot.value.length
-    ? suggestionDraftSnapshot.value
-    : store.draft;
-  pendingEscapeDraft.value = preservedDraft;
-  suggestionsDismissed.value = true;
-  restorePreservedDraft(preservedDraft);
-  event.preventDefault();
-  event.stopPropagation();
-  return true;
-}
-function restorePreservedDraft(preservedDraft: string) {
-  if (store.draft !== preservedDraft) store.draft = preservedDraft;
-  const element = textarea.value;
-  if (element && element.value !== preservedDraft) {
-    element.value = preservedDraft;
-    element.setSelectionRange(preservedDraft.length, preservedDraft.length);
-    resize();
-  }
-}
-function restoreDismissedDraft(event: KeyboardEvent) {
-  if (event.key !== "Escape" || pendingEscapeDraft.value === null) return;
-  restorePreservedDraft(pendingEscapeDraft.value);
-  pendingEscapeDraft.value = null;
-  event.preventDefault();
-  event.stopPropagation();
-}
 function onKeyup(event: KeyboardEvent) {
   restoreDismissedDraft(event);
 }
@@ -387,10 +373,15 @@ function onBeforeInput(event: InputEvent) {
 }
 async function submit() {
   if (composing.value) return;
-  await store.submitDraft();
+  const sent = store.draft;
+  const admitted = await store.submitDraft();
   await nextTick();
   if (store.capabilityTargetRequest?.selection_mode === "explicit") return;
   textarea.value?.focus();
   resize();
+  // Advisory: a verdict is a proposal the user confirms, a failure proposes nothing — and a
+  // draft that was never admitted (offline, refused intent, a save-edit) has nothing to propose
+  // about, so the admission verdict gates the classification too.
+  void projectClassification.classifyMessage(sent, admitted);
 }
 </script>

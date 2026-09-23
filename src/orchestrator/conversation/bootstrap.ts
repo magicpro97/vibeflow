@@ -34,6 +34,11 @@ import { ConversationDelegationWorkspaceAuthorityV1 } from "./conversation-deleg
 import type { ConversationHomeAuthorities } from "./conversation-home-authorities.js";
 import type { ConversationMessageQueueRuntimeV1 } from "./conversation-message-queue-runtime.js";
 import { ConversationPrivateContextBrokerV1 } from "./conversation-private-context-broker-store.js";
+import {
+  type ConversationProjectRebinderV1,
+  createConversationProjectRebinder,
+  createPendingRevisionProposalGuard,
+} from "./conversation-project-rebind.js";
 import { ConversationUserMessageAuthorityV1 } from "./conversation-user-message-authority.js";
 import { CoordinateConversationPolicy } from "./coordinate-policy.js";
 import { DebateConversationPolicy } from "./debate-policy.js";
@@ -43,6 +48,7 @@ import { ConversationLineageService } from "./lineage-service.js";
 import { OrchestrateConversationPolicy } from "./orchestrate-policy.js";
 import { PlanConversationPolicy } from "./plan-policy.js";
 import { ConversationPolicyRegistry } from "./policy-registry.js";
+import { ProjectRegistryAuthority } from "./project-registry-authority.js";
 import { ReviewConversationPolicy, createReviewEvidenceAuthority } from "./review-policy.js";
 import { ConversationOrchestrator } from "./service.js";
 import {
@@ -69,6 +75,14 @@ export interface ConversationBootstrapOptions extends ConversationRequestResolut
   repoRoot: string;
   libraries: ConversationBootstrapLibraries;
   stateDir?: string;
+  /** Project registry directory; defaults to `<repoRoot>/.vibeflow/projects`. */
+  projectsDir?: string;
+  /**
+   * Auto-classify switch (`projectClassification.enabled`), read from the settings document by
+   * the command layer that owns `repoRoot`. Passed straight to the materializer, which uses it to
+   * decide whether an implicit create may be filed by the deterministic tiers. Omitted = ON.
+   */
+  projectClassificationEnabled?: () => boolean;
   phase?: number;
   session?: EngineSessionAdapterOptions;
   mirror?: TraceStoreOptions["mirror"];
@@ -106,6 +120,9 @@ export interface ConversationBootstrap {
     traceStore: TraceStore;
     artifactStore: ConversationArtifactStore;
     homeAuthorities: ConversationHomeAuthorities;
+    projects: ProjectRegistryAuthority;
+    /** The chip's confirm: re-binds the active revision's `project_id` and invalidates the catalog. */
+    rebindConversationProject: ConversationProjectRebinderV1;
     policies: ConversationPolicyRegistry;
     agentActionCandidates: ConversationAgentActionCandidateAuthorityV1;
     coordinationWorkspaces: ConversationDelegationWorkspaceAuthorityV1;
@@ -155,6 +172,32 @@ export function createConversationBootstrap(
     home: homeAuthorities,
   });
   const now = options.now ?? (() => new Date().toISOString());
+  const projects = new ProjectRegistryAuthority({
+    root: resolve(options.projectsDir ?? join(repoRoot, ".vibeflow", "projects")),
+  });
+  /**
+   * The chip's confirm. Composed here because the two things a re-bind must not break — the
+   * lineage head and the catalog notifier — are owned here; `notify` is the same boundary a
+   * committed message uses, so a projection failure cannot fail a re-bind that already landed.
+   */
+  const rebindConversationProject = createConversationProjectRebinder({
+    artifactStore,
+    lineage: {
+      head: (rootSessionId) => homeAuthorities.lineage.readHead(rootSessionId),
+      reservation: (rootSessionId) => homeAuthorities.lineage.readReservation(rootSessionId),
+      // The second half of the "don't move under a live revision" window: `reservation` is only
+      // set while an operation executes, whereas a *prepared* proposal pins the lock digest at
+      // propose time. `pending` is the action service's durable non-terminal read, so the guard
+      // follows the proposal's real lifecycle — committing or cancelling it clears the guard.
+      pendingProposalPinsLock: createPendingRevisionProposalGuard({
+        artifactRoot,
+        pendingProposals: homeAuthorities.actions.pending.bind(homeAuthorities.actions),
+      }),
+    },
+    projects,
+    notify: (conversationId, recordedAt) => recordConversationSource?.(conversationId, recordedAt),
+    now,
+  });
   const privateContextBroker = new ConversationPrivateContextBrokerV1({
     artifactRoot,
     repoRoot,
@@ -268,6 +311,10 @@ export function createConversationBootstrap(
     coordinationWorkspaces,
     privateContextBroker,
     messageQueueUserAuthority,
+    projects,
+    ...(options.projectClassificationEnabled
+      ? { projectClassificationEnabled: options.projectClassificationEnabled }
+      : {}),
     sessionAdapter,
     policies,
     onConversationSourceCommitted: (event) =>
@@ -325,6 +372,8 @@ export function createConversationBootstrap(
       traceStore,
       artifactStore,
       homeAuthorities,
+      projects,
+      rebindConversationProject,
       policies,
       agentActionCandidates,
       coordinationWorkspaces,

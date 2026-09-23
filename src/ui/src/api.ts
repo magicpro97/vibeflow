@@ -70,9 +70,12 @@ export const api = {
   state: () => req<WorkflowState>("GET", "/state"),
   settings: {
     // Server returns { settings: VibeSettings, tools: ToolView[] } — unwrap here
-    get: () => req<{ settings: VibeSettings }>("GET", "/api/settings").then((r) => r.settings),
-    set: (s: Partial<VibeSettings>) =>
-      req<{ settings: VibeSettings }>("POST", "/api/settings", s).then((r) => r.settings),
+    get: (signal?: AbortSignal) =>
+      req<{ settings: VibeSettings }>("GET", "/api/settings", undefined, signal).then(
+        (r) => r.settings,
+      ),
+    set: (s: Partial<VibeSettings>, signal?: AbortSignal) =>
+      req<{ settings: VibeSettings }>("POST", "/api/settings", s, signal).then((r) => r.settings),
     previewPolicy: (s: Pick<VibeSettings, "envPolicy" | "hooks">) =>
       req<import("./types.js").PolicyPreview>("POST", "/api/settings/preview", s),
     applyPolicy: (previewId: string, confirmationText: string, settings?: Partial<VibeSettings>) =>

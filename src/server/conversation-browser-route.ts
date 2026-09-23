@@ -18,12 +18,18 @@ import {
   handleConversationDraftPrivateContextRoute,
   handleConversationMessageQueueRoute,
 } from "./conversation-message-queue-route.js";
+import {
+  type ConversationProjectRouteAuthorityV1,
+  type ConversationProjectSurfaceV1,
+  handleConversationProjectRoute,
+} from "./conversation-project-route.js";
 import { handleConversationReactionRoute } from "./conversation-reaction-route.js";
 import { handleConversationTimelineRoute } from "./conversation-timeline-route.js";
 
 const CONVERSATIONS = "/api/conversations";
 const SESSIONS = "/api/conversation-sessions";
 const DRAFTS = "/api/conversation-drafts";
+const PROJECTS = "/api/conversation-projects";
 
 export interface ConversationBrowserHttpAuthorityV1 extends ReturnTypeOfBrowserAuthorities {
   sessions: Pick<ConversationSessionAuthority, "authorize">;
@@ -31,6 +37,9 @@ export interface ConversationBrowserHttpAuthorityV1 extends ReturnTypeOfBrowserA
   principal?: ConversationActionRouteAuthorityV1["principal"];
   legacyAdopt?: ConversationLegacyAdoptRouteAuthorityV1["legacyAdopt"];
   messageQueue?: ConversationMessageQueueHttpAuthorityV1["queue"];
+  /** Project registry read + re-bind; absent entirely when the runtime has no registry. */
+  projects?: Omit<ConversationProjectRouteAuthorityV1, "sessions" | "csrf"> &
+    Pick<ConversationProjectSurfaceV1, "updateProject" | "classify">;
 }
 
 export function isConversationNamespace(path: string): boolean {
@@ -40,7 +49,9 @@ export function isConversationNamespace(path: string): boolean {
     path === SESSIONS ||
     path.startsWith(`${SESSIONS}/`) ||
     path === DRAFTS ||
-    path.startsWith(`${DRAFTS}/`)
+    path.startsWith(`${DRAFTS}/`) ||
+    path === PROJECTS ||
+    path.startsWith(`${PROJECTS}/`)
   );
 }
 
@@ -81,6 +92,18 @@ export async function handleConversationBrowserRoute(
   request: Request,
   url: URL,
 ): Promise<Response | null> {
+  if (authority.projects) {
+    const projects = await handleConversationProjectRoute(
+      {
+        ...authority.projects,
+        sessions: authority.sessions,
+        ...(authority.csrf ? { csrf: authority.csrf } : {}),
+      },
+      request,
+      url,
+    );
+    if (projects) return projects;
+  }
   const drafts = decodedPath(url.pathname, DRAFTS);
   if (drafts) {
     if (!authority.messageQueue) return null;

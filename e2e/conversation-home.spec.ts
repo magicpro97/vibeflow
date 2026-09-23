@@ -2627,6 +2627,421 @@ test.describe("AI-first conversation Home", () => {
     });
   });
 
+  test("offers a project move, files it, and keeps the classification switch durable", async ({
+    page,
+  }) => {
+    const moves: unknown[] = [];
+    const enginePatches: unknown[] = [];
+    let settingsPosted: unknown = null;
+    let enabled = true;
+    const session = homeSession("root-project", "Project chip", [
+      homeParticipant("reviewer", "reviewer"),
+    ]);
+    await page.route("**/api/engines**", (route) =>
+      route.fulfill({ status: 200, json: { engines: [] } }),
+    );
+    // The re-bind lands in the catalog's `project_id`, so a re-read after the move reports the new
+    // group. Serving the original binding forever would hide a rail that never re-reads the list.
+    const bound = () =>
+      moves.length === 0
+        ? session
+        : {
+            ...session,
+            root: { ...session.root, project_id: "alpha" },
+            active: { ...session.active, project_id: "alpha" },
+          };
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [bound()],
+          next_cursor: null,
+          catalog_generation: "generation",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await page.route("**/api/conversation-sessions/root-project/head", async (route) => {
+      await route.fulfill({ status: 200, json: homeHead(bound()) });
+    });
+    await page.route("**/api/conversation-sessions/root-project/timeline?**", async (route) => {
+      await route.fulfill({ status: 200, json: homeTimeline("root-project", []) });
+    });
+    await page.route("**/api/conversation-sessions/root-project/messages/queue", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, json: homeMessageQueue("root-project") });
+        return;
+      }
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      const queued = {
+        ...homeQueuedMessage("root-project", 1, String(body.content)),
+        target_participants: body.target_participants,
+        quote_refs: body.quote_refs,
+        private_context_present: body.private_context_present,
+      };
+      await route.fulfill({ status: 201, json: queued });
+    });
+    await page.route(
+      "**/api/conversations/root-project-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-project-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: { stream_token: "project-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+        });
+      },
+    );
+    await page.route("**/api/conversations/root-project-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+          schema_version: "1.0",
+          last_public_sequence: 0,
+        }),
+      });
+    });
+    await page.route("**/api/conversation-projects", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: "1.0",
+          projects: [
+            {
+              id: "alpha",
+              name: "alpha-service",
+              goal: "Ship the alpha",
+              engine: { cli: "codex", model: null, thinking: "high" },
+            },
+          ],
+        },
+      });
+    });
+    await page.route("**/api/conversation-projects/alpha", async (route) => {
+      enginePatches.push(route.request().postDataJSON());
+      await route.fulfill({ status: 200, json: { schema_version: "1.0" } });
+    });
+    await page.route("**/api/conversation-projects/classify", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { schema_version: "1.0", project_id: "alpha", confidence: 0.9, reason: "ai" },
+      });
+    });
+    await page.route("**/api/conversation-projects/move", async (route) => {
+      moves.push(route.request().postDataJSON());
+      await route.fulfill({ status: 202, json: { schema_version: "1.0", moved: true } });
+    });
+    await page.route("**/api/settings", async (route) => {
+      if (route.request().method() === "POST") {
+        settingsPosted = route.request().postDataJSON();
+        enabled = Boolean(
+          (settingsPosted as { projectClassification?: { enabled?: boolean } })
+            ?.projectClassification?.enabled,
+        );
+      }
+      await route.fulfill({
+        status: 200,
+        json: {
+          settings: {
+            projectClassification: {
+              enabled,
+              engine: { cli: null, model: null, thinking: null },
+            },
+          },
+          tools: [],
+        },
+      });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Project chip/ }).click();
+
+    // A send produces a verdict; the chip's confirm is what files the conversation.
+    await page.locator("#home-composer").fill("please move this");
+    await page.getByRole("button", { name: "Send message" }).click();
+    const chip = page.getByRole("group", { name: "Project suggestion" });
+    await expect(chip).toBeVisible();
+    await expect(chip).toContainText("alpha-service");
+    // Axe reads blended colors: let the 140ms enter animation settle before auditing contrast.
+    await chip.evaluate(async (node) => {
+      await Promise.all(
+        node
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => {})),
+      );
+    });
+    await expectAxeClean(page, "project suggestion chip");
+
+    await page.getByRole("button", { name: "Move", exact: true }).click();
+    await expect(chip).toHaveCount(0);
+    expect(moves).toHaveLength(1);
+    // The rail groups the sessions list, so a landed move must re-read it: without that the chip
+    // reports success while the conversation stays under Ideas until a reload.
+    await expect(
+      page.getByRole("group", { name: /alpha-service/ }).getByRole("button", {
+        name: /Project chip/,
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole("group", { name: /Ideas/ })).toHaveCount(0);
+
+    // The switch is a durable gate: toggling it persists the block immediately.
+    await page.getByRole("button", { name: "Open settings" }).click();
+    const toggle = page.getByLabel("Auto-classify new conversations");
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await expect
+      .poll(() => settingsPosted as { projectClassification?: { enabled?: boolean } } | null)
+      .toMatchObject({ projectClassification: { enabled: false } });
+
+    // `Save project settings` is the ONLY writer of the engine block and of every override row:
+    // fill the classifier engine and one override, then assert both persisted bodies. Without
+    // this the panel's save() is invisible to every test (a no-op passes the whole suite).
+    await page.getByLabel("Classifier CLI").selectOption("codex");
+    await page.getByLabel("Classifier model").fill("gpt-5");
+    await page.getByLabel("Thinking effort").fill("high");
+    await page.getByRole("button", { name: /Per-project engine override/ }).click();
+    await page.getByLabel("alpha-service model override").fill("gpt-5-mini");
+    await page.getByRole("button", { name: "Save project settings" }).click();
+    await expect.poll(() => settingsPosted).toMatchObject({
+      projectClassification: {
+        enabled: false,
+        engine: { cli: "codex", model: "gpt-5", thinking: "high" },
+      },
+    });
+    await expect
+      .poll(() => enginePatches)
+      .toEqual([
+        { engine: { cli: "codex", model: "gpt-5-mini", thinking: "high" } },
+      ]);
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  });
+
+  test("hides a stale proposal while the next send is still settling", async ({ page }) => {
+    const session = homeSession("root-settle", "Settling session");
+    let releaseAdmission: (() => void) | null = null;
+    const admissionGate = new Promise<void>((resolve) => {
+      releaseAdmission = resolve;
+    });
+    await page.route("**/api/engines**", (route) =>
+      route.fulfill({ status: 200, json: { engines: [] } }),
+    );
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "generation",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await page.route("**/api/conversation-sessions/root-settle/head", async (route) => {
+      await route.fulfill({ status: 200, json: homeHead(session) });
+    });
+    await page.route("**/api/conversation-sessions/root-settle/timeline?**", async (route) => {
+      await route.fulfill({ status: 200, json: homeTimeline("root-settle", []) });
+    });
+    let admissions = 0;
+    await page.route("**/api/conversation-sessions/root-settle/messages/queue", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, json: homeMessageQueue("root-settle") });
+        return;
+      }
+      admissions += 1;
+      // The second send's admission is held open on purpose: the chip must stay hidden for as
+      // long as the composer reports itself busy, not merely until the classification returns.
+      if (admissions > 1) await admissionGate;
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 201,
+        json: {
+          ...homeQueuedMessage("root-settle", admissions, String(body.content)),
+          target_participants: body.target_participants,
+          quote_refs: body.quote_refs,
+          private_context_present: body.private_context_present,
+        },
+      });
+    });
+    await page.route(
+      "**/api/conversations/root-settle-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+    await page.route(
+      "**/api/conversations/root-settle-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: { stream_token: "settle-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+        });
+      },
+    );
+    await page.route("**/api/conversations/root-settle-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT, {
+          schema_version: "1.0",
+          last_public_sequence: 0,
+        }),
+      });
+    });
+    await page.route("**/api/conversation-projects", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: "1.0",
+          projects: [
+            {
+              id: "alpha",
+              name: "alpha-service",
+              goal: "Ship it",
+              engine: { cli: "codex", model: null, thinking: "high" },
+            },
+          ],
+        },
+      });
+    });
+    await page.route("**/api/conversation-projects/classify", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { schema_version: "1.0", project_id: "alpha", confidence: 0.9, reason: "ai" },
+      });
+    });
+    await page.route("**/api/settings", async (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          settings: {
+            projectClassification: {
+              enabled: true,
+              engine: { cli: null, model: null, thinking: null },
+            },
+          },
+          tools: [],
+        },
+      }),
+    );
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Settling session/ }).click();
+    const chip = page.getByRole("group", { name: "Project suggestion" });
+
+    await page.locator("#home-composer").fill("first message");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(chip).toBeVisible();
+
+    // A second send while the first proposal is on screen: the composer reports the queue
+    // admission as pending, so the stale proposal must not linger over a settling send.
+    await page.locator("#home-composer").fill("second message");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.locator("#home-composer")).toHaveValue("");
+    await expect(chip).toHaveCount(0);
+
+    releaseAdmission?.();
+    await expect(chip).toBeVisible();
+  });
+
+  test("gives the grouped rail list semantics, a roving tabindex, and Home/End traversal", async ({
+    page,
+  }) => {
+    // Two projects, so the entries span two groups: traversal must cross the boundary. The
+    // catalog DTO carries `project_id` on the revisions, which is what grouping reads.
+    const withProjectId = <T extends { root: object; active: object }>(
+      session: T,
+      projectId: string,
+    ): T => ({
+      ...session,
+      root: { ...session.root, project_id: projectId },
+      active: { ...session.active, project_id: projectId },
+    });
+    const alpha = withProjectId(homeSession("root-rail-alpha", "Rail alpha"), "alpha");
+    const beta = withProjectId(homeSession("root-rail-beta", "Rail beta"), "beta");
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [alpha, beta],
+          next_cursor: null,
+          catalog_generation: "generation",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [alpha, beta]);
+    await page.route("**/api/conversation-projects", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: "1.0",
+          projects: [
+            {
+              id: "alpha",
+              name: "alpha-service",
+              goal: "Ship it",
+              engine: { cli: "codex", model: null, thinking: "high" },
+            },
+            {
+              id: "beta",
+              name: "beta-service",
+              goal: "Bill it",
+              engine: { cli: "codex", model: null, thinking: "high" },
+            },
+          ],
+        },
+      });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+
+    // The entries container is a real list and every row is a listitem, so the count is announced.
+    const lists = page.locator(".home-session-group__entries");
+    await expect(lists).toHaveCount(2);
+    for (let index = 0; index < 2; index += 1) {
+      await expect(lists.nth(index)).toHaveAttribute("role", "list");
+    }
+    await expect(page.locator('.home-session-group__entries [role="listitem"]')).toHaveCount(2);
+
+    // Roving tabindex: exactly one entry is tabbable, and it is the focused one.
+    const entries = page.locator(".home-session[data-root-session]");
+    await expect(entries).toHaveCount(2);
+    const tabbables = page.locator('.home-session[data-root-session][tabindex="0"]');
+    await expect(tabbables).toHaveCount(1);
+    await entries.first().focus();
+    await expect(entries.first()).toBeFocused();
+    await expect(entries.first()).toHaveAttribute("tabindex", "0");
+    await expect(entries.nth(1)).toHaveAttribute("tabindex", "-1");
+
+    // Home/End jump to the first/last visible entry; ArrowDown walks across group boundaries.
+    await page.keyboard.press("End");
+    await expect(entries.nth(1)).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(entries.first()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(entries.nth(1)).toBeFocused();
+    // ArrowDown on the last entry wraps to the first rather than leaving the rail.
+    await page.keyboard.press("ArrowDown");
+    await expect(entries.first()).toBeFocused();
+
+    await expectAxeClean(page, "grouped rail");
+  });
+
   test("has no automated accessibility violations in the primary Home", async ({ page }) => {
     await page.goto("/");
     await waitForPage(page);
