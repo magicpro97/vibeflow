@@ -3232,7 +3232,13 @@ describe("commands.makeResearcher (test seam)", () => {
       });
       const result = await researcher(1, "private question");
       expect(result.blocked).toBe(false);
-      expect(spawnedArgv).toContain(bridgeCommand);
+      // #805: Windows tokenizes the bridge command string (cmd.exe cannot receive it through
+      // argv without the quotes being re-escaped); POSIX keeps the shell.
+      expect(spawnedArgv).toEqual(
+        process.platform === "win32"
+          ? ["printf", "canonical-bridge-output"]
+          : ["/bin/sh", "-c", bridgeCommand],
+      );
       expect(spawnedArgv?.[0]).not.toBe("claude");
     } finally {
       if (previous === undefined) process.env.VIBEFLOW_AI = "";

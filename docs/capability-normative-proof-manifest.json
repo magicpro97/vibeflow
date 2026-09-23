@@ -787,7 +787,7 @@
         "src/durability"
       ],
       "test_sha256": "1cb1ae6f66fff3ddb1a4eb37a978c7a1cee8dfd7b1f20e90c50e6b3432e33bff",
-      "production_sha256": "4328a64e6180fa13b5965d8cb1ab6df870017ee77aff16a3644dc0c9cd1affa2"
+      "production_sha256": "f6efeb1ae791acd44862f90c298374550e20f8883b6e1676abd54374a312e8e7"
     }
   ],
   "section_dispositions": [
@@ -2517,6 +2517,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "2236d59f00e09b0a1a41bb73e33ff0ff7235da25675cd7726090e27c74d667cb"
+    "reviewed_payload_sha256": "7d00ff6dfcad8dd479af15299d5fd6af6de51afbf3635f8360e4924bf458536f"
   }
 }

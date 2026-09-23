@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { extname, join } from "node:path";
-import { resolveCommand } from "../core.js";
+import { resolveCommand, shellLaunchArgv } from "../core.js";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { filterEnv } from "./env-filter.js";
 import {
@@ -66,11 +66,7 @@ export function defaultSpawner(
 export function defaultSyncSpawner(cmd: string, args: string[], input: string): SyncResult {
   const resolvedCmd = resolveCommand(cmd) ?? cmd;
   const needsShell = shouldUseWindowsShell(cmd, resolvedCmd);
-  const spawnArgs = needsShell
-    ? process.platform === RUNTIME_PLATFORM.WINDOWS
-      ? ["cmd.exe", "/c", cmd, ...args]
-      : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
-    : [cmd, ...args];
+  const spawnArgs = needsShell ? shellLaunchArgv(cmd, args, needsShell) : [cmd, ...args];
   // Pipe stderr so child error output is captured in the result (M2) and never leaks to the
   // parent TTY. Previously `Bun.spawnSync([cmd, ...args], { ..., stdout: "pipe" })` only piped
   // stdout — `stderr` defaulted to inherit on Bun under some versions, leaking engine errors
@@ -169,12 +165,9 @@ export function makeAsyncSpawner(opts: AsyncSpawnerOpts = {}): AsyncSpawner {
     // path first; if the resolved path is a .cmd/.bat shim, use
     // shell. The explicit `shell` opt still wins if caller sets it.
     const resolvedCmd = resolveCommand(cmd) ?? cmd;
-    const needsShell = shell ?? shouldUseWindowsShell(cmd, resolvedCmd);
-    const spawnArgs = needsShell
-      ? process.platform === RUNTIME_PLATFORM.WINDOWS
-        ? ["cmd.exe", "/c", cmd, ...args]
-        : ["/bin/sh", "-c", [cmd, ...args].join(" ")]
-      : [cmd, ...args];
+    const windowsShim = shouldUseWindowsShell(cmd, resolvedCmd);
+    const needsShell = shell ?? windowsShim;
+    const spawnArgs = needsShell ? shellLaunchArgv(cmd, args, windowsShim) : [cmd, ...args];
     const ownedRuntime =
       ownsRuntime && owned && ownedProcessPlatform
         ? (() => {
