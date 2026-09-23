@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import { dirname, parse, relative, resolve, sep } from "node:path";
+import { withFailureCleanup } from "../../durability/cleanup.js";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import { errnoIs, native, syscallFailure } from "../../durability/native-runtime.js";
 import {
@@ -73,7 +74,12 @@ function childDirectory(
     syncDirectory(parent.fd);
     fd = tryOpenAt(parent, name, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
   }
-  return fd === null ? null : pinned(fd, path);
+  if (fd === null) return null;
+  const opened = fd;
+  // pinned() can reject the directory's identity, and on Windows tryOpenAt has already
+  // registered this fd: a bare throw would leak the handle and leave the fd-to-path entry
+  // behind for a number the OS recycles.
+  return withFailureCleanup(() => pinned(opened, path), [() => closeTrackedFd(opened)]);
 }
 
 function withPinnedParent<T>(
@@ -123,7 +129,7 @@ function readAt(directory: PinnedDirectory, name: string): Buffer | null {
     }
     return bytes;
   } finally {
-    fs.closeSync(fd);
+    closeTrackedFd(fd);
   }
 }
 

@@ -2,7 +2,6 @@ import { timingSafeEqual } from "node:crypto";
 import { win32 as windowsPath } from "node:path";
 import { cleanupThenThrow, runCleanups } from "./cleanup.js";
 import { durabilityError } from "./errors.js";
-import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
 import { windowsFfiAddressing } from "./windows-ffi-runtime.js";
 import { loadWindowsRecordNativeBindingsKoffi } from "./windows-kernel-lock-koffi.js";

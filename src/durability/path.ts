@@ -9,6 +9,7 @@ import {
   assertPinnedDirectory,
   canonicalDurabilityPath,
   closePinnedDirectory,
+  closeTrackedFd,
   createAt,
   openAt,
   openPrivateDirectory,
@@ -130,7 +131,7 @@ export function readPrivateFileAt(
   assertPinnedDirectory(directory);
   const fd = tryOpenAt(directory, name, fs.constants.O_RDONLY);
   if (fd === null) return null;
-  return withCleanup(() => readPrivateFd(fd, name, maxBytes, maxLinks), [() => fs.closeSync(fd)]);
+  return withCleanup(() => readPrivateFd(fd, name, maxBytes, maxLinks), [() => closeTrackedFd(fd)]);
 }
 
 export function privateFileBytes(path: string, maxBytes: number): Buffer | null {
@@ -242,7 +243,9 @@ export function openExistingPrivateFileAt(
       assertPrivateFile(fd, name, maxLinks);
       return fd;
     } catch (error) {
-      return cleanupThenThrow(error, [() => fs.closeSync(fd)]);
+      // closeTrackedFd, not fs.closeSync: this fd came from tryOpenAt, so on Windows it may
+      // carry a fd-to-path registration that must die with it.
+      return cleanupThenThrow(error, [() => closeTrackedFd(fd)]);
     }
   }
 }
