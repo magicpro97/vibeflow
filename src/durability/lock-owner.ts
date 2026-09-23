@@ -12,6 +12,8 @@ import {
   PROCESS_START_IDENTITY_PATTERN_SOURCE,
   PROCESS_START_IDENTITY_PREFIX,
   PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS,
+  WINDOWS_FILETIME_TICKS_PER_MICROSECOND,
+  WINDOWS_FILETIME_TO_DOTNET_TICKS_OFFSET,
   classifyDarwinProcessStartIdentity,
   formatPlatformProcessStartIdentity,
   formatProcessStartIdentity,
@@ -19,6 +21,8 @@ import {
   isProcessStartIdentityGenericPosixPlatform,
   windowsProcessStartIdentityQuery,
 } from "./process-identity-contract.js";
+import { loadWindowsProcessTimesBun } from "./windows-process-times-bun.js";
+import { loadWindowsProcessTimesKoffi } from "./windows-process-times-koffi.js";
 
 export interface ProcessLockOwnerV1 {
   schema_version: "1.0";
@@ -38,6 +42,8 @@ export interface ProcessLockOwnerRuntime {
   windowsSystemRoot: string;
   observeStartIdentity?: (pid: number) => string | null;
   darwinProcLoader?: DarwinProcLoaderRuntime;
+  /** Injected for tests; production auto-loads via IS_BUN/requireModule. */
+  windowsProcessTimesLoader?: WindowsProcessTimesLoader;
 }
 
 const OWNER_KEYS = [
@@ -69,8 +75,17 @@ export interface DarwinProcBinding {
   procPidInfo: DarwinProcPidInfo;
 }
 
+/** Injected loader for the Windows GetProcessTimes FFI path. */
+export interface WindowsProcessTimesLoader {
+  isBun: boolean;
+  requireModule: (specifier: "bun:ffi" | "koffi") => unknown;
+}
+
 let darwinProcLibrary: unknown;
 let darwinProcPidInfo: DarwinProcPidInfo | null | undefined;
+
+/** Cached production GetProcessTimes fn; undefined = not yet attempted. */
+let windowsGetProcessTimesFn: ((pid: number) => bigint | null) | null | undefined;
 
 /** Uncached cross-runtime loader; production caches its result and tests inject exact modules. */
 export function loadDarwinProcBinding(runtime: DarwinProcLoaderRuntime): DarwinProcBinding | null {
@@ -212,7 +227,47 @@ function psStartIdentity(
   }
 }
 
+function loadWindowsProcessTimesFromRuntime(
+  loader: WindowsProcessTimesLoader,
+): ((pid: number) => bigint | null) | null {
+  if (loader.isBun) return loadWindowsProcessTimesBun((s) => loader.requireModule(s as "bun:ffi"));
+  return loadWindowsProcessTimesKoffi((s) => loader.requireModule(s as "koffi"));
+}
+
+/** Returns the cached production GetProcessTimes fn, loading on first call. */
+function getWindowsProcessTimesFn(): ((pid: number) => bigint | null) | null {
+  if (windowsGetProcessTimesFn !== undefined) return windowsGetProcessTimesFn;
+  windowsGetProcessTimesFn = loadWindowsProcessTimesFromRuntime({
+    isBun: IS_BUN,
+    requireModule: (specifier) => RUNTIME_REQUIRE(specifier),
+  });
+  return windowsGetProcessTimesFn;
+}
+
 function windowsStartIdentity(pid: number, runtime: ProcessLockOwnerRuntime): string | null {
+  // Primary path: GetProcessTimes via FFI — instant, no subprocess.
+  const getProcessTimes = runtime.windowsProcessTimesLoader
+    ? loadWindowsProcessTimesFromRuntime(runtime.windowsProcessTimesLoader)
+    : getWindowsProcessTimesFn();
+  if (getProcessTimes) {
+    try {
+      const filetime = getProcessTimes(pid);
+      if (filetime !== null && filetime > 0n) {
+        const dotnetTicks =
+          (filetime / WINDOWS_FILETIME_TICKS_PER_MICROSECOND) *
+            WINDOWS_FILETIME_TICKS_PER_MICROSECOND +
+          WINDOWS_FILETIME_TO_DOTNET_TICKS_OFFSET;
+        const ticks = String(dotnetTicks);
+        if (/^[1-9][0-9]{0,19}$/.test(ticks))
+          return formatProcessStartIdentity(PROCESS_START_IDENTITY_PREFIX.WINDOWS, ticks);
+      }
+    } catch {
+      // fall through to PowerShell fallback
+    }
+    // FFI loaded but query failed: fail closed (don't spawn powershell when the FFI is available).
+    return null;
+  }
+  // Fallback: PowerShell (only when FFI load itself is unavailable).
   try {
     const root = windowsPath.normalize(runtime.windowsSystemRoot);
     if (!/^[A-Za-z]:\\[^\0]+$/.test(root)) return null;

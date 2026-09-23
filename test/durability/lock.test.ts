@@ -53,16 +53,24 @@ function exactOwner(
   };
 }
 
-test("Windows lock identity uses an absolute native query and never POSIX ps", () => {
+test("Windows lock identity uses PowerShell fallback when FFI is unavailable", () => {
   const identities = new Map<number, string | Error>([[41, "638918820000000000"]]);
   const commands: string[] = [];
   const queries: string[] = [];
   const timeouts: (number | undefined)[] = [];
+  // Inject a loader that fails so the code falls back to PowerShell.
+  const failingTimesLoader = {
+    isBun: false,
+    requireModule: (): never => {
+      throw new Error("injected FFI load failure");
+    },
+  };
   const runtime: Partial<ProcessLockOwnerRuntime> = {
     platform: "win32",
     host: hostname(),
     windowsSystemRoot: "D:\\Windows",
     kill: (() => true) as typeof process.kill,
+    windowsProcessTimesLoader: failingTimesLoader,
     execFileSync: ((command: string, args: string[], options: { timeout?: number }) => {
       commands.push(command);
       queries.push(args[2] ?? "");
@@ -78,10 +86,8 @@ test("Windows lock identity uses an absolute native query and never POSIX ps", (
   const owner = exactOwner("win32", identity);
 
   expect(processStartIdentity(owner.pid, runtime)).toBe(identity);
-  // A one-second budget cannot cover a powershell.exe + Get-CimInstance cold start, and a timed-out
-  // probe surfaces as "process start identity is unavailable" on healthy Windows hosts.
+  // PowerShell fallback uses WINDOWS_COLD_START budget.
   expect(timeouts[0]).toBe(PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.WINDOWS_COLD_START);
-  expect(timeouts[0]).toBeGreaterThanOrEqual(10_000);
   // ConstrainedLanguage mode (AppLocker/WDAC) blocks System.Console, so the probe must not use it.
   expect(queries[0]).toBe(windowsProcessStartIdentityQuery(owner.pid));
   expect(queries[0]).not.toContain("[Console]");

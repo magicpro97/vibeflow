@@ -128,15 +128,42 @@ export const PROCESS_START_IDENTITY_WINDOWS_QUERY_STATUS = Object.freeze({
 /**
  * Probe budgets for the platform start-identity queries.
  *
- * POSIX `ps` answers in milliseconds, but a Windows probe pays for a `powershell.exe` cold start
- * plus the first `Get-CimInstance` module load; on contended or AV-scanned hosts that routinely
- * exceeds a one-second budget and the probe returns null, which callers surface as
- * "process start identity is unavailable".
+ * POSIX `ps` answers in milliseconds. The Windows primary path uses kernel32!GetProcessTimes
+ * (FFI, instant, no subprocess), so WINDOWS_COLD_START now bounds only the PowerShell fallback,
+ * which fires when the FFI load itself is unavailable. It stays at ten seconds: that fallback is
+ * still a cold `powershell.exe` plus the first CIM module load, which has been measured past ten
+ * seconds on a contended host — only reaching it is rare now, not paying for it.
  */
 export const PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS = Object.freeze({
   POSIX: 1_000,
   WINDOWS_COLD_START: 10_000,
 } as const);
+
+/**
+ * Offset from Windows FILETIME (100-ns ticks since 1601-01-01) to .NET DateTime.Ticks
+ * (100-ns ticks since 0001-01-01). PowerShell's `CreationDate.ToUniversalTime().Ticks`
+ * returns .NET ticks; GetProcessTimes returns a FILETIME. Add this offset to a FILETIME
+ * value to reproduce the .NET tick value so on-disk lock records stay comparable.
+ *
+ * Value = (1601-01-01 - 0001-01-01) in 100-ns intervals = 504_911_232_000_000_000.
+ */
+export const WINDOWS_FILETIME_TO_DOTNET_TICKS_OFFSET = 504_911_232_000_000_000n;
+
+/**
+ * Ticks per microsecond in the 100-ns unit FILETIME and .NET ticks both use.
+ *
+ * `GetProcessTimes` reports the creation instant at full 100-ns resolution, but the CIM/WMI
+ * provider behind `Get-CimInstance Win32_Process` renders `CreationDate` with microsecond
+ * precision, so the shipped PowerShell query truncates the sub-microsecond digits. The FFI value
+ * has to be truncated the same way or a record written by this release no longer compares equal to
+ * a probe from a release that answers through the FFI — the comparison in
+ * `processLockOwnerIsAlive` is exact string equality, and a mismatch reads as "a different process
+ * owns this pid", which is how a live lock gets taken over.
+ *
+ * Measured on Windows 11: FILETIME 134346355485478757 -> 639257587485478750 after
+ * truncation + offset, versus 639257587485478750 from the PowerShell query.
+ */
+export const WINDOWS_FILETIME_TICKS_PER_MICROSECOND = 10n;
 
 /**
  * Builds the Windows start-identity query.
