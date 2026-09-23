@@ -171,6 +171,60 @@ describe("executeConversationWorkflow", () => {
     expect(writes).toBe(0);
   });
 
+  test("#783: dispatches the pending slice only and keeps a blocked unit out of the run", async () => {
+    const workflow = state([unit("blocked-unit", "blocked"), unit("unit-a")]);
+    let written: WorkflowState | null = null;
+    let dispatched: string[] = [];
+
+    const result = await executeConversationWorkflow(
+      "/tmp/task5-blocked",
+      context(new AbortController().signal),
+      {
+        readState: () => structuredClone(workflow),
+        writeState: (_base, next) => {
+          written = structuredClone(next);
+        },
+        recomputeTotals: (next) => {
+          next.totals = {
+            units: next.work_units.length,
+            done: next.work_units.filter((candidate) => candidate.status === "done").length,
+            tokens: 0,
+            cost_usd: 0,
+            wall_seconds: 0,
+          };
+          return next;
+        },
+        defaultContext: () => ({ repoRoot: "/tmp/task5-blocked" }) as never,
+        readSettings: () => ({}) as never,
+        makeDispatcher: () =>
+          (async () => ({ status: "verifying", confidence: 1, evidence: [] })) as never,
+        makeReviewer: () => (async () => ({ pass: true, reason: "ok" })) as never,
+        dispatch: async ({ units }) => {
+          dispatched = units.map((candidate) => candidate.name);
+          return {
+            ran: [{ ...units[0], status: "done", confidence: 1, evidence: ["src/unit-a.ts:1"] }],
+            reviews: [{ unit: "unit-a", pass: true, reason: "looks good" }],
+          } as never;
+        },
+      },
+    );
+
+    // The blocked unit never reaches dispatch...
+    expect(dispatched).toEqual(["unit-a"]);
+    expect(result.units.map((candidate) => candidate.name)).toEqual(["unit-a"]);
+    // ...and stays in the ledger untouched next to the unit that ran.
+    const persisted = expectWritten(written);
+    expect(persisted.work_units.map((candidate) => candidate.name)).toEqual([
+      "blocked-unit",
+      "unit-a",
+    ]);
+    expect(persisted.work_units[0]).toMatchObject({
+      name: "blocked-unit",
+      status: "blocked",
+      confidence: 0,
+    });
+  });
+
   test("fails closed when dispatch throws and never leaks the thrown detail", async () => {
     const workflow = state([unit("unit-a"), unit("unit-b")]);
     let written: WorkflowState | null = null;

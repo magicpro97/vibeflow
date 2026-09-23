@@ -8,8 +8,12 @@
           :key="gate"
           class="px-1.5 py-0.5 bg-red-950/40 border border-red-900/40 rounded text-red-400 font-mono text-[10px]"
         >✗ {{ gate }}</span>
-        <span v-if="!GATE_KEYS.some((name)=>unit.gates[name]==='fail')" class="text-neutral-700 italic text-[11px]">
-          Blocked — waiting on another unit to finish first
+        <span
+          v-if="!GATE_KEYS.some((name)=>unit.gates[name]==='fail')"
+          class="text-neutral-700 italic text-[11px]"
+          title="Blocked units stay out of the dispatch set. Unblock with: vf units update <name> --status pending"
+        >
+          Blocked — held out of dispatch until unblocked
         </span>
       </div>
     </div>

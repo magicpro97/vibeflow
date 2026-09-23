@@ -2,7 +2,7 @@
 title: Work-Unit Orchestration
 description: How VibeFlow decomposes tasks into scoped, file-backed work units with quality gates, lifecycle tracking, and sub-agent guardrails.
 category: explanation
-last_updated: 2026-06-24
+last_updated: 2026-09-24
 ---
 
 # Work-Unit Orchestration
@@ -280,6 +280,32 @@ Tracked per work unit and rolled up to `totals`:
 - evidence file paths
 ```
 
+### Dispatch set: which statuses a run may start (#783)
+
+A run (`vf orchestrate`, the conversation workflow, and the Stage 3 "Run agents"
+button behind `POST /api/orchestrate`) dispatches **`pending` units only**. The
+policy is one frozen authority — `WORK_UNIT_DISPATCH_BY_STATUS` in
+`src/core/workflow-contract.ts` — so every surface agrees on what a status means
+for dispatch:
+
+```text
+pending    → dispatch   (the only status handed to the engine)
+running    → skip       reported as "in-flight" (a dispatch is already out)
+verifying  → skip       reported as "awaiting-verification"
+done       → skip       reported as "already-complete"
+blocked    → skip       reported as "blocked" — sequential gating, never a dispatch candidate
+```
+
+Skipped units are reported on the CLI (`Skipping N blocked unit(s): <names>`) and
+stay byte-identical in `.vibeflow/WORKFLOW_STATE.json`, so a run never drops a
+blocked unit or re-dispatches finished work. A dry run previews the same dispatch
+set: only `pending` units are counted, and prompts are written only for them.
+To return a skipped unit to the dispatch set, unblock it explicitly:
+
+```bash
+vf units update <name> --status pending   # staged sequential gating, one unit at a time
+```
+
 ### Web UI surfacing
 
 The web UI (`WEB_UI_DESIGN.md`) renders this ledger as a live orchestration dashboard so
@@ -291,6 +317,8 @@ the user can follow quality and resource consumption without reading raw logs:
 - Resource meter: tokens, estimated cost, elapsed time per unit and in total
 - Evidence drawer: links to recorded gate output under evidence/
 - Triage banner: any BLOCKED / TOO_BIG / AMBIGUOUS / REGRESSED unit is surfaced first
+- Dispatch footer (Stage 3): how many blocked units stay out of the next run (#783),
+  and the blocked-unit card states it is held out of dispatch until unblocked
 ```
 
 Updates stream over the existing WebSocket/SSE channel (`WEB_UI_DESIGN.md`).
