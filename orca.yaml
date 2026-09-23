@@ -1,8 +1,0 @@
-# Orca repo config — worktree sharing (from onorca.dev/docs/model/worktrees)
-# Symlink/share large rebuildable gitignored dirs into every new worktree
-# so parallel agents don't each rebuild node_modules (167M) + .cache.
-worktree:
-  sharedDirectories:
-    - node_modules
-    - .cache
-    - dist
