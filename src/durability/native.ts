@@ -171,23 +171,23 @@ export function openPrivateDirectory(input: string, create: boolean): PinnedDire
       try {
         next = assertDirectory(nextFd, nextPath, index === parts.length - 1);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(nextFd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(nextFd)]);
       }
       const previous = fd;
       fd = -1;
       try {
-        fs.closeSync(previous);
+        closeTrackedFd(previous);
         // Clean up the path registry entry for the closed fd.
         WIN32_FD_PATHS.delete(previous);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(next.fd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(next.fd)]);
       }
       fd = next.fd;
       cursor = nextPath;
     }
     return assertDirectory(fd, path, true);
   } catch (error) {
-    return cleanupThenThrow(error, fd >= 0 ? [() => fs.closeSync(fd)] : []);
+    return cleanupThenThrow(error, fd >= 0 ? [() => closeTrackedFd(fd)] : []);
   }
 }
 
@@ -197,7 +197,7 @@ export function duplicatePinnedDirectory(directory: PinnedDirectory): PinnedDire
   if (fd < 0) syscallFailure("openat duplicate pinned directory");
   return withFailureCleanup(
     () => assertDirectory(fd, directory.path, true),
-    [() => fs.closeSync(fd)],
+    [() => closeTrackedFd(fd)],
   );
 }
 
@@ -221,27 +221,40 @@ export function openPinnedDescendant(
       try {
         next = assertDirectory(nextFd, nextPath, true);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(nextFd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(nextFd)]);
       }
       current = null;
       try {
-        fs.closeSync(previous.fd);
+        closeTrackedFd(previous.fd);
         WIN32_FD_PATHS.delete(previous.fd);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(next.fd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(next.fd)]);
       }
       current = next;
     }
     return current as PinnedDirectory;
   } catch (error) {
     const remaining = current;
-    return cleanupThenThrow(error, remaining ? [() => fs.closeSync(remaining.fd)] : []);
+    return cleanupThenThrow(error, remaining ? [() => closeTrackedFd(remaining.fd)] : []);
   }
 }
 
 export function closePinnedDirectory(directory: PinnedDirectory): void {
   WIN32_FD_PATHS.delete(directory.fd);
   fs.closeSync(directory.fd);
+}
+
+/**
+ * Close a bare fd obtained from tryOpenAt/openAt, dropping any fd→path registration with it.
+ *
+ * Use this instead of fs.closeSync for those fds: the OS recycles fd numbers, so an entry left
+ * behind would later describe a different directory. Registration is overwritten rather than
+ * trusted everywhere it is read, so a leak is not exploitable today — this keeps it from
+ * becoming an unenforced cross-file invariant.
+ */
+export function closeTrackedFd(fd: number): void {
+  WIN32_FD_PATHS.delete(fd);
+  fs.closeSync(fd);
 }
 
 export function openAt(directory: PinnedDirectory, name: string, flags: number, mode = 0): number {
@@ -272,11 +285,14 @@ export function tryOpenAt(
     mode,
   );
   if (fd >= 0) {
-    // Register descendants opened relatively: WIN32_FD_PATHS is how the *at() shims resolve a
+    // Register directories opened relatively: WIN32_FD_PATHS is how the *at() shims resolve a
     // directory fd back to a path, so a fd that never lands here cannot be descended through.
-    // Overwrite unconditionally — callers close these with plain fs.closeSync, so an entry from
+    // Only directories — a file fd is never a valid *at() base, so registering one would just
+    // leave an entry behind for a number the OS will recycle. The flag cannot be tested here:
+    // node exposes no O_DIRECTORY on win32 (it is undefined), so ask the fd itself.
+    // Overwrite unconditionally: callers close these with plain fs.closeSync, so an entry from
     // a previous owner of this recycled fd number can still be present and must not win.
-    if (process.platform === RUNTIME_PLATFORM.WINDOWS)
+    if (process.platform === RUNTIME_PLATFORM.WINDOWS && fs.fstatSync(fd).isDirectory())
       WIN32_FD_PATHS.set(fd, join(directory.path, name));
     return fd;
   }

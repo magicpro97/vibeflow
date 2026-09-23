@@ -6,6 +6,7 @@ import {
   assertPinnedDirectory,
   canonicalDurabilityPath,
   closePinnedDirectory,
+  closeTrackedFd,
   createAt,
   renameAt,
   tryOpenAt,
@@ -47,7 +48,7 @@ function pinnedParent(path: string): PinnedDirectory {
     assertPinnedDirectory(directory);
     return directory;
   } catch (error) {
-    fs.closeSync(fd);
+    closeTrackedFd(fd);
     throw error;
   }
 }

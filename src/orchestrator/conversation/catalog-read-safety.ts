@@ -4,6 +4,7 @@ import {
   type PinnedDirectory,
   assertPinnedDirectory,
   closePinnedDirectory,
+  closeTrackedFd,
   openPrivateDirectory,
   tryOpenAt,
 } from "../../durability/native.js";
@@ -122,7 +123,7 @@ export function openPrivateChildDirectoryReadOnly(
     assertPrivateDirectorySnapshot(parent);
     return { state: "valid", path, dev: stat.dev, ino: stat.ino, directory };
   } catch {
-    fs.closeSync(fd);
+    closeTrackedFd(fd);
     return invalid(path);
   }
 }

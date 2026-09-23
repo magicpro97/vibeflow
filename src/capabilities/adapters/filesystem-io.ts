@@ -7,6 +7,7 @@ import {
   type PinnedDirectory,
   assertPinnedDirectory,
   canonicalDurabilityPath,
+  closeTrackedFd,
   createAt,
   pinnedDirectoryPathMatches,
   renameAt,
@@ -90,14 +91,14 @@ function withPinnedParent<T>(
       const nextPath = resolve(cursor, part);
       const next = childDirectory(current, part, nextPath, create);
       if (next === null) return null;
-      fs.closeSync(current.fd);
+      closeTrackedFd(current.fd);
       current = next;
       cursor = nextPath;
     }
     assertPinnedDirectory(current);
     return callback(current, target.slice(targetParent.length + 1));
   } finally {
-    fs.closeSync(current.fd);
+    closeTrackedFd(current.fd);
   }
 }
 
