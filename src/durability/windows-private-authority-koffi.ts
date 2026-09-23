@@ -137,7 +137,10 @@ export function loadWindowsPrivateAuthorityKoffi(
     validSid,
     sidLength,
     sidToString,
-    wideString: (text) => koffi.decode(text, "char16_t *") as string,
+    // Decode as a NUL-terminated wide string. "char16_t *" (and "str16") segfault here: the
+    // out-parameter arrives as a raw BigInt address, and koffi dereferences those two forms as
+    // pointer-to-pointer. Measured on Windows 11 — this form is the one that returns the string.
+    wideString: (text) => koffi.decode(text, "char16_t", -1) as string,
     convertDescriptor,
     getSecurityInfo,
     setNamedSecurityInfo,
