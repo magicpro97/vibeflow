@@ -373,6 +373,15 @@ export function releaseAdvisoryLock(fd: number): void {
 export { assertNativeDurabilityAvailable };
 
 function assertSafeName(name: string): void {
-  if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\0"))
+  // A name is resolved against a pinned directory, so it must be a single component. Windows
+  // treats "\" as a separator too, and join() collapses "..\outside" out of the pin entirely.
+  if (
+    !name ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name.includes("\0")
+  )
     durabilityError("unsafe_path", "unsafe relative native path name");
 }

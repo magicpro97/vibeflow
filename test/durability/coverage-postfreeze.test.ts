@@ -674,12 +674,15 @@ test("native runtime initialization exercises Node, unsupported, and Linux loade
       bindings: null,
       unavailableReason: "native durability was disabled by the runtime",
     });
-    expect(
-      nativeRuntime.initializeNativeRuntime({ disabled: false, platform: "win32", isBun: true }),
-    ).toEqual({
-      bindings: null,
-      unavailableReason: "native durability is unsupported on win32",
+    // win32 now loads real bindings: vf init depends on them, so the contract is that the
+    // loader runs and reports "not initialized" rather than refusing the platform outright.
+    const windows = nativeRuntime.initializeNativeRuntime({
+      disabled: false,
+      platform: "win32",
+      isBun: true,
     });
+    expect(windows.bindings).not.toBeNull();
+    expect(windows.unavailableReason).toBe("native durability is not initialized");
 
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
     Object.defineProperty(process, "platform", { ...platformDescriptor, value: "linux" });

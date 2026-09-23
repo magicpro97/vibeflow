@@ -4,6 +4,7 @@ import { cleanupThenThrow, runCleanups } from "./cleanup.js";
 import { durabilityError } from "./errors.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
+import { windowsFfiAddressing } from "./windows-ffi-runtime.js";
 import { loadWindowsRecordNativeBindingsKoffi } from "./windows-kernel-lock-koffi.js";
 import { WINDOWS_FILE_NATIVE } from "./windows-native-contract.js";
 import {
@@ -108,47 +109,57 @@ export function loadWindowsRecordNativeBindings(
   if (runtime.isBun) {
     const ffi = runtime.requireModule("bun:ffi") as typeof import("bun:ffi");
     const t = ffi.FFIType;
+    const { address } = windowsFfiAddressing(ffi);
+    // Win32 hands HANDLEs back as plain integers and Bun refuses to coerce an integer into an
+    // FFIType.ptr argument, so every handle/pointer argument is declared u64 and addressed.
     const kernel32 = ffi.dlopen("Kernel32.dll", {
-      CreateFileW: { args: [t.ptr, t.u32, t.u32, t.ptr, t.u32, t.u32, t.ptr], returns: t.ptr },
-      LockFileEx: { args: [t.ptr, t.u32, t.u32, t.u32, t.u32, t.ptr], returns: t.i32 },
-      UnlockFileEx: { args: [t.ptr, t.u32, t.u32, t.u32, t.ptr], returns: t.i32 },
-      MoveFileExW: { args: [t.ptr, t.ptr, t.u32], returns: t.i32 },
-      FlushFileBuffers: { args: [t.ptr], returns: t.i32 },
-      CloseHandle: { args: [t.ptr], returns: t.i32 },
-      GetFileInformationByHandleEx: { args: [t.ptr, t.i32, t.ptr, t.u32], returns: t.i32 },
+      CreateFileW: { args: [t.u64, t.u32, t.u32, t.u64, t.u32, t.u32, t.u64], returns: t.u64 },
+      LockFileEx: { args: [t.u64, t.u32, t.u32, t.u32, t.u32, t.u64], returns: t.i32 },
+      UnlockFileEx: { args: [t.u64, t.u32, t.u32, t.u32, t.u64], returns: t.i32 },
+      MoveFileExW: { args: [t.u64, t.u64, t.u32], returns: t.i32 },
+      FlushFileBuffers: { args: [t.u64], returns: t.i32 },
+      CloseHandle: { args: [t.u64], returns: t.i32 },
+      GetFileInformationByHandleEx: { args: [t.u64, t.i32, t.u64, t.u32], returns: t.i32 },
     });
     return {
       ...volume,
       invalidHandle: 0xffff_ffff_ffff_ffffn,
       createFile: (path, access, share, security, creation, flags, template) =>
         kernel32.symbols.CreateFileW(
-          path,
+          address(path),
           access,
           share,
-          security as Buffer | null,
+          address(security),
           creation,
           flags,
-          template,
+          address(template),
         ) as bigint,
       lockFile: (handle, flags, reserved, low, high, overlapped) =>
         kernel32.symbols.LockFileEx(
-          handle,
+          address(handle),
           flags,
           reserved,
           low,
           high,
-          encodeOverlapped(overlapped),
+          address(encodeOverlapped(overlapped)),
         ),
       unlockFile: (handle, reserved, low, high, overlapped) =>
-        kernel32.symbols.UnlockFileEx(handle, reserved, low, high, encodeOverlapped(overlapped)),
-      moveFileEx: (source, target, flags) => kernel32.symbols.MoveFileExW(source, target, flags),
-      flushFile: (handle) => kernel32.symbols.FlushFileBuffers(handle),
-      closeHandle: (handle) => kernel32.symbols.CloseHandle(handle),
+        kernel32.symbols.UnlockFileEx(
+          address(handle),
+          reserved,
+          low,
+          high,
+          address(encodeOverlapped(overlapped)),
+        ),
+      moveFileEx: (source, target, flags) =>
+        kernel32.symbols.MoveFileExW(address(source), address(target), flags),
+      flushFile: (handle) => kernel32.symbols.FlushFileBuffers(address(handle)),
+      closeHandle: (handle) => kernel32.symbols.CloseHandle(address(handle)),
       fileInfo: (handle, informationClass, output, outputBytes) =>
         kernel32.symbols.GetFileInformationByHandleEx(
-          handle,
+          address(handle),
           informationClass,
-          output,
+          address(output),
           outputBytes,
         ),
     };
