@@ -579,7 +579,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -594,7 +594,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -609,7 +609,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -624,7 +624,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -639,7 +639,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -654,7 +654,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -670,7 +670,7 @@
         "src/server",
         "src/actions"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "48ba46d6f65775e389b85413ed09a64ca850a4024076bccba9c557611ef2aeab"
     },
     {
@@ -685,7 +685,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -700,7 +700,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -715,7 +715,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -730,7 +730,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -745,7 +745,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1b80cee9d5c3b3671109cccddaa4471b65df1ed1fd2b85715b9a3745ccd02965",
+      "test_sha256": "b72e9fb3ef6e252b802c3dfd94b46d39df475d62ac813af0cf37ade95d1ca24d",
       "production_sha256": "e08a797a716754845394eed82acc22c93ab9bf68a391f03acd90efb47a208a7e"
     },
     {
@@ -2517,6 +2517,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "f375c66e792ca9dc69614b7d525f7a3f7622a777e287652925f61ee5f33a80d2"
+    "reviewed_payload_sha256": "cd2acd71b4220843b2e7bcefb087cc75cb5405b18d2daebbaac1c35db2e6b32e"
   }
 }
