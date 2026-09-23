@@ -36,7 +36,7 @@ function descriptor(flags = 0): WindowsPrivateDescriptorView {
 
 function fixture(view: WindowsPrivateDescriptorView = descriptor()) {
   const sddls: string[] = [];
-  const migrated: [string, string][] = [];
+  const migrated: [bigint, string][] = [];
   let released = 0;
   const bindings: WindowsPrivateAuthorityBindings = {
     currentUser: () => ({ sid: USER_SID, sddl: USER_SDDL }),
@@ -45,8 +45,8 @@ function fixture(view: WindowsPrivateDescriptorView = descriptor()) {
       return { attributes: { private: true }, release: () => released++ };
     },
     inspect: () => view,
-    migrateDacl: (path, sddl) => {
-      migrated.push([path, sddl]);
+    migrateHandle: (handle, sddl) => {
+      migrated.push([handle, sddl]);
     },
   };
   return {
@@ -112,10 +112,10 @@ describe("Windows private authority", () => {
     );
     const absent = fixture({ ...descriptor(), daclPresent: false, aces: [] });
     expect(() => absent.authority.verifyNoForeignWrite(7n)).toThrow("the DACL is absent");
-    file.authority.migrateToOwnerOnly("C:\\token", WINDOWS_AUTHORITY_PATH_KIND.FILE);
-    // By path, not by handle: see the migrateDacl contract on WindowsPrivateAuthorityBindings.
-    expect(file.migrated).toEqual([["C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`]]);
-    file.authority.migrateToOwnerOnly("C:\\token", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+    file.authority.migrateHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+    // By handle, not by path: see the migrateHandle contract on WindowsPrivateAuthorityBindings.
+    expect(file.migrated).toEqual([[7n, `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`]]);
+    file.authority.migrateHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
     expect(file.migrated[1]?.[1]).toBe(`O:${USER_SDDL}D:P(A;OICI;FA;;;${USER_SDDL})`);
   });
 
@@ -146,7 +146,7 @@ describe("Windows private authority", () => {
         currentUser: () => ({ sid: Buffer.alloc(1), sddl: "invalid" }),
         createSecurity: () => ({ attributes: null, release: () => {} }),
         inspect: () => descriptor(),
-        migrateDacl: () => undefined,
+        migrateHandle: () => undefined,
       }),
     ).toThrow("token user SID is unavailable");
   });
@@ -208,7 +208,7 @@ describe("Windows private authority", () => {
         output.writeUInt32LE(aclBytesInUse, 4);
         return 1;
       },
-      SetNamedSecurityInfoW: () => 0,
+      SetSecurityInfo: () => 0,
     };
     const library = {
       func: (_convention: string, name: string) => {
@@ -260,17 +260,17 @@ describe("Windows private authority", () => {
     expect(() => bindings.inspect(7n)).toThrow("inconsistent Windows authority ACL");
     expect(declarations).toContain("GetSecurityInfo");
     expect(freed.length).toBeGreaterThanOrEqual(3);
-    // migrateDacl replaces the DACL BY PATH: SetSecurityInfo on a CreateFileW handle returns 0
-    // and leaves the DACL untouched, so the retained call is SetNamedSecurityInfoW.
-    bindings.migrateDacl("C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
-    expect(declarations).toContain("SetNamedSecurityInfoW");
-    dispatch.SetNamedSecurityInfoW = () => 5;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
-      "SetNamedSecurityInfoW failed with Windows error 5",
+    // migrateHandle replaces the DACL BY HANDLE: SetSecurityInfo acts on the object the handle
+    // refers to, so a name that changes during the call cannot receive the write.
+    bindings.migrateHandle(7n, `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
+    expect(declarations).toContain("SetSecurityInfo");
+    dispatch.SetSecurityInfo = () => 5;
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow(
+      "SetSecurityInfo failed with Windows error 5",
     );
-    dispatch.SetNamedSecurityInfoW = () => 0;
+    dispatch.SetSecurityInfo = () => 0;
     dispatch.ConvertStringSecurityDescriptorToSecurityDescriptorW = () => 0;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow(
       "ConvertStringSecurityDescriptorToSecurityDescriptorW(migrate)",
     );
     dispatch.ConvertStringSecurityDescriptorToSecurityDescriptorW = (_sddl, _revision, output) => {
@@ -278,9 +278,7 @@ describe("Windows private authority", () => {
       return 1;
     };
     dispatch.GetSecurityDescriptorDacl = () => 0;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
-      "GetSecurityDescriptorDacl(migrate)",
-    );
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow("GetSecurityDescriptorDacl(migrate)");
     dispatch.GetSecurityDescriptorDacl = (_descriptor, present, dacl, defaulted) => {
       present[0] = 1;
       dacl[0] = acl;
@@ -381,7 +379,7 @@ describe("Windows private authority", () => {
         buffer.writeUInt32LE(aclBytesInUse, 4);
         return 1;
       },
-      SetNamedSecurityInfoW: () => 0,
+      SetSecurityInfo: () => 0,
     };
     const ffi = {
       FFIType: { ptr: 1, u32: 2, i32: 3, u64: 4 },
@@ -433,10 +431,10 @@ describe("Windows private authority", () => {
     expect(bindings.inspect(7n)).toEqual(descriptor());
     aclBytesInUse += 1;
     expect(() => bindings.inspect(7n)).toThrow("inconsistent Windows authority ACL");
-    bindings.migrateDacl("C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
-    dispatch.SetNamedSecurityInfoW = () => 5;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
-      "SetNamedSecurityInfoW failed with Windows error 5",
+    bindings.migrateHandle(7n, `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
+    dispatch.SetSecurityInfo = () => 5;
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow(
+      "SetSecurityInfo failed with Windows error 5",
     );
     dispatch.OpenProcessToken = () => 0;
     expect(() => bindings.currentUser()).toThrow("OpenProcessToken failed");

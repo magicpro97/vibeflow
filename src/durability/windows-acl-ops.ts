@@ -1,6 +1,6 @@
 /**
- * Shared Windows ACL helpers used by posix-fs-semantics.ts (hasPrivateMode, isNotGroupOrWorldWritable)
- * and windows-fs-shims.ts (fchmodat).
+ * Shared Windows ACL helpers used by posix-fs-semantics.ts (hasPrivateMode,
+ * isNotGroupOrWorldWritable) and native-windows-ops.ts (the leaf repair behind openDirectoryAt).
  *
  * Opens by path using the existing CreateFileW binding, then delegates to
  * createWindowsPrivateAuthority() for verify/migrate. Does NOT use _get_osfhandle —
@@ -8,8 +8,19 @@
  *
  * The open is by path, so a verdict describes whatever sits at the path when it happens. Callers
  * that already stat'ed the object hand in its identity, and the reopened handle has to prove it is
- * that same object before its DACL speaks for it or is rewritten (issue #811).
+ * that same object before its DACL speaks for it (issue #811). The identity is carried as bigints:
+ * NTFS file ids need 57 bits, so a Number-typed `ino` is rounded above 2^53 and two distinct objects
+ * can share one rounded value (issue #817).
+ *
+ * The DACL *write* is by handle, never by path: SetSecurityInfo replaces the descriptor of the
+ * object the handle refers to, whatever happens to the name meanwhile (measured: with WRITE_DAC on
+ * the handle it returns 0 and replaces the DACL; without it, ERROR_ACCESS_DENIED and no change —
+ * see WindowsPrivateAuthorityBindings.migrateHandle). Every write here additionally requires the
+ * caller's identity and fails closed without one, so there is no path for a substituted object to
+ * intercept: a write that cannot be tied to the object the caller measured is not performed at all
+ * (issue #817).
  */
+import * as fs from "node:fs";
 import { durabilityError } from "./errors.js";
 import type { WindowsFfiRuntime } from "./windows-ffi-runtime.js";
 import {
@@ -28,12 +39,29 @@ import {
 } from "./windows-private-authority.js";
 
 /**
- * The identity of a file object as node:fs reports it: `dev` is the volume serial number and `ino`
- * the file id — the same pair PinnedDirectory carries for a pinned directory fd.
+ * The exact identity of a file object as node:fs reports it with `{ bigint: true }`: `dev` is the
+ * volume serial number and `ino` the file id — the same pair PinnedDirectory carries for a pinned
+ * directory fd.
+ *
+ * Bigint on purpose. `ino` is a 64-bit NTFS file id and Number-typed stats round it above 2^53, so
+ * two distinct objects can present the same rounded id; an identity that cannot be told apart is not
+ * an identity.
  */
 export interface WindowsFileIdentity {
-  dev: number;
-  ino: number;
+  dev: bigint;
+  ino: bigint;
+}
+
+/**
+ * The exact identity of the object behind an open descriptor.
+ *
+ * The ACL machinery only ever has a path, so the caller's own measurement is the witness its verdict
+ * is bound to. A descriptor cannot be retargeted, so this describes the same object the caller's
+ * stat did, and `{ bigint: true }` keeps it exact.
+ */
+export function descriptorIdentity(descriptor: number): WindowsFileIdentity {
+  const stat = fs.fstatSync(descriptor, { bigint: true });
+  return { dev: stat.dev, ino: stat.ino };
 }
 
 /**
@@ -46,19 +74,21 @@ export interface WindowsAclOpsOptions {
   authority?: WindowsPrivateAuthority;
   runtime?: WindowsFfiRuntime;
   /**
-   * The identity of the object the caller stat'ed.
+   * The exact identity of the object the caller measured, from `descriptorIdentity(fd)`.
    *
-   * Windows has no handle-based DACL setter and `_get_osfhandle` aborts the runtime, so both the
-   * verdict and the migration go through a *reopened* path. This is what binds them to the object
-   * the caller will actually read: a handle opened at `path` counts as that object only if it
-   * reproduces this pair, so a leaf swapped in after the caller's stat can neither answer for it nor
-   * have its DACL rewritten.
-   *
-   * Omitted by the fchmodat shim, which re-ACLs a directory leaf under a path its own caller pinned
-   * by fd and has no stat of its own.
+   * The verdicts reopen the path, so this is what binds an answer to the object the caller will
+   * actually use: a handle opened at `path` counts as that object only if it reproduces the pair
+   * exactly, and a leaf swapped in after the caller's stat fails the comparison instead of
+   * answering for it. The repairs additionally require it — a DACL write that cannot be tied to the
+   * object the caller measured is refused rather than performed.
    */
   identity?: WindowsFileIdentity;
 }
+
+// READ_CONTROL answers what the DACL says; a repair additionally needs WRITE_DAC, because the write
+// goes through the handle and a handle without it gets ERROR_ACCESS_DENIED from SetSecurityInfo.
+const VERDICT_ACCESS = WINDOWS_NATIVE_RECORD.READ_CONTROL >>> 0;
+const REPAIR_ACCESS = (WINDOWS_NATIVE_RECORD.READ_CONTROL | WINDOWS_NATIVE_RECORD.WRITE_DAC) >>> 0;
 
 const isDirectory = (kind: WindowsAuthorityPathKind): boolean =>
   kind === WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY;
@@ -74,6 +104,7 @@ function openForAcl(
   path: string,
   directory: boolean,
   identity: WindowsFileIdentity | undefined,
+  access: number,
 ): bigint | null {
   const flags =
     (WINDOWS_NATIVE_RECORD.FILE_ATTRIBUTE_NORMAL |
@@ -82,7 +113,7 @@ function openForAcl(
     0;
   const handle = binding.createFile(
     widePath(path),
-    WINDOWS_NATIVE_RECORD.READ_CONTROL >>> 0,
+    access,
     WINDOWS_NATIVE_RECORD.FILE_SHARE_READ | WINDOWS_NATIVE_RECORD.FILE_SHARE_WRITE,
     null,
     WINDOWS_NATIVE_RECORD.OPEN_EXISTING,
@@ -104,6 +135,9 @@ function openForAcl(
  * number and the file id, measured on Windows 11 (see windows-acl-identity.test.ts) — so an object
  * that reproduces both is that object. A handle whose identity cannot be read is not: an unproven
  * identity is not an identity.
+ *
+ * The comparison is on the raw 64-bit file id, never on a Number: rounding it above 2^53 would let
+ * two distinct objects share an identity, which is the whole of what this gate is for.
  */
 function identityMatches(
   binding: WindowsRecordNativeBindings,
@@ -115,7 +149,7 @@ function identityMatches(
     return false;
   // FILE_ID_INFO is the volume serial number (u64) followed by the 16-byte file id. node:fs reports
   // the low 32 bits of the serial and the low 64 bits of the id, so compare the same fields.
-  return info.readUInt32LE(0) === identity.dev && Number(info.readBigUInt64LE(8)) === identity.ino;
+  return BigInt(info.readUInt32LE(0)) === identity.dev && info.readBigUInt64LE(8) === identity.ino;
 }
 
 function closeQuietly(binding: WindowsRecordNativeBindings, handle: bigint): void {
@@ -165,7 +199,7 @@ export function windowsVerifyPathAcl(
   if (context === null) return false;
   let handle: bigint | null = null;
   try {
-    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity);
+    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity, VERDICT_ACCESS);
     if (handle === null) return false;
     context.authority.verifyHandle(handle, kind);
     return true;
@@ -196,7 +230,7 @@ export function windowsHasNoForeignWrite(
   if (context === null) return false;
   let handle: bigint | null = null;
   try {
-    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity);
+    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity, VERDICT_ACCESS);
     if (handle === null) return false;
     return !descriptorAllowsForeignWrite(
       context.authority.inspect(handle),
@@ -209,34 +243,20 @@ export function windowsHasNoForeignWrite(
   }
 }
 
-/**
- * Reset the DACL on path to owner-only + SE_DACL_PROTECTED.
- *
- * Applies by path rather than by handle: SetSecurityInfo on a handle opened with
- * READ_CONTROL|WRITE_DAC returns 0 and leaves the DACL untouched, while SetNamedSecurityInfoW
- * with the same descriptor replaces it (measured on Windows 11).
- *
- * Unlike the two predicates above this one reports failure by throwing, because the caller asked
- * for a change rather than an answer; fchmodat turns the throw into EACCES.
- */
-export function windowsApplyOwnerAcl(
-  path: string,
-  kind: WindowsAuthorityPathKind,
-  options: WindowsAclOpsOptions = {},
-): void {
-  authorityFor(options).migrateToOwnerOnly(path, kind);
-}
-
 export { WINDOWS_AUTHORITY_PATH_KIND };
 
 /**
  * Verify-or-repair for one descriptor policy, with the caller's identity gating both halves.
  *
- * The handle stays open across the repair: the DACL write is by path — there is no handle-based
- * setter — while the handle is what identifies the object, and GetSecurityInfo through it reflects
- * the descriptor that was just written. So the answer after the repair is read from the same object
- * the answer before it was rejected on, and a repair that landed elsewhere (the name moved under
- * us, the write failed) fails the second verdict instead of answering true for a different file.
+ * One handle carries the whole transaction: it is what identifies the object against the caller's
+ * measurement, what the policy is read from, and what the repair is written through. The DACL write
+ * cannot be diverted — SetSecurityInfo acts on the handle, never on the name — so the answer after
+ * the repair is read from the same object the answer before it was rejected on, whatever happens to
+ * the path meanwhile.
+ *
+ * No identity, no repair. A caller that cannot say which object it measured has nothing this module
+ * can tie the write to, and repairing whatever the name holds would be exactly the substitution the
+ * identity gate exists to refuse (issue #817), so the answer is false and no write is attempted.
  */
 function ensureAcl(
   path: string,
@@ -244,16 +264,17 @@ function ensureAcl(
   options: WindowsAclOpsOptions,
   verdict: (context: WindowsAclContext, handle: bigint) => void,
 ): boolean {
+  if (options.identity === undefined) return false;
   const context = aclContext(options);
   if (context === null) return false;
   let handle: bigint | null = null;
   try {
-    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity);
+    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity, REPAIR_ACCESS);
     if (handle === null) return false;
     try {
       verdict(context, handle);
     } catch {
-      context.authority.migrateToOwnerOnly(path, kind);
+      context.authority.migrateHandle(handle, kind);
       verdict(context, handle);
     }
     return true;

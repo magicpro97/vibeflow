@@ -1,17 +1,31 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type WindowsPinRuntimeV1,
   memoizedWindowsLockProvider,
   pinWindowsDirectory,
   releaseWindowsAdvisoryLock,
+  repairWindowsLeafAcl,
   tryWindowsAdvisoryLock,
   windowsPinRuntime,
 } from "../../src/durability/native-windows-ops.js";
 import type { PinnedDirectory } from "../../src/durability/pinned-directory.js";
+import {
+  WINDOWS_NATIVE_RECORD,
+  type WindowsRecordNativeBindings,
+} from "../../src/durability/windows-kernel-lock.js";
 import type {
   WindowsKernelLock,
   WindowsKernelLockProvider,
 } from "../../src/durability/windows-kernel-lock.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  type WindowsAuthorityPathKind,
+  type WindowsPrivateAuthority,
+} from "../../src/durability/windows-private-authority.js";
 
 /**
  * These are the Windows-only steps of native.ts. Running them used to require Windows, so CI
@@ -106,6 +120,131 @@ const fakeLock = (): WindowsKernelLock & { released: number } => {
 
 const fakeProvider = (lock: WindowsKernelLock | null): WindowsKernelLockProvider =>
   ({ tryAcquire: () => lock }) as unknown as WindowsKernelLockProvider;
+
+describe("repairWindowsLeafAcl", () => {
+  const SCRATCH: string[] = [];
+  const scratch = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-leaf-acl-"));
+    SCRATCH.push(dir);
+    return dir;
+  };
+  const cleanup = () => {
+    for (const dir of SCRATCH.splice(0)) rmSync(dir, { recursive: true, force: true });
+  };
+
+  const fakeAcl = (options: {
+    fileInfo?: (handle: bigint, informationClass: number, output: Buffer) => number;
+    verifyHandle?: () => void;
+    createFile?: () => bigint;
+  }) => {
+    const calls = { migrated: [] as WindowsAuthorityPathKind[], closed: 0 };
+    const binding = {
+      invalidHandle: 0n,
+      createFile: options.createFile ?? (() => 42n),
+      closeHandle: () => {
+        calls.closed += 1;
+        return 1;
+      },
+      fileInfo:
+        options.fileInfo ??
+        ((_handle, informationClass, output: Buffer) => {
+          if (informationClass !== WINDOWS_NATIVE_RECORD.FILE_ID_INFO_CLASS) return 0;
+          output.writeUInt32LE(7, 0);
+          output.writeBigUInt64LE(11n, 8);
+          return 1;
+        }),
+    } as unknown as WindowsRecordNativeBindings;
+    const authority = {
+      currentUserId: () => Buffer.alloc(0),
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
+      verifyHandle: options.verifyHandle ?? (() => undefined),
+      migrateHandle: (_handle: bigint, kind: WindowsAuthorityPathKind) => calls.migrated.push(kind),
+    } as unknown as WindowsPrivateAuthority;
+    return { binding, authority, calls };
+  };
+  // The identity the real fd reports, so the fake ACL layer can reproduce it exactly.
+  const reportedIdentity = (fd: number): { dev: bigint; ino: bigint } => {
+    const stat = fs.fstatSync(fd, { bigint: true });
+    return { dev: stat.dev, ino: stat.ino };
+  };
+  const identityInfo = (identity: { dev: bigint; ino: bigint }) => {
+    return (handle: bigint, informationClass: number, output: Buffer): number => {
+      if (handle !== 42n || informationClass !== WINDOWS_NATIVE_RECORD.FILE_ID_INFO_CLASS) return 0;
+      output.writeUInt32LE(Number(identity.dev), 0);
+      output.writeBigUInt64LE(identity.ino, 8);
+      return 1;
+    };
+  };
+
+  test("writes the owner-only ACL through a handle that reproduces the fd's identity", () => {
+    const path = scratch();
+    const fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    try {
+      let checks = 0;
+      const { binding, authority, calls } = fakeAcl({
+        fileInfo: identityInfo(reportedIdentity(fd)),
+        // The first check is what a path with the inherited descriptor answers: repair, then answer
+        // again on the same handle.
+        verifyHandle: () => {
+          if (checks++ === 0) throw new Error("permissive Windows authority DACL rejected");
+        },
+      });
+      expect(repairWindowsLeafAcl(path, fd, { binding, authority })).toBe(true);
+      expect(calls.migrated).toEqual([WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]);
+      expect(calls.closed).toBe(1);
+      expect(checks).toBe(2);
+    } finally {
+      fs.closeSync(fd);
+      cleanup();
+    }
+  });
+
+  test("refuses to write when the path holds a different object than the fd", () => {
+    const path = scratch();
+    const fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    try {
+      const neighbour = reportedIdentity(fd);
+      const { binding, authority, calls } = fakeAcl({
+        fileInfo: identityInfo({ dev: neighbour.dev, ino: neighbour.ino + 1n }),
+        verifyHandle: () => {
+          throw new Error("permissive Windows authority DACL rejected");
+        },
+      });
+      // A Number-typed comparison would accept this; the exact pair is what refuses it.
+      expect(repairWindowsLeafAcl(path, fd, { binding, authority })).toBe(false);
+      expect(calls.migrated).toHaveLength(0);
+      expect(calls.closed).toBe(1);
+    } finally {
+      fs.closeSync(fd);
+      cleanup();
+    }
+  });
+
+  test("refuses a descriptor whose identity cannot be read", () => {
+    expect(repairWindowsLeafAcl("C:\\state", -1)).toBe(false);
+    const closed = fs.openSync(scratch(), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    fs.closeSync(closed);
+    expect(repairWindowsLeafAcl("C:\\state", closed)).toBe(false);
+  });
+
+  test("refuses when the host has no Win32 security bindings at all", () => {
+    if (process.platform === "win32") return;
+    const path = scratch();
+    const fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    try {
+      expect(repairWindowsLeafAcl(path, fd)).toBe(false);
+    } finally {
+      fs.closeSync(fd);
+      cleanup();
+    }
+  });
+});
 
 describe("memoizedWindowsLockProvider", () => {
   test("constructs the provider once and reuses it", () => {

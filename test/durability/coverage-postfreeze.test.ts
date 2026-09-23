@@ -30,6 +30,7 @@ import {
   readStableLockRecord,
 } from "../../src/durability/lock-record.js";
 import * as nativeRuntime from "../../src/durability/native-runtime.js";
+import { repairWindowsLeafAcl } from "../../src/durability/native-windows-ops.js";
 import {
   closePinnedDirectory,
   createAt,
@@ -48,6 +49,10 @@ import {
   openOrCreatePrivateFileAt,
   writePrivateTemporaryAt,
 } from "../../src/durability/path.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  windowsVerifyPathAcl,
+} from "../../src/durability/windows-acl-ops.js";
 
 const { native } = nativeRuntime;
 
@@ -771,10 +776,63 @@ test("open directory creation preserves fchmod failure and removes the rejected 
   const realFchmodat = api.fchmodat;
   api.fchmodat = () => -1;
   try {
-    expect(() => openPinnedDescendant(base, join(root, "rejected"), true)).toThrow(/fchmodat/);
-    expect(fs.existsSync(join(root, "rejected"))).toBeFalse();
+    // The POSIX arm: mode bits are the privacy step, and the fchmodat failure removes the directory
+    // it created rather than leaving it behind unsecured. On Windows there are no mode bits to set —
+    // fchmodat refuses outright there and the leaf repair happens after the open — so the injected
+    // failure has no effect and the injected-cleanup arm is not exercised.
+    if (process.platform !== "win32") {
+      expect(() => openPinnedDescendant(base, join(root, "rejected"), true)).toThrow(/fchmodat/);
+      expect(fs.existsSync(join(root, "rejected"))).toBeFalse();
+    }
   } finally {
     api.fchmodat = realFchmodat;
+    closePinnedDirectory(base);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("open directory creation on win32 refuses a swapped leaf and leaves the substitute alone", () => {
+  const root = sandbox("vf-native-leaf-swap-");
+  ensurePrivateDirectory(root);
+  const base = openPrivateDirectory(root, false);
+  const leaf = join(root, "leaf");
+  const elsewhere = join(root, "elsewhere");
+  fs.mkdirSync(elsewhere);
+  const platformDescriptor = Object.getOwnPropertyDescriptor(
+    process,
+    "platform",
+  ) as PropertyDescriptor;
+  const onWindows = platformDescriptor.value === "win32";
+  Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+  try {
+    if (onWindows) {
+      // A writer that can replace a leaf hands the walk a junction to a directory of its choosing.
+      // The repair is bound to the identity of the object the walk holds, so it refuses to write the
+      // substitute's DACL; the same descriptor against the path it really refers to is repaired.
+      // Driven without the walk here: the platform-mocking tests earlier in this file leave the
+      // native *at() seam mocked for the rest of the file, so an open-through-the-walk assertion
+      // could only fail for that reason. The walk-driven version of this scenario is in
+      // windows-acl-identity.test.ts, which is not shadowed by that mock.
+      fs.symlinkSync(elsewhere, leaf, "junction");
+      const fd = fs.openSync(leaf, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+      try {
+        expect(fs.realpathSync(leaf)).toBe(fs.realpathSync(elsewhere));
+        expect(repairWindowsLeafAcl(leaf, fd)).toBe(false);
+        expect(windowsVerifyPathAcl(elsewhere, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBeFalse();
+        expect(repairWindowsLeafAcl(elsewhere, fd)).toBeTrue();
+      } finally {
+        fs.closeSync(fd);
+      }
+    } else {
+      // No Win32 security APIs on this host, so the leaf repair cannot be performed at all:
+      // creation fails closed and takes the directory it created back out.
+      expect(() => openPinnedDescendant(base, join(root, "unrepairable"), true)).toThrow(
+        /fchmodat/,
+      );
+      expect(fs.existsSync(join(root, "unrepairable"))).toBeFalse();
+    }
+  } finally {
+    Object.defineProperty(process, "platform", platformDescriptor);
     closePinnedDirectory(base);
     fs.rmSync(root, { recursive: true, force: true });
   }

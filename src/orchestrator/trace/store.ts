@@ -89,7 +89,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
         !entry.isDirectory() ||
         !ownerMatches(opened) ||
         !ownerMatches(entry) ||
-        (privateMode && !hasPrivateMode(opened, 0o777, 0o700, path)) ||
+        (privateMode && !hasPrivateMode(opened, 0o777, 0o700, path, fd)) ||
         opened.dev !== entry.dev ||
         opened.ino !== entry.ino
       )
@@ -147,7 +147,7 @@ export const TraceStore: new (options: TraceStoreOptions) => TraceStoreContract 
         !ownerMatches(stat) ||
         !ownerMatches(entry) ||
         stat.nlink !== 1 ||
-        !hasPrivateMode(stat, 0o777, 0o600, path) ||
+        !hasPrivateMode(stat, 0o777, 0o600, path, fd) ||
         stat.dev !== entry.dev ||
         stat.ino !== entry.ino
       )

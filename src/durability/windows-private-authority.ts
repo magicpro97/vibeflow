@@ -43,8 +43,8 @@ export interface WindowsPrivateAuthority {
   verifyNoForeignWrite(handle: bigint): void;
   /** The SID of the account running this process, for callers applying their own descriptor policy. */
   currentUserId(): Buffer;
-  /** Reset an existing file/dir's DACL in-place to owner-only + SE_DACL_PROTECTED. */
-  migrateToOwnerOnly(path: string, kind: WindowsAuthorityPathKind): void;
+  /** Reset an existing object's DACL in-place to owner-only + SE_DACL_PROTECTED, through its handle. */
+  migrateHandle(handle: bigint, kind: WindowsAuthorityPathKind): void;
 }
 
 export interface WindowsSecurityNativeRuntime {
@@ -76,8 +76,8 @@ export interface WindowsSecurityNativeRuntime {
     sacl: unknown[],
     descriptor: unknown[],
   ): number;
-  setNamedSecurityInfo(
-    path: Buffer,
+  setSecurityInfo(
+    handle: bigint,
     type: number,
     info: number,
     owner: unknown,
@@ -151,8 +151,8 @@ export function createWindowsPrivateAuthority(
       )
         durabilityError("unsafe_path", "permissive Windows authority DACL rejected");
     },
-    migrateToOwnerOnly(path, kind) {
-      bindings.migrateDacl(path, descriptorSddl(user.sddl, kind));
+    migrateHandle(handle, kind) {
+      bindings.migrateHandle(handle, descriptorSddl(user.sddl, kind));
     },
   };
 }
@@ -247,7 +247,7 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       release: () => runCleanups([attributes.release, () => native.localFree(descriptor[0])]),
     };
   };
-  const migrateDacl = (path: string, sddl: string): void => {
+  const migrateHandle = (handle: bigint, sddl: string): void => {
     const descriptor: unknown[] = [null];
     if (
       !native.convertDescriptor(
@@ -268,8 +268,8 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
         !dacl[0]
       )
         failed("GetSecurityDescriptorDacl(migrate)");
-      const code = native.setNamedSecurityInfo(
-        Buffer.from(`${path}\0`, "utf16le"),
+      const code = native.setSecurityInfo(
+        handle,
         WINDOWS_PRIVATE_SECURITY.SE_FILE_OBJECT,
         // >>> 0: PROTECTED_DACL_INFORMATION is 0x80000000, so the bitwise OR yields a negative
         // int32 in JS. Passing that to a u32 FFI parameter reaches Windows as garbage flags and
@@ -283,7 +283,7 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
         null,
       );
       if (code !== 0)
-        durabilityError("unsafe_path", `SetNamedSecurityInfoW failed with Windows error ${code}`);
+        durabilityError("unsafe_path", `SetSecurityInfo failed with Windows error ${code}`);
     } finally {
       native.localFree(descriptor[0]);
     }
@@ -363,7 +363,7 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       };
     }, [() => native.localFree(descriptor[0])]);
   };
-  return { currentUser, createSecurity, inspect, migrateDacl };
+  return { currentUser, createSecurity, inspect, migrateHandle };
 }
 
 export function loadWindowsPrivateAuthorityBindings(

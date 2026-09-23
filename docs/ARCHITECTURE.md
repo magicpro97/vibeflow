@@ -151,8 +151,11 @@ keeps working.
 
 Three Win32 details this depends on, each measured rather than assumed:
 
-- Migration applies **by path** (`SetNamedSecurityInfoW`). `SetSecurityInfo` on a handle opened
-  with `READ_CONTROL|WRITE_DAC` returns `0` and leaves the DACL untouched.
+- Migration applies **through the object's handle** (`SetSecurityInfo` on a handle opened with
+  `WRITE_DAC`, flags coerced with `>>> 0`). Measured on Windows 11: with that access the handle
+  write sets the DACL, so the earlier note that it returns `0` and changes nothing does not hold.
+  A path-based `SetNamedSecurityInfoW` write is no longer used — a writer that replaced the name
+  would have had the descriptor land on its object instead of ours.
 - Any flag mask with bit 31 set (`PROTECTED_DACL_INFORMATION` is `0x80000000`) must be coerced
   with `>>> 0`; JS bitwise OR produces a negative int32 that reaches Win32 as garbage flags.
 - Opening a **directory** with `CreateFileW` requires `FILE_FLAG_BACKUP_SEMANTICS`, otherwise the
