@@ -119,16 +119,26 @@ jobs:
         if: matrix.suite == 'package-smoke'
         run: node dist/cli.js --version
       - name: Node runtime smoke over the private state path
-        # The koffi backend only loads under Node; every other Windows row spawns bun. Bootstrap a
-        # throwaway project so the owner-only state directory goes through the Node FFI path.
+        # The koffi backend only loads under Node; every other Windows row spawns bun. Boot the
+        # shipped CLI in a throwaway project so the owner-only state tree goes through the Node
+        # FFI path — a rejected directory exits the CLI before it ever writes the tree.
         if: matrix.suite == 'package-smoke'
         shell: pwsh
         run: |
-          $root = Join-Path $env:RUNNER_TEMP "vf node init smoke"
+          $root = Join-Path $env:RUNNER_TEMP "vf node state smoke"
           New-Item -ItemType Directory -Force $root | Out-Null
           Set-Location $root
           git init -q .
-          node "$env:GITHUB_WORKSPACE/dist/cli.js" init --no-ai --no-hooks --no-ask
+          $ui = Start-Process -FilePath node -ArgumentList "$env:GITHUB_WORKSPACE/dist/cli.js", "ui", "--port", "0", "--no-open" -PassThru -NoNewWindow -RedirectStandardOutput ui.log -RedirectStandardError ui.err
+          Start-Sleep -Seconds 20
+          if ($ui.HasExited) {
+            Get-Content ui.log, ui.err
+            throw "vf ui exited before booting (code=$($ui.ExitCode))"
+          }
+          Stop-Process -Id $ui.Id -Force
+          if (-not (Test-Path ".vibeflow/conversation/trace")) {
+            throw "the Node runtime did not create the private conversation tree"
+          }
       - name: Pack and install shipped artifact in isolated path
         if: matrix.suite == 'package-smoke'
         shell: pwsh
