@@ -132,10 +132,20 @@ jobs:
       - name: Run vf init through the installed Windows shim
         if: matrix.suite == 'package-smoke'
         shell: pwsh
+        env:
+          # copilot's readiness is `gh auth status`, which gh answers from this token. The
+          # binary still has to exist: readiness short-circuits to "no-binary" before it ever
+          # reaches the auth probe. Installing it is the cheap way to get one ready engine.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # This is the path a Windows user actually takes, and nothing else in CI covered it:
         # #801 shipped a `vf init` that failed on every Windows machine while CI stayed green,
         # because the suites above only ever ran `--version` and `git init`.
+        #
+        # Not --dry-run: dry-run skips activateProjectCapabilityAuthorityForVfInit, which is
+        # the exact durability path #801 broke, so the gate has to take the writing path.
         run: |
+          npm install --global @github/copilot --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "installing copilot CLI failed with $LASTEXITCODE" }
           $root = Join-Path $env:RUNNER_TEMP "vf package smoke"
           $vf = Join-Path (Join-Path $root "prefix") "vf.cmd"
           $project = Join-Path $root "init project"
