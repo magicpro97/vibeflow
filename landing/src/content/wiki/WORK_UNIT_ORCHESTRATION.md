@@ -297,9 +297,12 @@ blocked    → skip       reported as "blocked" — sequential gating, never a d
 ```
 
 Skipped units are reported on the CLI (`Skipping N blocked unit(s): <names>`) and
-stay byte-identical in `.vibeflow/WORKFLOW_STATE.json`, so a run never drops a
-blocked unit or re-dispatches finished work. A dry run previews the same dispatch
-set: only `pending` units are counted, and prompts are written only for them.
+stay in `.vibeflow/WORKFLOW_STATE.json`: a run holds them out of the dispatch set
+without dropping a blocked unit or re-dispatching finished work. Their fields are
+not preserved byte-for-byte: the run writes the ledger back with the resolved
+`riskClass` stamped onto any unit that declares none, and `totals` recomputed. A
+dry run previews the same dispatch set: only `pending` units are counted, and
+prompts are written only for them.
 To return a skipped unit to the dispatch set, unblock it explicitly:
 
 ```bash
