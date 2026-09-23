@@ -32,10 +32,9 @@ import {
 import {
   openExistingPrivateFileAt,
   openOrCreatePrivateFileAt,
+  syncDirectory,
   validatePrivateFileFd,
 } from "./path.js";
-import { syncDirectory } from "./posix-fs-semantics.js";
-import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 export type { ProcessLockOwnerRuntime, ProcessLockOwnerV1 } from "./lock-owner.js";
 export { processStartIdentity } from "./lock-owner.js";
@@ -182,27 +181,21 @@ function closeAttempt(
   fd: number,
   unlock: boolean,
 ): void {
+  // Every step swallows its own error: acquisition already failed and cleanup must preserve
+  // that primary error.
   try {
     if (unlock) releaseAdvisoryLock(fd);
-  } catch {
-    // Acquisition already failed; cleanup must preserve that primary error.
-  }
+  } catch {}
   try {
     fs.closeSync(fd);
-  } catch {
-    // Acquisition already failed; cleanup must preserve that primary error.
-  }
+  } catch {}
   try {
     closePinnedDirectory(root);
-  } catch {
-    // Acquisition already failed; cleanup must preserve that primary error.
-  }
+  } catch {}
   if (coverageRoot) {
     try {
       closePinnedDirectory(coverageRoot);
-    } catch {
-      // Acquisition already failed; cleanup must preserve that primary error.
-    }
+    } catch {}
   }
 }
 
@@ -329,9 +322,6 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
   try {
     fd = openOrCreatePrivateFileAt(root, name);
     validatePrivateFileFd(fd, name);
-    // B3: skip directory fsync on win32 — FlushFileBuffers on a directory handle is invalid
-    // (EPERM). NTFS journal provides crash-consistency without an explicit flush.
-    // ponytail: on POSIX, fsync of the parent dir makes the lock-file directory entry durable.
     syncDirectory(root.fd);
   } catch (error) {
     const opened = fd;
