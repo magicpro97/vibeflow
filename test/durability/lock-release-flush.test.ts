@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * Release durability: the lock record lives in a FILE descriptor, so emptying the owner slot
@@ -11,7 +12,12 @@ import { readFileSync } from "node:fs";
  * regressed. If the release path is restructured, update the anchors — do not delete the check.
  */
 describe("process lock release flushes the record file", () => {
-  const source = readFileSync("src/durability/lock.ts", "utf8");
+  // Resolved from this file, not cwd: sibling tests chdir into temporary repositories, so a
+  // relative read here would fail or read the wrong tree depending on test ordering.
+  const source = readFileSync(
+    fileURLToPath(new URL("../../src/durability/lock.ts", import.meta.url)),
+    "utf8",
+  );
 
   test("the release path fsyncs the lock file and syncs the directory separately", () => {
     const release = source.slice(source.indexOf("process lock release slot was not retained"));

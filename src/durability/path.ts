@@ -243,7 +243,9 @@ export function openExistingPrivateFileAt(
       assertPrivateFile(fd, name, maxLinks);
       return fd;
     } catch (error) {
-      return cleanupThenThrow(error, [() => fs.closeSync(fd)]);
+      // closeTrackedFd, not fs.closeSync: this fd came from tryOpenAt, so on Windows it may
+      // carry a fd-to-path registration that must die with it.
+      return cleanupThenThrow(error, [() => closeTrackedFd(fd)]);
     }
   }
 }
