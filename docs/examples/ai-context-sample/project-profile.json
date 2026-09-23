@@ -1,29 +1,20 @@
 {
   "name": "@magicpro97/vibeflow",
   "summary": "On a fresh clone, arm the guardrail before any human edit:",
-  "languages": [
-    "TypeScript",
-    "Shell"
-  ],
+  "languages": ["TypeScript", "Shell"],
   "packageManager": "bun",
   "buildCommand": "bun run build",
   "testCommand": "bun run test",
   "lintCommand": "bun run lint",
-  "frameworks": [
-    "Astro"
-  ],
+  "frameworks": ["Astro"],
   "hasCI": true,
-  "manifests": [
-    "package.json"
-  ],
+  "manifests": ["package.json"],
   "walkTruncated": false,
   "findings": [
     {
       "component": "language",
       "value": "TypeScript",
-      "evidence": [
-        "package.json"
-      ],
+      "evidence": ["package.json"],
       "confidence": "high"
     },
     {
@@ -35,25 +26,19 @@
     {
       "component": "frameworks",
       "value": "Astro",
-      "evidence": [
-        "package.json"
-      ],
+      "evidence": ["package.json"],
       "confidence": "medium"
     },
     {
       "component": "ui",
       "value": "web (see package.json)",
-      "evidence": [
-        "package.json"
-      ],
+      "evidence": ["package.json"],
       "confidence": "medium"
     },
     {
       "component": "ci",
       "value": "configured",
-      "evidence": [
-        ".github/workflows/"
-      ],
+      "evidence": [".github/workflows/"],
       "confidence": "high"
     }
   ]

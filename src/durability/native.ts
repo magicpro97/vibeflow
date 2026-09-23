@@ -5,19 +5,42 @@ import { durabilityError } from "./errors.js";
 import {
   IS_BUN,
   O_CLOEXEC,
+  WIN32_FD_PATHS,
   assertNativeDurabilityAvailable,
   errnoIs,
   native,
   syscallFailure,
 } from "./native-runtime.js";
+import {
+  memoizedWindowsLockProvider,
+  pinWindowsDirectory,
+  releaseWindowsAdvisoryLock,
+  tryWindowsAdvisoryLock,
+  windowsPinRuntime,
+} from "./native-windows-ops.js";
+import {
+  type PinnedDirectory,
+  assertPinnedDirectory,
+  pinnedDirectoryPath,
+  pinnedDirectoryPathMatches,
+} from "./pinned-directory.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
+import {
+  type WindowsKernelLock,
+  type WindowsKernelLockProvider,
+  createWindowsKernelLockProvider,
+  loadWindowsRecordNativeBindings,
+} from "./windows-kernel-lock.js";
 
-export interface PinnedDirectory {
-  fd: number;
-  path: string;
-  dev: number;
-  ino: number;
-}
+export {
+  type PinnedDirectory,
+  type PinnedDirectoryRuntimeV1,
+  assertPinnedDirectory,
+  pinnedDirectoryPath,
+  pinnedDirectoryPathForRuntime,
+  pinnedDirectoryPathMatches,
+} from "./pinned-directory.js";
 
 const LOCK_EX = 2;
 const LOCK_NB = 4;
@@ -27,6 +50,15 @@ const AT_REMOVEDIR = process.platform === RUNTIME_PLATFORM.DARWIN ? 0x80 : 0x200
 const DIRECTORY_FLAGS =
   fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW | O_CLOEXEC;
 const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefined;
+
+// Module-level Windows kernel lock registry: lock-file fd → held kernel lock.
+// ponytail: flock(2) is POSIX-only; LockFileEx (via createWindowsKernelLockProvider)
+// is the Windows equivalent. Keyed by Node fd for the same tryAdvisoryLock/releaseAdvisoryLock API.
+const WIN32_KERNEL_LOCKS: Map<number, WindowsKernelLock> = new Map();
+
+const getWinLockProvider = memoizedWindowsLockProvider(() =>
+  createWindowsKernelLockProvider(loadWindowsRecordNativeBindings(), undefined),
+);
 
 export function canonicalDurabilityPath(input: string): string {
   if (typeof input !== "string" || input.includes("\0"))
@@ -51,6 +83,8 @@ export function canonicalDurabilityPath(input: string): string {
 }
 
 function assertDirectory(fd: number, path: string, privateMode: boolean): PinnedDirectory {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS)
+    return pinWindowsDirectory(fd, path, windowsPinRuntime());
   const stat = fs.fstatSync(fd);
   if (
     !stat.isDirectory() ||
@@ -80,7 +114,11 @@ function openDirectoryAt(parentFd: number, name: string, path: string, create: b
     api.unlinkat(parentFd, name, AT_REMOVEDIR);
     throw primary;
   }
-  fs.fsyncSync(parentFd);
+  // B3: NTFS has no dirent-flush equivalent; FlushFileBuffers on a directory handle is
+  // invalid (EPERM). Skip fsync on win32. Upgrade path: none — NTFS journal provides
+  // crash-consistency at the volume level without an explicit flush.
+  // ponytail: on POSIX, fsync of the parent dir makes the dir-entry durable on crash.
+  syncDirectory(parentFd);
   fd = api.openat(parentFd, name, DIRECTORY_FLAGS, "int", 0);
   if (fd < 0) syscallFailure(`openat created directory ${path}`);
   return fd;
@@ -96,6 +134,8 @@ export function openPrivateDirectory(input: string, create: boolean): PinnedDire
   );
   let cursor = root;
   try {
+    // Register root fd before pinnedDirectoryPath check (needed on Windows for B5).
+    if (process.platform === RUNTIME_PLATFORM.WINDOWS) WIN32_FD_PATHS.set(fd, root);
     if (pinnedDirectoryPath(fd) !== root)
       durabilityError("unsupported", "runtime cannot prove the durability root path");
     const parts = path.slice(root.length).split(sep).filter(Boolean);
@@ -107,21 +147,23 @@ export function openPrivateDirectory(input: string, create: boolean): PinnedDire
       try {
         next = assertDirectory(nextFd, nextPath, index === parts.length - 1);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(nextFd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(nextFd)]);
       }
       const previous = fd;
       fd = -1;
       try {
-        fs.closeSync(previous);
+        closeTrackedFd(previous);
+        // Clean up the path registry entry for the closed fd.
+        WIN32_FD_PATHS.delete(previous);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(next.fd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(next.fd)]);
       }
       fd = next.fd;
       cursor = nextPath;
     }
     return assertDirectory(fd, path, true);
   } catch (error) {
-    return cleanupThenThrow(error, fd >= 0 ? [() => fs.closeSync(fd)] : []);
+    return cleanupThenThrow(error, fd >= 0 ? [() => closeTrackedFd(fd)] : []);
   }
 }
 
@@ -131,7 +173,7 @@ export function duplicatePinnedDirectory(directory: PinnedDirectory): PinnedDire
   if (fd < 0) syscallFailure("openat duplicate pinned directory");
   return withFailureCleanup(
     () => assertDirectory(fd, directory.path, true),
-    [() => fs.closeSync(fd)],
+    [() => closeTrackedFd(fd)],
   );
 }
 
@@ -155,82 +197,40 @@ export function openPinnedDescendant(
       try {
         next = assertDirectory(nextFd, nextPath, true);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(nextFd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(nextFd)]);
       }
       current = null;
       try {
-        fs.closeSync(previous.fd);
+        closeTrackedFd(previous.fd);
+        WIN32_FD_PATHS.delete(previous.fd);
       } catch (error) {
-        return cleanupThenThrow(error, [() => fs.closeSync(next.fd)]);
+        return cleanupThenThrow(error, [() => closeTrackedFd(next.fd)]);
       }
       current = next;
     }
     return current as PinnedDirectory;
   } catch (error) {
     const remaining = current;
-    return cleanupThenThrow(error, remaining ? [() => fs.closeSync(remaining.fd)] : []);
+    return cleanupThenThrow(error, remaining ? [() => closeTrackedFd(remaining.fd)] : []);
   }
-}
-
-export interface PinnedDirectoryRuntimeV1 {
-  platform: NodeJS.Platform;
-  isBun: boolean;
-  realpath: typeof fs.realpathSync;
-  fcntl: ReturnType<typeof native>["fcntl"];
-}
-
-export function pinnedDirectoryPathForRuntime(
-  fd: number,
-  runtime: PinnedDirectoryRuntimeV1,
-): string {
-  if (runtime.platform === RUNTIME_PLATFORM.LINUX) {
-    let observed: string;
-    try {
-      observed = fs.readlinkSync(`/proc/self/fd/${fd}`);
-    } catch (error) {
-      return durabilityError(
-        "unsupported",
-        "runtime cannot resolve pinned directory handles",
-        error,
-      );
-    }
-    if (observed.endsWith(" (deleted)"))
-      durabilityError("unsafe_path", "pinned directory was removed");
-    return observed;
-  }
-  if (runtime.isBun) {
-    try {
-      return runtime.realpath(`/dev/fd/${fd}`);
-    } catch (error) {
-      return durabilityError("unsupported", "Bun cannot resolve pinned directory handles", error);
-    }
-  }
-  const output = Buffer.alloc(1024);
-  const { fcntl } = runtime;
-  if (!fcntl || fcntl(fd, F_GETPATH, "void *", output) !== 0) syscallFailure("fcntl F_GETPATH");
-  const end = output.indexOf(0);
-  return output.subarray(0, end < 0 ? output.length : end).toString("utf8");
-}
-
-export function pinnedDirectoryPath(fd: number): string {
-  return pinnedDirectoryPathForRuntime(fd, {
-    platform: process.platform,
-    isBun: IS_BUN,
-    realpath: fs.realpathSync,
-    fcntl: native().fcntl,
-  });
-}
-
-export function assertPinnedDirectory(directory: PinnedDirectory): void {
-  const stat = fs.fstatSync(directory.fd);
-  if (stat.dev !== directory.dev || stat.ino !== directory.ino || !stat.isDirectory())
-    durabilityError("unsafe_path", "pinned directory identity changed");
-  if (pinnedDirectoryPath(directory.fd) !== directory.path)
-    durabilityError("unsafe_path", "pinned directory path changed during mutation");
 }
 
 export function closePinnedDirectory(directory: PinnedDirectory): void {
+  WIN32_FD_PATHS.delete(directory.fd);
   fs.closeSync(directory.fd);
+}
+
+/**
+ * Close a bare fd obtained from tryOpenAt/openAt, dropping any fd→path registration with it.
+ *
+ * Use this instead of fs.closeSync for those fds: the OS recycles fd numbers, so an entry left
+ * behind would later describe a different directory. Registration is overwritten rather than
+ * trusted everywhere it is read, so a leak is not exploitable today — this keeps it from
+ * becoming an unenforced cross-file invariant.
+ */
+export function closeTrackedFd(fd: number): void {
+  WIN32_FD_PATHS.delete(fd);
+  fs.closeSync(fd);
 }
 
 export function openAt(directory: PinnedDirectory, name: string, flags: number, mode = 0): number {
@@ -260,7 +260,18 @@ export function tryOpenAt(
     "int",
     mode,
   );
-  if (fd >= 0) return fd;
+  if (fd >= 0) {
+    // Register directories opened relatively: WIN32_FD_PATHS is how the *at() shims resolve a
+    // directory fd back to a path, so a fd that never lands here cannot be descended through.
+    // Only directories — a file fd is never a valid *at() base, so registering one would just
+    // leave an entry behind for a number the OS will recycle. The flag cannot be tested here:
+    // node exposes no O_DIRECTORY on win32 (it is undefined), so ask the fd itself.
+    // Overwrite unconditionally: callers close these with plain fs.closeSync, so an entry from
+    // a previous owner of this recycled fd number can still be present and must not win.
+    if (process.platform === RUNTIME_PLATFORM.WINDOWS && fs.fstatSync(fd).isDirectory())
+      WIN32_FD_PATHS.set(fd, join(directory.path, name));
+    return fd;
+  }
   if (errnoIs("ENOENT")) return null;
   syscallFailure(`openat file ${name}`);
 }
@@ -311,19 +322,34 @@ export function unlinkAt(directory: PinnedDirectory, name: string, missingOk = f
   syscallFailure(`unlinkat file ${name}`);
 }
 
-export function tryAdvisoryLock(fd: number): boolean {
+export function tryAdvisoryLock(fd: number, lockPath?: string): boolean {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS)
+    return tryWindowsAdvisoryLock(fd, lockPath, getWinLockProvider(), WIN32_KERNEL_LOCKS);
   if (native().flock(fd, LOCK_EX | LOCK_NB) === 0) return true;
   if (errnoIs("EAGAIN") || errnoIs("EWOULDBLOCK")) return false;
   syscallFailure("advisory writer lock");
 }
 
 export function releaseAdvisoryLock(fd: number): void {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
+    releaseWindowsAdvisoryLock(fd, WIN32_KERNEL_LOCKS);
+    return;
+  }
   if (native().flock(fd, LOCK_UN) !== 0) syscallFailure("advisory writer unlock");
 }
 
 export { assertNativeDurabilityAvailable };
 
 function assertSafeName(name: string): void {
-  if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\0"))
+  // A name is resolved against a pinned directory, so it must be a single component. Windows
+  // treats "\" as a separator too, and join() collapses "..\outside" out of the pin entirely.
+  if (
+    !name ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name.includes("\0")
+  )
     durabilityError("unsafe_path", "unsafe relative native path name");
 }

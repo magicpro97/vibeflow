@@ -4,9 +4,11 @@ import {
   type PinnedDirectory,
   assertPinnedDirectory,
   closePinnedDirectory,
+  closeTrackedFd,
   openPrivateDirectory,
   tryOpenAt,
 } from "../../durability/native.js";
+import { hasPrivateMode } from "../../durability/posix-fs-semantics.js";
 import { effectiveOwnerMatches } from "../trace/path-safety.js";
 import { readDirectoryNamesAt } from "./catalog-directory-reader.js";
 
@@ -114,14 +116,14 @@ export function openPrivateChildDirectoryReadOnly(
   if (fd === null) return missing(path);
   try {
     const stat = fs.fstatSync(fd);
-    if (!stat.isDirectory() || !effectiveOwnerMatches(stat) || (stat.mode & 0o7777) !== 0o700)
+    if (!stat.isDirectory() || !effectiveOwnerMatches(stat) || !hasPrivateMode(stat, 0o7777, 0o700))
       unsafe();
     const directory = { fd, path, dev: stat.dev, ino: stat.ino };
     assertPinnedDirectory(directory);
     assertPrivateDirectorySnapshot(parent);
     return { state: "valid", path, dev: stat.dev, ino: stat.ino, directory };
   } catch {
-    fs.closeSync(fd);
+    closeTrackedFd(fd);
     return invalid(path);
   }
 }
@@ -160,7 +162,7 @@ function validateOpenedFile(
     !opened.isFile() ||
     !effectiveOwnerMatches(opened) ||
     opened.nlink !== 1 ||
-    (opened.mode & 0o7777) !== 0o600 ||
+    !hasPrivateMode(opened, 0o7777, 0o600) ||
     (!allowEmpty && opened.size === 0) ||
     opened.size > maximum
   )
@@ -227,7 +229,7 @@ export function assertPrivateFileSnapshot(snapshot: PrivateFileSnapshotV1): void
       !observed.isFile() ||
       !effectiveOwnerMatches(observed) ||
       observed.nlink !== 1 ||
-      (observed.mode & 0o7777) !== 0o600
+      !hasPrivateMode(observed, 0o7777, 0o600)
     )
       unsafe();
   } finally {

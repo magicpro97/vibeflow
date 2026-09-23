@@ -10,6 +10,7 @@ import {
   WINDOWS_AUTHORITY_PATH_KIND,
   type WindowsPrivateAuthority,
 } from "../src/dispatch/windows-private-authority.js";
+import { createFakeFfi } from "./helpers/fake-windows-ffi.js";
 
 interface Entry {
   directory: boolean;
@@ -559,40 +560,26 @@ describe("native Windows path authority", () => {
   });
 
   test("executes every Kernel32 binding through the builtin Bun FFI adapter", () => {
-    const dispatch: Record<string, (...args: any[]) => unknown> = {
+    // Bun hands the callee an integer address, never the buffer object, so out-parameters are
+    // filled by writing through the address the binding passed.
+    const fake = createFakeFfi((self) => ({
       CreateFileW: () => 0x10n,
       CreateDirectoryW: () => 1,
       GetFileInformationByHandleEx: () => 1,
-      ReadFile: (_handle: bigint, _output: Buffer, _bytes: number, readOut: { [0]: number }) => {
-        readOut[0] = 7;
+      ReadFile: (_handle: bigint, _output: unknown, _bytes: number, readOut: unknown) => {
+        self.writeU32(readOut, 7);
         return 1;
       },
-      WriteFile: (
-        _handle: bigint,
-        _input: Uint8Array,
-        _bytes: number,
-        writtenOut: { [0]: number },
-      ) => {
-        writtenOut[0] = 5;
+      WriteFile: (_handle: bigint, _input: unknown, _bytes: number, writtenOut: unknown) => {
+        self.writeU32(writtenOut, 5);
         return 1;
       },
       FlushFileBuffers: () => 1,
       SetFileInformationByHandle: () => 1,
       CloseHandle: () => 1,
       GetLastError: () => 5,
-    };
-    const ffi = {
-      FFIType: { ptr: 1, u32: 2, i32: 3 },
-      dlopen: () => ({
-        symbols: Object.fromEntries(
-          Object.keys(dispatch).map((name) => [
-            name,
-            (...args: unknown[]) => dispatch[name]?.(...args) ?? 1,
-          ]),
-        ),
-      }),
-    };
-    const binding = loadWindowsPathNativeBindings({ isBun: true, requireModule: () => ffi });
+    }));
+    const binding = loadWindowsPathNativeBindings({ isBun: true, requireModule: () => fake.ffi });
     expect(binding.invalidHandle).toBe(18_446_744_073_709_551_615n);
     const path = Buffer.from("C:\\x\0", "utf16le");
     expect(binding.createFile(path, 0x8000_0000, 3, null, 1, 0x80, null)).toBe(0x10n);

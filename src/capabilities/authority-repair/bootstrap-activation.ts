@@ -13,6 +13,7 @@ import type { ProcessLock } from "../../durability/index.js";
 import { withLockedParent } from "../../durability/lock.js";
 import { assertPinnedDirectory, renameAt, unlinkAt } from "../../durability/native.js";
 import { readPrivateFileAt } from "../../durability/path.js";
+import { syncDirectory } from "../../durability/posix-fs-semantics.js";
 import { readRecoveryBootstrapJournalBytes } from "./bootstrap-journal.js";
 import { AUTHORITY_REPAIR_LIMIT, RECOVERY_BOOTSTRAP_ID_PREFIX } from "./contract.js";
 import { recoveryBootstrapPaths } from "./paths.js";
@@ -77,7 +78,7 @@ function removePending(lock: ProcessLock, pendingPath: string): void {
     if (bytes === null) return;
     if (bytes.byteLength !== 0) fail("stale pending journal is not byte-identical empty state");
     unlinkAt(directory, name);
-    fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
     assertPinnedDirectory(directory);
   });
 }
@@ -91,7 +92,7 @@ function publishPendingJournal(lock: ProcessLock, pendingPath: string, finalPath
     const final = readPrivateFileAt(directory, finalName, AUTHORITY_REPAIR_LIMIT.JOURNAL_BYTES);
     if (final !== null) fail("bootstrap final journal appeared before pending rename");
     renameAt(directory, pendingName, finalName);
-    fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
     assertPinnedDirectory(directory);
   });
 }

@@ -21,6 +21,7 @@ import {
   unlinkAt,
 } from "./native.js";
 import { createPrivateFileAt, openExistingPrivateFileAt, readPrivateFileAt } from "./path.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 
 export interface StoredObject {
   digest: string;
@@ -110,7 +111,7 @@ function recoverPublication(
   if (entries.finalLinks === 2 && !entries.same)
     durabilityError("corrupt", `immutable object has an unbound hard link at ${name}`);
   unlinkAt(directory, stagedName);
-  fs.fsyncSync(directory.fd);
+  syncDirectory(directory.fd);
   const verified = readPrivateFileAt(directory, name, maxBytes);
   if (!exact(verified, bytes)) durabilityError("corrupt", `immutable recovery failed at ${name}`);
   return true;
@@ -150,7 +151,7 @@ export function createOrVerifyPrivateFile(
     options.fault?.("after-link");
     assertPinnedDirectory(directory);
     unlinkAt(directory, stagedName);
-    fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
     if (!exact(readPrivateFileAt(directory, name, maxBytes), bytes))
       durabilityError("corrupt", `immutable publication verification failed at ${name}`);
     return "created";
@@ -209,7 +210,7 @@ function prepareCasStage(
   if (staged !== null) {
     if (exact(staged, replacement)) return stagedName;
     unlinkAt(directory, stagedName);
-    fs.fsyncSync(directory.fd);
+    syncDirectory(directory.fd);
   }
   const fd = createPrivateFileAt(directory, stagedName, replacement);
   if (fd === null) durabilityError("conflict", `CAS staging entry raced at ${name}`);
@@ -242,7 +243,7 @@ export function atomicCompareAndSwap(
       temporary = null;
       options.fault?.("after-rename");
       assertPinnedDirectory(directory);
-      fs.fsyncSync(directory.fd);
+      syncDirectory(directory.fd);
       options.fault?.("after-directory-fsync");
     }, [
       () => {

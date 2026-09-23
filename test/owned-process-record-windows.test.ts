@@ -44,6 +44,7 @@ import {
 } from "../src/dispatch/windows-private-authority.js";
 import { canonicalJsonBytes } from "../src/durability/canonical.js";
 import type { ProcessLockOwnerV1 } from "../src/durability/lock-owner.js";
+import { createFakeFfi } from "./helpers/fake-windows-ffi.js";
 
 const roots: string[] = [];
 const ENTRY = `${"a".repeat(64)}.json`;
@@ -1044,9 +1045,15 @@ describe("native Windows record adapters", () => {
       WINDOWS_NATIVE_RECORD.LOCKFILE_EXCLUSIVE_LOCK |
         WINDOWS_NATIVE_RECORD.LOCKFILE_FAIL_IMMEDIATELY,
       0,
-      WINDOWS_NATIVE_RECORD.LOCK_RANGE,
-      WINDOWS_NATIVE_RECORD.LOCK_RANGE,
+      WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
+      0,
     ]);
+    // The locked byte must sit past the record payload, or the owner's own record write
+    // fails with EBUSY: LockFileEx is mandatory, unlike POSIX flock.
+    expect(fixture.calls.lock[0]?.[5]).toMatchObject({
+      Offset: WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_LOW,
+      OffsetHigh: WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_HIGH,
+    });
     expect(fixture.calls.unlock).toHaveLength(1);
     expect(fixture.calls.flush).toBe(2);
     expect(fixture.calls.close).toBe(1);
@@ -1188,16 +1195,19 @@ describe("native Windows record adapters", () => {
 
   test("locks and renames through the builtin Bun FFI adapter with encoded OVERLAPPED", () => {
     const calls: string[] = [];
-    const dispatch: Record<string, (...args: any[]) => unknown> = {
+    // Bun hands the callee an integer address, never the buffer, so every buffer argument is
+    // resolved back through the fake's registry before it is read or written.
+    const fake = createFakeFfi((self) => ({
       GetDriveTypeW: () => WINDOWS_NATIVE_RECORD.DRIVE_FIXED,
       GetVolumeInformationW: (
-        _root: Buffer,
-        _volume: Buffer,
+        _root: unknown,
+        _volume: unknown,
         _chars: number,
-        _serial: { [0]: number },
-        _component: { [0]: number },
+        _serial: unknown,
+        _component: unknown,
         flags: { [0]: number },
       ) => {
+        // This binding passes its out-parameters as typed arrays, not through ffi.ptr.
         flags[0] = WINDOWS_NATIVE_RECORD.FILE_PERSISTENT_ACLS;
         return 1;
       },
@@ -1207,49 +1217,50 @@ describe("native Windows record adapters", () => {
       },
       GetLastError: () => 5,
       CreateFileW: () => 41n,
-      GetFileInformationByHandleEx: (_handle: bigint, informationClass: number, output: Buffer) => {
+      GetFileInformationByHandleEx: (
+        _handle: bigint,
+        informationClass: number,
+        output: unknown,
+      ) => {
         calls.push("info");
+        const view = self.deref(output);
+        const buffer = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
         if (informationClass === WINDOWS_NATIVE_RECORD.ATTRIBUTE_TAG_CLASS)
-          output.writeUInt32LE(0, 0);
+          buffer.writeUInt32LE(0, 0);
         if (informationClass === WINDOWS_NATIVE_RECORD.STANDARD_INFO_CLASS) {
-          output.writeUInt32LE(1, WINDOWS_NATIVE_RECORD.STANDARD_LINKS_OFFSET);
-          output.writeUInt8(0, WINDOWS_NATIVE_RECORD.STANDARD_DELETE_PENDING_OFFSET);
+          buffer.writeUInt32LE(1, WINDOWS_NATIVE_RECORD.STANDARD_LINKS_OFFSET);
+          buffer.writeUInt8(0, WINDOWS_NATIVE_RECORD.STANDARD_DELETE_PENDING_OFFSET);
         }
         if (informationClass === WINDOWS_NATIVE_RECORD.FILE_ID_INFO_CLASS)
-          output.writeUInt32LE(1, 8);
+          buffer.writeUInt32LE(1, 8);
         return 1;
       },
       LockFileEx: (_handle: bigint, ...rest: unknown[]) => {
         calls.push("lock");
-        const overlapped = rest[4] as Buffer;
+        const view = self.deref(rest[4]);
+        const overlapped = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
         expect(overlapped.readBigUInt64LE(0)).toBe(0n);
         expect(overlapped.readBigUInt64LE(8)).toBe(0n);
-        expect(overlapped.readUInt32LE(16)).toBe(0);
-        expect(overlapped.readUInt32LE(20)).toBe(0);
+        // The lock covers one sentinel byte parked past any payload, so the owner can still
+        // write its own record through a second fd without blocking on its own lock.
+        expect(overlapped.readUInt32LE(16)).toBe(WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_LOW);
+        expect(overlapped.readUInt32LE(20)).toBe(WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_HIGH);
         expect(overlapped.readBigUInt64LE(24)).toBe(0n);
         return 1;
       },
       UnlockFileEx: (_handle: bigint, ...rest: unknown[]) => {
         calls.push("unlock");
-        expect(Buffer.isBuffer(rest[3])).toBe(true);
+        expect(self.deref(rest[3]).byteLength).toBeGreaterThan(0);
         return 1;
       },
       MoveFileExW: () => 1,
       FlushFileBuffers: () => 1,
       CloseHandle: () => 1,
-    };
-    const ffi = {
-      FFIType: { ptr: 1, u32: 2, i32: 3 },
-      dlopen: () => ({
-        symbols: Object.fromEntries(
-          Object.keys(dispatch).map((name) => [
-            name,
-            (...args: unknown[]) => dispatch[name]?.(...args) ?? 1,
-          ]),
-        ),
-      }),
-    };
-    const binding = loadWindowsRecordNativeBindings({ isBun: true, requireModule: () => ffi });
+    }));
+    const binding = loadWindowsRecordNativeBindings({
+      isBun: true,
+      requireModule: () => fake.ffi,
+    });
     expect(binding.invalidHandle).toBe(18_446_744_073_709_551_615n);
     expect(() => assertWindowsLocalRecordPath("C:\\record", binding)).not.toThrow();
     const provider = createWindowsKernelLockProvider(binding);

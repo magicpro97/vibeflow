@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createRequire } from "node:module";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -273,31 +272,21 @@ describe("final owned-process health coverage", () => {
 
 describe("final owned-process platform and reaper coverage", () => {
   test("native Windows root rejects a failed kernel directory query", () => {
-    const require = createRequire(import.meta.url);
-    const koffi = require("koffi") as {
-      load: (name: string) => {
-        func: (signature: string) => (output: Buffer, chars: number) => number;
-      };
+    // Inject the query instead of monkey-patching koffi.load: under Bun the system root goes
+    // through bun:ffi dlopen, which cannot open Kernel32.dll on a Linux CI runner.
+    const failing = () => {
+      throw new Error("trusted Windows directory query failed");
     };
-    const originalLoad = koffi.load;
-    let returnValidRoot = false;
-    koffi.load = () => ({
-      func: () => (output: Buffer) => {
-        if (!returnValidRoot) return 0;
-        const encoded = Buffer.from("C:\\Windows", "utf16le");
-        encoded.copy(output);
-        return encoded.byteLength / 2;
-      },
-    });
-    try {
-      expect(() => resolveOwnedWindowsSystemRoot()).toThrow(
-        "trusted Windows directory query failed",
-      );
-      returnValidRoot = true;
-      expect(resolveOwnedWindowsSystemRoot()).toBe("C:\\Windows");
-    } finally {
-      koffi.load = originalLoad;
-    }
+    expect(() => resolveOwnedWindowsSystemRoot(failing)).toThrow(
+      "trusted Windows directory query failed",
+    );
+    expect(resolveOwnedWindowsSystemRoot(() => "C:\\Windows")).toBe("C:\\Windows");
+    // A trailing separator is normalized away; anything that is not a drive-rooted path is
+    // rejected rather than trusted, because this value builds paths to system binaries.
+    expect(resolveOwnedWindowsSystemRoot(() => "C:\\Windows\\")).toBe("C:\\Windows");
+    expect(() => resolveOwnedWindowsSystemRoot(() => "not-a-root")).toThrow(
+      "invalid trusted Windows system root",
+    );
   });
 
   test("POSIX probes distinguish disappearance after ps failure and unknown group scans", () => {

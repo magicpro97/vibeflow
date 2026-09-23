@@ -32,6 +32,7 @@ import {
 import {
   openExistingPrivateFileAt,
   openOrCreatePrivateFileAt,
+  syncDirectory,
   validatePrivateFileFd,
 } from "./path.js";
 
@@ -180,28 +181,19 @@ function closeAttempt(
   fd: number,
   unlock: boolean,
 ): void {
-  try {
-    if (unlock) releaseAdvisoryLock(fd);
-  } catch {
-    // Acquisition already failed; cleanup must preserve that primary error.
-  }
-  try {
-    fs.closeSync(fd);
-  } catch {
-    // Acquisition already failed; cleanup must preserve that primary error.
-  }
-  try {
-    closePinnedDirectory(root);
-  } catch {
-    // Acquisition already failed; cleanup must preserve that primary error.
-  }
-  if (coverageRoot) {
+  // Each step swallows its own error: acquisition already failed and cleanup must not
+  // replace that primary error with a secondary cleanup failure.
+  const quietly = (step: () => void): void => {
     try {
-      closePinnedDirectory(coverageRoot);
+      step();
     } catch {
-      // Acquisition already failed; cleanup must preserve that primary error.
+      // Preserve the primary acquisition error.
     }
-  }
+  };
+  if (unlock) quietly(() => releaseAdvisoryLock(fd));
+  quietly(() => fs.closeSync(fd));
+  quietly(() => closePinnedDirectory(root));
+  if (coverageRoot) quietly(() => closePinnedDirectory(coverageRoot));
 }
 
 function faultFor(
@@ -270,7 +262,7 @@ function makeHandle(path: string, owner: ProcessLockOwnerV1, state: LockState): 
       const pending = readStableLockRecord(current.fd, current.name);
       if (pending.payload !== null || pending.generation !== current.pendingReleaseGeneration)
         durabilityError("lock_lost", "process lock release slot was not retained exactly");
-      fs.fsyncSync(current.fd);
+      syncDirectory(current.fd);
       assertPinnedDirectory(current.root);
       finishRelease(current);
     },
@@ -327,7 +319,7 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
   try {
     fd = openOrCreatePrivateFileAt(root, name);
     validatePrivateFileFd(fd, name);
-    fs.fsyncSync(root.fd);
+    syncDirectory(root.fd);
   } catch (error) {
     const opened = fd;
     return cleanupThenThrow(error, [
@@ -339,7 +331,7 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
   let locked = false;
   try {
     do {
-      locked = tryAdvisoryLock(fd);
+      locked = tryAdvisoryLock(fd, canonicalPath);
       if (locked) break;
       if (Date.now() >= deadline) break;
       wait(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));

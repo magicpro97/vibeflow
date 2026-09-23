@@ -49,3 +49,7 @@ coverage/
 */.vibeflow/.ui-port
 .vibeflow/knowledge/memory.db*
 .agents/agents/
+
+# Local Orca worktree tooling (per-developer, not project config)
+.worktreeinclude
+orca.yaml

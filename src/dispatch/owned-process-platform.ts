@@ -1,5 +1,4 @@
 import { execFileSync as nodeExecFileSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { win32 as windowsPath } from "node:path";
 import { processStartIdentity } from "../durability/index.js";
 import {
@@ -9,6 +8,7 @@ import {
   isProcessStartIdentity,
   windowsProcessStartIdentityQuery,
 } from "../durability/process-identity-contract.js";
+import { trustedWindowsSystemRoot } from "../durability/windows-volume-authority.js";
 import {
   OWNED_PROCESS_PRESENCE_KIND,
   OWNED_PROCESS_PROOF_STRENGTH,
@@ -16,7 +16,6 @@ import {
   OWNED_PROCESS_RECORD_FIELD,
   OWNED_PROCESS_STRATEGY,
   OWNED_PROCESS_TIMING_MS,
-  OWNED_WINDOWS_LIMIT,
   OWNED_WINDOWS_QUERY_STATUS,
   type OwnedProcessProofStrength,
   type OwnedProcessQuiescenceMode,
@@ -32,7 +31,6 @@ export type OwnedProcessPresence =
   | { kind: typeof OWNED_PROCESS_PRESENCE_KIND.ABSENT }
   | { kind: typeof OWNED_PROCESS_PRESENCE_KIND.UNKNOWN };
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
-const RUNTIME_REQUIRE = createRequire(import.meta.url);
 
 export interface OwnedProcessQuiescenceHint {
   supervisor_exit_observed?: boolean;
@@ -98,17 +96,12 @@ function windowsTool(runtime: OwnedProcessPlatformRuntime, relativePath: string)
 }
 
 function queryNativeWindowsSystemRoot(): string {
-  const koffi = RUNTIME_REQUIRE("koffi") as typeof import("koffi").default;
-  const kernel32 = koffi.load("Kernel32.dll");
-  const getWindowsDirectory = kernel32.func(
-    "unsigned int GetWindowsDirectoryW(void *, unsigned int)",
-  ) as (output: Buffer, outputChars: number) => number;
-  const output = Buffer.alloc(OWNED_WINDOWS_LIMIT.DIRECTORY_BUFFER_CHARS * 2);
-  const length = getWindowsDirectory(output, OWNED_WINDOWS_LIMIT.DIRECTORY_BUFFER_CHARS);
-  if (length < 1 || length >= OWNED_WINDOWS_LIMIT.DIRECTORY_BUFFER_CHARS) {
-    throw new Error("trusted Windows directory query failed");
-  }
-  return output.subarray(0, length * 2).toString("utf16le");
+  // Reuse the durability volume binding: it asks GetWindowsDirectoryW through the same
+  // isBun/koffi split as the rest of the codebase. Loading koffi directly here ran koffi inside
+  // Bun, whose finalizers then crash Bun's GC at teardown ("Finalizer is calling a function that
+  // may affect GC state"). Not process.env.SystemRoot: this root builds paths to system binaries,
+  // so it must not come from an attacker-settable environment variable.
+  return trustedWindowsSystemRoot();
 }
 
 export function resolveOwnedWindowsSystemRoot(

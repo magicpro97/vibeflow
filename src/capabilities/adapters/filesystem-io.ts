@@ -7,12 +7,14 @@ import {
   type PinnedDirectory,
   assertPinnedDirectory,
   canonicalDurabilityPath,
+  closeTrackedFd,
   createAt,
-  pinnedDirectoryPath,
+  pinnedDirectoryPathMatches,
   renameAt,
   tryOpenAt,
   unlinkAt,
 } from "../../durability/native.js";
+import { syncDirectory } from "../../durability/posix-fs-semantics.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import type { CapabilityPrivateJsonV1 } from "./types.js";
 
@@ -43,7 +45,7 @@ export function boundedProjectionPath(root: string, logical: string): string {
 
 function pinned(fd: number, path: string): PinnedDirectory {
   const stat = fs.fstatSync(fd);
-  if (!stat.isDirectory() || pinnedDirectoryPath(fd) !== path)
+  if (!stat.isDirectory() || !pinnedDirectoryPathMatches(fd, path))
     throw new CapabilityValidationError("projection directory cannot be pinned", path);
   const directory = { fd, path, dev: stat.dev, ino: stat.ino };
   assertPinnedDirectory(directory);
@@ -68,7 +70,7 @@ function childDirectory(
   if (fd === null && create) {
     if (native().mkdirat(parent.fd, name, 0o700) !== 0 && !errnoIs("EEXIST"))
       syscallFailure(`mkdirat projection directory ${path}`);
-    fs.fsyncSync(parent.fd);
+    syncDirectory(parent.fd);
     fd = tryOpenAt(parent, name, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
   }
   return fd === null ? null : pinned(fd, path);
@@ -89,14 +91,14 @@ function withPinnedParent<T>(
       const nextPath = resolve(cursor, part);
       const next = childDirectory(current, part, nextPath, create);
       if (next === null) return null;
-      fs.closeSync(current.fd);
+      closeTrackedFd(current.fd);
       current = next;
       cursor = nextPath;
     }
     assertPinnedDirectory(current);
     return callback(current, target.slice(targetParent.length + 1));
   } finally {
-    fs.closeSync(current.fd);
+    closeTrackedFd(current.fd);
   }
 }
 
@@ -192,7 +194,7 @@ export function compareAndSwapProjectionFile(
         renameAt(directory, temporary, name);
         temporary = null;
       }
-      fs.fsyncSync(directory.fd);
+      syncDirectory(directory.fd);
       assertPinnedDirectory(directory);
     } finally {
       if (temporary !== null) unlinkAt(directory, temporary, true);
@@ -245,7 +247,7 @@ export function compareAndSwapTomlOwnedBlock(
         renameAt(directory, temporary, name);
         temporary = null;
       }
-      fs.fsyncSync(directory.fd);
+      syncDirectory(directory.fd);
       assertPinnedDirectory(directory);
     } finally {
       if (temporary !== null) unlinkAt(directory, temporary, true);

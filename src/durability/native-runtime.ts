@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import { arch, constants as osConstants } from "node:os";
+import { join } from "node:path";
 import { DurabilityError, durabilityError } from "./errors.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
@@ -203,6 +204,10 @@ export interface NativeRuntimeInitializationV1 {
   unavailableReason: string;
 }
 
+import { loadWindowsBindings, win32LastErrnoValue } from "./windows-fs-shims.js";
+
+export { WIN32_FD_PATHS, loadWindowsBindings, win32SetErrno } from "./windows-fs-shims.js";
+
 export function initializeNativeRuntime(input: {
   disabled: boolean;
   platform: string;
@@ -211,6 +216,23 @@ export function initializeNativeRuntime(input: {
   try {
     if (input.disabled)
       return { bindings: null, unavailableReason: "native durability was disabled by the runtime" };
+    if (input.platform === RUNTIME_PLATFORM.WINDOWS) {
+      errnoReader = () => win32LastErrnoValue();
+      // Extend rather than replace: this assignment is module-global, and dropping the rest of
+      // the table would make classifySyscallError misread ENOSYS/ENOTSUP/EOPNOTSUPP as 0.
+      errnoTable = {
+        ...osConstants.errno,
+        ENOENT: 2,
+        EEXIST: 17,
+        EACCES: 13,
+        EAGAIN: 11,
+        EWOULDBLOCK: 11,
+      };
+      return {
+        bindings: loadWindowsBindings(),
+        unavailableReason: "native durability is not initialized",
+      };
+    }
     if (input.platform !== RUNTIME_PLATFORM.DARWIN && input.platform !== RUNTIME_PLATFORM.LINUX)
       return {
         bindings: null,
@@ -237,7 +259,9 @@ bindings = initialized.bindings;
 unavailableReason = initialized.unavailableReason;
 
 export function native(): NativeBindings {
-  if (!bindings || nativeLibrary === null) durabilityError("unsupported", unavailableReason);
+  // On Windows, nativeLibrary is not set (no libc FFI). Check bindings only.
+  if (!bindings || (process.platform !== RUNTIME_PLATFORM.WINDOWS && nativeLibrary === null))
+    durabilityError("unsupported", unavailableReason);
   return bindings;
 }
 
