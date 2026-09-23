@@ -8,7 +8,7 @@ import {
   assertPinnedDirectory,
   canonicalDurabilityPath,
   createAt,
-  pinnedDirectoryPath,
+  pinnedDirectoryPathMatches,
   renameAt,
   tryOpenAt,
   unlinkAt,
@@ -43,7 +43,7 @@ export function boundedProjectionPath(root: string, logical: string): string {
 
 function pinned(fd: number, path: string): PinnedDirectory {
   const stat = fs.fstatSync(fd);
-  if (!stat.isDirectory() || pinnedDirectoryPath(fd) !== path)
+  if (!stat.isDirectory() || !pinnedDirectoryPathMatches(fd, path))
     throw new CapabilityValidationError("projection directory cannot be pinned", path);
   const directory = { fd, path, dev: stat.dev, ino: stat.ino };
   assertPinnedDirectory(directory);

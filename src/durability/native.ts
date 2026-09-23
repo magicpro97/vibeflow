@@ -253,9 +253,10 @@ export function pinnedDirectoryPathForRuntime(
   if (runtime.platform === RUNTIME_PLATFORM.WINDOWS) {
     const stored = WIN32_FD_PATHS.get(fd);
     if (stored !== undefined) return stored;
-    // For root fds opened directly (not via openDirectoryAt), look up from the OS root.
-    // The root fd is opened in openPrivateDirectory before the registry is populated.
-    // Fall through to return the root from parse — handled by the caller.
+    // A directory fd opened outside this module (fs.openSync in a caller) was never registered.
+    // Windows offers no fd→path resolution at all, so the path cannot be recovered here; the
+    // caller must register it when it opens the fd. Callers that only want to CHECK an fd against
+    // a known path should use windowsPinnedPathMatches instead of resolving.
     durabilityError("unsupported", "runtime cannot resolve Windows pinned directory path");
   }
   if (runtime.platform === RUNTIME_PLATFORM.LINUX) {
@@ -296,13 +297,46 @@ export function pinnedDirectoryPath(fd: number): string {
   });
 }
 
+/**
+ * Confirm a directory fd refers to `path`, for callers that opened the fd themselves.
+ *
+ * POSIX resolves the fd and compares paths. Windows has no fd→path route, so an unregistered fd
+ * is instead verified by identity: stat the fd and the path and require the same volume + file id.
+ * That is the property the path compare exists to establish, and the fd stays inode-bound while
+ * held (a rename of an ancestor is refused by the OS with EPERM).
+ *
+ * ponytail: identity compare instead of a path compare on win32 — upgrade to
+ * GetFinalPathNameByHandleW once real HANDLEs are reachable from JS.
+ */
+export function pinnedDirectoryPathMatches(fd: number, path: string): boolean {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS && !WIN32_FD_PATHS.has(fd)) {
+    try {
+      const opened = fs.fstatSync(fd, { bigint: true });
+      const observed = fs.statSync(path, { bigint: true });
+      return opened.dev === observed.dev && opened.ino === observed.ino;
+    } catch {
+      return false;
+    }
+  }
+  return pinnedDirectoryPath(fd) === path;
+}
+
 export function assertPinnedDirectory(directory: PinnedDirectory): void {
   if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
-    // B4: use bigint fstatSync for exact 57-bit NTFS inode compare.
-    // B5: skip path re-check — no fd→path route on Windows (see pinnedDirectoryPath).
-    // OS blocks ancestor renames (EPERM) and deletes (ENOENT) while the fd is held.
-    const stat = fs.fstatSync(directory.fd, { bigint: true });
-    if (stat.dev !== directory.devBig || stat.ino !== directory.inoBig || !stat.isDirectory())
+    // B4: NTFS file ids need 57 bits, so a Number-typed ino is rounded. Compare bigints when the
+    // pin recorded them. Pins built outside this module carry only the rounded pair; compare those
+    // like for like, which is still exact for "is this the same fd as before" — rounding only ever
+    // risks conflating two *different* directories, and both sides here come from the same fd.
+    // B5: no path re-check — Windows has no fd→path route (see pinnedDirectoryPath). The OS
+    // refuses ancestor renames (EPERM) and deletes (ENOENT) while the fd is held.
+    if (directory.devBig !== undefined && directory.inoBig !== undefined) {
+      const stat = fs.fstatSync(directory.fd, { bigint: true });
+      if (stat.dev !== directory.devBig || stat.ino !== directory.inoBig || !stat.isDirectory())
+        durabilityError("unsafe_path", "pinned directory identity changed");
+      return;
+    }
+    const stat = fs.fstatSync(directory.fd);
+    if (stat.dev !== directory.dev || stat.ino !== directory.ino || !stat.isDirectory())
       durabilityError("unsafe_path", "pinned directory identity changed");
     return;
   }

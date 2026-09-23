@@ -1044,9 +1044,15 @@ describe("native Windows record adapters", () => {
       WINDOWS_NATIVE_RECORD.LOCKFILE_EXCLUSIVE_LOCK |
         WINDOWS_NATIVE_RECORD.LOCKFILE_FAIL_IMMEDIATELY,
       0,
-      WINDOWS_NATIVE_RECORD.LOCK_RANGE,
-      WINDOWS_NATIVE_RECORD.LOCK_RANGE,
+      WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
+      0,
     ]);
+    // The locked byte must sit past the record payload, or the owner's own record write
+    // fails with EBUSY: LockFileEx is mandatory, unlike POSIX flock.
+    expect(fixture.calls.lock[0]?.[5]).toMatchObject({
+      Offset: WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_LOW,
+      OffsetHigh: WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_HIGH,
+    });
     expect(fixture.calls.unlock).toHaveLength(1);
     expect(fixture.calls.flush).toBe(2);
     expect(fixture.calls.close).toBe(1);

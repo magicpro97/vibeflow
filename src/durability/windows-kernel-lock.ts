@@ -24,7 +24,17 @@ export const WINDOWS_NATIVE_RECORD = Object.freeze({
   MOVE_WRITE_THROUGH: 0x8,
   LOCKFILE_FAIL_IMMEDIATELY: 0x1,
   LOCKFILE_EXCLUSIVE_LOCK: 0x2,
-  LOCK_RANGE: 0xffff_ffff,
+  // The lock is a single sentinel byte parked far past any record payload.
+  //
+  // LockFileEx is MANDATORY, unlike POSIX flock which is advisory: a locked byte range cannot be
+  // written even by the owning process through a different descriptor. acquireProcessLock holds
+  // this lock and then writes the lock record through its own Node fd, so a range covering the
+  // record (offset 0) makes the owner's own write fail with EBUSY. Locking one byte at 2^40
+  // leaves the record bytes writable while still excluding every other process, which only ever
+  // contends for this same byte.
+  LOCK_SENTINEL_OFFSET_HIGH: 0x100,
+  LOCK_SENTINEL_OFFSET_LOW: 0x0,
+  LOCK_SENTINEL_BYTES: 0x1,
 } as const);
 
 type Handle = bigint;
@@ -217,8 +227,8 @@ function fileIdentity(binding: WindowsRecordNativeBindings, handle: Handle): Buf
 const newOverlapped = (): Overlapped => ({
   Internal: 0,
   InternalHigh: 0,
-  Offset: 0,
-  OffsetHigh: 0,
+  Offset: WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_LOW,
+  OffsetHigh: WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_OFFSET_HIGH,
   hEvent: null,
 });
 
@@ -265,8 +275,8 @@ export function createWindowsKernelLockProvider(
             WINDOWS_NATIVE_RECORD.LOCKFILE_EXCLUSIVE_LOCK |
               WINDOWS_NATIVE_RECORD.LOCKFILE_FAIL_IMMEDIATELY,
             0,
-            WINDOWS_NATIVE_RECORD.LOCK_RANGE,
-            WINDOWS_NATIVE_RECORD.LOCK_RANGE,
+            WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
+            0,
             overlapped,
           ) === 0
         ) {
@@ -296,8 +306,8 @@ export function createWindowsKernelLockProvider(
                   binding.unlockFile(
                     handle,
                     0,
-                    WINDOWS_NATIVE_RECORD.LOCK_RANGE,
-                    WINDOWS_NATIVE_RECORD.LOCK_RANGE,
+                    WINDOWS_NATIVE_RECORD.LOCK_SENTINEL_BYTES,
+                    0,
                     overlapped,
                   ),
                 ),
