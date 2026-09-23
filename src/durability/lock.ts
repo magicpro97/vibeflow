@@ -181,22 +181,19 @@ function closeAttempt(
   fd: number,
   unlock: boolean,
 ): void {
-  // Every step swallows its own error: acquisition already failed and cleanup must preserve
-  // that primary error.
-  try {
-    if (unlock) releaseAdvisoryLock(fd);
-  } catch {}
-  try {
-    fs.closeSync(fd);
-  } catch {}
-  try {
-    closePinnedDirectory(root);
-  } catch {}
-  if (coverageRoot) {
+  // Each step swallows its own error: acquisition already failed and cleanup must not
+  // replace that primary error with a secondary cleanup failure.
+  const quietly = (step: () => void): void => {
     try {
-      closePinnedDirectory(coverageRoot);
-    } catch {}
-  }
+      step();
+    } catch {
+      // Preserve the primary acquisition error.
+    }
+  };
+  if (unlock) quietly(() => releaseAdvisoryLock(fd));
+  quietly(() => fs.closeSync(fd));
+  quietly(() => closePinnedDirectory(root));
+  if (coverageRoot) quietly(() => closePinnedDirectory(coverageRoot));
 }
 
 function faultFor(
