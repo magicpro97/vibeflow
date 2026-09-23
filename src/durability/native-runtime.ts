@@ -218,7 +218,16 @@ export function initializeNativeRuntime(input: {
       return { bindings: null, unavailableReason: "native durability was disabled by the runtime" };
     if (input.platform === RUNTIME_PLATFORM.WINDOWS) {
       errnoReader = () => win32LastErrnoValue();
-      errnoTable = { ENOENT: 2, EEXIST: 17, EACCES: 13, EAGAIN: 11, EWOULDBLOCK: 11 };
+      // Extend rather than replace: this assignment is module-global, and dropping the rest of
+      // the table would make classifySyscallError misread ENOSYS/ENOTSUP/EOPNOTSUPP as 0.
+      errnoTable = {
+        ...osConstants.errno,
+        ENOENT: 2,
+        EEXIST: 17,
+        EACCES: 13,
+        EAGAIN: 11,
+        EWOULDBLOCK: 11,
+      };
       return {
         bindings: loadWindowsBindings(),
         unavailableReason: "native durability is not initialized",

@@ -219,6 +219,14 @@ describe("Windows private authority", () => {
       memory.set(address, Buffer.alloc(bytes));
       return address;
     };
+    const writeU32 = (address: unknown, value: number): void => {
+      memory.get(BigInt(Number(address)))?.writeUInt32LE(value, 0);
+    };
+    const writeU64 = (address: unknown, value: bigint): void => {
+      const buffer = memory.get(BigInt(Number(address)));
+      if (!buffer) throw new Error(`writeU64: no buffer at ${Number(address)}`);
+      buffer.writeBigUInt64LE(value, 0);
+    };
     const userSidAddress = reserve(USER_SID.length);
     memory.get(userSidAddress)?.set(USER_SID, 0);
     const sddlAddress = reserve(32);
@@ -245,51 +253,66 @@ describe("Windows private authority", () => {
       },
       GetLastError: () => WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER,
       OpenProcessToken: (_process, _access, tokenOut) => {
-        tokenOut[0] = 8n;
+        writeU64(tokenOut, 8n);
         return 1;
       },
       GetTokenInformation: (_token, _kind, output, _bytes, needed) => {
-        if (output === null) {
-          needed[0] = 8;
+        if (Number(output) === 0) {
+          writeU32(needed, 8);
           return 0;
         }
-        output.writeBigUInt64LE(userSidAddress, 0);
+        writeU64(output, userSidAddress);
         return 1;
       },
       IsValidSid: () => 1,
       GetLengthSid: () => USER_SID.length,
       ConvertSidToStringSidW: (_sid, output) => {
-        output[0] = sddlAddress;
+        writeU64(output, sddlAddress);
         return 1;
       },
       ConvertStringSecurityDescriptorToSecurityDescriptorW: (_sddl, _revision, output) => {
-        output[0] = descriptorAddress;
+        writeU64(output, descriptorAddress);
         return 1;
       },
       GetSecurityInfo: (_handle, _type, _info, owner, _group, dacl, _sacl, output) => {
-        owner[0] = userSidAddress;
-        dacl[0] = daclAddress;
-        output[0] = descriptorAddress;
+        writeU64(owner, userSidAddress);
+        writeU64(dacl, daclAddress);
+        writeU64(output, descriptorAddress);
         return 0;
       },
       GetSecurityDescriptorControl: (_descriptor, control) => {
-        control[0] = WINDOWS_PRIVATE_SECURITY.SE_DACL_PROTECTED;
+        // SECURITY_DESCRIPTOR_CONTROL is a WORD: the binding passes a 2-byte out-parameter.
+        memory
+          .get(BigInt(Number(control)))
+          ?.writeUInt16LE(WINDOWS_PRIVATE_SECURITY.SE_DACL_PROTECTED, 0);
         return 1;
       },
       GetSecurityDescriptorDacl: (_descriptor, present, dacl, defaulted) => {
-        present[0] = 1;
-        dacl[0] = daclAddress;
-        defaulted[0] = 0;
+        writeU32(present, 1);
+        writeU64(dacl, daclAddress);
+        writeU32(defaulted, 0);
         return 1;
       },
       GetAclInformation: (_acl, output) => {
-        output.writeUInt32LE(1, 0);
-        output.writeUInt32LE(aclBytesInUse, 4);
+        const buffer = memory.get(BigInt(Number(output)));
+        if (!buffer) throw new Error(`GetAclInformation: no buffer at ${Number(output)}`);
+        buffer.writeUInt32LE(1, 0);
+        buffer.writeUInt32LE(aclBytesInUse, 4);
         return 1;
       },
     };
     const ffi = {
-      FFIType: { ptr: 1, u32: 2, i32: 3 },
+      FFIType: { ptr: 1, u32: 2, i32: 3, u64: 4 },
+      // Bun hands the callee an integer address, never the buffer, so the bindings pass every
+      // pointer argument through ffi.ptr. Register the buffer in the same fake memory the reads
+      // resolve against, so an out-parameter written by a fake syscall is visible to the binding.
+      ptr: (value: NodeJS.TypedArray): bigint => {
+        for (const [address, buffer] of memory) if (buffer === value) return address;
+        const address = nextPointer;
+        nextPointer += 0x1000n;
+        memory.set(address, Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+        return address;
+      },
       dlopen: () => ({
         symbols: Object.fromEntries(
           Object.keys(dispatch).map((name) => [
@@ -300,15 +323,17 @@ describe("Windows private authority", () => {
       }),
       read: {
         u16: (pointer: bigint, byteOffset: number): number =>
-          memory.get(pointer)?.readUInt16LE(byteOffset) ?? 0,
+          memory.get(BigInt(Number(pointer)))?.readUInt16LE(byteOffset) ?? 0,
       },
       toArrayBuffer: (pointer: bigint, byteOffset: number, byteLength: number): ArrayBuffer => {
-        const buffer = memory.get(pointer);
+        const buffer = memory.get(BigInt(Number(pointer)));
         if (!buffer) throw new Error("missing fake bun:ffi memory");
-        return buffer.buffer.slice(
-          buffer.byteOffset + byteOffset,
-          buffer.byteOffset + byteOffset + byteLength,
-        ) as ArrayBuffer;
+        // Bun reads whatever the address maps to; a caller asking for more than the fake
+        // allocation holds gets the allocation, not an out-of-bounds slice. Bound by the view's
+        // own byteLength, not the backing ArrayBuffer, which Buffer.alloc may share with a pool.
+        const length = Math.min(byteLength, Math.max(buffer.byteLength - byteOffset, 0));
+        const start = buffer.byteOffset + byteOffset;
+        return buffer.buffer.slice(start, start + length) as ArrayBuffer;
       },
     };
     const bindings = loadWindowsPrivateAuthorityBindings({
