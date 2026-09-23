@@ -7,7 +7,11 @@
  */
 import * as fs from "node:fs";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
-import { WINDOWS_AUTHORITY_PATH_KIND, windowsVerifyPathAcl } from "./windows-acl-ops.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  windowsHasNoForeignWrite,
+  windowsVerifyPathAcl,
+} from "./windows-acl-ops.js";
 import type { WindowsAuthorityPathKind } from "./windows-private-authority.js";
 
 const isWindows = (): boolean => process.platform === RUNTIME_PLATFORM.WINDOWS;
@@ -60,9 +64,11 @@ export function hasPrivateMode(
 /**
  * Whether a stat is free of group/other write permission.
  *
- * On Windows this verifies the path's DACL, for the same reason as hasPrivateMode.
+ * On Windows this asks the DACL the same question the POSIX branch asks the mode: does anyone but
+ * the owner hold a write right? It is deliberately not the owner-only policy hasPrivateMode
+ * applies — a container directory such as `.vibeflow` only has to avoid a foreign write bit.
  */
 export function isNotGroupOrWorldWritable(stat: fs.Stats, path: string): boolean {
   if (!isWindows()) return (stat.mode & 0o022) === 0;
-  return windowsVerifyPathAcl(path, pathKindOf(stat));
+  return windowsHasNoForeignWrite(path, pathKindOf(stat));
 }

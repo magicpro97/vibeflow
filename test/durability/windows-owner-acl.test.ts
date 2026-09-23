@@ -19,6 +19,7 @@ import {
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
   windowsApplyOwnerAcl,
+  windowsHasNoForeignWrite,
   windowsVerifyPathAcl,
 } from "../../src/durability/windows-acl-ops.js";
 
@@ -94,6 +95,80 @@ describe("windows owner-only ACL", () => {
   });
 });
 
+describe("windowsHasNoForeignWrite (the group/other-write rule)", () => {
+  it("accepts a container that only carries the standard inherited DACL", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      // The `.vibeflow` case: SYSTEM, Administrators and the owner inherit full control and
+      // nothing else is granted. POSIX accepts the equivalent 0755 directory.
+      expect(windowsHasNoForeignWrite(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("accepts a directory that has been migrated to owner-only", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      windowsApplyOwnerAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+      expect(windowsHasNoForeignWrite(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("rejects a directory that grants Everyone write", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      execFileSync("icacls", [dir, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
+      expect(windowsHasNoForeignWrite(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("still accepts a read-only grant to Everyone", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      // Read/execute for other principals must not trip the rule: POSIX 0755 allows exactly this.
+      execFileSync("icacls", [dir, "/grant", "*S-1-1-0:(RX)"], { stdio: "ignore" });
+      expect(windowsHasNoForeignWrite(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("reports false for a missing path", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      expect(windowsHasNoForeignWrite(join(dir, "absent"), WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(
+        false,
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("is wired into isNotGroupOrWorldWritable", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      // Inherited-only container passes, which is what unblocked vf init on a pre-existing
+      // .vibeflow; the same directory fails once a foreign principal can write.
+      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      execFileSync("icacls", [dir, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
+      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("posix-fs-semantics on windows consults the ACL", () => {
   it("is not vacuous: a permissive path fails hasPrivateMode", () => {
     if (!isWindows) return;
@@ -108,15 +183,35 @@ describe("posix-fs-semantics on windows consults the ACL", () => {
     }
   });
 
-  it("checks directories with the directory policy", () => {
+  it("checks directories with the foreign-write policy, not the owner-only one", () => {
     if (!isWindows) return;
     const { dir, cleanup } = scratch();
     try {
-      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(false);
+      // An inherited DACL has no foreign write right, so it satisfies this rule even though it
+      // would fail the stricter owner-only check hasPrivateMode applies.
+      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
       windowsApplyOwnerAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
       expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
     } finally {
       cleanup();
+    }
+  });
+
+  it("consults the ACL machinery whenever the platform reads as win32", () => {
+    // The Windows branch must run on CI too, or the only code path that decides privacy on
+    // Windows is exercised exclusively on a developer machine. The path is absent, so the answer
+    // is "no privacy" whether the host can reach the Win32 security calls or not.
+    const original = process.platform;
+    const absent = join(tmpdir(), "vf-fs-semantics-absent", "record.bin");
+    const stat = { mode: 0o666, isDirectory: () => false } as fs.Stats;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      expect(hasPrivateMode(stat, 0o7777, 0o600, absent)).toBe(false);
+      expect(isNotGroupOrWorldWritable(stat, absent)).toBe(false);
+    } finally {
+      Object.defineProperty(process, "platform", { value: original });
     }
   });
 

@@ -3,12 +3,18 @@ import * as fs from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WINDOWS_AUTHORITY_PATH_KIND } from "../../src/durability/windows-acl-ops.js";
+import type { WindowsFfiRuntime } from "../../src/durability/windows-ffi-runtime.js";
 import {
   WIN32_FD_PATHS,
   loadWindowsBindings,
   win32LastErrnoValue,
   win32SetErrno,
 } from "../../src/durability/windows-fs-shims.js";
+import type {
+  WindowsAuthorityPathKind,
+  WindowsPrivateAuthority,
+} from "../../src/durability/windows-private-authority.js";
 
 /**
  * The Windows *at() shims are plain node:fs on top of the fd->path registry, so they run on any
@@ -105,11 +111,39 @@ describe("windows fs shims", () => {
     expect(win32LastErrnoValue()).toBe(2);
   });
 
-  test("fchmodat is a no-op that clears errno", () => {
+  test("fchmodat treats an unregistered fd as a no-op and clears errno", () => {
     const bindings = loadWindowsBindings();
     win32SetErrno(13);
     expect(bindings.fchmodat(1, "anything", 0o600, 0)).toBe(0);
     expect(win32LastErrnoValue()).toBe(0);
+  });
+
+  test("fchmodat applies the owner-only ACL to a registered directory", () => {
+    const applied: [string, WindowsAuthorityPathKind][] = [];
+    const authority = {
+      migrateToOwnerOnly: (path: string, kind: WindowsAuthorityPathKind) => {
+        applied.push([path, kind]);
+      },
+    } as unknown as WindowsPrivateAuthority;
+    const bindings = loadWindowsBindings({ authority });
+    const { fd, path } = pin();
+    fs.mkdirSync(join(path, "child"));
+    expect(bindings.fchmodat(fd, "child", 0o700, 0)).toBe(0);
+    expect(win32LastErrnoValue()).toBe(0);
+    expect(applied).toEqual([[join(path, "child"), WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
+  });
+
+  test("fchmodat reports EACCES when the ACL cannot be applied", () => {
+    const unreachable: WindowsFfiRuntime = {
+      isBun: false,
+      requireModule: () => {
+        throw new Error("Advapi32 is unavailable on this host");
+      },
+    };
+    const bindings = loadWindowsBindings({ runtime: unreachable });
+    const { fd } = pin();
+    expect(bindings.fchmodat(fd, "child", 0o700, 0)).toBe(-1);
+    expect(win32LastErrnoValue()).toBe(13);
   });
 
   test("renameat moves between two pinned directories", () => {

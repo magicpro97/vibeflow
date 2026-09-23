@@ -77,6 +77,8 @@ export interface WindowsPrivateAuthorityBindings {
 export interface WindowsPrivateAuthority {
   withCreationSecurity<T>(kind: WindowsAuthorityPathKind, create: (attributes: unknown) => T): T;
   verifyHandle(handle: bigint, kind: WindowsAuthorityPathKind): void;
+  /** Read the owner/DACL view behind a handle, for callers that apply their own policy to it. */
+  inspect(handle: bigint): WindowsPrivateDescriptorView;
   /** Reset an existing file/dir's DACL in-place to owner-only + SE_DACL_PROTECTED. */
   migrateToOwnerOnly(path: string, kind: WindowsAuthorityPathKind): void;
 }
@@ -152,6 +154,9 @@ export function createWindowsPrivateAuthority(
     withCreationSecurity(kind, create) {
       const security = bindings.createSecurity(descriptorSddl(user.sddl, kind));
       return withCleanup(() => create(security.attributes), [security.release]);
+    },
+    inspect(handle) {
+      return bindings.inspect(handle);
     },
     verifyHandle(handle, kind) {
       const descriptor = bindings.inspect(handle);

@@ -210,6 +210,13 @@ function nativeFixture() {
   };
   let verifyFailure: Error | undefined;
   const privacy: WindowsPrivateAuthority = {
+    inspect: () => ({
+      control: 0,
+      owner: Buffer.alloc(0),
+      daclPresent: true,
+      daclDefaulted: false,
+      aces: [],
+    }),
     withCreationSecurity: (_kind, create) => create({ tokenUserOnly: true }),
     verifyHandle: (handle, kind) => {
       calls.security.push([handle, kind]);

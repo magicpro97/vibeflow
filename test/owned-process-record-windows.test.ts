@@ -1065,6 +1065,13 @@ describe("native Windows record adapters", () => {
     const fixture = nativeFixture();
     const calls: unknown[] = [];
     const privacy: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
       withCreationSecurity: (kind, create) => {
         expect(kind).toBe(WINDOWS_AUTHORITY_PATH_KIND.FILE);
         return create({ private: true });
@@ -1085,6 +1092,57 @@ describe("native Windows record adapters", () => {
     expect(() =>
       createWindowsKernelLockProvider(nativeFixture().binding, permissive).tryAcquire("C:\\lock"),
     ).toThrow("permissive existing lock metadata");
+  });
+
+  test("migrates a pre-existing permissive lock file and re-verifies the replacement handle", () => {
+    const migrated: string[] = [];
+    let verifications = 0;
+    const stale: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
+      withCreationSecurity: (_kind, create) => create({ private: true }),
+      verifyHandle: () => {
+        verifications += 1;
+        // The handle opened at creation carries the inherited DACL; the in-place migration is
+        // what makes the re-opened handle acceptable.
+        if (verifications === 1) throw new Error("permissive Windows authority DACL rejected");
+      },
+      migrateToOwnerOnly: (path, kind) => migrated.push(`${path}:${kind}`),
+    };
+    const lock = createWindowsKernelLockProvider(nativeFixture().binding, stale).tryAcquire(
+      "C:\\lock",
+    );
+    expect(migrated).toEqual([`C:\\lock:${WINDOWS_AUTHORITY_PATH_KIND.FILE}`]);
+    expect(verifications).toBe(2);
+    lock?.release();
+  });
+
+  test("gives up when the lock file stays permissive after migration", () => {
+    const stillPermissive: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
+      withCreationSecurity: (_kind, create) => create({ private: true }),
+      verifyHandle: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      migrateToOwnerOnly: () => undefined,
+    };
+    const fixture = nativeFixture();
+    expect(() =>
+      createWindowsKernelLockProvider(fixture.binding, stillPermissive).tryAcquire("C:\\lock"),
+    ).toThrow("permissive Windows authority DACL rejected");
+    // Both handles — the creation one and the re-opened one — are closed on the way out.
+    expect(fixture.calls.close).toBe(2);
   });
 
   test("returns busy only for ERROR_LOCK_VIOLATION and closes the HANDLE", () => {
