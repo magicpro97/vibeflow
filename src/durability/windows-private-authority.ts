@@ -197,7 +197,8 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
     const output = Buffer.alloc(needed[0] ?? 0);
     if (!native.tokenInfo(token, kind, output, output.length, needed))
       failed("GetTokenInformation");
-    // TOKEN_USER and TOKEN_OWNER are the same SID_AND_ATTRIBUTES shape, so one reader serves both.
+    // TOKEN_USER and TOKEN_OWNER both begin with the SID pointer, and the reader takes that
+    // pointer rather than a struct, so one read serves both classes.
     return native.tokenUserSid(output);
   };
   const currentUser = (): { sid: Buffer; sddl: string; ownerSid: Buffer } => {

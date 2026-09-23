@@ -207,8 +207,10 @@ describe("Windows private authority", () => {
         token[0] = 2n;
         return 1;
       },
-      GetTokenInformation: (_token, _kind, output, _bytes, needed) => {
-        needed[0] = 32;
+      GetTokenInformation: (_token, kind, output, _bytes, needed) => {
+        // Win32 reports the documented struct size for each class: TOKEN_USER is the 16-byte
+        // SID_AND_ATTRIBUTES, TOKEN_OWNER is a bare 8-byte PSID.
+        needed[0] = kind === WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS ? 16 : 8;
         return output ? 1 : 0;
       },
       IsValidSid: () => 1,
@@ -250,14 +252,12 @@ describe("Windows private authority", () => {
         return (...args: any[]) => dispatch[name]?.(...args) ?? 1;
       },
     };
-    const tokenUserType = { tokenUser: true };
     const koffi = {
       load: () => library,
       opaque: () => ({ opaque: true }),
-      pointer: (value: unknown) => ({ pointer: value }),
+      pointer: (value: unknown) => ({ pointer: value, isPointer: true }),
       out: (value: unknown) => ({ out: value }),
-      struct: (value: Record<string, unknown>) =>
-        "User" in value ? tokenUserType : { struct: value },
+      struct: (value: Record<string, unknown>) => ({ struct: value }),
       alloc: () => ({ allocated: true }),
       encode: (target: object, _type: unknown, value: object) => {
         if (failEncode) throw new Error("injected security attribute encode failure");
@@ -267,12 +267,18 @@ describe("Windows private authority", () => {
       sizeof: () => 24,
       view: (value: Buffer, length: number) =>
         value.buffer.slice(value.byteOffset, value.byteOffset + length),
-      decode: (value: unknown, type: unknown) =>
-        type === tokenUserType
-          ? { User: { Sid: USER_SID } }
-          : type === "char16_t"
-            ? (value as { text: string }).text
-            : value,
+      decode: (value: unknown, type: unknown) => {
+        // koffi refuses a struct read that does not fit the buffer, and the token-info buffer is
+        // sized per class (16 bytes for TOKEN_USER, 8 for TOKEN_OWNER), so the adapter must read
+        // the SID pointer itself instead of decoding a struct.
+        if (Buffer.isBuffer(value)) {
+          if (!(type as { isPointer?: boolean }).isPointer)
+            throw new Error(`token-info buffer decoded as ${JSON.stringify(type)}`);
+          return USER_SID;
+        }
+        if (type === "char16_t") return (value as { text: string }).text;
+        return value;
+      },
     };
     const bindings = loadWindowsPrivateAuthorityBindings({
       requireModule: () => koffi,

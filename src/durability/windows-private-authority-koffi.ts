@@ -22,9 +22,6 @@ export function loadWindowsPrivateAuthorityKoffi(
     lpSecurityDescriptor: pointer,
     bInheritHandle: "int",
   });
-  const tokenUser = koffi.struct({
-    User: koffi.struct({ Sid: pointer, Attributes: "uint32_t" }),
-  });
   const getCurrentProcess = kernel.func(
     "__stdcall",
     "GetCurrentProcess",
@@ -132,8 +129,10 @@ export function loadWindowsPrivateAuthorityKoffi(
     lastError: () => lastError(),
     openToken,
     tokenInfo,
-    tokenUserSid: (output) =>
-      (koffi.decode(output, tokenUser) as { User: { Sid: unknown } }).User.Sid,
+    // TOKEN_USER is SID_AND_ATTRIBUTES and TOKEN_OWNER is a bare PSID, but both begin with the
+    // SID pointer, so read that pointer instead of decoding a struct: koffi would read the
+    // 16-byte TOKEN_USER layout out of TOKEN_OWNER's 8-byte buffer.
+    tokenUserSid: (output) => koffi.decode(output, pointer) as unknown,
     validSid,
     sidLength,
     sidToString,
