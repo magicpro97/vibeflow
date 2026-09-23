@@ -75,6 +75,63 @@
       >⚠ same-tool review</span>
     </div>
 
+    <!-- #555 race — head-to-head: the SAME task to several engines in parallel,
+         each in its own worktree/branch, ranked by the confidence gate. -->
+    <div id="race-panel" class="rounded border border-neutral-800/40 px-3 py-2.5 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-[11px] text-neutral-600 flex items-center gap-0.5">
+          Race engines
+          <InfoTip tip="Sends the SAME task to every selected engine in parallel, each in its own git worktree and branch, then ranks them by the confidence gate (confidence, then tests_run, then files_changed). vf never auto-merges — the winner's branch is printed for you to review and merge." />
+        </span>
+        <button
+          id="race-engines-button"
+          class="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+          :disabled="store.raceRunning || !store.state?.goal"
+          :title="store.state?.goal ? 'Race the goal across the selected engines' : 'Set a goal first'"
+          @click="raceEngines"
+        >{{ store.raceRunning ? "racing…" : "run race" }}</button>
+      </div>
+
+      <div class="flex flex-wrap gap-3">
+        <label
+          v-for="candidate in ENGINES"
+          :key="candidate"
+          class="inline-flex items-center gap-1 text-xs font-mono"
+          :class="raceSelection.includes(candidate) ? 'text-neutral-300' : 'text-neutral-600'"
+        >
+          <input
+            type="checkbox"
+            class="accent-neutral-400"
+            :checked="raceSelection.includes(candidate)"
+            :disabled="store.raceRunning"
+            @change="toggleRaceEngine(candidate)"
+          />
+          {{ candidate }}
+        </label>
+      </div>
+      <p class="text-[10px] text-neutral-700">
+        none selected = every installed engine · ranked by confidence (ties: tests_run, files_changed) · no auto-merge
+      </p>
+
+      <div v-if="store.raceSkipped.length" class="text-[10px] text-neutral-500" role="status">
+        skipped (not installed/ready): {{ store.raceSkipped.map((s) => s.engine).join(", ") }}
+      </div>
+      <div v-if="store.raceError" class="text-xs text-red-300" role="alert" aria-live="assertive">
+        {{ store.raceError }}
+      </div>
+      <ol v-if="store.raceRanking.length" class="space-y-1" aria-label="Race results, best first">
+        <li
+          v-for="(row, i) in store.raceRanking"
+          :key="row.engine"
+          class="text-xs font-mono text-neutral-400"
+        >
+          {{ i + 1 }}. {{ row.engine }} · confidence {{ row.confidence }} · tests {{ row.tests_run }} · files {{ row.files_changed }} · branch {{ row.branch }}
+          <span v-if="i === 0 && row.ok" class="text-green-400">← winner — review, then merge it yourself</span>
+          <span v-if="!row.ok" class="text-neutral-600">({{ row.reason ?? "failed" }})</span>
+        </li>
+      </ol>
+    </div>
+
     <!-- Hook approval modal: surfaces require_approval hooks during dispatch -->
     <HookApprovalModal />
     <!-- #682 skill acquisition approval cards: approve/reject before any install -->
@@ -294,6 +351,21 @@ async function orchestrate() {
   } finally {
     orchestrating.value = false;
   }
+}
+
+// ── Race (#555) ────────────────────────────────────────────────────────────
+const raceSelection = ref<string[]>([]);
+
+function toggleRaceEngine(candidate: string) {
+  raceSelection.value = raceSelection.value.includes(candidate)
+    ? raceSelection.value.filter((e) => e !== candidate)
+    : [...raceSelection.value, candidate];
+}
+
+/** Race the workflow goal across the selected engines (empty = all installed). */
+async function raceEngines() {
+  err.value = null;
+  await store.runRace(store.state?.goal ?? "", raceSelection.value);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

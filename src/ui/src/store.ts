@@ -4,6 +4,7 @@ import { WORK_UNIT_STATUS } from "../../core/workflow-contract.js";
 import { api } from "./api.js";
 import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
 import { resolveRepoPath } from "./lib/resolve-repo-path.js";
+import { createRaceState } from "./store-race.js";
 import { createReleaseProposalState } from "./store-release.js";
 import type {
   DomainRootView,
@@ -55,6 +56,7 @@ export const useVfStore = defineStore("vf", () => {
   const registryError = ref<string | null>(null);
   const registryPreview = ref<RegistryPreview | null>(null);
   const releaseState = createReleaseProposalState();
+  const raceState = createRaceState();
   // #691: read-only domain view state (read-model, no mutation).
   const domains = ref<DomainRootView[]>([]);
   const domainsLoading = ref(false);
@@ -379,6 +381,7 @@ export const useVfStore = defineStore("vf", () => {
     previewRegistryUpdate,
     closeRegistryPreview,
     ...releaseState,
+    ...raceState,
     domains,
     domainsLoading,
     domainsError,

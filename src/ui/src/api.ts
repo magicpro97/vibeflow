@@ -66,6 +66,25 @@ async function req<T>(
   }
 }
 
+/** #555: one engine's row in a race, ranked by the confidence gate. */
+export interface RaceResultRow {
+  engine: string;
+  ok: boolean;
+  confidence: number;
+  tests_run: number;
+  files_changed: number;
+  branch: string;
+  worktree: string;
+  reason?: string;
+}
+
+/** #555: `/api/race` response — the ranked rows plus the engines skipped as unavailable. */
+export interface RaceViewResponse {
+  ok: boolean;
+  ranking: RaceResultRow[];
+  skipped: Array<{ engine: string; reason: string }>;
+}
+
 export const api = {
   state: () => req<WorkflowState>("GET", "/state"),
   settings: {
@@ -166,6 +185,10 @@ export const api = {
   dispatch: (payload?: unknown) => req<unknown>("POST", "/api/dispatch", payload ?? {}),
   units: (payload: unknown) => req<unknown>("POST", "/api/units", payload),
   orchestrate: (payload?: unknown) => req<unknown>("POST", "/api/orchestrate", payload ?? {}),
+  // #555: head-to-head race — the SAME task to several engines, ranked by confidence.
+  // The request waits for the real run (like /api/orchestrate); vf never auto-merges.
+  race: (payload: { task: string; engines?: string[]; dry?: boolean }) =>
+    req<RaceViewResponse>("POST", "/api/race", payload),
   preflight: () => req<unknown>("POST", "/api/preflight", {}),
   verify: (signal?: AbortSignal) => req<unknown>("POST", "/api/verify", {}, signal),
   // #526: drop a pre-dispatch steering note for a QUEUED unit (fire-and-forget).

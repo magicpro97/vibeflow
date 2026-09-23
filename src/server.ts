@@ -55,6 +55,7 @@ import {
 } from "./server/pending-hooks.js";
 import { clearPendingSkillAcquisitions } from "./server/pending-skill-acquisitions.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
+import { handleRaceRoute } from "./server/race-route.js";
 import {
   handleReleaseProposalView,
   handleReleaseProposalsView,
@@ -267,6 +268,15 @@ export async function startServer(
         if (!conversation?.privateFileRanges)
           return Response.json({ error: "conversation_authority_unavailable" }, { status: 500 });
         return handleHomePrivateFileRangeRoute(conversation.privateFileRanges, activeRepo, req);
+      }
+
+      // --- POST /api/race (#555) — head-to-head race; same guard as the write surface.
+      // Handled here (not in src/server/routes.ts) to keep that route table under its
+      // 400-line cap; the body handler owns validation. Defaults to a dry plan.
+      if (method === "POST" && path === "/api/race") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        const raceBody = (await req.json()) as Record<string, unknown>;
+        return await handleRaceRoute({ getActiveRepo: () => activeRepo }, raceBody);
       }
 
       // --- GET / (HTML page) ---

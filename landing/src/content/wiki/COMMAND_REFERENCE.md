@@ -2,7 +2,7 @@
 title: Command Reference
 description: Complete reference of all shipped `vf` CLI commands and their flags, including conversations, orchestration, skills, hooks, and verification.
 category: reference
-last_updated: 2026-09-22
+last_updated: 2026-09-24
 ---
 
 # Command Reference
@@ -15,6 +15,7 @@ last_updated: 2026-09-22
 - [Dispatch](#dispatch)
 - [Conversations](#conversations)
 - [Orchestrate](#orchestrate)
+- [Race (head-to-head)](#race-head-to-head)
 - [Work Units (Ledger)](#work-units-ledger)
 - [Settings (Config)](#settings-config)
 - [Skills (Demand-Driven)](#skills-demand-driven)
@@ -329,6 +330,32 @@ parallel, runs an independent reviewer (pass only at confidence `1.0` with evide
 then prints the goal-eval verdict (`met | partial | blocked`).
 
 When `vf orchestrate` is used for an explicit multi-participant route, the coordinator is the sole authority and the executor is a different admitted engine. Clarifications route back to the coordinator first; the coordinator resolves ambiguity by checking the task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort. Exact native session resume stays engine-local; when supported native reconciliation detects compaction or exact proof is unavailable, VibeFlow revokes exact authority and falls back to bounded replay. Bare coordinate routes currently admit Claude and Codex because both can enforce the resolved role sandbox and return authenticated structured coordination output. Copilot, OpenCode, and Antigravity remain available on workflow transports and fail closed for coordinate authority until their adapters can prove both contracts. `--isolate` keeps each unit in its own linked git worktree so clarification and recovery stay in the same filesystem state. On a proved exact resume, the coordinator sends only fresh user and peer-agent context; after detected compaction or missing exact proof, it also sends bounded public history from the receiving CLI. Executors must commit in their worktree, and the host only fast-forwards a clean, quiescent HEAD after verification; failure and divergence stay preserved for recovery.
+
+## Race (head-to-head)
+
+```bash
+vf race "add a /health endpoint with a test" --engines claude,codex --yes
+vf race "fix the flaky retry test" --yes         # every installed engine
+vf race "tighten the parser"                     # dry: plan only, no engine launch
+```
+
+One task, several engines, head to head: the same prompt is dispatched to each named engine
+in parallel, each in its own linked git worktree on branch `vf-race-<engine>`, so their edits
+never mix. Results are ranked by the confidence gate — successful dispatches first, then
+`confidence` descending, then tests run, then files changed, then engine order — and the ranked
+table prints each engine's branch and worktree path.
+
+  --engines <a,b>   claude | copilot | codex | opencode | antigravity
+                    (default: the installed engines; a single engine is valid)
+  --yes             launch the engines (otherwise this is a read-only plan)
+
+Engines whose CLI is not installed are skipped with a notice and the survivors still rank; if
+none is available the race exits non-zero without dispatching. The repo must be initialized
+(`vf init`) because the dispatch prompt is context-driven.
+
+There is no auto-merge: the winner's branch is named for you to review and merge yourself.
+The web workspace exposes the same race on Stage 3 — select engines, run the plan or the real
+race, and read the ranked rows (`POST /api/race`).
 
 ## Work units (ledger)
 
