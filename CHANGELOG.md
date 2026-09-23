@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0](https://github.com/magicpro97/vibeflow/compare/v0.17.0...v0.18.0) (2026-09-23)
+
+
+### Features
+
+* project classification — project_id entity, tiered classifier, project rail UI ([#800](https://github.com/magicpro97/vibeflow/issues/800)) ([31b4b63](https://github.com/magicpro97/vibeflow/commit/31b4b63f60b336cc7dafc0a3577603e4e3cf6bea))
+
+
+### Bug Fixes
+
+* **durability:** flush lock record on release, stop leaking fd registrations, gate vf init on Windows CI ([#808](https://github.com/magicpro97/vibeflow/issues/808)) ([a50b01e](https://github.com/magicpro97/vibeflow/commit/a50b01e45d15eb028fa6912dacc35b625fbd5ce7))
+* **durability:** make vf init work on Windows ([#806](https://github.com/magicpro97/vibeflow/issues/806)) ([fda5d27](https://github.com/magicpro97/vibeflow/commit/fda5d279cab3c30feb23cf7ecffe90e0abf3dfe6))
+
 ## [0.17.0](https://github.com/magicpro97/vibeflow/compare/v0.16.0...v0.17.0) (2026-09-22)
 
 
