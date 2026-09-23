@@ -354,8 +354,8 @@ none is available the race exits non-zero without dispatching. The repo must be 
 (`vf init`) because the dispatch prompt is context-driven.
 
 There is no auto-merge: the winner's branch is named for you to review and merge yourself.
-The web workspace exposes the same race on Stage 3 — select engines, run the plan or the real
-race, and read the ranked rows (`POST /api/race`).
+The web workspace exposes the same race on Stage 3 — select engines, run the race, and read the
+ranked rows (`POST /api/race`).
 
 ## Work units (ledger)
 

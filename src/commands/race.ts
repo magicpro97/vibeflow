@@ -81,17 +81,21 @@ export function raceWorktreePath(engine: Engine, base: string): string {
 }
 
 /** Parse `--engines a,b` (CLI string) or a JSON string array (UI payload).
- *  Unknown names fail loudly; the result is deduped in canonical ENGINES order. */
+ *  Unknown names fail loudly; the result is deduped in canonical ENGINES order.
+ *  Array members are validated, not filtered (#818): `["claude", 7]` is a
+ *  malformed request, never a request for `claude` alone. */
 export function parseEngineList(
   raw: unknown,
 ): { ok: true; engines: Engine[] } | { ok: false; message: string } {
-  const names =
-    typeof raw === "string"
-      ? raw.split(",").map((s) => s.trim())
-      : Array.isArray(raw)
-        ? raw.filter((value): value is string => typeof value === "string").map((s) => s.trim())
-        : [];
-  const chosen = names.filter(Boolean);
+  const members: unknown[] =
+    typeof raw === "string" ? raw.split(",") : Array.isArray(raw) ? raw : [];
+  if (!members.every((value): value is string => typeof value === "string")) {
+    return {
+      ok: false,
+      message: `--engines needs a comma-separated list from ${ENGINES.join(" | ")} (array members must be strings)`,
+    };
+  }
+  const chosen = members.map((name) => name.trim()).filter(Boolean);
   const unknown = [...new Set(chosen.filter((n) => !(ENGINES as readonly string[]).includes(n)))];
   if (chosen.length === 0 || unknown.length > 0) {
     return {

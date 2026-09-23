@@ -18,6 +18,9 @@ export function createRaceState() {
     try {
       const result = await api.race({
         task,
+        // The route treats anything but a literal `false` as DISPATCH_MODE.DRY
+        // (#818), so the button must ask for the real run explicitly.
+        dry: false,
         ...(engines.length ? { engines } : {}),
       });
       raceRanking.value = result.ranking;

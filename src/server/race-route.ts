@@ -15,6 +15,20 @@ export interface RaceRouteDeps {
 
 type RaceResponse = RaceRunResult | { error: string; status: number };
 
+/** The request body as a JSON object; `null` for a malformed body or one that is
+ *  not a JSON object (`null`, an array, a bare scalar). The caller answers 400 —
+ *  `req.json()` throwing out of the fetch handler was the #818 defect. */
+export async function readRaceBody(req: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const body: unknown = await req.json();
+    return body !== null && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Validate state + payload, run the race, and return the ranked rows. */
 export async function handleRaceRoute(
   deps: RaceRouteDeps,

@@ -3,6 +3,7 @@
 // the data layer (api.ts / store-race.ts / store.ts) and the Stage 3 component
 // are pinned by structural invariants — the ranking rule itself is tested in
 // test/orchestrator-race.test.ts and the route in test/server-race-555.test.ts.
+// The one behavioral case (the store's request payload) stubs `fetch`.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
@@ -66,6 +67,51 @@ describe("store.ts: wires the race state", () => {
   test("spreads the race state into the store", () => {
     expect(src).toContain("createRaceState");
     expect(src).toContain("...raceState");
+  });
+});
+
+describe("store-race.ts: the /api/race request it sends (behavioral)", () => {
+  test("the run-race button asks for a REAL run: the payload carries dry:false", async () => {
+    const { createRaceState } = await import("../src/ui/src/store-race.js");
+    const calls: Array<{ path: string; body: unknown }> = [];
+    let fail = false;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (path: string, init?: RequestInit) => {
+      calls.push({ path, body: JSON.parse(String(init?.body)) });
+      if (fail)
+        return new Response(JSON.stringify({ error: "no workflow state — run init first" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      return new Response(JSON.stringify({ ok: true, ranking: [], skipped: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+    try {
+      const race = createRaceState();
+      await race.runRace("add a health endpoint", ["claude"]);
+      await race.runRace("add a health endpoint", []);
+      expect(race.raceError.value).toBeNull();
+      // A refused race surfaces the server's message and clears the rows.
+      fail = true;
+      await race.runRace("add a health endpoint", []);
+      expect(race.raceError.value).toContain("no workflow state");
+      expect(race.raceRanking.value).toEqual([]);
+      expect(race.raceRunning.value).toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
+    // The route treats anything but a literal `false` as DISPATCH_MODE.DRY, so an
+    // omitted flag would leave the UI stuck on an empty dry plan (#818).
+    expect(calls[0]?.path).toBe("/api/race");
+    expect(calls[0]?.body).toEqual({
+      task: "add a health endpoint",
+      dry: false,
+      engines: ["claude"],
+    });
+    // No selection = every installed engine, still a real run.
+    expect(calls[1]?.body).toEqual({ task: "add a health endpoint", dry: false });
   });
 });
 

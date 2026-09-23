@@ -55,7 +55,7 @@ import {
 } from "./server/pending-hooks.js";
 import { clearPendingSkillAcquisitions } from "./server/pending-skill-acquisitions.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
-import { handleRaceRoute } from "./server/race-route.js";
+import { handleRaceRoute, readRaceBody } from "./server/race-route.js";
 import {
   handleReleaseProposalView,
   handleReleaseProposalsView,
@@ -275,7 +275,10 @@ export async function startServer(
       // 400-line cap; the body handler owns validation. Defaults to a dry plan.
       if (method === "POST" && path === "/api/race") {
         if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
-        const raceBody = (await req.json()) as Record<string, unknown>;
+        // A malformed / `null` / array body is a client error, not a handler throw (#818).
+        const raceBody = await readRaceBody(req);
+        if (!raceBody)
+          return Response.json({ error: "race needs a JSON object body" }, { status: 400 });
         return await handleRaceRoute({ getActiveRepo: () => activeRepo }, raceBody);
       }
 

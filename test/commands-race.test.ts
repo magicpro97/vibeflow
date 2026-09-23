@@ -371,10 +371,27 @@ describe("vf race (#555) — engine list parsing + defaults", () => {
       engines: ["claude", "codex"],
     });
     // The UI sends an array instead of a comma string — same rule, same order.
-    expect(parseEngineList(["copilot", "claude", 7, "claude"])).toEqual({
+    expect(parseEngineList(["copilot", "claude", "claude"])).toEqual({
       ok: true,
       engines: ["claude", "copilot"],
     });
+  });
+
+  test("parseEngineList refuses a malformed array member instead of filtering it out", () => {
+    // Copilot PR #818: `["claude", 7]` is a malformed request, not a request for
+    // `claude` alone — filtering it silently ignored bad API input.
+    const malformed: unknown[] = [
+      ["claude", 7],
+      [7],
+      ["claude", null],
+      ["claude", ["codex"]],
+      ["claude", { engine: "codex" }],
+    ];
+    for (const raw of malformed) {
+      const parsed = parseEngineList(raw);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.ok ? "" : parsed.message).toContain("array members must be strings");
+    }
   });
 
   test("parseEngineList rejects empty/absent/non-string/unknown values", () => {

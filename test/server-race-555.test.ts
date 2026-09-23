@@ -9,7 +9,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RaceOptions, RaceRunResult } from "../src/commands.js";
-import { handleRaceRoute } from "../src/server/race-route.js";
+import { UI_LAN_TOKEN_HEADER } from "../src/core/ui-cli-contract.js";
+import { startServer } from "../src/server.js";
+import { handleRaceRoute, readRaceBody } from "../src/server/race-route.js";
 
 interface Recorded {
   calls: RaceOptions[];
@@ -106,6 +108,18 @@ describe("POST /api/race (#555)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("a malformed engine member → 400, never a silently narrowed list (#818)", async () => {
+    const dir = repoWithState("g");
+    const recorded: Recorded = { calls: [] };
+    const res = await call(dir, { task: "t", engines: ["claude", 7] }, recorded);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain(
+      "array members must be strings",
+    );
+    expect(recorded.calls).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("no task and no saved goal → 400 (nothing to race)", async () => {
     const dir = repoWithState("");
     const res = await call(dir, { task: "   " });
@@ -131,6 +145,54 @@ describe("POST /api/race (#555)", () => {
     const branch = server.slice(server.indexOf('path === "/api/race"'));
     expect(branch.length).toBeGreaterThan(0);
     expect(branch.slice(0, 300)).toContain("guarded(req)");
-    expect(branch.slice(0, 300)).toContain("handleRaceRoute({ getActiveRepo: () => activeRepo }");
+    expect(branch.slice(0, 500)).toContain("handleRaceRoute({ getActiveRepo: () => activeRepo }");
+  });
+});
+
+describe("readRaceBody (#818): a bad body is the route's 400, never a fetch-handler throw", () => {
+  const post = (raw: string) =>
+    new Request("http://vf.test/api/race", { method: "POST", body: raw });
+
+  test("malformed JSON, `null`, an array, and bare scalars → null (no throw)", async () => {
+    for (const raw of ["{ not json", "null", '["claude"]', '"claude"', "42", ""]) {
+      expect(await readRaceBody(post(raw))).toBeNull();
+    }
+  });
+
+  test("a JSON object body is passed through unchanged", async () => {
+    expect(await readRaceBody(post('{"task":"t","dry":false}'))).toEqual({ task: "t", dry: false });
+  });
+});
+
+describe("POST /api/race over HTTP (#818): the fetch handler answers 400 instead of rejecting", () => {
+  test("malformed JSON / `null` / array bodies → 400 with a JSON error body", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-race-http-"));
+    const { server, url } = await startServer(0, { repoDir: repo });
+    try {
+      const page = await fetch(url);
+      const token =
+        (await page.text()).match(/<meta\s+name="vf-token"\s+content="([^"]+)"/i)?.[1] ?? "";
+      expect(token).not.toBe("");
+      const httpPost = (raw: string) =>
+        fetch(`${url}/api/race`, {
+          method: "POST",
+          headers: { "content-type": "application/json", [UI_LAN_TOKEN_HEADER]: token },
+          body: raw,
+        });
+
+      for (const raw of ["{ not json", "null", '["claude"]']) {
+        const res = await httpPost(raw);
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { error: string }).error).toContain("JSON");
+      }
+
+      // A well-formed object still reaches the route: here its own no-state 400.
+      const shaped = await httpPost('{"task":"t"}');
+      expect(shaped.status).toBe(400);
+      expect(((await shaped.json()) as { error: string }).error).toContain("no workflow state");
+    } finally {
+      await server.stop();
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
