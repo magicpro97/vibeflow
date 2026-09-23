@@ -19,6 +19,7 @@ import {
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
   windowsApplyOwnerAcl,
+  windowsEnsurePrivateAcl,
   windowsHasNoForeignWrite,
   windowsVerifyPathAcl,
 } from "../../src/durability/windows-acl-ops.js";
@@ -50,6 +51,33 @@ describe("windows owner-only ACL", () => {
       // A path created normally inherits SYSTEM/Administrators/owner from its parent.
       expect(windowsVerifyPathAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(false);
       expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("repairs a directory whose DACL was synthesised the way a standard host hands one down", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      // The strongest form of the standard shape: inheritance stripped and only the two
+      // root-equivalent grants a profile directory propagates — no ACE for the owner and no
+      // SE_DACL_PROTECTED. Verification must repair it in place rather than reject it (#803).
+      execFileSync(
+        "icacls",
+        [
+          dir,
+          "/inheritance:r",
+          "/grant",
+          "*S-1-5-18:(OI)(CI)F",
+          "/grant",
+          "*S-1-5-32-544:(OI)(CI)F",
+        ],
+        { stdio: "ignore" },
+      );
+      expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
+      expect(windowsEnsurePrivateAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
+      expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
     } finally {
       cleanup();
     }

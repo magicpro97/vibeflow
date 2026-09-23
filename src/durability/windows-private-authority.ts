@@ -142,7 +142,13 @@ export function createWindowsPrivateAuthority(
         !descriptor.daclPresent ||
         descriptor.daclDefaulted ||
         descriptor.aces.length !== 1 ||
-        !descriptor.owner.equals(user.sid) ||
+        // The owner must be the caller's own principal — which is the token's owner SID, not
+        // necessarily its user SID: Windows stamps the token owner on every object the token
+        // creates, and for an elevated administrator token that is BUILTIN\Administrators. A
+        // freshly created directory on such a host is owned by that group, so comparing against
+        // the user SID alone rejected objects this process had just created and could not be
+        // repaired back (the owner is not the DACL). See #803.
+        (!descriptor.owner.equals(user.sid) && !descriptor.owner.equals(user.ownerSid)) ||
         !ace ||
         ace.type !== WINDOWS_PRIVATE_SECURITY.ACCESS_ALLOWED_ACE_TYPE ||
         ace.flags !== expectedAceFlags(kind) ||
@@ -181,40 +187,32 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       durabilityError("unsafe_path", "invalid Windows authority ACE SID");
     return Buffer.from(sid);
   };
-  const currentUser = (): { sid: Buffer; sddl: string } => {
+  const tokenSid = (token: bigint, kind: number): unknown => {
+    const needed = [0];
+    if (
+      native.tokenInfo(token, kind, null, 0, needed) ||
+      native.lastError() !== WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER
+    )
+      failed("GetTokenInformation(size)");
+    const output = Buffer.alloc(needed[0] ?? 0);
+    if (!native.tokenInfo(token, kind, output, output.length, needed))
+      failed("GetTokenInformation");
+    // TOKEN_USER and TOKEN_OWNER are the same SID_AND_ATTRIBUTES shape, so one reader serves both.
+    return native.tokenUserSid(output);
+  };
+  const currentUser = (): { sid: Buffer; sddl: string; ownerSid: Buffer } => {
     const token: unknown[] = [null];
     if (!native.openToken(native.getCurrentProcess(), WINDOWS_PRIVATE_SECURITY.TOKEN_QUERY, token))
       failed("OpenProcessToken");
     return withCleanup(() => {
-      const needed = [0];
-      if (
-        native.tokenInfo(
-          token[0] as bigint,
-          WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS,
-          null,
-          0,
-          needed,
-        ) ||
-        native.lastError() !== WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER
-      )
-        failed("GetTokenInformation(size)");
-      const output = Buffer.alloc(needed[0] ?? 0);
-      if (
-        !native.tokenInfo(
-          token[0] as bigint,
-          WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS,
-          output,
-          output.length,
-          needed,
-        )
-      )
-        failed("GetTokenInformation");
-      const sid = native.tokenUserSid(output);
+      const sid = tokenSid(token[0] as bigint, WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS);
+      const ownerSid = tokenSid(token[0] as bigint, WINDOWS_PRIVATE_SECURITY.TOKEN_OWNER_CLASS);
       const text: unknown[] = [null];
       if (!native.sidToString(sid, text)) failed("ConvertSidToStringSidW");
       return withCleanup(
         () => ({
           sid: copySid(sid),
+          ownerSid: copySid(ownerSid),
           sddl: native.wideString(text[0]),
         }),
         [() => native.localFree(text[0])],

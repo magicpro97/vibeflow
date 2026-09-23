@@ -18,6 +18,7 @@ export type WindowsAuthorityPathKind =
 export const WINDOWS_PRIVATE_SECURITY = Object.freeze({
   TOKEN_QUERY: 0x8,
   TOKEN_USER_CLASS: 1,
+  TOKEN_OWNER_CLASS: 4,
   OWNER_INFORMATION: 0x1,
   DACL_INFORMATION: 0x4,
   PROTECTED_DACL_INFORMATION: 0x8000_0000,
@@ -146,7 +147,17 @@ export interface WindowsCreationSecurity {
 }
 
 export interface WindowsPrivateAuthorityBindings {
-  currentUser(): { sid: Buffer; sddl: string };
+  /**
+   * The token identity the authority answers with: the user SID and its SDDL form, plus the token's
+   * default owner SID.
+   *
+   * The owner SID is a separate fact because Windows, not the caller, decides the owner of every
+   * object a process creates: it stamps the token's owner, which is the user SID for a filtered
+   * token, BUILTIN\Administrators for an elevated administrator token, and SYSTEM for a service.
+   * Verifying an object's owner against the user SID alone therefore rejects objects the process
+   * just created on any elevated Windows host (see #803).
+   */
+  currentUser(): { sid: Buffer; sddl: string; ownerSid: Buffer };
   createSecurity(sddl: string): WindowsCreationSecurity;
   inspect(handle: bigint): WindowsPrivateDescriptorView;
   /**
