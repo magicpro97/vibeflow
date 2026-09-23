@@ -90,8 +90,11 @@ export function loadWindowsBindings(acl: WindowsAclOpsOptions = {}): NativeBindi
     fchmodat(directoryFd, name, _mode, _flags) {
       const base = WIN32_FD_PATHS.get(directoryFd);
       if (base === undefined) {
-        win32SetErrno(0);
-        return 0;
+        // Every other *at shim reports the unknown fd through node:fs. This one has no node:fs
+        // call to do it, and reporting success would claim an ACL that was never applied: the
+        // native.ts caller unlinks the directory it cannot secure.
+        win32SetErrno(2 /* ENOENT */);
+        return -1;
       }
       const target = join(base, name);
       try {

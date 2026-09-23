@@ -111,11 +111,11 @@ describe("windows fs shims", () => {
     expect(win32LastErrnoValue()).toBe(2);
   });
 
-  test("fchmodat treats an unregistered fd as a no-op and clears errno", () => {
+  test("fchmodat reports ENOENT for an unregistered fd instead of claiming success", () => {
     const bindings = loadWindowsBindings();
-    win32SetErrno(13);
-    expect(bindings.fchmodat(1, "anything", 0o600, 0)).toBe(0);
-    expect(win32LastErrnoValue()).toBe(0);
+    win32SetErrno(0);
+    expect(bindings.fchmodat(1, "anything", 0o600, 0)).toBe(-1);
+    expect(win32LastErrnoValue()).toBe(2);
   });
 
   test("fchmodat applies the owner-only ACL to a registered directory", () => {
