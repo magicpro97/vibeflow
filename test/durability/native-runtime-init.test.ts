@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import {
   errnoIs,
   errnoValue,
@@ -10,9 +10,18 @@ import {
  * leaves most of its branches unexecuted — including the Windows errno table, which is the
  * thing that makes errnoIs("ENOENT") answer correctly for the *at() shims.
  *
- * The function takes the platform as an argument, so every branch is reachable anywhere.
+ * The function takes the platform as an argument, so every branch is reachable anywhere. It
+ * also writes module-global state (the errno reader and errno table), so this file must put
+ * the real runtime back afterwards or every later durability test in the same process
+ * misreads its syscall errors.
  */
+const realRuntime = { disabled: false, platform: process.platform, isBun: true };
+
 describe("initializeNativeRuntime", () => {
+  afterAll(() => {
+    initializeNativeRuntime(realRuntime);
+  });
+
   test("reports the disabled runtime without loading anything", () => {
     const result = initializeNativeRuntime({ disabled: true, platform: "linux", isBun: true });
     expect(result.bindings).toBeNull();
@@ -38,7 +47,6 @@ describe("initializeNativeRuntime", () => {
   });
 
   test("win32 errno reads flow through the shim errno, not koffi", () => {
-    initializeNativeRuntime({ disabled: false, platform: "win32", isBun: true });
     const bindings = initializeNativeRuntime({
       disabled: false,
       platform: "win32",
@@ -57,8 +65,8 @@ describe("initializeNativeRuntime", () => {
   });
 
   test("a loader failure is captured as the unavailable reason", () => {
-    // sunos reaches neither the Windows nor the POSIX loader, and freebsd is rejected before
-    // any FFI work happens — both must fail closed with a reason instead of throwing.
+    // None of these reach a loader: each must fail closed with a reason naming the platform
+    // instead of throwing out of initialization.
     for (const platform of ["sunos", "freebsd", "android"]) {
       const result = initializeNativeRuntime({ disabled: false, platform, isBun: false });
       expect(result.bindings).toBeNull();
