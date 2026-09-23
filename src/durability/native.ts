@@ -53,10 +53,16 @@ const WIN32_KERNEL_LOCKS: Map<number, WindowsKernelLock> = new Map();
 let _winLockProvider: WindowsKernelLockProvider | undefined;
 function getWinLockProvider(): WindowsKernelLockProvider {
   if (!_winLockProvider) {
-    // ponytail: pass undefined privateAuthority to skip ACL verification on the lock file.
-    // The OS default DACL applies. Full ACL enforcement requires createWindowsPrivateAuthority()
-    // to work via GetTokenInformation — currently failing in Bun 1.3.14 FFI context.
-    // Upgrade when Bun handles the pointer type correctly.
+    // No privateAuthority: enabling it here breaks every existing install, and not for the
+    // reason the old comment claimed. The Bun FFI defect IS fixed in this change
+    // (createWindowsPrivateAuthority() now constructs fine), but verifyHandle demands a DACL of
+    // exactly one owner-only ACE, while a lock file under %USERPROFILE% inherits three
+    // (SYSTEM, Administrators, user) and CreateFileW applies security attributes only when it
+    // creates the file. Measured on an existing lock:
+    //   NT AUTHORITY\SYSTEM:(I)(F)  BUILTIN\Administrators:(I)(F)  <user>:(I)(F)
+    // so turning it on fails closed with "permissive Windows authority DACL rejected" on any
+    // pre-existing state. Enabling it needs a policy that accepts the standard Windows
+    // inherited ACEs plus a migration for existing lock files: tracked in #807.
     _winLockProvider = createWindowsKernelLockProvider(
       loadWindowsRecordNativeBindings(),
       undefined,
