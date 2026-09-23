@@ -208,7 +208,9 @@ test("process lock stores private owner identity and fences a live owner within 
     expect(owner?.operation).toBe("test-operation");
     expect(owner?.nonce).toMatch(/^[a-f0-9]{64}$/);
     expect(owner?.process_start_identity.length).toBeGreaterThan(0);
-    expect(lstatSync(path).mode & 0o777).toBe(0o600);
+    // On Windows, file mode bits are 0o666 (ACL carries privacy — B2).
+    const expectedMode = process.platform === "win32" ? 0o666 : 0o600;
+    expect(lstatSync(path).mode & 0o777).toBe(expectedMode);
 
     const began = Date.now();
     expect(() => acquireProcessLock(path, { operation: "contender", timeoutMs: 30 })).toThrow(
@@ -231,8 +233,11 @@ test("lock acquisition closes its opened file after validation or root fsync fai
   const sandbox = mkdtempSync(join(tmpdir(), "vf-lock-open-failure-"));
   const root = join(sandbox, "private");
   ensurePrivateDirectory(root);
+  // /proc/self/fd (Linux) and /dev/fd (macOS/Bun) are not available on Windows.
+  // ponytail: Windows fd-count verification skipped — no /proc/self/fd equivalent.
+  const canCountFds = process.platform !== "win32";
   const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
-  const before = fs.readdirSync(descriptorDirectory).length;
+  const before = canCountFds ? fs.readdirSync(descriptorDirectory).length : 0;
   const realFstat = fs.fstatSync;
   const realFsync = fs.fsyncSync;
   let rejectFileValidation = false;
@@ -271,24 +276,28 @@ test("lock acquisition closes its opened file after validation or root fsync fai
     return realFsync(fd);
   }) as typeof fs.fsyncSync);
   try {
-    for (let index = 0; index < 32; index++) {
-      rejectRootFsync = true;
-      try {
-        acquireProcessLock(join(root, `fsync-${index}.lock`), { operation: "fsync-fail" });
-        throw new Error("expected root fsync failure");
-      } catch (error) {
-        expect(error).toBe(primary);
-      } finally {
-        rejectRootFsync = false;
+    // B3: directory fsync is skipped on Windows — the spy never fires, so this sub-test
+    // is not meaningful there. Skip on win32 to avoid a false "expected root fsync failure".
+    if (process.platform !== "win32") {
+      for (let index = 0; index < 32; index++) {
+        rejectRootFsync = true;
+        try {
+          acquireProcessLock(join(root, `fsync-${index}.lock`), { operation: "fsync-fail" });
+          throw new Error("expected root fsync failure");
+        } catch (error) {
+          expect(error).toBe(primary);
+        } finally {
+          rejectRootFsync = false;
+        }
       }
     }
   } finally {
     fsyncSpy.mockRestore();
   }
-  expect(fs.readdirSync(descriptorDirectory).length).toBeLessThanOrEqual(before + 1);
+  if (canCountFds)
+    expect(fs.readdirSync(descriptorDirectory).length).toBeLessThanOrEqual(before + 1);
   rmSync(sandbox, { recursive: true, force: true });
 });
-
 test("process lock atomically replaces exact proved-dead owner metadata under the OS lock", async () => {
   const sandbox = mkdtempSync(join(tmpdir(), "vf-lock-stale-"));
   const root = join(sandbox, "private");

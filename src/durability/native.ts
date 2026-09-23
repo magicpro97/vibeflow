@@ -5,18 +5,28 @@ import { durabilityError } from "./errors.js";
 import {
   IS_BUN,
   O_CLOEXEC,
+  WIN32_FD_PATHS,
   assertNativeDurabilityAvailable,
   errnoIs,
   native,
   syscallFailure,
 } from "./native-runtime.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
+import {
+  type WindowsKernelLock,
+  type WindowsKernelLockProvider,
+  createWindowsKernelLockProvider,
+  loadWindowsRecordNativeBindings,
+} from "./windows-kernel-lock.js";
 
 export interface PinnedDirectory {
   fd: number;
   path: string;
   dev: number;
   ino: number;
+  /** bigint dev/ino for exact identity comparison on Windows (B4: NTFS ino is 57-bit). */
+  devBig?: bigint;
+  inoBig?: bigint;
 }
 
 const LOCK_EX = 2;
@@ -27,6 +37,27 @@ const AT_REMOVEDIR = process.platform === RUNTIME_PLATFORM.DARWIN ? 0x80 : 0x200
 const DIRECTORY_FLAGS =
   fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW | O_CLOEXEC;
 const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefined;
+
+// Module-level Windows kernel lock registry: lock-file fd → held kernel lock.
+// ponytail: flock(2) is POSIX-only; LockFileEx (via createWindowsKernelLockProvider)
+// is the Windows equivalent. Keyed by Node fd for the same tryAdvisoryLock/releaseAdvisoryLock API.
+const WIN32_KERNEL_LOCKS: Map<number, WindowsKernelLock> = new Map();
+
+// Lazily initialized on Windows to avoid loading FFI on POSIX at module init time.
+let _winLockProvider: WindowsKernelLockProvider | undefined;
+function getWinLockProvider(): WindowsKernelLockProvider {
+  if (!_winLockProvider) {
+    // ponytail: pass undefined privateAuthority to skip ACL verification on the lock file.
+    // The OS default DACL applies. Full ACL enforcement requires createWindowsPrivateAuthority()
+    // to work via GetTokenInformation — currently failing in Bun 1.3.14 FFI context.
+    // Upgrade when Bun handles the pointer type correctly.
+    _winLockProvider = createWindowsKernelLockProvider(
+      loadWindowsRecordNativeBindings(),
+      undefined,
+    );
+  }
+  return _winLockProvider;
+}
 
 export function canonicalDurabilityPath(input: string): string {
   if (typeof input !== "string" || input.includes("\0"))
@@ -51,6 +82,27 @@ export function canonicalDurabilityPath(input: string): string {
 }
 
 function assertDirectory(fd: number, path: string, privateMode: boolean): PinnedDirectory {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
+    // B4: use bigint fstatSync to get exact 57-bit NTFS inode without rounding.
+    const stat = fs.fstatSync(fd, { bigint: true });
+    if (!stat.isDirectory()) durabilityError("unsafe_path", `unsafe pinned directory: ${path}`);
+    // B2: on Windows, privacy lives in the ACL, not mode bits. Skip the 0o700 check.
+    // ponytail: ACL verification via createWindowsPrivateAuthority/verifyHandle requires a
+    // Win32 HANDLE; uv_get_osfhandle (C-only) is not reachable from JS. The directory is
+    // created with OS-default ACL restricted to the current user (NTFS private by default
+    // in %APPDATA% and %TEMP%). Upgrade: bind GetFinalPathNameByHandleW + real HANDLEs.
+    WIN32_FD_PATHS.set(fd, path);
+    const pinned: PinnedDirectory = {
+      fd,
+      path,
+      dev: Number(stat.dev),
+      ino: Number(stat.ino),
+      devBig: stat.dev,
+      inoBig: stat.ino,
+    };
+    assertPinnedDirectory(pinned);
+    return pinned;
+  }
   const stat = fs.fstatSync(fd);
   if (
     !stat.isDirectory() ||
@@ -80,7 +132,11 @@ function openDirectoryAt(parentFd: number, name: string, path: string, create: b
     api.unlinkat(parentFd, name, AT_REMOVEDIR);
     throw primary;
   }
-  fs.fsyncSync(parentFd);
+  // B3: NTFS has no dirent-flush equivalent; FlushFileBuffers on a directory handle is
+  // invalid (EPERM). Skip fsync on win32. Upgrade path: none — NTFS journal provides
+  // crash-consistency at the volume level without an explicit flush.
+  // ponytail: on POSIX, fsync of the parent dir makes the dir-entry durable on crash.
+  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(parentFd);
   fd = api.openat(parentFd, name, DIRECTORY_FLAGS, "int", 0);
   if (fd < 0) syscallFailure(`openat created directory ${path}`);
   return fd;
@@ -96,6 +152,8 @@ export function openPrivateDirectory(input: string, create: boolean): PinnedDire
   );
   let cursor = root;
   try {
+    // Register root fd before pinnedDirectoryPath check (needed on Windows for B5).
+    if (process.platform === RUNTIME_PLATFORM.WINDOWS) WIN32_FD_PATHS.set(fd, root);
     if (pinnedDirectoryPath(fd) !== root)
       durabilityError("unsupported", "runtime cannot prove the durability root path");
     const parts = path.slice(root.length).split(sep).filter(Boolean);
@@ -113,6 +171,8 @@ export function openPrivateDirectory(input: string, create: boolean): PinnedDire
       fd = -1;
       try {
         fs.closeSync(previous);
+        // Clean up the path registry entry for the closed fd.
+        WIN32_FD_PATHS.delete(previous);
       } catch (error) {
         return cleanupThenThrow(error, [() => fs.closeSync(next.fd)]);
       }
@@ -160,6 +220,7 @@ export function openPinnedDescendant(
       current = null;
       try {
         fs.closeSync(previous.fd);
+        WIN32_FD_PATHS.delete(previous.fd);
       } catch (error) {
         return cleanupThenThrow(error, [() => fs.closeSync(next.fd)]);
       }
@@ -183,6 +244,20 @@ export function pinnedDirectoryPathForRuntime(
   fd: number,
   runtime: PinnedDirectoryRuntimeV1,
 ): string {
+  // B5: no fd→path route on Windows. /proc/self/fd and /dev/fd are ENOENT; fcntl is null;
+  // GetFinalPathNameByHandleW needs a HANDLE not a Node fd (uv_get_osfhandle is C-only).
+  // Use the WIN32_FD_PATHS registry maintained during directory open. OS enforces identity:
+  // ancestor rename → EPERM, delete → ENOENT while fd is held (probed on this machine).
+  // ponytail: GetFinalPathNameByHandleW + real HANDLEs is the upgrade path for the
+  // one security gap: a rename of the pinned leaf itself is undetectable on win32.
+  if (runtime.platform === RUNTIME_PLATFORM.WINDOWS) {
+    const stored = WIN32_FD_PATHS.get(fd);
+    if (stored !== undefined) return stored;
+    // For root fds opened directly (not via openDirectoryAt), look up from the OS root.
+    // The root fd is opened in openPrivateDirectory before the registry is populated.
+    // Fall through to return the root from parse — handled by the caller.
+    durabilityError("unsupported", "runtime cannot resolve Windows pinned directory path");
+  }
   if (runtime.platform === RUNTIME_PLATFORM.LINUX) {
     let observed: string;
     try {
@@ -222,6 +297,15 @@ export function pinnedDirectoryPath(fd: number): string {
 }
 
 export function assertPinnedDirectory(directory: PinnedDirectory): void {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
+    // B4: use bigint fstatSync for exact 57-bit NTFS inode compare.
+    // B5: skip path re-check — no fd→path route on Windows (see pinnedDirectoryPath).
+    // OS blocks ancestor renames (EPERM) and deletes (ENOENT) while the fd is held.
+    const stat = fs.fstatSync(directory.fd, { bigint: true });
+    if (stat.dev !== directory.devBig || stat.ino !== directory.inoBig || !stat.isDirectory())
+      durabilityError("unsafe_path", "pinned directory identity changed");
+    return;
+  }
   const stat = fs.fstatSync(directory.fd);
   if (stat.dev !== directory.dev || stat.ino !== directory.ino || !stat.isDirectory())
     durabilityError("unsafe_path", "pinned directory identity changed");
@@ -230,6 +314,7 @@ export function assertPinnedDirectory(directory: PinnedDirectory): void {
 }
 
 export function closePinnedDirectory(directory: PinnedDirectory): void {
+  WIN32_FD_PATHS.delete(directory.fd);
   fs.closeSync(directory.fd);
 }
 
@@ -311,13 +396,27 @@ export function unlinkAt(directory: PinnedDirectory, name: string, missingOk = f
   syscallFailure(`unlinkat file ${name}`);
 }
 
-export function tryAdvisoryLock(fd: number): boolean {
+export function tryAdvisoryLock(fd: number, lockPath?: string): boolean {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
+    if (!lockPath) durabilityError("invalid_value", "Windows advisory lock requires a path");
+    const lock = getWinLockProvider().tryAcquire(lockPath);
+    if (lock === null) return false;
+    WIN32_KERNEL_LOCKS.set(fd, lock);
+    return true;
+  }
   if (native().flock(fd, LOCK_EX | LOCK_NB) === 0) return true;
   if (errnoIs("EAGAIN") || errnoIs("EWOULDBLOCK")) return false;
   syscallFailure("advisory writer lock");
 }
 
 export function releaseAdvisoryLock(fd: number): void {
+  if (process.platform === RUNTIME_PLATFORM.WINDOWS) {
+    const lock = WIN32_KERNEL_LOCKS.get(fd);
+    if (!lock) durabilityError("lock_lost", "Windows kernel lock not found for fd");
+    WIN32_KERNEL_LOCKS.delete(fd);
+    lock.release();
+    return;
+  }
   if (native().flock(fd, LOCK_UN) !== 0) syscallFailure("advisory writer unlock");
 }
 

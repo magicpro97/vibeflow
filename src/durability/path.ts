@@ -70,7 +70,8 @@ export function assertNoSymlinkComponents(input: string): string {
 export function syncPrivateDirectory(path: string): void {
   const directory = openPrivateDirectory(path, false);
   withCleanup(() => {
-    fs.fsyncSync(directory.fd);
+    // B3: skip directory fsync on win32 (FlushFileBuffers on dir handle is EPERM).
+    if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(directory.fd);
     assertPinnedDirectory(directory);
   }, [() => closePinnedDirectory(directory)]);
 }
@@ -78,7 +79,8 @@ export function syncPrivateDirectory(path: string): void {
 export function ensurePrivateDirectory(input: string): string {
   const directory = openPrivateDirectory(input, true);
   return withCleanup(() => {
-    fs.fsyncSync(directory.fd);
+    // B3: skip directory fsync on win32 (FlushFileBuffers on dir handle is EPERM).
+    if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(directory.fd);
     assertPinnedDirectory(directory);
     return directory.path;
   }, [() => closePinnedDirectory(directory)]);
@@ -89,7 +91,9 @@ function assertPrivateFile(fd: number, label: string, maxLinks: number): fs.Stat
   if (
     !stat.isFile() ||
     (OWNER !== undefined && stat.uid !== OWNER) ||
-    (stat.mode & 0o7777) !== 0o600 ||
+    // B2: on Windows, file mode bits are 0o666 (ACL carries privacy). Skip mode check.
+    // ponytail: ACL verification requires a Win32 HANDLE (uv_get_osfhandle is C-only).
+    (process.platform !== RUNTIME_PLATFORM.WINDOWS && (stat.mode & 0o7777) !== 0o600) ||
     stat.nlink < 1 ||
     stat.nlink > maxLinks
   )

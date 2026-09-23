@@ -34,6 +34,7 @@ import {
   openOrCreatePrivateFileAt,
   validatePrivateFileFd,
 } from "./path.js";
+import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 export type { ProcessLockOwnerRuntime, ProcessLockOwnerV1 } from "./lock-owner.js";
 export { processStartIdentity } from "./lock-owner.js";
@@ -327,7 +328,10 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
   try {
     fd = openOrCreatePrivateFileAt(root, name);
     validatePrivateFileFd(fd, name);
-    fs.fsyncSync(root.fd);
+    // B3: skip directory fsync on win32 — FlushFileBuffers on a directory handle is invalid
+    // (EPERM). NTFS journal provides crash-consistency without an explicit flush.
+    // ponytail: on POSIX, fsync of the parent dir makes the lock-file directory entry durable.
+    if (process.platform !== RUNTIME_PLATFORM.WINDOWS) fs.fsyncSync(root.fd);
   } catch (error) {
     const opened = fd;
     return cleanupThenThrow(error, [
@@ -339,7 +343,7 @@ export function acquireProcessLock(path: string, options: AcquireProcessLockOpti
   let locked = false;
   try {
     do {
-      locked = tryAdvisoryLock(fd);
+      locked = tryAdvisoryLock(fd, canonicalPath);
       if (locked) break;
       if (Date.now() >= deadline) break;
       wait(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));
