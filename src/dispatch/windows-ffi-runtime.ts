@@ -2,4 +2,5 @@
 export {
   DEFAULT_WINDOWS_FFI_RUNTIME,
   type WindowsFfiRuntime,
+  windowsFfiAddressing,
 } from "../durability/windows-ffi-runtime.js";

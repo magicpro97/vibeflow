@@ -3,8 +3,8 @@ import { win32 as windowsPath } from "node:path";
 import { cleanupThenThrow, runCleanups } from "./cleanup.js";
 import { durabilityError } from "./errors.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
-import { loadWindowsRecordNativeBindingsKoffi } from "./windows-kernel-lock-koffi.js";
 import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
+import { loadWindowsRecordNativeBindingsKoffi } from "./windows-kernel-lock-koffi.js";
 import { WINDOWS_FILE_NATIVE } from "./windows-native-contract.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,

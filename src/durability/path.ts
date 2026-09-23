@@ -15,8 +15,8 @@ import {
   tryOpenAt,
   unlinkAt,
 } from "./native.js";
-import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 import { syncDirectory } from "./posix-fs-semantics.js";
+import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefined;
 

@@ -20,10 +20,10 @@ import {
 } from "./frame-file.js";
 import { type VffrDomainRule, vffrRuleFor } from "./frame-rules.js";
 import { nonNegativeSafeInteger, positiveSafeLimit } from "./limits.js";
-import { syncDirectory } from "./posix-fs-semantics.js";
 import { assertProcessLockCovers, withLockedParent } from "./lock.js";
 import { assertPinnedDirectory, canonicalDurabilityPath } from "./native.js";
 import { readPrivateFd, writeAll } from "./path.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 
 const MAGIC = Buffer.from("VFFR", "ascii");
 const CHECKSUM_DOMAIN = Buffer.from("VF-FRAME-CHECKSUM\0v1\0", "utf8");

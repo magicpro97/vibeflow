@@ -19,7 +19,6 @@ import {
   publishStableLockRecord,
   readStableLockRecord,
 } from "./lock-record.js";
-import { syncDirectory } from "./posix-fs-semantics.js";
 import {
   type PinnedDirectory,
   assertPinnedDirectory,
@@ -35,6 +34,7 @@ import {
   openOrCreatePrivateFileAt,
   validatePrivateFileFd,
 } from "./path.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 
 export type { ProcessLockOwnerRuntime, ProcessLockOwnerV1 } from "./lock-owner.js";

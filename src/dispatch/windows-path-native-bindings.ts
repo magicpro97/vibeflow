@@ -1,4 +1,8 @@
-import { DEFAULT_WINDOWS_FFI_RUNTIME, type WindowsFfiRuntime } from "./windows-ffi-runtime.js";
+import {
+  DEFAULT_WINDOWS_FFI_RUNTIME,
+  type WindowsFfiRuntime,
+  windowsFfiAddressing,
+} from "./windows-ffi-runtime.js";
 
 export type WindowsNativeHandle = bigint;
 
@@ -40,72 +44,88 @@ export function loadWindowsPathNativeBindings(
 ): WindowsPathNativeBindings {
   if (runtime.isBun) {
     const ffi = runtime.requireModule("bun:ffi") as typeof import("bun:ffi");
+    const { address } = windowsFfiAddressing(ffi);
+    // Win32 HANDLEs are plain integers; Bun's FFI rejects them in FFIType.ptr arguments, so
+    // handle and buffer arguments alike are declared u64 and routed through `address`.
+    const word = ffi.FFIType.u64;
     const kernel = ffi.dlopen("Kernel32.dll", {
       CreateFileW: {
         args: [
-          ffi.FFIType.ptr,
+          word,
           ffi.FFIType.u32,
           ffi.FFIType.u32,
-          ffi.FFIType.ptr,
+          word,
           ffi.FFIType.u32,
           ffi.FFIType.u32,
-          ffi.FFIType.ptr,
+          word,
         ],
-        returns: ffi.FFIType.ptr,
+        returns: word,
       },
-      CreateDirectoryW: { args: [ffi.FFIType.ptr, ffi.FFIType.ptr], returns: ffi.FFIType.i32 },
+      CreateDirectoryW: { args: [word, word], returns: ffi.FFIType.i32 },
       GetFileInformationByHandleEx: {
-        args: [ffi.FFIType.ptr, ffi.FFIType.i32, ffi.FFIType.ptr, ffi.FFIType.u32],
+        args: [word, ffi.FFIType.i32, word, ffi.FFIType.u32],
         returns: ffi.FFIType.i32,
       },
       ReadFile: {
-        args: [ffi.FFIType.ptr, ffi.FFIType.ptr, ffi.FFIType.u32, ffi.FFIType.ptr, ffi.FFIType.ptr],
+        args: [word, word, ffi.FFIType.u32, word, word],
         returns: ffi.FFIType.i32,
       },
       WriteFile: {
-        args: [ffi.FFIType.ptr, ffi.FFIType.ptr, ffi.FFIType.u32, ffi.FFIType.ptr, ffi.FFIType.ptr],
+        args: [word, word, ffi.FFIType.u32, word, word],
         returns: ffi.FFIType.i32,
       },
-      FlushFileBuffers: { args: [ffi.FFIType.ptr], returns: ffi.FFIType.i32 },
+      FlushFileBuffers: { args: [word], returns: ffi.FFIType.i32 },
       SetFileInformationByHandle: {
-        args: [ffi.FFIType.ptr, ffi.FFIType.i32, ffi.FFIType.ptr, ffi.FFIType.u32],
+        args: [word, ffi.FFIType.i32, word, ffi.FFIType.u32],
         returns: ffi.FFIType.i32,
       },
-      CloseHandle: { args: [ffi.FFIType.ptr], returns: ffi.FFIType.i32 },
+      CloseHandle: { args: [word], returns: ffi.FFIType.i32 },
       GetLastError: { args: [], returns: ffi.FFIType.u32 },
     });
     return {
       invalidHandle: 0xffff_ffff_ffff_ffffn,
       createFile: (path, access, share, security, creation, flags, template) =>
         kernel.symbols.CreateFileW(
-          path,
+          address(path),
           access,
           share,
-          security as Buffer | null,
+          address(security),
           creation,
           flags,
-          template,
+          address(template),
         ) as bigint,
       createDirectory: (path, security) =>
-        kernel.symbols.CreateDirectoryW(path, security as Buffer | null),
+        kernel.symbols.CreateDirectoryW(address(path), address(security)),
       fileInfo: (handle, kind, output, bytes) =>
-        kernel.symbols.GetFileInformationByHandleEx(handle, kind, output, bytes),
+        kernel.symbols.GetFileInformationByHandleEx(address(handle), kind, address(output), bytes),
       readFile: (handle, output, bytes, read, overlapped) => {
         const readOut = new Uint32Array(1);
-        const result = kernel.symbols.ReadFile(handle, output, bytes, readOut, overlapped);
+        const result = kernel.symbols.ReadFile(
+          address(handle),
+          address(output),
+          bytes,
+          address(readOut),
+          address(overlapped),
+        );
         read[0] = readOut[0] ?? 0;
         return result;
       },
       writeFile: (handle, input, bytes, written, overlapped) => {
         const writtenOut = new Uint32Array(1);
-        const result = kernel.symbols.WriteFile(handle, input, bytes, writtenOut, overlapped);
+        const result = kernel.symbols.WriteFile(
+          address(handle),
+          address(input),
+          bytes,
+          address(writtenOut),
+          address(overlapped),
+        );
         written[0] = writtenOut[0] ?? 0;
         return result;
       },
-      flushFile: (handle) => kernel.symbols.FlushFileBuffers(handle),
+      flushFile: (handle) => kernel.symbols.FlushFileBuffers(address(handle)),
       setFileInfo: (handle, kind, input, bytes) =>
-        kernel.symbols.SetFileInformationByHandle(handle, kind, input, bytes),
-      closeHandle: (handle) => kernel.symbols.CloseHandle(handle),
+        kernel.symbols.SetFileInformationByHandle(address(handle), kind, address(input), bytes),
+      closeHandle: (handle) => kernel.symbols.CloseHandle(address(handle)),
       lastError: () => kernel.symbols.GetLastError(),
     };
   }

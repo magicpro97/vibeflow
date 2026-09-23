@@ -12,36 +12,57 @@ const initializeWindowsJob = () => {
   if (process.platform !== IDENTITY.KIND.WINDOWS) return null;
   const ffi = typeof process.versions.bun === "string" ? require("bun:ffi") : null;
   const koffi = ffi ? null : require("koffi");
+  // Win32 HANDLEs arrive as plain integers and Bun's FFI refuses to coerce an integer into a
+  // ptr argument ("Unable to convert N to a pointer"), so handles and buffers alike are declared
+  // u64 here and every value is passed through ffiAddress below.
+  const ffiWord = ffi ? ffi.FFIType.u64 : null;
+  const ffiAddress = (value) => {
+    if (value === null || value === undefined) return 0n;
+    if (typeof value === "bigint") return value;
+    if (typeof value === "number") return BigInt(value);
+    return BigInt(ffi.ptr(value));
+  };
   const bunKernel = ffi
     ? ffi.dlopen("Kernel32.dll", {
-        CreateJobObjectW: { args: [ffi.FFIType.ptr, ffi.FFIType.ptr], returns: ffi.FFIType.ptr },
+        CreateJobObjectW: { args: [ffiWord, ffiWord], returns: ffiWord },
         SetInformationJobObject: {
-          args: [ffi.FFIType.ptr, ffi.FFIType.i32, ffi.FFIType.ptr, ffi.FFIType.u32],
+          args: [ffiWord, ffi.FFIType.i32, ffiWord, ffi.FFIType.u32],
           returns: ffi.FFIType.i32,
         },
-        AssignProcessToJobObject: { args: [ffi.FFIType.ptr, ffi.FFIType.ptr], returns: ffi.FFIType.i32 },
+        AssignProcessToJobObject: { args: [ffiWord, ffiWord], returns: ffi.FFIType.i32 },
         QueryInformationJobObject: {
-          args: [ffi.FFIType.ptr, ffi.FFIType.i32, ffi.FFIType.ptr, ffi.FFIType.u32, ffi.FFIType.ptr],
+          args: [ffiWord, ffi.FFIType.i32, ffiWord, ffi.FFIType.u32, ffiWord],
           returns: ffi.FFIType.i32,
         },
-        GetCurrentProcess: { args: [], returns: ffi.FFIType.ptr },
-        GetWindowsDirectoryW: { args: [ffi.FFIType.ptr, ffi.FFIType.u32], returns: ffi.FFIType.u32 },
+        GetCurrentProcess: { args: [], returns: ffiWord },
+        GetWindowsDirectoryW: { args: [ffiWord, ffi.FFIType.u32], returns: ffi.FFIType.u32 },
       })
     : undefined;
   const koffiKernel = ffi ? undefined : koffi.load("Kernel32.dll");
   const kernel = ffi ? bunKernel : koffiKernel;
   const api = ffi
     ? {
-        createJobObject: () => kernel.symbols.CreateJobObjectW(null, null),
+        createJobObject: () => kernel.symbols.CreateJobObjectW(0n, 0n),
         setJobInformation: (handle, kind, limits, bytes) =>
-          kernel.symbols.SetInformationJobObject(handle, kind, limits, bytes),
+          kernel.symbols.SetInformationJobObject(
+            ffiAddress(handle),
+            kind,
+            ffiAddress(limits),
+            bytes,
+          ),
         assignProcessToJob: (job, process) =>
-          kernel.symbols.AssignProcessToJobObject(job, process),
+          kernel.symbols.AssignProcessToJobObject(ffiAddress(job), ffiAddress(process)),
         queryJobInformation: (handle, kind, bytes, length) =>
-          kernel.symbols.QueryInformationJobObject(handle, kind, bytes, length, null),
+          kernel.symbols.QueryInformationJobObject(
+            ffiAddress(handle),
+            kind,
+            ffiAddress(bytes),
+            length,
+            0n,
+          ),
         getCurrentProcess: () => kernel.symbols.GetCurrentProcess(),
         getWindowsDirectory: (buffer, chars) =>
-          kernel.symbols.GetWindowsDirectoryW(buffer, chars),
+          kernel.symbols.GetWindowsDirectoryW(ffiAddress(buffer), chars),
       }
     : {
         createJobObject: () => kernel.func("void * CreateJobObjectW(void *, void *)")(null, null),

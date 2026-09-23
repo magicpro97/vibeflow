@@ -10,10 +10,10 @@ import {
   privateFileBytes,
 } from "../../durability/index.js";
 import type { ProcessLock } from "../../durability/index.js";
-import { syncDirectory } from "../../durability/posix-fs-semantics.js";
 import { withLockedParent } from "../../durability/lock.js";
 import { assertPinnedDirectory, renameAt, unlinkAt } from "../../durability/native.js";
 import { readPrivateFileAt } from "../../durability/path.js";
+import { syncDirectory } from "../../durability/posix-fs-semantics.js";
 import { readRecoveryBootstrapJournalBytes } from "./bootstrap-journal.js";
 import { AUTHORITY_REPAIR_LIMIT, RECOVERY_BOOTSTRAP_ID_PREFIX } from "./contract.js";
 import { recoveryBootstrapPaths } from "./paths.js";

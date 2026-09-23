@@ -11,6 +11,7 @@ import {
   native,
   syscallFailure,
 } from "./native-runtime.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
 import {
   type WindowsKernelLock,
@@ -18,7 +19,6 @@ import {
   createWindowsKernelLockProvider,
   loadWindowsRecordNativeBindings,
 } from "./windows-kernel-lock.js";
-import { syncDirectory } from "./posix-fs-semantics.js";
 
 export interface PinnedDirectory {
   fd: number;

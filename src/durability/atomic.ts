@@ -20,8 +20,8 @@ import {
   tryLinkAt,
   unlinkAt,
 } from "./native.js";
-import { syncDirectory } from "./posix-fs-semantics.js";
 import { createPrivateFileAt, openExistingPrivateFileAt, readPrivateFileAt } from "./path.js";
+import { syncDirectory } from "./posix-fs-semantics.js";
 
 export interface StoredObject {
   digest: string;

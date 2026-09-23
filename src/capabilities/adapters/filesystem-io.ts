@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import { dirname, parse, relative, resolve, sep } from "node:path";
 import { canonicalJsonBytes } from "../../durability/index.js";
 import { errnoIs, native, syscallFailure } from "../../durability/native-runtime.js";
-import { syncDirectory } from "../../durability/posix-fs-semantics.js";
 import {
   type PinnedDirectory,
   assertPinnedDirectory,
@@ -14,6 +13,7 @@ import {
   tryOpenAt,
   unlinkAt,
 } from "../../durability/native.js";
+import { syncDirectory } from "../../durability/posix-fs-semantics.js";
 import { CapabilityValidationError } from "../wire/primitives.js";
 import type { CapabilityPrivateJsonV1 } from "./types.js";
 

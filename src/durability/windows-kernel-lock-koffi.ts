@@ -1,5 +1,5 @@
-import type { WindowsRecordNativeBindings } from "./windows-kernel-lock.js";
 import type { WindowsFfiRuntime } from "./windows-ffi-runtime.js";
+import type { WindowsRecordNativeBindings } from "./windows-kernel-lock.js";
 import type { WindowsVolumeNativeBindings } from "./windows-volume-authority.js";
 
 export function loadWindowsRecordNativeBindingsKoffi(
