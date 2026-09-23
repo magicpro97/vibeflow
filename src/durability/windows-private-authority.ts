@@ -31,6 +31,12 @@ export const WINDOWS_PRIVATE_SECURITY = Object.freeze({
   ACL_HEADER_BYTES: 8,
   ACE_HEADER_BYTES: 4,
   ACCESS_ALLOWED_SID_OFFSET: 8,
+  WRITE_DAC: 0x00040000,
+  GENERIC_READ: 0x80000000,
+  OPEN_EXISTING: 3,
+  FILE_FLAG_OPEN_REPARSE_POINT: 0x00200000,
+  FILE_FLAG_BACKUP_SEMANTICS: 0x02000000,
+  FILE_ATTRIBUTE_NORMAL: 0x80,
 } as const);
 
 export interface WindowsPrivateAce {
@@ -57,11 +63,22 @@ export interface WindowsPrivateAuthorityBindings {
   currentUser(): { sid: Buffer; sddl: string };
   createSecurity(sddl: string): WindowsCreationSecurity;
   inspect(handle: bigint): WindowsPrivateDescriptorView;
+  /**
+   * Apply a new DACL (derived from sddl) to an existing path in-place.
+   *
+   * By path, not by handle: SetSecurityInfo on a CreateFileW handle opened with
+   * READ_CONTROL|WRITE_DAC returns 0 (success) and leaves the DACL untouched. Measured on
+   * Windows 11 — the inherited SYSTEM/Administrators/owner triple survived the call, while
+   * SetNamedSecurityInfoW with the identical security descriptor replaced it correctly.
+   */
+  migrateDacl(path: string, sddl: string): void;
 }
 
 export interface WindowsPrivateAuthority {
   withCreationSecurity<T>(kind: WindowsAuthorityPathKind, create: (attributes: unknown) => T): T;
   verifyHandle(handle: bigint, kind: WindowsAuthorityPathKind): void;
+  /** Reset an existing file/dir's DACL in-place to owner-only + SE_DACL_PROTECTED. */
+  migrateToOwnerOnly(path: string, kind: WindowsAuthorityPathKind): void;
 }
 
 export interface WindowsSecurityNativeRuntime {
@@ -92,6 +109,15 @@ export interface WindowsSecurityNativeRuntime {
     dacl: unknown[],
     sacl: unknown[],
     descriptor: unknown[],
+  ): number;
+  setNamedSecurityInfo(
+    path: Buffer,
+    type: number,
+    info: number,
+    owner: unknown,
+    group: unknown,
+    dacl: unknown,
+    sacl: unknown,
   ): number;
   descriptorControl(descriptor: unknown, control: number[], revision: number[]): number;
   descriptorDacl(
@@ -143,6 +169,9 @@ export function createWindowsPrivateAuthority(
         !ace.sid.equals(user.sid)
       )
         durabilityError("unsafe_path", "permissive Windows authority DACL rejected");
+    },
+    migrateToOwnerOnly(path, kind) {
+      bindings.migrateDacl(path, descriptorSddl(user.sddl, kind));
     },
   };
 }
@@ -237,6 +266,47 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       release: () => runCleanups([attributes.release, () => native.localFree(descriptor[0])]),
     };
   };
+  const migrateDacl = (path: string, sddl: string): void => {
+    const descriptor: unknown[] = [null];
+    if (
+      !native.convertDescriptor(
+        Buffer.from(`${sddl}\0`, "utf16le"),
+        WINDOWS_PRIVATE_SECURITY.SDDL_REVISION,
+        descriptor,
+        [0],
+      )
+    )
+      failed("ConvertStringSecurityDescriptorToSecurityDescriptorW(migrate)");
+    try {
+      const present = [0];
+      const dacl: unknown[] = [null];
+      const defaulted = [0];
+      if (
+        !native.descriptorDacl(descriptor[0], present, dacl, defaulted) ||
+        !present[0] ||
+        !dacl[0]
+      )
+        failed("GetSecurityDescriptorDacl(migrate)");
+      const code = native.setNamedSecurityInfo(
+        Buffer.from(`${path}\0`, "utf16le"),
+        WINDOWS_PRIVATE_SECURITY.SE_FILE_OBJECT,
+        // >>> 0: PROTECTED_DACL_INFORMATION is 0x80000000, so the bitwise OR yields a negative
+        // int32 in JS. Passing that to a u32 FFI parameter reaches Windows as garbage flags and
+        // the call fails with ERROR_ACCESS_DENIED(5).
+        (WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
+          WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
+          0,
+        null,
+        null,
+        dacl[0],
+        null,
+      );
+      if (code !== 0)
+        durabilityError("unsafe_path", `SetNamedSecurityInfoW failed with Windows error ${code}`);
+    } finally {
+      native.localFree(descriptor[0]);
+    }
+  };
   const inspect = (handle: bigint): WindowsPrivateDescriptorView => {
     const owner: unknown[] = [null];
     const dacl: unknown[] = [null];
@@ -312,7 +382,7 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       };
     }, [() => native.localFree(descriptor[0])]);
   };
-  return { currentUser, createSecurity, inspect };
+  return { currentUser, createSecurity, inspect, migrateDacl };
 }
 
 export function loadWindowsPrivateAuthorityBindings(

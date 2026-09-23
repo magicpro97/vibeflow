@@ -215,6 +215,7 @@ function nativeFixture() {
       calls.security.push([handle, kind]);
       if (verifyFailure) throw verifyFailure;
     },
+    migrateToOwnerOnly: () => undefined,
   };
   return {
     authority: createNativeWindowsPathAuthority(binding, privacy),

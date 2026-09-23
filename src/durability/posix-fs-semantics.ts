@@ -7,8 +7,15 @@
  */
 import * as fs from "node:fs";
 import { RUNTIME_PLATFORM } from "./process-identity-contract.js";
+import { WINDOWS_AUTHORITY_PATH_KIND, windowsVerifyPathAcl } from "./windows-acl-ops.js";
+import type { WindowsAuthorityPathKind } from "./windows-private-authority.js";
 
 const isWindows = (): boolean => process.platform === RUNTIME_PLATFORM.WINDOWS;
+
+// The ACL policy differs between the two kinds (a directory descriptor carries inheritance ACEs a
+// file never has), so derive it from the stat the caller already took instead of guessing.
+const pathKindOf = (stat: fs.Stats): WindowsAuthorityPathKind =>
+  stat.isDirectory() ? WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY : WINDOWS_AUTHORITY_PATH_KIND.FILE;
 
 /**
  * fsync a DIRECTORY descriptor to flush its entries.
@@ -32,33 +39,30 @@ export function syncDirectory(fd: number): void {
 /**
  * Whether a stat carries exactly the expected POSIX permission bits.
  *
- * Windows does not implement POSIX mode bits: a directory created with mode 0o700 reports 0o666, so
- * the compare can never hold and privacy is instead an ACL property of the object. This returns
- * true there, which makes the mode term vacuous rather than falsely failing. The surrounding checks
- * that still apply on Windows — symlink-component rejection, O_NOFOLLOW opens, and the
- * fstat-vs-lstat dev/ino identity match — continue to do the real work.
- *
- * ponytail: vacuous on Windows — upgrade by asserting the object's ACL (a private-authority check)
- * once that layer is reachable from these call sites.
+ * On Windows, POSIX mode bits do not apply, so privacy is enforced by verifying the path's DACL
+ * against the owner-only policy instead. The path is required rather than optional: an optional
+ * one makes every caller that omits it silently return true, which is a trust-boundary check that
+ * passes without checking anything.
  *
  * Pass the caller's existing mask result and expectation; masks differ per call site (0o777 vs
  * 0o7777) and are deliberately not normalized here.
  */
-export function hasPrivateMode(stat: fs.Stats, mask: number, expected: number): boolean {
-  if (isWindows()) return true;
-  return (stat.mode & mask) === expected;
+export function hasPrivateMode(
+  stat: fs.Stats,
+  mask: number,
+  expected: number,
+  path: string,
+): boolean {
+  if (!isWindows()) return (stat.mode & mask) === expected;
+  return windowsVerifyPathAcl(path, pathKindOf(stat));
 }
 
 /**
  * Whether a stat is free of group/other write permission.
  *
- * Same Windows caveat as hasPrivateMode: POSIX mode bits do not exist there (every directory
- * reports 0o666), so the check is vacuous on Windows and the object's ACL is what actually
- * restricts writers.
- *
- * ponytail: vacuous on Windows — upgrade by asserting the ACL once that layer is reachable here.
+ * On Windows this verifies the path's DACL, for the same reason as hasPrivateMode.
  */
-export function isNotGroupOrWorldWritable(stat: fs.Stats): boolean {
-  if (isWindows()) return true;
-  return (stat.mode & 0o022) === 0;
+export function isNotGroupOrWorldWritable(stat: fs.Stats, path: string): boolean {
+  if (!isWindows()) return (stat.mode & 0o022) === 0;
+  return windowsVerifyPathAcl(path, pathKindOf(stat));
 }

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { join } from "node:path";
 import type { NativeBindings } from "./native-runtime.js";
+import { WINDOWS_AUTHORITY_PATH_KIND, windowsApplyOwnerAcl } from "./windows-acl-ops.js";
 
 /**
  * Windows-specific NativeBindings backed by node:fs with a module-level fd→path registry.
@@ -78,11 +79,21 @@ export function loadWindowsBindings(): NativeBindings {
         return -1;
       }
     },
-    fchmodat(_directoryFd, _name, _mode, _flags) {
-      // ponytail: no-op on Windows — privacy lives in the ACL, not mode bits (B2).
-      // Upgrade: set DACL via SetNamedSecurityInfoW when ACL enforcement is required.
-      win32SetErrno(0);
-      return 0;
+    fchmodat(directoryFd, name, _mode, _flags) {
+      const base = WIN32_FD_PATHS.get(directoryFd);
+      if (base === undefined) {
+        win32SetErrno(0);
+        return 0;
+      }
+      const target = join(base, name);
+      try {
+        windowsApplyOwnerAcl(target, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+        win32SetErrno(0);
+        return 0;
+      } catch {
+        win32SetErrno(13 /* EACCES */);
+        return -1;
+      }
     },
     renameat(fromFd, from, toFd, to) {
       const fromBase = WIN32_FD_PATHS.get(fromFd);

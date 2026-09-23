@@ -91,6 +91,23 @@ export function loadWindowsPrivateAuthorityKoffi(
     sacl: unknown[],
     descriptor: unknown[],
   ) => number;
+  const setNamedSecurityInfo = advapi.func("__stdcall", "SetNamedSecurityInfoW", "uint32_t", [
+    pointer,
+    "int",
+    "uint32_t",
+    pointer,
+    pointer,
+    pointer,
+    pointer,
+  ]) as (
+    path: Buffer,
+    type: number,
+    info: number,
+    owner: unknown,
+    group: unknown,
+    dacl: unknown,
+    sacl: unknown,
+  ) => number;
   const descriptorControl = advapi.func("__stdcall", "GetSecurityDescriptorControl", "int", [
     pointer,
     koffi.out(koffi.pointer("uint16_t")),
@@ -123,6 +140,7 @@ export function loadWindowsPrivateAuthorityKoffi(
     wideString: (text) => koffi.decode(text, "char16_t *") as string,
     convertDescriptor,
     getSecurityInfo,
+    setNamedSecurityInfo,
     descriptorControl,
     descriptorDacl,
     aclInfo,

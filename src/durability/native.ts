@@ -31,6 +31,7 @@ import {
   createWindowsKernelLockProvider,
   loadWindowsRecordNativeBindings,
 } from "./windows-kernel-lock.js";
+import { createWindowsPrivateAuthority } from "./windows-private-authority.js";
 
 export {
   type PinnedDirectory,
@@ -56,7 +57,10 @@ const OWNER = typeof process.geteuid === "function" ? process.geteuid() : undefi
 const WIN32_KERNEL_LOCKS: Map<number, WindowsKernelLock> = new Map();
 
 const getWinLockProvider = memoizedWindowsLockProvider(() =>
-  createWindowsKernelLockProvider(loadWindowsRecordNativeBindings(), undefined),
+  createWindowsKernelLockProvider(
+    loadWindowsRecordNativeBindings(),
+    createWindowsPrivateAuthority(),
+  ),
 );
 
 export function canonicalDurabilityPath(input: string): string {

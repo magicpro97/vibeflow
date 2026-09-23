@@ -38,6 +38,7 @@ function fixture(view: WindowsPrivateDescriptorView = descriptor()) {
       return { attributes: { private: true }, release: () => released++ };
     },
     inspect: () => view,
+    migrateDacl: () => undefined,
   };
   return { authority: createWindowsPrivateAuthority(bindings), sddls, released: () => released };
 }
@@ -94,6 +95,7 @@ describe("Windows private authority", () => {
         currentUser: () => ({ sid: Buffer.alloc(1), sddl: "invalid" }),
         createSecurity: () => ({ attributes: null, release: () => {} }),
         inspect: () => descriptor(),
+        migrateDacl: () => undefined,
       }),
     ).toThrow("token user SID is unavailable");
   });

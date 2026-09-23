@@ -1070,6 +1070,7 @@ describe("native Windows record adapters", () => {
         return create({ private: true });
       },
       verifyHandle: (handle, kind) => calls.push([handle, kind]),
+      migrateToOwnerOnly: () => undefined,
     };
     const lock = createWindowsKernelLockProvider(fixture.binding, privacy).tryAcquire("C:\\lock");
     expect(fixture.calls.create[0]?.[3]).toEqual({ private: true });

@@ -41,7 +41,7 @@ function pinnedParent(path: string): PinnedDirectory {
     if (
       !stat.isDirectory() ||
       (OWNER !== undefined && stat.uid !== OWNER) ||
-      !isNotGroupOrWorldWritable(stat)
+      !isNotGroupOrWorldWritable(stat, canonical)
     )
       throw new CapabilityValidationError("portable record parent is not owner-safe", canonical);
     const directory = { fd, path: canonical, dev: stat.dev, ino: stat.ino };
