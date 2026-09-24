@@ -119,7 +119,7 @@ export function openPrivateChildDirectoryReadOnly(
     if (
       !stat.isDirectory() ||
       !effectiveOwnerMatches(stat) ||
-      !hasPrivateMode(stat, 0o7777, 0o700, path)
+      !hasPrivateMode(stat, 0o7777, 0o700, path, fd)
     )
       unsafe();
     const directory = { fd, path, dev: stat.dev, ino: stat.ino };
@@ -167,7 +167,7 @@ function validateOpenedFile(
     !opened.isFile() ||
     !effectiveOwnerMatches(opened) ||
     opened.nlink !== 1 ||
-    !hasPrivateMode(opened, 0o7777, 0o600, path) ||
+    !hasPrivateMode(opened, 0o7777, 0o600, path, fd) ||
     (!allowEmpty && opened.size === 0) ||
     opened.size > maximum
   )
@@ -234,7 +234,7 @@ export function assertPrivateFileSnapshot(snapshot: PrivateFileSnapshotV1): void
       !observed.isFile() ||
       !effectiveOwnerMatches(observed) ||
       observed.nlink !== 1 ||
-      !hasPrivateMode(observed, 0o7777, 0o600, snapshot.path)
+      !hasPrivateMode(observed, 0o7777, 0o600, snapshot.path, observedFd)
     )
       unsafe();
   } finally {

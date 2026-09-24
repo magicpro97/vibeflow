@@ -145,14 +145,22 @@ See `docs/ENGINE-COMPAT.md` for adapter-specific resume contracts.
 
 POSIX mode bits do not exist on Windows, so durability paths prove privacy through their DACL
 instead: exactly one allow ACE for the current user, with `SE_DACL_PROTECTED` set so the three
-ACEs a path normally inherits (SYSTEM, Administrators, owner) cannot creep back in. Paths created
-before this policy are migrated in place on first use rather than rejected, so an existing install
-keeps working.
+ACEs a path normally inherits (SYSTEM, Administrators, owner) cannot creep back in, and the current
+user recorded as the owner — an elevated token otherwise leaves the objects it creates owned by its
+Administrators group. Paths created before this policy are migrated in place on first use rather
+than rejected, so an existing install keeps working.
 
 Three Win32 details this depends on, each measured rather than assumed:
 
-- Migration applies **by path** (`SetNamedSecurityInfoW`). `SetSecurityInfo` on a handle opened
-  with `READ_CONTROL|WRITE_DAC` returns `0` and leaves the DACL untouched.
+- Migration applies **through the object's handle** (`SetSecurityInfo` on a handle opened with
+  `WRITE_DAC | WRITE_OWNER`, flags coerced with `>>> 0`) and replaces the owner together with the
+  DACL: a DACL-only write leaves a path this process just created short of the policy under an
+  elevated token — that is the state the `windows-latest` `package-smoke` row failed on — while the
+  owner half needs `WRITE_OWNER` and, without `SeRestorePrivilege`, the token user as the new owner,
+  so it cannot take over an object the caller does not already command. Measured on Windows 11: with
+  `WRITE_DAC` the handle write sets the DACL, so the earlier note that it returns `0` and changes
+  nothing does not hold. A path-based `SetNamedSecurityInfoW` write is no longer used — a writer that
+  replaced the name would have had the descriptor land on its object instead of ours.
 - Any flag mask with bit 31 set (`PROTECTED_DACL_INFORMATION` is `0x80000000`) must be coerced
   with `>>> 0`; JS bitwise OR produces a negative int32 that reaches Win32 as garbage flags.
 - Opening a **directory** with `CreateFileW` requires `FILE_FLAG_BACKUP_SEMANTICS`, otherwise the

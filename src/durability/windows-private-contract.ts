@@ -150,12 +150,21 @@ export interface WindowsPrivateAuthorityBindings {
   createSecurity(sddl: string): WindowsCreationSecurity;
   inspect(handle: bigint): WindowsPrivateDescriptorView;
   /**
-   * Apply a new DACL (derived from sddl) to an existing path in-place.
+   * Replace an existing object's owner and DACL (both derived from sddl) in place, through the
+   * handle that names it.
    *
-   * By path, not by handle: SetSecurityInfo on a CreateFileW handle opened with
-   * READ_CONTROL|WRITE_DAC returns 0 (success) and leaves the DACL untouched. Measured on
-   * Windows 11 — the inherited SYSTEM/Administrators/owner triple survived the call, while
-   * SetNamedSecurityInfoW with the identical security descriptor replaced it correctly.
+   * By handle, not by path: the descriptor lands on the object this handle refers to, so a name
+   * that is replaced while the handle is held cannot receive the write — one measure that closed
+   * the migration window (issue #817). SetSecurityInfo requires WRITE_DAC on the handle for the
+   * DACL half and WRITE_OWNER for the owner half: with WRITE_DAC the call returns 0 and the DACL is
+   * replaced, and without it (a READ_CONTROL-only handle) it fails with ERROR_ACCESS_DENIED(5).
+   * Measured on Windows 11 — see test/durability/windows-acl-identity.test.ts.
+   *
+   * The owner is part of what a strict verdict checks: an elevated token leaves the objects it
+   * creates owned by its Administrators group, so a DACL-only write would leave the object one
+   * field short of the policy and the caller refusing its own files. Windows only accepts the write
+   * for an object the caller already commands (WRITE_OWNER, and the token user as the new owner
+   * without SeRestorePrivilege), so a foreign object stays refused.
    */
-  migrateDacl(path: string, sddl: string): void;
+  migrateHandle(handle: bigint, sddl: string): void;
 }

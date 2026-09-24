@@ -1,17 +1,17 @@
 import * as fs from "node:fs";
 import { join } from "node:path";
 import type { NativeBindings } from "./native-runtime.js";
-import {
-  WINDOWS_AUTHORITY_PATH_KIND,
-  type WindowsAclOpsOptions,
-  windowsApplyOwnerAcl,
-} from "./windows-acl-ops.js";
 
 /**
  * Windows-specific NativeBindings backed by node:fs with a module-level fd→path registry.
+ *
  * openat/mkdirat/unlinkat use the full path looked up from the registry;
  * flock is intentionally a no-op here — advisory locking on Windows is done in
  * tryAdvisoryLock/releaseAdvisoryLock via the Windows kernel lock provider.
+ *
+ * fchmodat fails closed: there are no mode bits to set on Windows, and the ACL write that used to
+ * stand in for them could not be tied to a caller identity from its arguments (issue #817); the
+ * durable leaf repair is repairWindowsLeafAcl in native-windows-ops.ts.
  *
  * ponytail: dir fsync (B3) and path reverification (B5) are skipped on win32.
  * FlushFileBuffers on a directory handle is invalid on NTFS; GetFinalPathNameByHandleW
@@ -45,11 +45,8 @@ export function win32LastErrnoValue(): number {
   return win32LastErrno;
 }
 
-/**
- * @param acl Injection seam for the Win32 ACL machinery behind fchmodat. Production callers omit
- *   it; a test supplies fakes so both the applied and the rejected branch run on any platform.
- */
-export function loadWindowsBindings(acl: WindowsAclOpsOptions = {}): NativeBindings {
+/** Windows bindings for the native durability runtime. fchmodat always fails (see the module doc). */
+export function loadWindowsBindings(): NativeBindings {
   // ponytail: no-op flock — advisory locking is handled via WindowsKernelLockProvider
   // in tryAdvisoryLock/releaseAdvisoryLock in native.ts.
   return {
@@ -96,15 +93,15 @@ export function loadWindowsBindings(acl: WindowsAclOpsOptions = {}): NativeBindi
         win32SetErrno(2 /* ENOENT */);
         return -1;
       }
-      const target = join(base, name);
-      try {
-        windowsApplyOwnerAcl(target, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, acl);
-        win32SetErrno(0);
-        return 0;
-      } catch {
-        win32SetErrno(13 /* EACCES */);
-        return -1;
-      }
+      // Refused, not silently ignored: fchmodat is a mode-bit call, mode bits do not exist on
+      // Windows, and the ACL write that used to stand in for them cannot be tied to any caller
+      // identity from these arguments — the leaf would be whatever the ACL layer happened to open
+      // under `name`, so a writer that replaced the leaf could have it rewritten (issue #817). The
+      // durable path secures a leaf through repairWindowsLeafAcl, which binds the write to the
+      // identity of the directory the caller opened; a caller that reaches this shim instead gets
+      // EACCES rather than an ACL it cannot account for.
+      win32SetErrno(13 /* EACCES */);
+      return -1;
     },
     renameat(fromFd, from, toFd, to) {
       const fromBase = WIN32_FD_PATHS.get(fromFd);
