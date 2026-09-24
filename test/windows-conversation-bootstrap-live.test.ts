@@ -24,6 +24,14 @@ const LIVE_WINDOWS_ENV = "VF_REQUIRE_LIVE_WINDOWS";
 const BOOT_TIMEOUT_MS = 60_000;
 const repoRoot = dirname(dirname(fileURLToPath(new URL(import.meta.url))));
 const cliEntry = join(repoRoot, "dist", "cli.js");
+/**
+ * The shipped Windows command is `bin/vf.mjs`, which launches the artifact with Node
+ * (`bin/vf.mjs:9`). This suite runs under Bun, so spawning `process.execPath` would exercise
+ * `bun dist/cli.js` and stay green through a Node-only break in the real command. Resolve Node
+ * from PATH — the Windows matrix installs it, and the throw below fails the gate when it is
+ * missing rather than silently falling back to Bun.
+ */
+const nodeExecPath = Bun.which("node");
 const liveWindowsTest = process.platform === RUNTIME_PLATFORM.WINDOWS ? test : test.skip;
 
 if (process.env[LIVE_WINDOWS_ENV] === "1" && process.platform !== RUNTIME_PLATFORM.WINDOWS) {
@@ -39,7 +47,10 @@ interface HomeUi {
 /** Start the built CLI in `cwd` and resolve once it prints the bound Home URL. */
 function startHomeUi(cwd: string): Promise<HomeUi> {
   return new Promise<HomeUi>((resolve, reject) => {
-    const child = spawn(process.execPath, [cliEntry, "ui", "--port", "0", "--no-open"], {
+    if (nodeExecPath === null) {
+      throw new Error("node is not on PATH; the shipped bin/vf.mjs launches dist/cli.js with Node");
+    }
+    const child = spawn(nodeExecPath, [cliEntry, "ui", "--port", "0", "--no-open"], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -48,12 +59,11 @@ function startHomeUi(cwd: string): Promise<HomeUi> {
     let stderr = "";
     let settled = false;
     const transcript = (): string => `${stdout}\n${stderr}`;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill();
-      reject(new Error(`vf ui did not boot within ${BOOT_TIMEOUT_MS}ms:\n${transcript()}`));
-    }, BOOT_TIMEOUT_MS);
+    /**
+     * Kill the child if it is alive and resolve only once it has actually exited. Every teardown
+     * path — the normal `stop()` and the boot timeout — awaits this, so no Windows orphan can
+     * outlive the test and keep touching the workspace the caller deletes in its `finally`.
+     */
     const stop = async (): Promise<void> => {
       if (child.exitCode === null && child.signalCode === null) {
         const exited = new Promise<void>((done) => child.once("exit", () => done()));
@@ -61,6 +71,12 @@ function startHomeUi(cwd: string): Promise<HomeUi> {
         await exited;
       }
     };
+    const timer = setTimeout(async () => {
+      if (settled) return;
+      settled = true;
+      await stop();
+      reject(new Error(`vf ui did not boot within ${BOOT_TIMEOUT_MS}ms:\n${transcript()}`));
+    }, BOOT_TIMEOUT_MS);
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
       const match = /http:\/\/127\.0\.0\.1:(\d+)/.exec(stdout);
