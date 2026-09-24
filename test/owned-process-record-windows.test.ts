@@ -40,6 +40,7 @@ import {
 } from "../src/dispatch/owned-process-record-windows.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
+  type WindowsAuthorityPathKind,
   type WindowsPrivateAuthority,
 } from "../src/dispatch/windows-private-authority.js";
 import { canonicalJsonBytes } from "../src/durability/canonical.js";
@@ -1039,7 +1040,15 @@ describe("native Windows record adapters", () => {
     expect(fixture.calls.create[0]?.[2]).toBe(
       WINDOWS_NATIVE_RECORD.FILE_SHARE_READ | WINDOWS_NATIVE_RECORD.FILE_SHARE_WRITE,
     );
-    expect(fixture.calls.create[0]?.[1]).toBe(3_221_225_472);
+    // GENERIC_READ|GENERIC_WRITE|WRITE_DAC: the repair writes the DACL through this handle, and
+    // SetSecurityInfo refuses a handle without WRITE_DAC with ERROR_ACCESS_DENIED (issue #817).
+    // >>> 0 because the constant table carries GENERIC_READ as the signed 0x80000000.
+    expect(fixture.calls.create[0]?.[1]).toBe(
+      (WINDOWS_NATIVE_RECORD.GENERIC_READ |
+        WINDOWS_NATIVE_RECORD.GENERIC_WRITE |
+        WINDOWS_NATIVE_RECORD.WRITE_DAC) >>>
+        0,
+    );
     expect(fixture.calls.create[0]?.[5]).toBe(2_149_580_928);
     expect(fixture.calls.lock[0]?.slice(1, 5)).toEqual([
       WINDOWS_NATIVE_RECORD.LOCKFILE_EXCLUSIVE_LOCK |
@@ -1079,7 +1088,7 @@ describe("native Windows record adapters", () => {
       currentUserId: () => Buffer.alloc(0),
       verifyNoForeignWrite: (handle) => calls.push(handle),
       verifyHandle: () => undefined,
-      migrateToOwnerOnly: () => undefined,
+      migrateHandle: () => undefined,
     };
     const lock = createWindowsKernelLockProvider(fixture.binding, privacy).tryAcquire("C:\\lock");
     expect(fixture.calls.create[0]?.[3]).toEqual({ private: true });
@@ -1097,7 +1106,7 @@ describe("native Windows record adapters", () => {
   });
 
   test("migrates a lock file that grants write to another principal, then re-verifies it", () => {
-    const migrated: string[] = [];
+    const migrated: [bigint, WindowsAuthorityPathKind][] = [];
     let verifications = 0;
     const stale: WindowsPrivateAuthority = {
       inspect: () => ({
@@ -1110,18 +1119,20 @@ describe("native Windows record adapters", () => {
       withCreationSecurity: (_kind, create) => create({ private: true }),
       verifyNoForeignWrite: () => {
         verifications += 1;
-        // The handle opened at creation grants write to another principal; the in-place migration
-        // is what makes the re-opened handle acceptable.
+        // The handle opened at creation grants write to another principal; the migration written
+        // through that very handle is what makes the re-opened handle acceptable.
         if (verifications === 1) throw new Error("permissive Windows authority DACL rejected");
       },
       verifyHandle: () => undefined,
       currentUserId: () => Buffer.alloc(0),
-      migrateToOwnerOnly: (path, kind) => migrated.push(`${path}:${kind}`),
+      migrateHandle: (handle, kind) => migrated.push([handle, kind]),
     };
     const lock = createWindowsKernelLockProvider(nativeFixture().binding, stale).tryAcquire(
       "C:\\lock",
     );
-    expect(migrated).toEqual([`C:\\lock:${WINDOWS_AUTHORITY_PATH_KIND.FILE}`]);
+    // Through the handle the call opened, never through the path: the descriptor cannot be written
+    // anywhere but the object this acquisition is about (issue #817).
+    expect(migrated).toEqual([[41n, WINDOWS_AUTHORITY_PATH_KIND.FILE]]);
     expect(verifications).toBe(2);
     lock?.release();
   });
@@ -1141,7 +1152,7 @@ describe("native Windows record adapters", () => {
       },
       currentUserId: () => Buffer.alloc(0),
       verifyHandle: () => undefined,
-      migrateToOwnerOnly: () => undefined,
+      migrateHandle: () => undefined,
     };
     const fixture = nativeFixture();
     expect(() =>
@@ -1149,6 +1160,73 @@ describe("native Windows record adapters", () => {
     ).toThrow("permissive Windows authority DACL rejected");
     // Both handles — the creation one and the re-opened one — are closed on the way out.
     expect(fixture.calls.close).toBe(2);
+  });
+
+  test("refuses a lock file whose identity changed across the migration window", () => {
+    const fixture = nativeFixture();
+    const migrated: bigint[] = [];
+    let verifications = 0;
+    const swapped: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
+      withCreationSecurity: (_kind, create) => create({ private: true }),
+      verifyNoForeignWrite: () => {
+        verifications += 1;
+        if (verifications === 1) throw new Error("permissive Windows authority DACL rejected");
+      },
+      verifyHandle: () => undefined,
+      currentUserId: () => Buffer.alloc(0),
+      // The rewrite goes through the handle the call opened, so it lands on that object no matter
+      // what holds the name; the substitute a writer installs meanwhile is what the reopen sees, and
+      // the identity comparison is what refuses it.
+      migrateHandle: (handle) => {
+        migrated.push(handle);
+        fixture.setIdentity(2);
+      },
+    };
+    expect(() =>
+      createWindowsKernelLockProvider(fixture.binding, swapped).tryAcquire("C:\\lock"),
+    ).toThrow("permissive Windows authority DACL rejected");
+    // The one repair went to the handle this acquisition opened, and the substitute the reopen found
+    // — which was never rewritten — is rejected on identity, not verified, and not locked.
+    expect(migrated).toEqual([41n]);
+    expect(verifications).toBe(1);
+    expect(fixture.calls.close).toBe(2);
+    expect(fixture.calls.lock).toHaveLength(0);
+  });
+
+  test("refuses to repair a lock file it cannot pin an identity to", () => {
+    const fixture = nativeFixture();
+    const migrated: bigint[] = [];
+    const unidentifiable: WindowsPrivateAuthority = {
+      inspect: () => ({
+        control: 0,
+        owner: Buffer.alloc(0),
+        daclPresent: true,
+        daclDefaulted: false,
+        aces: [],
+      }),
+      withCreationSecurity: (_kind, create) => create({ private: true }),
+      verifyNoForeignWrite: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      verifyHandle: () => undefined,
+      currentUserId: () => Buffer.alloc(0),
+      migrateHandle: (handle) => migrated.push(handle),
+    };
+    // No FileIdInfo for the handle this call opened, so the rewrite cannot be tied to it: refuse to
+    // repair rather than rewrite an object the call cannot show it opened.
+    fixture.setResult("info", 0);
+    expect(() =>
+      createWindowsKernelLockProvider(fixture.binding, unidentifiable).tryAcquire("C:\\lock"),
+    ).toThrow("permissive Windows authority DACL rejected");
+    expect(migrated).toEqual([]);
+    expect(fixture.calls.close).toBe(1);
   });
 
   test("returns busy only for ERROR_LOCK_VIOLATION and closes the HANDLE", () => {

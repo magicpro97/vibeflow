@@ -18,13 +18,44 @@ import {
 } from "../../src/durability/posix-fs-semantics.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
-  windowsApplyOwnerAcl,
+  descriptorIdentity,
   windowsEnsurePrivateAcl,
   windowsHasNoForeignWrite,
   windowsVerifyPathAcl,
 } from "../../src/durability/windows-acl-ops.js";
+import type { WindowsAuthorityPathKind } from "../../src/durability/windows-private-authority.js";
 
 const isWindows = process.platform === "win32";
+// The descriptor the ACL verdict is bound to. The mode-bit branch never reads it, so off win32 only
+// a placeholder is needed; the win32-only cases open a real one.
+const UNUSED_DESCRIPTOR = -1;
+
+/** Migrate the object at `path` the way production does: bound to that object's own identity. */
+function migrate(path: string, kind: WindowsAuthorityPathKind): boolean {
+  const fd = fs.openSync(
+    path,
+    fs.constants.O_RDONLY |
+      (kind === WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY ? fs.constants.O_DIRECTORY : 0),
+  );
+  try {
+    return windowsEnsurePrivateAcl(path, kind, { identity: descriptorIdentity(fd) });
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Whether this process can still open `path` at all. The synthesised root-only DACL grants this
+ * process nothing, so this answers whether the token holds one of the two root-equivalent grants.
+ */
+function opens(path: string): boolean {
+  try {
+    fs.closeSync(fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function scratch(): { dir: string; file: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(join(tmpdir(), "vf-acl-test-"));
@@ -61,23 +92,43 @@ describe("windows owner-only ACL", () => {
     const { dir, cleanup } = scratch();
     try {
       // The strongest form of the standard shape: inheritance stripped and only the two
-      // root-equivalent grants a profile directory propagates — no ACE for the owner and no
+      // root-equivalent grants a profile directory propagates — no ACE for this process and no
       // SE_DACL_PROTECTED. Verification must repair it in place rather than reject it (#803).
-      execFileSync(
-        "icacls",
-        [
-          dir,
-          "/inheritance:r",
-          "/grant",
-          "*S-1-5-18:(OI)(CI)F",
-          "/grant",
-          "*S-1-5-32-544:(OI)(CI)F",
-        ],
-        { stdio: "ignore" },
-      );
-      expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
-      expect(windowsEnsurePrivateAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
-      expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
+      //
+      // The descriptor is opened first, because since #817 the repair is bound to the object the
+      // caller stat'ed and the synthesised DACL may leave this process no way to open it again. Its
+      // only grants are the two root-equivalent principals, so the repair is possible exactly on a
+      // token that holds one of them — an elevated administrator token, the shape #803 was measured
+      // on. A filtered token keeps no access to the directory at all, and the #817 repair goes
+      // through a handle (READ_CONTROL|WRITE_DAC|WRITE_OWNER) it cannot open: the answer is then a
+      // refusal, never a claimed migration of an object left as it was found.
+      const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+      try {
+        execFileSync(
+          "icacls",
+          [
+            dir,
+            "/inheritance:r",
+            "/grant",
+            "*S-1-5-18:(OI)(CI)F",
+            "/grant",
+            "*S-1-5-32-544:(OI)(CI)F",
+          ],
+          { stdio: "ignore" },
+        );
+        const rootEquivalent = opens(dir);
+        expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
+        expect(
+          windowsEnsurePrivateAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+            identity: descriptorIdentity(fd),
+          }),
+        ).toBe(rootEquivalent);
+        expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(
+          rootEquivalent,
+        );
+      } finally {
+        fs.closeSync(fd);
+      }
     } finally {
       cleanup();
     }
@@ -87,8 +138,8 @@ describe("windows owner-only ACL", () => {
     if (!isWindows) return;
     const { dir, file, cleanup } = scratch();
     try {
-      windowsApplyOwnerAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE);
-      windowsApplyOwnerAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+      expect(migrate(file, WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(true);
+      expect(migrate(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
       expect(windowsVerifyPathAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(true);
       expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
     } finally {
@@ -100,7 +151,7 @@ describe("windows owner-only ACL", () => {
     if (!isWindows) return;
     const { file, cleanup } = scratch();
     try {
-      windowsApplyOwnerAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+      migrate(file, WINDOWS_AUTHORITY_PATH_KIND.FILE);
       expect(windowsVerifyPathAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(true);
       // S-1-1-0 is Everyone: full control for world is exactly what the policy must catch.
       execFileSync("icacls", [file, "/grant", "*S-1-1-0:(F)"], { stdio: "ignore" });
@@ -140,7 +191,7 @@ describe("windowsHasNoForeignWrite (the group/other-write rule)", () => {
     if (!isWindows) return;
     const { dir, cleanup } = scratch();
     try {
-      windowsApplyOwnerAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+      migrate(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
       expect(windowsHasNoForeignWrite(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
     } finally {
       cleanup();
@@ -186,13 +237,18 @@ describe("windowsHasNoForeignWrite (the group/other-write rule)", () => {
     if (!isWindows) return;
     const { dir, cleanup } = scratch();
     try {
-      // Inherited-only container passes, which is what unblocked vf init on a pre-existing
-      // .vibeflow.
-      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
-      execFileSync("icacls", [dir, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
-      // A foreign write is repaired in place instead of reported: the caller is about to use this
-      // directory as a trust boundary, and rejecting it is what left existing installs unusable.
-      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+      try {
+        // Inherited-only container passes, which is what unblocked vf init on a pre-existing
+        // .vibeflow.
+        expect(isNotGroupOrWorldWritable(fs.fstatSync(fd), dir, fd)).toBe(true);
+        execFileSync("icacls", [dir, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
+        // A foreign write is repaired in place instead of reported: the caller is about to use this
+        // directory as a trust boundary, and rejecting it is what left existing installs unusable.
+        expect(isNotGroupOrWorldWritable(fs.fstatSync(fd), dir, fd)).toBe(true);
+      } finally {
+        fs.closeSync(fd);
+      }
       expect(windowsHasNoForeignWrite(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
     } finally {
       cleanup();
@@ -204,12 +260,15 @@ describe("posix-fs-semantics on windows consults the ACL", () => {
   it("is not vacuous: a path with inherited ACEs is migrated before hasPrivateMode answers", () => {
     if (!isWindows) return;
     const { file, cleanup } = scratch();
+    const fd = fs.openSync(file, fs.constants.O_RDONLY);
     try {
       // Inherited ACEs used to answer vacuously true, and rejecting them outright blocked existing
-      // installs; the ACL is now migrated first, and the answer reflects the migrated DACL.
-      expect(hasPrivateMode(fs.statSync(file), 0o7777, 0o600, file)).toBe(true);
+      // installs; the ACL is now migrated first, and the answer reflects the migrated DACL. The
+      // verdict is bound to this descriptor's object.
+      expect(hasPrivateMode(fs.fstatSync(fd), 0o7777, 0o600, file, fd)).toBe(true);
       expect(windowsVerifyPathAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(true);
     } finally {
+      fs.closeSync(fd);
       cleanup();
     }
   });
@@ -217,15 +276,17 @@ describe("posix-fs-semantics on windows consults the ACL", () => {
   it("checks directories with the foreign-write policy, not the owner-only one", () => {
     if (!isWindows) return;
     const { dir, cleanup } = scratch();
+    const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
     try {
       // An inherited DACL has no foreign write right, so it satisfies this rule even though it
       // would fail the stricter owner-only check hasPrivateMode applies.
-      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      expect(isNotGroupOrWorldWritable(fs.fstatSync(fd), dir, fd)).toBe(true);
       expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
-      windowsApplyOwnerAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
-      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      migrate(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+      expect(isNotGroupOrWorldWritable(fs.fstatSync(fd), dir, fd)).toBe(true);
       expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(true);
     } finally {
+      fs.closeSync(fd);
       cleanup();
     }
   });
@@ -237,12 +298,14 @@ describe("posix-fs-semantics on windows consults the ACL", () => {
     const original = process.platform;
     const absent = join(tmpdir(), "vf-fs-semantics-absent", "record.bin");
     const stat = { mode: 0o666, isDirectory: () => false } as fs.Stats;
+    const fd = fs.openSync(tmpdir(), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
     Object.defineProperty(process, "platform", { value: "win32" });
     try {
-      expect(hasPrivateMode(stat, 0o7777, 0o600, absent)).toBe(false);
-      expect(isNotGroupOrWorldWritable(stat, absent)).toBe(false);
+      expect(hasPrivateMode(stat, 0o7777, 0o600, absent, fd)).toBe(false);
+      expect(isNotGroupOrWorldWritable(stat, absent, fd)).toBe(false);
     } finally {
       Object.defineProperty(process, "platform", { value: original });
+      fs.closeSync(fd);
     }
   });
 
@@ -251,11 +314,11 @@ describe("posix-fs-semantics on windows consults the ACL", () => {
     const { file, dir, cleanup } = scratch();
     try {
       fs.chmodSync(file, 0o600);
-      expect(hasPrivateMode(fs.statSync(file), 0o777, 0o600, file)).toBe(true);
+      expect(hasPrivateMode(fs.statSync(file), 0o777, 0o600, file, UNUSED_DESCRIPTOR)).toBe(true);
       fs.chmodSync(file, 0o644);
-      expect(hasPrivateMode(fs.statSync(file), 0o777, 0o600, file)).toBe(false);
+      expect(hasPrivateMode(fs.statSync(file), 0o777, 0o600, file, UNUSED_DESCRIPTOR)).toBe(false);
       fs.chmodSync(dir, 0o700);
-      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir)).toBe(true);
+      expect(isNotGroupOrWorldWritable(fs.statSync(dir), dir, UNUSED_DESCRIPTOR)).toBe(true);
     } finally {
       cleanup();
     }

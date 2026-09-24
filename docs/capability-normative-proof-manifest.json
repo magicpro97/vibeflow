@@ -3,7 +3,7 @@
   "profile": "vf-normative-proof-manifest/2",
   "design": {
     "path": "docs/superpowers/specs/2026-08-24-ai-first-home-capability-fabric-design.md",
-    "sha256": "fa3ade830c066c78bf84985feeb1d00e4c8b7cc7d48f4a7b85203c488b7a9f23"
+    "sha256": "b72d4106be3d24579f1c6d51d18c6e3be5ac0b3440a693f380429e67c3e3326f"
   },
   "proof_catalog": [
     {
@@ -18,7 +18,7 @@
         "src/durability"
       ],
       "test_sha256": "2af5cdd495f03c0e0171fcc0cd4b29512a7d94a0160ec04ded260d9acb05372c",
-      "production_sha256": "68b47aeb6ca82285fcd05d428ce7236f562a42b8914df168ad31c73ccb148bf2"
+      "production_sha256": "7950c1974abcd2f65b432e25df4e9011934fd4607e98cd391f0f67470c203287"
     },
     {
       "id": "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
@@ -44,7 +44,7 @@
         "src/durability"
       ],
       "test_sha256": "a6e690df8f1f535905552e31429b911d6aec32996e0ab7810ae37790028747f5",
-      "production_sha256": "e46015a9bc93aa2c4f23223899d41bb3fed55058e214f72f4664f0120586b308"
+      "production_sha256": "6b634758fc1e932decf4ef08092e57f75e6360a90ef164a5cd1c6160c23f22aa"
     },
     {
       "id": "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
@@ -57,7 +57,46 @@
         "src/durability"
       ],
       "test_sha256": "fe61f4c5936fa4bbe186b22a310beda838c57c5d7818350dfda3368c36a8d918",
-      "production_sha256": "e46015a9bc93aa2c4f23223899d41bb3fed55058e214f72f4664f0120586b308"
+      "production_sha256": "6b634758fc1e932decf4ef08092e57f75e6360a90ef164a5cd1c6160c23f22aa"
+    },
+    {
+      "id": "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/durability/windows-acl-identity.test.ts",
+      "title": "holds containers to the foreign-write policy and data files to the owner-only policy",
+      "production_paths": [
+        "src/durability"
+      ],
+      "test_sha256": "43094c1dbe7e250849cef6610ba3a449c195c4711d5554a2031c5f55a1191c39",
+      "production_sha256": "6b634758fc1e932decf4ef08092e57f75e6360a90ef164a5cd1c6160c23f22aa"
+    },
+    {
+      "id": "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/durability/windows-acl-identity.test.ts",
+      "title": "migrates pre-existing state that carries the inherited DACL instead of rejecting it",
+      "production_paths": [
+        "src/durability"
+      ],
+      "test_sha256": "43094c1dbe7e250849cef6610ba3a449c195c4711d5554a2031c5f55a1191c39",
+      "production_sha256": "6b634758fc1e932decf4ef08092e57f75e6360a90ef164a5cd1c6160c23f22aa"
+    },
+    {
+      "id": "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused",
+      "owner": "foundation-durability-actions",
+      "runner": "bun",
+      "assurance": "behavioral",
+      "path": "test/durability/windows-acl-identity.test.ts",
+      "title": "refuses to accept or repair a substituted object",
+      "production_paths": [
+        "src/durability"
+      ],
+      "test_sha256": "43094c1dbe7e250849cef6610ba3a449c195c4711d5554a2031c5f55a1191c39",
+      "production_sha256": "6b634758fc1e932decf4ef08092e57f75e6360a90ef164a5cd1c6160c23f22aa"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
@@ -70,7 +109,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "f2f25793bef3eaa37995e34811d12dba905e80dc388819c167110826651d0e19",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-lineage.test.ts#stable-journal-snapshot",
@@ -83,7 +122,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "85a0a194ca28b34799bb088a779ce83803ea50602027c81e1e2277608f6684e4",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-timeline.test.ts#timeline-cursor-head",
@@ -96,7 +135,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "d3e02717d898de49a939373aff451600c27b9f8bf4e1802fff563ab7ccedb631",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-handoff.test.ts#deterministic-handoff",
@@ -109,7 +148,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "e1306d0ebc2ac626d482feef82ba097488e90a965148d47286658a22c7cd38cb",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-interaction.test.ts#social-authority",
@@ -122,7 +161,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "60727a4e46c76d4bf46d76cbfb8ab5a0084e7cdab0920bf23c43e492a9b36fe2",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-message-delivery.test.ts#private-file-target",
@@ -135,7 +174,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "fa6a83fb19daecfd5180b05ce5b3ac7bd012dae5dc765eedd61ac5518ff928a9",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-revision.test.ts#revision-authority-tamper",
@@ -148,7 +187,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "7e2a3b586bed16924d7d1d423b840af352696654c9a559fc68bd0eb4767ec16b",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-revision-start-owner.test.ts#revision-start-owner",
@@ -162,7 +201,7 @@
         "src/durability"
       ],
       "test_sha256": "8355f07c58b791316f317a8042119269ae897aaeb6f59b0c20c0dadab818cc86",
-      "production_sha256": "b2588cc2d35e10c4d193003fd11509cee06428bc899906940c7e8fbd0d0eb20f"
+      "production_sha256": "917d8e5de19fb179bd37eedd6a903295e819e22ba21761eaf14bc85b83878bb1"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
@@ -177,7 +216,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "d3123a6cae8d37014fef329596c1f709317133f06f6145d4da9c4dd5fb866401"
+      "production_sha256": "25c72830153c3aed2223f3818d209e91eaba0b0992dffd5203bb4cc3339f22ed"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
@@ -192,7 +231,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "d3123a6cae8d37014fef329596c1f709317133f06f6145d4da9c4dd5fb866401"
+      "production_sha256": "25c72830153c3aed2223f3818d209e91eaba0b0992dffd5203bb4cc3339f22ed"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
@@ -207,7 +246,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "d3123a6cae8d37014fef329596c1f709317133f06f6145d4da9c4dd5fb866401"
+      "production_sha256": "25c72830153c3aed2223f3818d209e91eaba0b0992dffd5203bb4cc3339f22ed"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
@@ -220,7 +259,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "8b31b8312f66f6db7abb98c0a829787889b371d0195753e665013a2658bb600e",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/server-conversation-route.test.ts#conversation-auth-boundary",
@@ -247,7 +286,7 @@
         "src/capabilities"
       ],
       "test_sha256": "a1b730ecef1332164e10e01cf2208cb5333a9e218243dd504bfc57d38855f93c",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
@@ -260,7 +299,7 @@
         "src/capabilities"
       ],
       "test_sha256": "50107fd79bd49652570290926e2dda18de7b2cef8e0abca9cd84377c714782ba",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
@@ -273,7 +312,7 @@
         "src/capabilities"
       ],
       "test_sha256": "86e00527b41f4f46dc0be032e0043450de101b858a72cb60bb0159d0468429d0",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
@@ -286,7 +325,7 @@
         "src/capabilities"
       ],
       "test_sha256": "3b46291b5df5ece1e396ca41286b12d30979583b6deee1fa0a28223b8e4218d7",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
@@ -299,7 +338,7 @@
         "src/capabilities"
       ],
       "test_sha256": "ce694e5ea8894beceb119d37ddf37d6bc6b9f7b210ba67cc9e7abf9708ce562b",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance",
@@ -340,7 +379,7 @@
         "src/server"
       ],
       "test_sha256": "8a5a7b96a46d6c0ad97856ee1f23ec51ee303500abcf2b229b992883b19fd1a8",
-      "production_sha256": "7188f53af490b99c21ce9f488615d690e6775c382bfa9bb483cf4c181285b05e"
+      "production_sha256": "42f7fdeb05060582a59e1148e466e8124480f2c3c3f50737b45184ee080df2a9"
     },
     {
       "id": "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
@@ -353,7 +392,7 @@
         "src/capabilities"
       ],
       "test_sha256": "e06661f2ccdd61b2b8ecb156f52ae26ba053abfb6218a90a51548622cbfbb6d4",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
@@ -366,7 +405,7 @@
         "src/capabilities"
       ],
       "test_sha256": "2b0b4662489319e1e24c3fc13ea18627da4e70aeb2993532fdd774dfbd6127e9",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
@@ -379,7 +418,7 @@
         "src/capabilities"
       ],
       "test_sha256": "42cfa76b9437cbdd90dc6a7b1e08ea1ae194de848faafceaa49113c00b22e1df",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
@@ -392,7 +431,7 @@
         "src/capabilities"
       ],
       "test_sha256": "2a84fcd03df241251b3bca334ae7b3e35349e513725ff9eeb8f362e43bd5d354",
-      "production_sha256": "b45b222b2362bcfd1e4480813df00777470012bff46ca73664a7093952d8d70c"
+      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
     },
     {
       "id": "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
@@ -468,7 +507,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "a11473fe722b0967cb63cdb39a9ba550c8eb28b5b7c0b2a1717bb354d9100d52",
-      "production_sha256": "2cb9789f64e21c50fe5adb8840c514152e131c16a83512cb01089a8548aa9b50"
+      "production_sha256": "1950815685ac96cf7eafe5d033bac7f96affc497de51e7d42ef8bddf1827ddf3"
     },
     {
       "id": "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect",
@@ -484,7 +523,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "a11473fe722b0967cb63cdb39a9ba550c8eb28b5b7c0b2a1717bb354d9100d52",
-      "production_sha256": "2cb9789f64e21c50fe5adb8840c514152e131c16a83512cb01089a8548aa9b50"
+      "production_sha256": "1950815685ac96cf7eafe5d033bac7f96affc497de51e7d42ef8bddf1827ddf3"
     },
     {
       "id": "proof:bun:test/authority-request-file-hardening.test.ts#all-request-files",
@@ -500,7 +539,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "027e780b3811b6adb03cc5c58cf2cc3905bf4a1ce2b1fa9a4011285451561f98",
-      "production_sha256": "2cb9789f64e21c50fe5adb8840c514152e131c16a83512cb01089a8548aa9b50"
+      "production_sha256": "1950815685ac96cf7eafe5d033bac7f96affc497de51e7d42ef8bddf1827ddf3"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
@@ -773,7 +812,7 @@
         "src/orchestrator/conversation"
       ],
       "test_sha256": "4a7142c361e4c8b0b4d1923d35de7938181dc7f2bbcb43083e27882f4fefec60",
-      "production_sha256": "eb0dab54f7790f78e5e5f930a89acdb77be2a4c26f8ff3dd3f25ce9ba34f792f"
+      "production_sha256": "10bce616548523cef46b6d5a594c7995ef32fca99a012b38bc5890e3063795c1"
     },
     {
       "id": "proof:bun:test/dispatch-owned-process-windows.test.ts#windows-job-containment",
@@ -787,7 +826,7 @@
         "src/durability"
       ],
       "test_sha256": "1cb1ae6f66fff3ddb1a4eb37a978c7a1cee8dfd7b1f20e90c50e6b3432e33bff",
-      "production_sha256": "383fdea221a874e0c4fb7350be3a42bd97b9f3f2921bcf9a2b89835baf7a986e"
+      "production_sha256": "085b30ede30f3c8d4b090b553d37e00d59381dc4a56951d9f97c522cf9c088fe"
     }
   ],
   "section_dispositions": [
@@ -2434,12 +2473,31 @@
       "waiver_id": null
     },
     {
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "heading": "Windows private-state permissions",
+      "semantic_atom_count": 16,
+      "semantic_atom_sha256": "193912f1b07af309b8cdc87c218e412fb650cd26764a41d01dab7e43cabe530a",
+      "candidate_count": 3,
+      "candidate_sha256": "1e7355cafc7c18a44f03969a9f2b401c182840612d41ac5256ab3286d8f4b600",
+      "disposition": "behavioral",
+      "owners": [
+        "foundation-durability-actions"
+      ],
+      "proof_ids": [
+        "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+        "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+        "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+      ],
+      "rationale": "The owner-only and foreign-write descriptor rules, the in-place migration of pre-existing state, and the file-identity binding are each exercised against a real Windows DACL.",
+      "waiver_id": null
+    },
+    {
       "section_id": "section:completion-criteria:74382a22fa1f",
       "heading": "Completion criteria",
       "semantic_atom_count": 29,
-      "semantic_atom_sha256": "5e36245bb43d520da9651ea1d5cc3a1bded1b1a8c4386f7f4821c8a7a8e6ccc0",
+      "semantic_atom_sha256": "9443ab55c1a3c21fcb0ce3892f3de2e6c80dd981432e642aae16598477c082e2",
       "candidate_count": 4,
-      "candidate_sha256": "4d9e59637c31974ce6073cb5b95183f98f9aa1287db517a9732530542cb35475",
+      "candidate_sha256": "34e73e5eb0326342d3cc6f49c3b98238c4ee30f47fa348c281e6dc23146f0e9c",
       "disposition": "behavioral",
       "owners": [
         "foundation-durability-actions",
@@ -2517,6 +2575,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "56eaae34b8dfed797a85f18969b0c440aa525e165fd94705ba7aa673af9ca0ee"
+    "reviewed_payload_sha256": "606b4556deb3ff01e6dc4ac3e52b64c373c9f4684f9b797cbe861a0628742ee0"
   }
 }

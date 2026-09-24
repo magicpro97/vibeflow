@@ -246,12 +246,6 @@ export function createWindowsKernelLockProvider(
   binding: WindowsRecordNativeBindings = loadWindowsRecordNativeBindings(),
   privateAuthority: WindowsPrivateAuthority | null | undefined = null,
 ): WindowsKernelLockProvider {
-  // Migration is by path: SetNamedSecurityInfoW replaces the DACL, while SetSecurityInfo on a
-  // READ_CONTROL|WRITE_DAC handle returns success and changes nothing (measured on Windows 11).
-  const migrateIfNeeded = (path: string): void => {
-    if (!privateAuthority) return;
-    privateAuthority.migrateToOwnerOnly(path, WINDOWS_AUTHORITY_PATH_KIND.FILE);
-  };
   // A lock file is held to the weaker policy: it may keep the DACL it inherited from the profile
   // directory (SYSTEM, Administrators, owner), which is what a POSIX 0755 lock directory grants
   // too. verifyHandle's owner-only rule stays on the data files whose contents are the boundary —
@@ -262,7 +256,11 @@ export function createWindowsKernelLockProvider(
       const create = (security: unknown) => {
         const created = binding.createFile(
           widePath(path),
-          (WINDOWS_NATIVE_RECORD.GENERIC_READ | WINDOWS_NATIVE_RECORD.GENERIC_WRITE) >>> 0,
+          // WRITE_DAC: the repair below writes the DACL through this handle (issue #817).
+          (WINDOWS_NATIVE_RECORD.GENERIC_READ |
+            WINDOWS_NATIVE_RECORD.GENERIC_WRITE |
+            WINDOWS_NATIVE_RECORD.WRITE_DAC) >>>
+            0,
           WINDOWS_NATIVE_RECORD.FILE_SHARE_READ | WINDOWS_NATIVE_RECORD.FILE_SHARE_WRITE,
           security,
           WINDOWS_NATIVE_RECORD.OPEN_ALWAYS,
@@ -276,40 +274,54 @@ export function createWindowsKernelLockProvider(
           throw nativeError("CreateFileW", binding.lastError());
         return created;
       };
-      let closed = false;
+      const closeQuietly = (target: bigint): void => {
+        try {
+          binding.closeHandle(target);
+        } catch {
+          /* A close failure must not mask the result the caller asked for. */
+        }
+      };
       const handle = privateAuthority
         ? privateAuthority.withCreationSecurity(WINDOWS_AUTHORITY_PATH_KIND.FILE, create)
         : create(null);
-      if (privateAuthority) {
-        try {
-          privateAuthority.verifyNoForeignWrite(handle);
-        } catch (verifyError) {
-          closed = true;
-          try {
-            binding.closeHandle(handle);
-          } catch {
-            /* non-fatal */
-          }
-          const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
-          if (!msg.includes("permissive Windows authority DACL rejected")) throw verifyError;
-          // A lock file that does grant write to another principal is repaired in place, then
-          // re-checked: the owner-only migration is a superset of the policy it has to satisfy.
-          migrateIfNeeded(path);
-          const final = create(null);
-          try {
-            privateAuthority.verifyNoForeignWrite(final);
-          } catch {
-            try {
-              binding.closeHandle(final);
-            } catch {
-              /* ignore */
-            }
-            throw verifyError;
-          }
-          return acquireVerifiedHandle(final, binding);
+      if (!privateAuthority) return acquireVerifiedHandle(handle, binding);
+      try {
+        privateAuthority.verifyNoForeignWrite(handle);
+        return acquireVerifiedHandle(handle, binding);
+      } catch (verifyError) {
+        const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
+        if (!msg.includes("permissive Windows authority DACL rejected")) {
+          closeQuietly(handle);
+          throw verifyError;
         }
+        // The identity of the object this call opened: a lock file that cannot be identified is not
+        // one to repair.
+        let pinned: Buffer;
+        try {
+          pinned = fileIdentity(binding, handle);
+        } catch {
+          closeQuietly(handle);
+          throw verifyError;
+        }
+        // Repaired in place through the handle that identified it, then re-checked: the write lands
+        // on the object the handle refers to even if a writer replaces the name meanwhile (#817).
+        privateAuthority.migrateHandle(handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+        let final: bigint | null = null;
+        try {
+          // The reopen does not make the repair safe (the write already happened): it proves the name
+          // still reaches the pinned object, so a substitute is refused, never verified or locked.
+          final = create(null);
+          if (!timingSafeEqual(pinned, fileIdentity(binding, final)))
+            durabilityError("unsafe_path", "Windows kernel lock identity changed mid-migration");
+          privateAuthority.verifyNoForeignWrite(final);
+        } catch {
+          if (final !== null) closeQuietly(final);
+          closeQuietly(handle);
+          throw verifyError;
+        }
+        closeQuietly(handle);
+        return acquireVerifiedHandle(final, binding);
       }
-      return acquireVerifiedHandle(handle, binding);
     },
   };
 }
