@@ -10,6 +10,8 @@ import {
 } from "../src/dispatch/windows-private-authority.js";
 
 const USER_SID = Buffer.from([1, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0]);
+const ADMINS_SID = Buffer.from([1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 32, 2, 0, 0]);
+const FOREIGN_SID = Buffer.from([1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 42, 2, 0, 0]);
 
 test("formatWindowsSid renders the S-1-5-… form and rejects an unreadable buffer", () => {
   expect(formatWindowsSid(USER_SID)).toBe("S-1-5-21");
@@ -56,21 +58,31 @@ function fakeSecurityKoffi(dispatch: Record<string, (...args: any[]) => unknown>
     sizeof: () => 24,
     view: (value: Buffer, length: number) =>
       value.buffer.slice(value.byteOffset, value.byteOffset + length),
+    // The security bindings read the SID pointer out of the TOKEN_USER/TOKEN_OWNER buffer instead of
+    // decoding a TOKEN_USER struct — TOKEN_OWNER is a bare PSID (#803) — so a pointer-typed decode
+    // answers the SID that buffer points at.
     decode: (value: unknown, type: unknown) =>
-      type === tokenUserType
-        ? { User: { Sid: USER_SID } }
+      typeof type === "object" && type !== null && "pointer" in type
+        ? USER_SID
         : type === "char16_t"
           ? (value as { text: string }).text
           : value,
   };
 }
 
-function fixture(view: WindowsPrivateDescriptorView = descriptor()) {
+function fixture(
+  view: WindowsPrivateDescriptorView = descriptor(),
+  identity: { sid: Buffer; sddl: string; ownerSid: Buffer } = {
+    sid: USER_SID,
+    sddl: USER_SDDL,
+    ownerSid: USER_SID,
+  },
+) {
   const sddls: string[] = [];
   const migrated: [bigint, string][] = [];
   let released = 0;
   const bindings: WindowsPrivateAuthorityBindings = {
-    currentUser: () => ({ sid: USER_SID, sddl: USER_SDDL }),
+    currentUser: () => identity,
     createSecurity: (sddl) => {
       sddls.push(sddl);
       return { attributes: { private: true }, release: () => released++ };
@@ -150,6 +162,31 @@ describe("Windows private authority", () => {
     expect(file.migrated[1]?.[1]).toBe(`O:${USER_SDDL}D:P(A;OICI;FA;;;${USER_SDDL})`);
   });
 
+  test("accepts an object owned by the token's own owner SID, not only by its user SID", () => {
+    // Measured on the Windows runner (#803): an elevated administrator token has the
+    // Administrators group as its owner, so every directory it creates — including the
+    // conversation state directory — is owned by S-1-5-32-544 while its single ACE names the
+    // user SID. The DACL is repaired and correct; only the owner comparison rejected it, and no
+    // repair can change an owner back.
+    const directoryFlags =
+      WINDOWS_PRIVATE_SECURITY.OBJECT_INHERIT_ACE | WINDOWS_PRIVATE_SECURITY.CONTAINER_INHERIT_ACE;
+    const elevated = fixture(
+      { ...descriptor(directoryFlags), owner: ADMINS_SID },
+      { sid: USER_SID, sddl: USER_SDDL, ownerSid: ADMINS_SID },
+    );
+    expect(() =>
+      elevated.authority.verifyHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY),
+    ).not.toThrow();
+    // An owner outside the token's own principals is still rejected.
+    const foreign = fixture(
+      { ...descriptor(directoryFlags), owner: FOREIGN_SID },
+      { sid: USER_SID, sddl: USER_SDDL, ownerSid: ADMINS_SID },
+    );
+    expect(() => foreign.authority.verifyHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toThrow(
+      "permissive Windows authority DACL rejected",
+    );
+  });
+
   test("structurally rejects every permissive or ambiguous descriptor shape", () => {
     const allowAce = descriptor().aces[0];
     if (!allowAce) throw new Error("missing allow ACE fixture");
@@ -174,7 +211,7 @@ describe("Windows private authority", () => {
       ).toThrow("permissive Windows authority DACL rejected");
     expect(() =>
       createWindowsPrivateAuthority({
-        currentUser: () => ({ sid: Buffer.alloc(1), sddl: "invalid" }),
+        currentUser: () => ({ sid: Buffer.alloc(1), sddl: "invalid", ownerSid: Buffer.alloc(1) }),
         createSecurity: () => ({ attributes: null, release: () => {} }),
         inspect: () => descriptor(),
         migrateHandle: () => undefined,
@@ -205,8 +242,10 @@ describe("Windows private authority", () => {
         token[0] = 2n;
         return 1;
       },
-      GetTokenInformation: (_token, _kind, output, _bytes, needed) => {
-        needed[0] = 32;
+      GetTokenInformation: (_token, kind, output, _bytes, needed) => {
+        // Win32 reports the documented struct size for each class: TOKEN_USER is the 16-byte
+        // SID_AND_ATTRIBUTES, TOKEN_OWNER is a bare 8-byte PSID.
+        needed[0] = kind === WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS ? 16 : 8;
         return output ? 1 : 0;
       },
       IsValidSid: () => 1,
@@ -251,14 +290,12 @@ describe("Windows private authority", () => {
         return (...args: any[]) => dispatch[name]?.(...args) ?? 1;
       },
     };
-    const tokenUserType = { tokenUser: true };
     const koffi = {
       load: () => library,
       opaque: () => ({ opaque: true }),
-      pointer: (value: unknown) => ({ pointer: value }),
+      pointer: (value: unknown) => ({ pointer: value, isPointer: true }),
       out: (value: unknown) => ({ out: value }),
-      struct: (value: Record<string, unknown>) =>
-        "User" in value ? tokenUserType : { struct: value },
+      struct: (value: Record<string, unknown>) => ({ struct: value }),
       alloc: () => ({ allocated: true }),
       encode: (target: object, _type: unknown, value: object) => {
         if (failEncode) throw new Error("injected security attribute encode failure");
@@ -268,18 +305,28 @@ describe("Windows private authority", () => {
       sizeof: () => 24,
       view: (value: Buffer, length: number) =>
         value.buffer.slice(value.byteOffset, value.byteOffset + length),
-      decode: (value: unknown, type: unknown) =>
-        type === tokenUserType
-          ? { User: { Sid: USER_SID } }
-          : type === "char16_t"
-            ? (value as { text: string }).text
-            : value,
+      decode: (value: unknown, type: unknown) => {
+        // koffi refuses a struct read that does not fit the buffer, and the token-info buffer is
+        // sized per class (16 bytes for TOKEN_USER, 8 for TOKEN_OWNER), so the adapter must read
+        // the SID pointer itself instead of decoding a struct.
+        if (Buffer.isBuffer(value)) {
+          if (!(type as { isPointer?: boolean }).isPointer)
+            throw new Error(`token-info buffer decoded as ${JSON.stringify(type)}`);
+          return USER_SID;
+        }
+        if (type === "char16_t") return (value as { text: string }).text;
+        return value;
+      },
     };
     const bindings = loadWindowsPrivateAuthorityBindings({
       requireModule: () => koffi,
       isBun: false,
     });
-    expect(bindings.currentUser()).toEqual({ sid: USER_SID, sddl: USER_SDDL });
+    expect(bindings.currentUser()).toEqual({
+      sid: USER_SID,
+      sddl: USER_SDDL,
+      ownerSid: USER_SID,
+    });
     const security = bindings.createSecurity(`O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
     expect(security.attributes).toMatchObject({ allocated: true });
     security.release();
@@ -475,7 +522,11 @@ describe("Windows private authority", () => {
       requireModule: () => ffi,
       isBun: true,
     });
-    expect(bindings.currentUser()).toEqual({ sid: USER_SID, sddl: USER_SDDL });
+    expect(bindings.currentUser()).toEqual({
+      sid: USER_SID,
+      sddl: USER_SDDL,
+      ownerSid: USER_SID,
+    });
     const security = bindings.createSecurity(`O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
     expect(Buffer.isBuffer(security.attributes)).toBe(true);
     expect((security.attributes as Buffer).readUInt32LE(0)).toBe(24);

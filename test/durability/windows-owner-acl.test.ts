@@ -44,6 +44,19 @@ function migrate(path: string, kind: WindowsAuthorityPathKind): boolean {
   }
 }
 
+/**
+ * Whether this process can still open `path` at all. The synthesised root-only DACL grants this
+ * process nothing, so this answers whether the token holds one of the two root-equivalent grants.
+ */
+function opens(path: string): boolean {
+  try {
+    fs.closeSync(fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function scratch(): { dir: string; file: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(join(tmpdir(), "vf-acl-test-"));
   const file = join(dir, "record.bin");
@@ -69,6 +82,53 @@ describe("windows owner-only ACL", () => {
       // A path created normally inherits SYSTEM/Administrators/owner from its parent.
       expect(windowsVerifyPathAcl(file, WINDOWS_AUTHORITY_PATH_KIND.FILE)).toBe(false);
       expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("repairs a directory whose DACL was synthesised the way a standard host hands one down", () => {
+    if (!isWindows) return;
+    const { dir, cleanup } = scratch();
+    try {
+      // The strongest form of the standard shape: inheritance stripped and only the two
+      // root-equivalent grants a profile directory propagates — no ACE for this process and no
+      // SE_DACL_PROTECTED. Verification must repair it in place rather than reject it (#803).
+      //
+      // The descriptor is opened first, because since #817 the repair is bound to the object the
+      // caller stat'ed and the synthesised DACL may leave this process no way to open it again. Its
+      // only grants are the two root-equivalent principals, so the repair is possible exactly on a
+      // token that holds one of them — an elevated administrator token, the shape #803 was measured
+      // on. A filtered token keeps no access to the directory at all, and the #817 repair goes
+      // through a handle (READ_CONTROL|WRITE_DAC|WRITE_OWNER) it cannot open: the answer is then a
+      // refusal, never a claimed migration of an object left as it was found.
+      const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+      try {
+        execFileSync(
+          "icacls",
+          [
+            dir,
+            "/inheritance:r",
+            "/grant",
+            "*S-1-5-18:(OI)(CI)F",
+            "/grant",
+            "*S-1-5-32-544:(OI)(CI)F",
+          ],
+          { stdio: "ignore" },
+        );
+        const rootEquivalent = opens(dir);
+        expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(false);
+        expect(
+          windowsEnsurePrivateAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+            identity: descriptorIdentity(fd),
+          }),
+        ).toBe(rootEquivalent);
+        expect(windowsVerifyPathAcl(dir, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toBe(
+          rootEquivalent,
+        );
+      } finally {
+        fs.closeSync(fd);
+      }
     } finally {
       cleanup();
     }
