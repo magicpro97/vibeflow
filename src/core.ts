@@ -313,6 +313,8 @@ export {
   needsShellForCommand,
   resolveCommand,
   resolveEngineBinary,
+  shellLaunchArgv,
+  splitCommandLine,
 } from "./core/command-runtime.js";
 
 export function isGitRepo(): boolean {

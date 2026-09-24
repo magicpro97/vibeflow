@@ -273,6 +273,9 @@ describe("orchestrate dry mode is read-only", () => {
       git: runner,
     });
     const { runner: runner2 } = fakeGit({ dirty: false });
+    // #783: a run dispatches `pending` units only, so a second attempt on an already-closed
+    // unit needs an explicit re-open — the run itself never re-opens it.
+    mutateUnits(dir, "update", { name: "auth", status: "pending" });
     await orchestrate({ engine: "claude", yes: true }, dir, {
       sessionRuntime: { processSpawner: okProcessSpawner },
       git: runner2,

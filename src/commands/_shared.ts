@@ -341,9 +341,37 @@ export {
 export type { PilotEncounter } from "./review-cross.js";
 
 import type { WorkUnit } from "../core.js";
-import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
-// === work-unit completeness check ===
-// Extracted from orchestrate.ts (#643). Shared so server routes can test the
-// same condition without inlining the logic.
-export const isComplete = (u: WorkUnit) =>
-  u.status === WORK_UNIT_STATUS.DONE && u.confidence >= 1 && (u.evidence?.length ?? 0) > 0;
+import {
+  WORK_UNIT_DISPATCH_BY_STATUS,
+  type WorkUnitDispatchDisposition,
+  isWorkUnitDispatchable,
+} from "../core/workflow-contract.js";
+
+// === dispatch-set selection (#783) ===
+// A run dispatches ONLY `pending` units (authority: WORK_UNIT_DISPATCH_BY_STATUS); every other
+// unit is held out of the run and reported under its disposition. Shared so `vf orchestrate`
+// and the conversation workflow apply one policy instead of an inline `!isComplete` filter per
+// caller — an inline filter is what dispatched blocked units (#783 replaced `isComplete` here).
+export interface DispatchSkipGroup {
+  disposition: WorkUnitDispatchDisposition;
+  units: WorkUnit[];
+}
+
+export function selectDispatchUnits(units: readonly WorkUnit[]): {
+  dispatch: WorkUnit[];
+  skipped: DispatchSkipGroup[];
+} {
+  const dispatch: WorkUnit[] = [];
+  const groups = new Map<WorkUnitDispatchDisposition, DispatchSkipGroup>();
+  for (const unit of units) {
+    if (isWorkUnitDispatchable(unit.status)) {
+      dispatch.push(unit);
+      continue;
+    }
+    const disposition = WORK_UNIT_DISPATCH_BY_STATUS[unit.status];
+    const group = groups.get(disposition);
+    if (group) group.units.push(unit);
+    else groups.set(disposition, { disposition, units: [unit] });
+  }
+  return { dispatch, skipped: [...groups.values()] };
+}

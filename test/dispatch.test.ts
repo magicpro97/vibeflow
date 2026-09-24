@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { shellLaunchArgv, splitCommandLine } from "../src/core.js";
 import {
   type AsyncSpawner,
   type EngineProbe,
@@ -1467,6 +1468,164 @@ describe("makeAsyncSpawner — Windows .cmd/.bat shim auto-shell (Task 7b)", () 
       expect(c.args).toEqual([]);
     } finally {
       (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+});
+
+// #805: bridge mode passes a command STRING (VIBEFLOW_AI / opts.bridgeCmd) that may hold a
+// quoted path with spaces. `cmd.exe /c <string>` cannot be expressed through argv — the launcher
+// re-escapes the quotes (Bun writes `\"`, node escapes them the same way for cmd.exe) and cmd.exe
+// then reads `\"C:\Users\...\bun.exe\"` as the program name. The string is tokenized instead and
+// launched directly; only a real .cmd/.bat program still needs cmd.exe.
+describe("shellLaunchArgv — Windows command strings (#805)", () => {
+  const WIN_EXE = "C:\\Program Files\\nodejs\\node.exe";
+  const WIN_SCRIPT = "C:\\Users\\Linh Ngo\\tmp\\bridge-engine.mjs";
+
+  test("splitCommandLine: keeps a quoted path with spaces as one argv element", () => {
+    expect(splitCommandLine(`"${WIN_EXE}" "${WIN_SCRIPT}"`)).toEqual([WIN_EXE, WIN_SCRIPT]);
+  });
+
+  test("splitCommandLine: bare command plus flags, collapsed whitespace, escaped quote", () => {
+    expect(splitCommandLine("  bun   run   script.ts --flag  ")).toEqual([
+      "bun",
+      "run",
+      "script.ts",
+      "--flag",
+    ]);
+    expect(splitCommandLine('tool "a\\"b"')).toEqual(["tool", 'a"b']);
+    expect(splitCommandLine("")).toEqual([]);
+  });
+
+  test("non-Windows keeps /bin/sh -c, args joined into the command string", () => {
+    if (process.platform === "win32") return;
+    expect(shellLaunchArgv("bun run script.ts", ["--flag"], false)).toEqual([
+      "/bin/sh",
+      "-c",
+      "bun run script.ts --flag",
+    ]);
+  });
+
+  test("Windows: a command string is tokenized instead of reaching cmd.exe", () => {
+    const origPlatform = process.platform;
+    const origWhich = Bun.which;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    // Pin PATH resolution: on a Windows dev box `bun` is itself an npm `.cmd` shim, which now
+    // (correctly) routes through cmd.exe. This test pins the non-shim tokenization instead.
+    (Bun as unknown as { which: typeof Bun.which }).which = (() =>
+      undefined) as unknown as typeof Bun.which;
+    try {
+      expect(shellLaunchArgv(`"${WIN_EXE}" "${WIN_SCRIPT}"`, [], false)).toEqual([
+        WIN_EXE,
+        WIN_SCRIPT,
+      ]);
+      // A bare command keeps its own args, and the caller's args are appended.
+      expect(shellLaunchArgv("bun run script.ts", ["--flag"], false)).toEqual([
+        "bun",
+        "run",
+        "script.ts",
+        "--flag",
+      ]);
+    } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("Windows: a .cmd/.bat program still routes through cmd.exe", () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      expect(shellLaunchArgv("copilot.cmd", ["-p", "hello"], false)).toEqual([
+        "cmd.exe",
+        "/c",
+        "copilot.cmd",
+        "-p",
+        "hello",
+      ]);
+      expect(shellLaunchArgv("copilot", ["--version"], true)).toEqual([
+        "cmd.exe",
+        "/c",
+        "copilot",
+        "--version",
+      ]);
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  // Copilot review on PR #815: tokenizing the command string is not enough — `copilot --json`
+  // carries no `.cmd` suffix on the TOKEN. Shim detection must resolve the token against PATH,
+  // or a bare engine name that npm installed as a `.cmd` shim is launched directly.
+  test("Windows: a bare name resolving to a .cmd shim still routes through cmd.exe", () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    // Simulate `Bun.which("copilot")` returning the .cmd shim path that npm installs.
+    const fakeWhich = (cmd: string) =>
+      cmd === "copilot" ? "C:\\Users\\x\\AppData\\Roaming\\npm\\copilot.cmd" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    try {
+      expect(shellLaunchArgv("copilot --json", [], false)).toEqual([
+        "cmd.exe",
+        "/c",
+        "copilot",
+        "--json",
+      ]);
+      // Only a batch shim needs the shell: a native binary keeps the direct argv.
+      expect(shellLaunchArgv("node.exe --version", [], false)).toEqual(["node.exe", "--version"]);
+    } finally {
+      (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("makeAsyncSpawner: shell:true tokenizes a quoted command string on Windows", async () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const calls: string[][] = [];
+    const fakeChild = {
+      stdin: { write: () => {}, end: () => {} },
+      stdout: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      stderr: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) },
+      exited: Promise.resolve(0),
+      kill: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+    const origSpawn = Bun.spawn;
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = ((args: readonly string[]) => {
+      calls.push([...args]);
+      return fakeChild;
+    }) as unknown as typeof Bun.spawn;
+    try {
+      const spawner = makeAsyncSpawner({ shell: true });
+      await spawner(`"${WIN_EXE}" "${WIN_SCRIPT}"`, [], "prompt");
+      expect(calls).toEqual([[WIN_EXE, WIN_SCRIPT]]);
+    } finally {
+      (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = origSpawn;
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  test("defaultSyncSpawner: a .cmd shim keeps cmd.exe /c with the argv intact", () => {
+    const { defaultSyncSpawner } = require("../src/dispatch.js");
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const origWhich = Bun.which;
+    const fakeWhich = (cmd: string) =>
+      cmd === "tool" ? "C:\\Program Files\\nodejs\\tool.cmd" : origWhich(cmd);
+    (Bun as unknown as { which: typeof Bun.which }).which = fakeWhich as typeof Bun.which;
+    let captured: string[] | undefined;
+    const origSpawnSync = Bun.spawnSync;
+    (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = ((cmd: string[]) => {
+      captured = [...cmd];
+      return { exitCode: 0, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    }) as unknown as typeof Bun.spawnSync;
+    try {
+      defaultSyncSpawner("tool", ["--version"], "");
+      expect(captured).toEqual(["cmd.exe", "/c", "tool", "--version"]);
+    } finally {
+      (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = origSpawnSync;
       (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
       Object.defineProperty(process, "platform", { value: origPlatform });
     }

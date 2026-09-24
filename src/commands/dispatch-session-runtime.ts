@@ -7,6 +7,7 @@ import {
   type MaterializedAgentBinding,
   materializeWorkflowAgentBinding,
 } from "../agents/binding.js";
+import { shellLaunchArgv } from "../core.js";
 import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { runDispatchAsync, writeDispatchPrompt } from "../dispatch.js";
 import { createIsolationLease, releaseIsolationLease } from "../dispatch/isolation.js";
@@ -31,7 +32,6 @@ import type {
 } from "../dispatch/session-types.js";
 import { createEngineSessionAdapter } from "../dispatch/session.js";
 import { makeEngineProcessSpawner } from "../dispatch/spawners.js";
-import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import type { DispatchResult, Engine } from "./_shared.js";
 
 export interface DispatchSessionRuntimeOptions {
@@ -102,10 +102,7 @@ function makeSessionProcessSpawner(
     if (options.mode === DISPATCH_MODE.BRIDGE) {
       const command = options.bridgeCommand ?? process.env.VIBEFLOW_AI;
       if (!command) throw new Error("VIBEFLOW_AI is not set");
-      const bridgeArgv =
-        process.platform === RUNTIME_PLATFORM.WINDOWS
-          ? ["cmd.exe", "/c", command]
-          : ["/bin/sh", "-c", command];
+      const bridgeArgv = shellLaunchArgv(command, [], false);
       return base(bridgeArgv, { ...ownedOptions, stdinText: bridgePrompt });
     }
     if (options.engine !== AGENT_ENGINE.COPILOT) return base(argv, ownedOptions);
