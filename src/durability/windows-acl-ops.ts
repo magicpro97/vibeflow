@@ -12,13 +12,13 @@
  * NTFS file ids need 57 bits, so a Number-typed `ino` is rounded above 2^53 and two distinct objects
  * can share one rounded value (issue #817).
  *
- * The DACL *write* is by handle, never by path: SetSecurityInfo replaces the descriptor of the
- * object the handle refers to, whatever happens to the name meanwhile (measured: with WRITE_DAC on
- * the handle it returns 0 and replaces the DACL; without it, ERROR_ACCESS_DENIED and no change —
- * see WindowsPrivateAuthorityBindings.migrateHandle). Every write here additionally requires the
- * caller's identity and fails closed without one, so there is no path for a substituted object to
- * intercept: a write that cannot be tied to the object the caller measured is not performed at all
- * (issue #817).
+ * The descriptor *write* (owner and DACL) is by handle, never by path: SetSecurityInfo replaces the
+ * owner and DACL of the object the handle refers to, whatever happens to the name meanwhile
+ * (measured: with WRITE_DAC on the handle it returns 0 and replaces the DACL; without it,
+ * ERROR_ACCESS_DENIED and no change — see WindowsPrivateAuthorityBindings.migrateHandle). Every write
+ * here additionally requires the caller's identity and fails closed without one, so there is no path
+ * for a substituted object to intercept: a write that cannot be tied to the object the caller
+ * measured is not performed at all (issue #817).
  */
 import * as fs from "node:fs";
 import { durabilityError } from "./errors.js";
@@ -85,10 +85,18 @@ export interface WindowsAclOpsOptions {
   identity?: WindowsFileIdentity;
 }
 
-// READ_CONTROL answers what the DACL says; a repair additionally needs WRITE_DAC, because the write
-// goes through the handle and a handle without it gets ERROR_ACCESS_DENIED from SetSecurityInfo.
+// READ_CONTROL answers what the DACL says; a repair additionally needs WRITE_DAC and WRITE_OWNER,
+// because the write goes through the handle and replaces the descriptor's owner as well as its DACL
+// (see WindowsPrivateAuthorityBindings.migrateHandle). A handle without WRITE_DAC gets
+// ERROR_ACCESS_DENIED from SetSecurityInfo, and one without WRITE_OWNER leaves the owner an elevated
+// token gave the object in place — which a strict verdict then refuses, even for a path this process
+// has just created.
 const VERDICT_ACCESS = WINDOWS_NATIVE_RECORD.READ_CONTROL >>> 0;
-const REPAIR_ACCESS = (WINDOWS_NATIVE_RECORD.READ_CONTROL | WINDOWS_NATIVE_RECORD.WRITE_DAC) >>> 0;
+const REPAIR_ACCESS =
+  (WINDOWS_NATIVE_RECORD.READ_CONTROL |
+    WINDOWS_NATIVE_RECORD.WRITE_DAC |
+    WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
+  0;
 
 const isDirectory = (kind: WindowsAuthorityPathKind): boolean =>
   kind === WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY;
@@ -249,10 +257,11 @@ export { WINDOWS_AUTHORITY_PATH_KIND };
  * Verify-or-repair for one descriptor policy, with the caller's identity gating both halves.
  *
  * One handle carries the whole transaction: it is what identifies the object against the caller's
- * measurement, what the policy is read from, and what the repair is written through. The DACL write
- * cannot be diverted — SetSecurityInfo acts on the handle, never on the name — so the answer after
- * the repair is read from the same object the answer before it was rejected on, whatever happens to
- * the path meanwhile.
+ * measurement, what the policy is read from, and what the repair is written through. The write cannot
+ * be diverted — SetSecurityInfo acts on the handle, never on the name — and it replaces the owner
+ * alongside the DACL, which is what brings an object an elevated token left to the group back to the
+ * policy the verdict enforces. So the answer after the repair is read from the same object the answer
+ * before it was rejected on, whatever happens to the path meanwhile.
  *
  * No identity, no repair. A caller that cannot say which object it measured has nothing this module
  * can tie the write to, and repairing whatever the name holds would be exactly the substitution the
@@ -286,12 +295,14 @@ function ensureAcl(
 }
 
 /**
- * The answer windowsVerifyPathAcl gives, after repairing the path when the DACL merely needs it.
+ * The answer windowsVerifyPathAcl gives, after repairing the path when the descriptor merely needs it.
  *
  * The owner-only policy is what the durable files are held to, but state written by an earlier
- * release — or by any caller that used plain fs calls — carries the inherited DACL its parent
- * handed it. Rejecting that outright blocks every existing install on first use, so the migration
- * runs first and the question is asked again; a path that cannot be migrated still answers false.
+ * release — or by any caller that used plain fs calls — carries the inherited DACL its parent handed
+ * it, and under an elevated token the owner that token leaves on everything it creates. Rejecting
+ * either outright blocks every existing install on first use, and the owner blocks even the paths the
+ * install has just created itself, so the migration runs first and the question is asked again; a path
+ * that cannot be migrated still answers false.
  */
 export function windowsEnsurePrivateAcl(
   path: string,

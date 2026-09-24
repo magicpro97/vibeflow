@@ -257,6 +257,29 @@ describe("windows acl verdict identity", () => {
     }
   });
 
+  it("takes a directory the walk creates to the owner-only policy through the leaf handle", () => {
+    if (!isWindows) return;
+    const dir = fs.mkdtempSync(join(tmpdir(), "vf-acl-created-leaf-"));
+    const leaf = join(dir, "private");
+    ensurePrivateDirectory(dir);
+    const base = openPrivateDirectory(dir, false);
+    try {
+      // Nothing is at the name yet: the walk is about to create it the way it creates
+      // `.vibeflow/private`, with a plain mkdirat followed by the repair on the handle it opens for
+      // the leaf (openDirectoryAt).
+      expect(windowsVerifyPathAcl(leaf, DIRECTORY)).toBe(false);
+      closePinnedDirectory(openPinnedDescendant(base, leaf, true));
+      // The strict verdict — the DACL *and* the owner field — accepts what the walk just created. A
+      // directory made this way inherits its DACL, and under an elevated token its owner is the
+      // Administrators group, so this repair is what keeps the install from refusing a path it made
+      // itself (the Windows package-smoke row failed exactly here).
+      expect(windowsVerifyPathAcl(leaf, DIRECTORY)).toBe(true);
+    } finally {
+      closePinnedDirectory(base);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("makes the walk refuse a leaf swapped for a junction instead of repairing the substitute", () => {
     if (!isWindows) return;
     const dir = fs.mkdtempSync(join(tmpdir(), "vf-acl-leaf-swap-"));

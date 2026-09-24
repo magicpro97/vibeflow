@@ -51,11 +51,12 @@ function fileIdInfo(dev: bigint, ino: bigint) {
 }
 
 function fakeBinding(overrides: Partial<Record<string, unknown>> = {}) {
-  const calls = { closeHandle: 0, paths: [] as string[] };
+  const calls = { closeHandle: 0, paths: [] as string[], access: [] as number[] };
   const binding = {
     invalidHandle: INVALID_HANDLE,
-    createFile: (path: Buffer) => {
+    createFile: (path: Buffer, access: number) => {
       calls.paths.push(path.toString("utf16le"));
+      calls.access.push(access);
       return HANDLE;
     },
     closeHandle: () => {
@@ -270,6 +271,42 @@ describe("windows acl ops", () => {
       }),
     ).toBe(true);
     expect(calls.migrated).toEqual([[HANDLE, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
+  });
+
+  test("asks for the accesses the repair write needs, and no more", () => {
+    const { binding, calls } = fakeBinding();
+    let checks = 0;
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        if (checks++ === 0) throw new Error("permissive Windows authority DACL rejected");
+      },
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    // The repair replaces the descriptor's owner as well as its DACL through this handle, so the open
+    // has to carry WRITE_OWNER: without it SetSecurityInfo leaves the owner an elevated token gave the
+    // object in place and the verdict refuses a path this process just created.
+    expect(calls.access).toEqual([
+      (WINDOWS_NATIVE_RECORD.READ_CONTROL |
+        WINDOWS_NATIVE_RECORD.WRITE_DAC |
+        WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
+        0,
+    ]);
+    expect(authorityCalls.migrated).toEqual([[HANDLE, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
+    // A verdict writes nothing, so it asks for nothing but the read the policy is answered from.
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(calls.access.at(-1)).toBe(WINDOWS_NATIVE_RECORD.READ_CONTROL >>> 0);
   });
 
   test("answers false when the DACL cannot be repaired", () => {

@@ -43,7 +43,10 @@ export interface WindowsPrivateAuthority {
   verifyNoForeignWrite(handle: bigint): void;
   /** The SID of the account running this process, for callers applying their own descriptor policy. */
   currentUserId(): Buffer;
-  /** Reset an existing object's DACL in-place to owner-only + SE_DACL_PROTECTED, through its handle. */
+  /**
+   * Reset an existing object's owner and DACL in place to owner-only + SE_DACL_PROTECTED, through
+   * its handle.
+   */
   migrateHandle(handle: bigint, kind: WindowsAuthorityPathKind): void;
 }
 
@@ -274,10 +277,17 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
         // >>> 0: PROTECTED_DACL_INFORMATION is 0x80000000, so the bitwise OR yields a negative
         // int32 in JS. Passing that to a u32 FFI parameter reaches Windows as garbage flags and
         // the call fails with ERROR_ACCESS_DENIED(5).
-        (WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
+        (WINDOWS_PRIVATE_SECURITY.OWNER_INFORMATION |
+          WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
           WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
           0,
-        null,
+        // The owner is written because the policy verifyHandle enforces names the token user there,
+        // and an elevated token leaves the objects it creates owned by its Administrators group: a
+        // DACL-only write stays one field short, so the repair answered false for every path the
+        // process itself had just created (the Windows package-smoke failure). The write needs
+        // WRITE_OWNER on the handle and, without SeRestorePrivilege, the token user as the new owner,
+        // so it cannot take over an object the caller does not already command.
+        currentUser().sid,
         null,
         dacl[0],
         null,
