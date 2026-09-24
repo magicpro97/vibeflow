@@ -40,6 +40,7 @@ import { config, decision } from "./commands/config-decision.js";
 import { buildConversationHttpAuthority } from "./commands/conversation-http.js";
 import { coord } from "./commands/coord.js";
 import { evalCmd } from "./commands/eval.js";
+import { race } from "./commands/race.js";
 import { state } from "./commands/state.js";
 import { CTX_DIR, c, cwd, parseFlags, writeFileSafe } from "./core.js";
 import {
@@ -284,6 +285,8 @@ async function main(argv: string[]): Promise<number> {
       return await brainstorm(rest);
     case "orchestrate":
       return await orchestrate(flags);
+    case "race":
+      return await race(positionals, flags);
     case "demo":
       return await demo(flags);
     case "workflow":

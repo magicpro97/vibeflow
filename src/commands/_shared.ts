@@ -268,6 +268,7 @@ export { buildPlanPrompt } from "./plan.js";
 export { collectVerifyReportAsync } from "./tools-detect.js";
 export type { VerifyReport } from "./tools-detect.js";
 export { ASK_HELP, BRAINSTORM_HELP, CHAT_HELP } from "./help-conversation.js";
+export { RACE_HELP } from "./help-race.js";
 export { SUPERPOWERS_HELP } from "./help-superpowers.js";
 export { authorityCommandHelp, capabilityCommandHelp } from "./help-capability.js";
 export { COMMAND_HELP } from "./help-commands.js";

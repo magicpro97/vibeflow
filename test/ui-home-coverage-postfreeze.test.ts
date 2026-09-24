@@ -621,6 +621,12 @@ describe("post-freeze UI Home HTTP contracts", () => {
         body: { unit: "a" },
       },
       { invoke: () => api.orchestrate(), method: "POST", path: "/api/orchestrate", body: {} },
+      {
+        invoke: () => api.race({ task: "add a health endpoint", engines: ["codex"], dry: true }),
+        method: "POST",
+        path: "/api/race",
+        body: { task: "add a health endpoint", engines: ["codex"], dry: true },
+      },
       { invoke: api.preflight, method: "POST", path: "/api/preflight", body: {} },
       { invoke: () => api.verify(signal), method: "POST", path: "/api/verify", body: {}, signal },
       {
