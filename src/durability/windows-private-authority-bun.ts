@@ -41,7 +41,7 @@ export function loadWindowsPrivateAuthorityBun(
       args: [word, ffi.FFIType.i32, ffi.FFIType.u32, word, word, word, word, word],
       returns: ffi.FFIType.u32,
     },
-    SetNamedSecurityInfoW: {
+    SetSecurityInfo: {
       args: [word, ffi.FFIType.i32, ffi.FFIType.u32, word, word, word, word],
       returns: ffi.FFIType.u32,
     },
@@ -136,9 +136,9 @@ export function loadWindowsPrivateAuthorityBun(
       descriptor[0] = descriptorOut[0] ?? 0n;
       return result;
     },
-    setNamedSecurityInfo: (path, type, info, owner, group, dacl, sacl) =>
-      advapi.symbols.SetNamedSecurityInfoW(
-        address(path),
+    setSecurityInfo: (handle, type, info, owner, group, dacl, sacl) =>
+      advapi.symbols.SetSecurityInfo(
+        address(handle),
         type,
         info,
         address(owner),

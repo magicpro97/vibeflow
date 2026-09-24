@@ -4,11 +4,11 @@
   "extractor_version": "2.0",
   "design": {
     "path": "docs/superpowers/specs/2026-08-24-ai-first-home-capability-fabric-design.md",
-    "sha256": "fa3ade830c066c78bf84985feeb1d00e4c8b7cc7d48f4a7b85203c488b7a9f23"
+    "sha256": "b72d4106be3d24579f1c6d51d18c6e3be5ac0b3440a693f380429e67c3e3326f"
   },
   "manifest": {
     "path": "docs/capability-normative-proof-manifest.json",
-    "sha256": "f2e3279c0a0d3bac140c8111b86c105a94cf66631b1bb10bb3091d8ae3b4ae72"
+    "sha256": "67b57747db7a3dd48b3b4b8afc8c54b3b66774e46a4563a5291928b5cf3a8972"
   },
   "atoms": [
     {
@@ -464594,16 +464594,16 @@
       }
     },
     {
-      "id": "atom:15567:c3d91a0d471c99c4",
+      "id": "atom:15567:60285abe56e4224a",
       "markdown_kind": "heading",
-      "section_id": "section:completion-criteria:74382a22fa1f",
-      "section": "Completion criteria",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
       "source_line_start": 15567,
       "source_line_end": 15567,
       "byte_start": 923039,
-      "byte_end": 923062,
-      "source_quote": "## Completion criteria\n",
-      "source_sha256": "c3d91a0d471c99c4ee1d5d0fe74ded0163128d368bce7cf9d75f8d74c6008803",
+      "byte_end": 923076,
+      "source_quote": "## Windows private-state permissions\n",
+      "source_sha256": "60285abe56e4224ae5233a35b19c07bf6ddabfea89fcf7f35bef10d56e684256",
       "candidates": [],
       "disposition": {
         "kind": "markdown-structure",
@@ -464615,12 +464615,12 @@
     {
       "id": "atom:15568:01ba4719c80b6fe9",
       "markdown_kind": "blank",
-      "section_id": "section:completion-criteria:74382a22fa1f",
-      "section": "Completion criteria",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
       "source_line_start": 15568,
       "source_line_end": 15568,
-      "byte_start": 923062,
-      "byte_end": 923063,
+      "byte_start": 923076,
+      "byte_end": 923077,
       "source_quote": "\n",
       "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
       "candidates": [],
@@ -464632,14 +464632,552 @@
       }
     },
     {
-      "id": "atom:15569:9cfedc88f1c0f6b0",
+      "id": "atom:15569:a4bbe1c930d3e47a",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15569,
+      "source_line_end": 15569,
+      "byte_start": 923077,
+      "byte_end": 923180,
+      "source_quote": "POSIX mode bits do not exist on Windows, so the descriptor is the durability trust boundary there, and\n",
+      "source_sha256": "a4bbe1c930d3e47a1fe41dbe98b62b37301c7d103b9edaa60edf7736e99d3768",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15570:63de87b7d19fe090",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15570,
+      "source_line_end": 15570,
+      "byte_start": 923180,
+      "byte_end": 923240,
+      "source_quote": "which rule a path is held to follows from that path's role:\n",
+      "source_sha256": "63de87b7d19fe09083421fbb998c58185c10e46fda4362ec5954fb0dd7418ed6",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15571:01ba4719c80b6fe9",
+      "markdown_kind": "blank",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15571,
+      "source_line_end": 15571,
+      "byte_start": 923240,
+      "byte_end": 923241,
+      "source_quote": "\n",
+      "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "candidates": [],
+      "disposition": {
+        "kind": "markdown-structure",
+        "owners": [],
+        "proof_ids": [],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15572:6428096e57f0a718",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15572,
+      "source_line_end": 15572,
+      "byte_start": 923241,
+      "byte_end": 923343,
+      "source_quote": "- the durable state a trust check reads — trace records and journals, registry directories, and the\n",
+      "source_sha256": "6428096e57f0a71886120d8a540131f59e59f6855a865498bdaa1599a33cca25",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15573:984a0bc2942fdf38",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15573,
+      "source_line_end": 15573,
+      "byte_start": 923343,
+      "byte_end": 923449,
+      "source_quote": "  conversation catalog — is held to a protected owner-only DACL: one ACE for the owning principal, with\n",
+      "source_sha256": "984a0bc2942fdf382fa081b24ff0ded42d386264b1cbffe4b946f2d5dedbecd0",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15574:07c98578a07c9b18",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15574,
+      "source_line_end": 15574,
+      "byte_start": 923449,
+      "byte_end": 923524,
+      "source_quote": "  `SE_DACL_PROTECTED` set so the ACEs a parent hands down cannot reappear;\n",
+      "source_sha256": "07c98578a07c9b187341a9394361f9305b977d30506f608f9626431b9e6f9b7e",
+      "candidates": [
+        {
+          "id": "candidate:negative:923507:9a43b6dac466",
+          "kind": "negative",
+          "byte_start": 923507,
+          "byte_end": 923513,
+          "quote": "cannot"
+        }
+      ],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15575:ba603f901e8ab019",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15575,
+      "source_line_end": 15575,
+      "byte_start": 923524,
+      "byte_end": 923625,
+      "source_quote": "- a shared container and the kernel lock file are held to the weaker rule instead, no ACE granting a\n",
+      "source_sha256": "ba603f901e8ab019683acb1b6579c5c6d0ec09e6cb548b76ff999e3ab90e98f0",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15576:31fcd6a7eea07411",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15576,
+      "source_line_end": 15576,
+      "byte_start": 923625,
+      "byte_end": 923720,
+      "source_quote": "  modifying right to a principal other than the owner, where `SYSTEM` and `Administrators` are\n",
+      "source_sha256": "31fcd6a7eea0741153baa8f99cab499f7461b595a54800f7e218eab408ceece5",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15577:5887440397d121a2",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15577,
+      "source_line_end": 15577,
+      "byte_start": 923720,
+      "byte_end": 923821,
+      "source_quote": "  root-equivalent because they can take ownership of any object; the descriptor such a path inherits\n",
+      "source_sha256": "5887440397d121a2be8eb728d91483353d7df8e72be745519ca323712117f577",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15578:ec36bf77d8525c0e",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15578,
+      "source_line_end": 15578,
+      "byte_start": 923821,
+      "byte_end": 923923,
+      "source_quote": "  from its parent therefore passes as it stands, exactly as POSIX accepts a group-readable directory.\n",
+      "source_sha256": "ec36bf77d8525c0e0a4b81908bf3fbb10e804ab67f551cc6d47d0e877d1a8717",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15579:01ba4719c80b6fe9",
+      "markdown_kind": "blank",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15579,
+      "source_line_end": 15579,
+      "byte_start": 923923,
+      "byte_end": 923924,
+      "source_quote": "\n",
+      "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "candidates": [],
+      "disposition": {
+        "kind": "markdown-structure",
+        "owners": [],
+        "proof_ids": [],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15580:9efd75f054ce7953",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15580,
+      "source_line_end": 15580,
+      "byte_start": 923924,
+      "byte_end": 924025,
+      "source_quote": "State written before the owner-only rule existed carries that inherited descriptor, so a trust check\n",
+      "source_sha256": "9efd75f054ce79536e08f349d679b6ee2f5cf7ed32730e96ee8bac71336bc8c4",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15581:c8fe67f447c5dfe7",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15581,
+      "source_line_end": 15581,
+      "byte_start": 924025,
+      "byte_end": 924130,
+      "source_quote": "migrates the path in place on first use and re-reads it rather than rejecting the install's own files; a\n",
+      "source_sha256": "c8fe67f447c5dfe7681cacab90af9a3fc87efb1f03cf0fffc49d17d0404db3bb",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15582:1ad34fd2093033a1",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15582,
+      "source_line_end": 15582,
+      "byte_start": 924130,
+      "byte_end": 924184,
+      "source_quote": "path that cannot be migrated fails the check instead.\n",
+      "source_sha256": "1ad34fd2093033a10a6cbb92bf622dd481d3e56eb14709b650b2092f9722891c",
+      "candidates": [
+        {
+          "id": "candidate:negative:924140:9a43b6dac466",
+          "kind": "negative",
+          "byte_start": 924140,
+          "byte_end": 924146,
+          "quote": "cannot"
+        }
+      ],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15583:01ba4719c80b6fe9",
+      "markdown_kind": "blank",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15583,
+      "source_line_end": 15583,
+      "byte_start": 924184,
+      "byte_end": 924185,
+      "source_quote": "\n",
+      "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "candidates": [],
+      "disposition": {
+        "kind": "markdown-structure",
+        "owners": [],
+        "proof_ids": [],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15584:f993f1e8f9a2bdd1",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15584,
+      "source_line_end": 15584,
+      "byte_start": 924185,
+      "byte_end": 924289,
+      "source_quote": "Windows has no handle-based DACL setter, so both the verdict and the migration are path-based. Both are\n",
+      "source_sha256": "f993f1e8f9a2bdd14c1121149f29691a4149fc486e3f3de1df78b415f8f232b5",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15585:b88801faafd4aa3c",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15585,
+      "source_line_end": 15585,
+      "byte_start": 924289,
+      "byte_end": 924394,
+      "source_quote": "bound to the file identity the caller stat'ed: a handle that does not reproduce that identity is neither\n",
+      "source_sha256": "b88801faafd4aa3c51489e7eb157e85faaf0382e38d4cb237f65eaa42c676e11",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15586:e361765fb5d70046",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15586,
+      "source_line_end": 15586,
+      "byte_start": 924394,
+      "byte_end": 924496,
+      "source_quote": "accepted for the object nor rewritten in its name, and a migration whose identity cannot be proven is\n",
+      "source_sha256": "e361765fb5d700460faf57d002c72737e49e948fa29fe8a94f4aa9b206a7fb05",
+      "candidates": [
+        {
+          "id": "candidate:negative:924476:9a43b6dac466",
+          "kind": "negative",
+          "byte_start": 924476,
+          "byte_end": 924482,
+          "quote": "cannot"
+        }
+      ],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15587:59b85d3fb295add5",
+      "markdown_kind": "content",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15587,
+      "source_line_end": 15587,
+      "byte_start": 924496,
+      "byte_end": 924518,
+      "source_quote": "not performed at all.\n",
+      "source_sha256": "59b85d3fb295add5891e2ddf05827d61abe2e2772466d0a46c8253bb29b1e3cd",
+      "candidates": [],
+      "disposition": {
+        "kind": "behavioral",
+        "owners": [
+          "foundation-durability-actions"
+        ],
+        "proof_ids": [
+          "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
+          "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused"
+        ],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15588:01ba4719c80b6fe9",
+      "markdown_kind": "blank",
+      "section_id": "section:windows-private-state-permissions:bcf3e57b5394",
+      "section": "Windows private-state permissions",
+      "source_line_start": 15588,
+      "source_line_end": 15588,
+      "byte_start": 924518,
+      "byte_end": 924519,
+      "source_quote": "\n",
+      "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "candidates": [],
+      "disposition": {
+        "kind": "markdown-structure",
+        "owners": [],
+        "proof_ids": [],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15589:c3d91a0d471c99c4",
+      "markdown_kind": "heading",
+      "section_id": "section:completion-criteria:74382a22fa1f",
+      "section": "Completion criteria",
+      "source_line_start": 15589,
+      "source_line_end": 15589,
+      "byte_start": 924519,
+      "byte_end": 924542,
+      "source_quote": "## Completion criteria\n",
+      "source_sha256": "c3d91a0d471c99c4ee1d5d0fe74ded0163128d368bce7cf9d75f8d74c6008803",
+      "candidates": [],
+      "disposition": {
+        "kind": "markdown-structure",
+        "owners": [],
+        "proof_ids": [],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15590:01ba4719c80b6fe9",
+      "markdown_kind": "blank",
+      "section_id": "section:completion-criteria:74382a22fa1f",
+      "section": "Completion criteria",
+      "source_line_start": 15590,
+      "source_line_end": 15590,
+      "byte_start": 924542,
+      "byte_end": 924543,
+      "source_quote": "\n",
+      "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "candidates": [],
+      "disposition": {
+        "kind": "markdown-structure",
+        "owners": [],
+        "proof_ids": [],
+        "waiver_id": null
+      }
+    },
+    {
+      "id": "atom:15591:9cfedc88f1c0f6b0",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15569,
-      "source_line_end": 15569,
-      "byte_start": 923063,
-      "byte_end": 923128,
+      "source_line_start": 15591,
+      "source_line_end": 15591,
+      "byte_start": 924543,
+      "byte_end": 924608,
       "source_quote": "The program is complete only when all of the following are true:\n",
       "source_sha256": "9cfedc88f1c0f6b09dd1e53e992745680567db70d4fe4e39a81c869595b33cc7",
       "candidates": [],
@@ -464717,14 +465255,14 @@
       }
     },
     {
-      "id": "atom:15570:01ba4719c80b6fe9",
+      "id": "atom:15592:01ba4719c80b6fe9",
       "markdown_kind": "blank",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15570,
-      "source_line_end": 15570,
-      "byte_start": 923128,
-      "byte_end": 923129,
+      "source_line_start": 15592,
+      "source_line_end": 15592,
+      "byte_start": 924608,
+      "byte_end": 924609,
       "source_quote": "\n",
       "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
       "candidates": [],
@@ -464736,14 +465274,14 @@
       }
     },
     {
-      "id": "atom:15571:5ed7b46ffd4fd9c9",
+      "id": "atom:15593:5ed7b46ffd4fd9c9",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15571,
-      "source_line_end": 15571,
-      "byte_start": 923129,
-      "byte_end": 923208,
+      "source_line_start": 15593,
+      "source_line_end": 15593,
+      "byte_start": 924609,
+      "byte_end": 924688,
       "source_quote": "- AI conversation is the default Home and the modal workspace path is removed.\n",
       "source_sha256": "5ed7b46ffd4fd9c93a0d4f0e9496a09759c17cff7f55299c97589fda6245bf49",
       "candidates": [],
@@ -464821,14 +465359,14 @@
       }
     },
     {
-      "id": "atom:15572:11be277949078925",
+      "id": "atom:15594:11be277949078925",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15572,
-      "source_line_end": 15572,
-      "byte_start": 923208,
-      "byte_end": 923307,
+      "source_line_start": 15594,
+      "source_line_end": 15594,
+      "byte_start": 924688,
+      "byte_end": 924787,
       "source_quote": "- The durable searchable session rail survives process restart and safely handles rapid switching.\n",
       "source_sha256": "11be2779490789253eba42cd28009bb42d0d2d9c7d9d3f1436ec58bf59520e89",
       "candidates": [],
@@ -464906,14 +465444,14 @@
       }
     },
     {
-      "id": "atom:15573:ebd4f977362f600c",
+      "id": "atom:15595:ebd4f977362f600c",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15573,
-      "source_line_end": 15573,
-      "byte_start": 923307,
-      "byte_end": 923405,
+      "source_line_start": 15595,
+      "source_line_end": 15595,
+      "byte_start": 924787,
+      "byte_end": 924885,
       "source_quote": "- Continuous ordinary sends are durably admitted and delivered through the per-root bounded FIFO;\n",
       "source_sha256": "ebd4f977362f600caab29869fc7b7827023c59d4ec67bd7fb5867f20a3770b35",
       "candidates": [],
@@ -464991,14 +465529,14 @@
       }
     },
     {
-      "id": "atom:15574:9dbe12fe5e1b6726",
+      "id": "atom:15596:9dbe12fe5e1b6726",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15574,
-      "source_line_end": 15574,
-      "byte_start": 923405,
-      "byte_end": 923509,
+      "source_line_start": 15596,
+      "source_line_end": 15596,
+      "byte_start": 924885,
+      "byte_end": 924989,
       "source_quote": "  oldest-only cross-process claim, exact predecessor-proof rebind, restart recovery, typed stale folds,\n",
       "source_sha256": "9dbe12fe5e1b67268f6cb162fdc80b6ee90ee43ff63d9ddd4b8cbebee1601e00",
       "candidates": [],
@@ -465076,22 +465614,22 @@
       }
     },
     {
-      "id": "atom:15575:6158d1f1df2a1732",
+      "id": "atom:15597:6158d1f1df2a1732",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15575,
-      "source_line_end": 15575,
-      "byte_start": 923509,
-      "byte_end": 923610,
+      "source_line_start": 15597,
+      "source_line_end": 15597,
+      "byte_start": 924989,
+      "byte_end": 925090,
       "source_quote": "  and latest-own `ArrowUp` edit all pass without sequence change, message loss, or direct injection.\n",
       "source_sha256": "6158d1f1df2a1732d7e11579e53da7550377c3bc08e79b7b1a62c9b17d21ffc0",
       "candidates": [
         {
-          "id": "candidate:negative:923550:1216b2a88975",
+          "id": "candidate:negative:925030:1216b2a88975",
           "kind": "negative",
-          "byte_start": 923550,
-          "byte_end": 923557,
+          "byte_start": 925030,
+          "byte_end": 925037,
           "quote": "without"
         }
       ],
@@ -465169,14 +465707,14 @@
       }
     },
     {
-      "id": "atom:15576:138e57e33def3e5c",
+      "id": "atom:15598:138e57e33def3e5c",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15576,
-      "source_line_end": 15576,
-      "byte_start": 923610,
-      "byte_end": 923712,
+      "source_line_start": 15598,
+      "source_line_end": 15598,
+      "byte_start": 925090,
+      "byte_end": 925192,
       "source_quote": "- Queued one-shot private file/range context survives content-only edit and restart through its exact\n",
       "source_sha256": "138e57e33def3e5c0d2f379d1388762a94e59f36379f05bed6815442698b2e58",
       "candidates": [],
@@ -465254,14 +465792,14 @@
       }
     },
     {
-      "id": "atom:15577:3fd3aec6e7355c13",
+      "id": "atom:15599:3fd3aec6e7355c13",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15577,
-      "source_line_end": 15577,
-      "byte_start": 923712,
-      "byte_end": 923817,
+      "source_line_start": 15599,
+      "source_line_end": 15599,
+      "byte_start": 925192,
+      "byte_end": 925297,
       "source_quote": "  server-owned binding, is consumed or released only by the proved queue outcome, and exposes no private\n",
       "source_sha256": "3fd3aec6e7355c13620e9117cd0aa7083b0e76f66189519cdad796751ded7437",
       "candidates": [],
@@ -465339,14 +465877,14 @@
       }
     },
     {
-      "id": "atom:15578:cf03db9545f710aa",
+      "id": "atom:15600:cf03db9545f710aa",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15578,
-      "source_line_end": 15578,
-      "byte_start": 923817,
-      "byte_end": 923876,
+      "source_line_start": 15600,
+      "source_line_end": 15600,
+      "byte_start": 925297,
+      "byte_end": 925356,
       "source_quote": "  bytes or identifiers through public/browser persistence.\n",
       "source_sha256": "cf03db9545f710aa9682ff856b9492f18fb7f97c963680cbefef74a5db4235f5",
       "candidates": [],
@@ -465424,14 +465962,14 @@
       }
     },
     {
-      "id": "atom:15579:e18888e1b015897f",
+      "id": "atom:15601:e18888e1b015897f",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15579,
-      "source_line_end": 15579,
-      "byte_start": 923876,
-      "byte_end": 923977,
+      "source_line_start": 15601,
+      "source_line_end": 15601,
+      "byte_start": 925356,
+      "byte_end": 925457,
       "source_quote": "- Initial-conversation private context uses the pre-root draft broker, lossless replacement/discard,\n",
       "source_sha256": "e18888e1b015897f695ee3c22adb6d269f97073201b8ad3f11a5678b8f8740f3",
       "candidates": [],
@@ -465509,22 +466047,22 @@
       }
     },
     {
-      "id": "atom:15580:3c8aa6557f0bce4c",
+      "id": "atom:15602:3c8aa6557f0bce4c",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15580,
-      "source_line_end": 15580,
-      "byte_start": 923977,
-      "byte_end": 924080,
+      "source_line_start": 15602,
+      "source_line_end": 15602,
+      "byte_start": 925457,
+      "byte_end": 925560,
       "source_quote": "  and one recoverable exact-ID transfer; final Home carries only `private_context_present` and never a\n",
       "source_sha256": "3c8aa6557f0bce4c2de32e635b3cb77af1b93ecdafba5326f826dd0d0c3a966e",
       "candidates": [
         {
-          "id": "candidate:negative:924072:6497e4b3d7be",
+          "id": "candidate:negative:925552:6497e4b3d7be",
           "kind": "negative",
-          "byte_start": 924072,
-          "byte_end": 924077,
+          "byte_start": 925552,
+          "byte_end": 925557,
           "quote": "never"
         }
       ],
@@ -465602,14 +466140,14 @@
       }
     },
     {
-      "id": "atom:15581:7c0218ee0e510093",
+      "id": "atom:15603:7c0218ee0e510093",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15581,
-      "source_line_end": 15581,
-      "byte_start": 924080,
-      "byte_end": 924103,
+      "source_line_start": 15603,
+      "source_line_end": 15603,
+      "byte_start": 925560,
+      "byte_end": 925583,
       "source_quote": "  legacy full binding.\n",
       "source_sha256": "7c0218ee0e51009324a079002611c1ebbf0a47e457de74c69df9a70616505aa3",
       "candidates": [],
@@ -465687,22 +466225,22 @@
       }
     },
     {
-      "id": "atom:15582:69e1d504547dc907",
+      "id": "atom:15604:69e1d504547dc907",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15582,
-      "source_line_end": 15582,
-      "byte_start": 924103,
-      "byte_end": 924199,
+      "source_line_start": 15604,
+      "source_line_end": 15604,
+      "byte_start": 925583,
+      "byte_end": 925679,
       "source_quote": "- Existing conversations remain discoverable or recoverable without authoritative-data rewrite.\n",
       "source_sha256": "69e1d504547dc90772129d80fb5504920de5ab51ef91ec18e5335f9d174c1dda",
       "candidates": [
         {
-          "id": "candidate:negative:924163:1216b2a88975",
+          "id": "candidate:negative:925643:1216b2a88975",
           "kind": "negative",
-          "byte_start": 924163,
-          "byte_end": 924170,
+          "byte_start": 925643,
+          "byte_end": 925650,
           "quote": "without"
         }
       ],
@@ -465780,14 +466318,14 @@
       }
     },
     {
-      "id": "atom:15583:7389892a74862527",
+      "id": "atom:15605:7389892a74862527",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15583,
-      "source_line_end": 15583,
-      "byte_start": 924199,
-      "byte_end": 924301,
+      "source_line_start": 15605,
+      "source_line_end": 15605,
+      "byte_start": 925679,
+      "byte_end": 925781,
       "source_quote": "- Add/remove agent produces a child revision with durable lineage and identical canonical context for\n",
       "source_sha256": "7389892a748625272c887d134163db516c35c8b5d36915c7826ff8345764dc51",
       "candidates": [],
@@ -465865,14 +466403,14 @@
       }
     },
     {
-      "id": "atom:15584:c2afbd7113704024",
+      "id": "atom:15606:c2afbd7113704024",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15584,
-      "source_line_end": 15584,
-      "byte_start": 924301,
-      "byte_end": 924330,
+      "source_line_start": 15606,
+      "source_line_end": 15606,
+      "byte_start": 925781,
+      "byte_end": 925810,
       "source_quote": "  every fresh child session.\n",
       "source_sha256": "c2afbd7113704024cf53ec59bec87375fbef1dad6f598331b92c77c7c5d711ee",
       "candidates": [],
@@ -465950,14 +466488,14 @@
       }
     },
     {
-      "id": "atom:15585:3a0f2adcd04b2e6d",
+      "id": "atom:15607:3a0f2adcd04b2e6d",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15585,
-      "source_line_end": 15585,
-      "byte_start": 924330,
-      "byte_end": 924426,
+      "source_line_start": 15607,
+      "source_line_end": 15607,
+      "byte_start": 925810,
+      "byte_end": 925906,
       "source_quote": "- Natural language, shortcuts, and CLI commands share typed validation and authority semantics.\n",
       "source_sha256": "3a0f2adcd04b2e6d82d11c4c2eab4375593c41fa93548b5461324b51f6b43065",
       "candidates": [],
@@ -466035,14 +466573,14 @@
       }
     },
     {
-      "id": "atom:15586:8c9da04e7e83d35b",
+      "id": "atom:15608:8c9da04e7e83d35b",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15586,
-      "source_line_end": 15586,
-      "byte_start": 924426,
-      "byte_end": 924528,
+      "source_line_start": 15608,
+      "source_line_end": 15608,
+      "byte_start": 925906,
+      "byte_end": 926008,
       "source_quote": "- Capability packages support install, status, configure, retarget, update, remove, rollback, repair,\n",
       "source_sha256": "8c9da04e7e83d35be0f4b69eb75af33d346a8bfb748223ceb4de554c463e8f88",
       "candidates": [],
@@ -466120,14 +466658,14 @@
       }
     },
     {
-      "id": "atom:15587:b8947121b218bde1",
+      "id": "atom:15609:b8947121b218bde1",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15587,
-      "source_line_end": 15587,
-      "byte_start": 924528,
-      "byte_end": 924582,
+      "source_line_start": 15609,
+      "source_line_end": 15609,
+      "byte_start": 926008,
+      "byte_end": 926062,
       "source_quote": "  and adoption across honest engine adapter outcomes.\n",
       "source_sha256": "b8947121b218bde1ab0e7b478ffca4068a8b39172c8cb6242e8c223aef528bc0",
       "candidates": [],
@@ -466205,14 +466743,14 @@
       }
     },
     {
-      "id": "atom:15588:aa002bcebae9a4b3",
+      "id": "atom:15610:aa002bcebae9a4b3",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15588,
-      "source_line_end": 15588,
-      "byte_start": 924582,
-      "byte_end": 924685,
+      "source_line_start": 15610,
+      "source_line_end": 15610,
+      "byte_start": 926062,
+      "byte_end": 926165,
       "source_quote": "- Package/UI trust boundaries, permission deltas, secret handling, idempotency, crash recovery, drift,\n",
       "source_sha256": "aa002bcebae9a4b3cc5906e77ff2ea533980c37fd7fd0e1237f045998d5bd3cf",
       "candidates": [],
@@ -466290,14 +466828,14 @@
       }
     },
     {
-      "id": "atom:15589:586ca5bb55cab08c",
+      "id": "atom:15611:586ca5bb55cab08c",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15589,
-      "source_line_end": 15589,
-      "byte_start": 924685,
-      "byte_end": 924755,
+      "source_line_start": 15611,
+      "source_line_end": 15611,
+      "byte_start": 926165,
+      "byte_end": 926235,
       "source_quote": "  and ownership preservation pass negative and fault-injection tests.\n",
       "source_sha256": "586ca5bb55cab08cdbc3e9135f9c28166fa15f004cc7ac56eeb2eba1475f0651",
       "candidates": [],
@@ -466375,14 +466913,14 @@
       }
     },
     {
-      "id": "atom:15590:296a16eb7a3daf69",
+      "id": "atom:15612:296a16eb7a3daf69",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15590,
-      "source_line_end": 15590,
-      "byte_start": 924755,
-      "byte_end": 924857,
+      "source_line_start": 15612,
+      "source_line_end": 15612,
+      "byte_start": 926235,
+      "byte_end": 926337,
       "source_quote": "- Production visual, responsive, offline, empty/error, keyboard, and screen-reader states satisfy the\n",
       "source_sha256": "296a16eb7a3daf69e8b9cc1997c3e555845f992bbb826ea8206da534573cdd26",
       "candidates": [],
@@ -466460,14 +466998,14 @@
       }
     },
     {
-      "id": "atom:15591:3e80a3542aae674e",
+      "id": "atom:15613:3e80a3542aae674e",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15591,
-      "source_line_end": 15591,
-      "byte_start": 924857,
-      "byte_end": 924881,
+      "source_line_start": 15613,
+      "source_line_end": 15613,
+      "byte_start": 926337,
+      "byte_end": 926361,
       "source_quote": "  approved UX contract.\n",
       "source_sha256": "3e80a3542aae674e3eef3c4c4b7ebe0f4a186bfd5ddb7d42d63c585929889860",
       "candidates": [],
@@ -466545,14 +467083,14 @@
       }
     },
     {
-      "id": "atom:15592:8be60496b1d6cd55",
+      "id": "atom:15614:8be60496b1d6cd55",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15592,
-      "source_line_end": 15592,
-      "byte_start": 924881,
-      "byte_end": 924982,
+      "source_line_start": 15614,
+      "source_line_end": 15614,
+      "byte_start": 926361,
+      "byte_end": 926462,
       "source_quote": "- Compatibility frontends use the Fabric; duplicate modal/direct-writer implementations are deleted.\n",
       "source_sha256": "8be60496b1d6cd551157b0656072747a5576b6ad25473ddf7aaafccd9d9dc6e1",
       "candidates": [],
@@ -466630,14 +467168,14 @@
       }
     },
     {
-      "id": "atom:15593:9dff69a2175762d8",
+      "id": "atom:15615:9dff69a2175762d8",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15593,
-      "source_line_end": 15593,
-      "byte_start": 924982,
-      "byte_end": 925056,
+      "source_line_start": 15615,
+      "source_line_end": 15615,
+      "byte_start": 926462,
+      "byte_end": 926536,
       "source_quote": "- Independent review finds no unresolved correctness or security blocker.\n",
       "source_sha256": "9dff69a2175762d8508a25fd330dffb02912dd8549ec4e79ee3fade8ef869253",
       "candidates": [],
@@ -466715,14 +467253,14 @@
       }
     },
     {
-      "id": "atom:15594:fec1f13453adf873",
+      "id": "atom:15616:fec1f13453adf873",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15594,
-      "source_line_end": 15594,
-      "byte_start": 925056,
-      "byte_end": 925133,
+      "source_line_start": 15616,
+      "source_line_end": 15616,
+      "byte_start": 926536,
+      "byte_end": 926613,
       "source_quote": "- The machine-checked normative-clause matrix has no uncovered or stale row.\n",
       "source_sha256": "fec1f13453adf87325c28870804c692c6b81304bec2f554b0fd6038adf537bd0",
       "candidates": [],
@@ -466800,14 +467338,14 @@
       }
     },
     {
-      "id": "atom:15595:3df5c5747d994ed4",
+      "id": "atom:15617:3df5c5747d994ed4",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15595,
-      "source_line_end": 15595,
-      "byte_start": 925133,
-      "byte_end": 925211,
+      "source_line_start": 15617,
+      "source_line_end": 15617,
+      "byte_start": 926613,
+      "byte_end": 926691,
       "source_quote": "- Whole-repository `vf verify` passes with live evidence at confidence `1.0`.\n",
       "source_sha256": "3df5c5747d994ed4625a61b9b689583941a07ec3fc651c80ce0251af108538c9",
       "candidates": [],
@@ -466885,14 +467423,14 @@
       }
     },
     {
-      "id": "atom:15596:01ba4719c80b6fe9",
+      "id": "atom:15618:01ba4719c80b6fe9",
       "markdown_kind": "blank",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15596,
-      "source_line_end": 15596,
-      "byte_start": 925211,
-      "byte_end": 925212,
+      "source_line_start": 15618,
+      "source_line_end": 15618,
+      "byte_start": 926691,
+      "byte_end": 926692,
       "source_quote": "\n",
       "source_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
       "candidates": [],
@@ -466904,14 +467442,14 @@
       }
     },
     {
-      "id": "atom:15597:349ad5819f06b943",
+      "id": "atom:15619:349ad5819f06b943",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15597,
-      "source_line_end": 15597,
-      "byte_start": 925212,
-      "byte_end": 925315,
+      "source_line_start": 15619,
+      "source_line_end": 15619,
+      "byte_start": 926692,
+      "byte_end": 926795,
       "source_quote": "There are no remaining product-direction questions in this design. Implementation-level module naming,\n",
       "source_sha256": "349ad5819f06b9431fbca954b21444d633def28711293d1d2d19afae07c2d30f",
       "candidates": [],
@@ -466989,14 +467527,14 @@
       }
     },
     {
-      "id": "atom:15598:3468dd21cfe2cf56",
+      "id": "atom:15620:3468dd21cfe2cf56",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15598,
-      "source_line_end": 15598,
-      "byte_start": 925315,
-      "byte_end": 925419,
+      "source_line_start": 15620,
+      "source_line_end": 15620,
+      "byte_start": 926795,
+      "byte_end": 926899,
       "source_quote": "work-unit boundaries, and exact response pagination defaults may be selected in the implementation plan\n",
       "source_sha256": "3468dd21cfe2cf5623d9a865170b1c083fb6e40e6782041fd1867e2ad1526fc1",
       "candidates": [],
@@ -467074,22 +467612,22 @@
       }
     },
     {
-      "id": "atom:15599:255cd7e2ed8998b2",
+      "id": "atom:15621:255cd7e2ed8998b2",
       "markdown_kind": "content",
       "section_id": "section:completion-criteria:74382a22fa1f",
       "section": "Completion criteria",
-      "source_line_start": 15599,
-      "source_line_end": 15599,
-      "byte_start": 925419,
-      "byte_end": 925453,
+      "source_line_start": 15621,
+      "source_line_end": 15621,
+      "byte_start": 926899,
+      "byte_end": 926933,
       "source_quote": "without changing these contracts.\n",
       "source_sha256": "255cd7e2ed8998b2f61e5d37e5e5c36a331aee74e8dc344e6b30d51f8c8f2a4a",
       "candidates": [
         {
-          "id": "candidate:negative:925419:1216b2a88975",
+          "id": "candidate:negative:926899:1216b2a88975",
           "kind": "negative",
-          "byte_start": 925419,
-          "byte_end": 925426,
+          "byte_start": 926899,
+          "byte_end": 926906,
           "quote": "without"
         }
       ],

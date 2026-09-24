@@ -329,6 +329,18 @@ Modes: `--yes` → CLI, else `$VIBEFLOW_AI` → bridge, else dry. Dispatches uni
 parallel, runs an independent reviewer (pass only at confidence `1.0` with evidence),
 then prints the goal-eval verdict (`met | partial | blocked`).
 
+The dispatch set is `pending` units only (#783). Every other ledger status is held out of
+the run and reported as skipped — `blocked` (sequential gating, never a dispatch candidate),
+`running` as in-flight, `verifying` as awaiting-verification, `done` as already-complete — so
+staged units stay staged without hand-editing statuses mid-run:
+
+```bash
+vf units update u2 --status pending   # explicitly unblock a staged unit for the next run
+```
+
+A dry run previews the same set: skipped units are listed, only `pending` units are counted in
+`Dispatched N unit(s)`, and prompts under `.vibeflow/workunits/*` are written for them alone.
+
 When `vf orchestrate` is used for an explicit multi-participant route, the coordinator is the sole authority and the executor is a different admitted engine. Clarifications route back to the coordinator first; the coordinator resolves ambiguity by checking the task spec, then conversation context, then repo evidence, then a safe default, and asks the user only as a last resort. Exact native session resume stays engine-local; when supported native reconciliation detects compaction or exact proof is unavailable, VibeFlow revokes exact authority and falls back to bounded replay. Bare coordinate routes currently admit Claude and Codex because both can enforce the resolved role sandbox and return authenticated structured coordination output. Copilot, OpenCode, and Antigravity remain available on workflow transports and fail closed for coordinate authority until their adapters can prove both contracts. `--isolate` keeps each unit in its own linked git worktree so clarification and recovery stay in the same filesystem state. On a proved exact resume, the coordinator sends only fresh user and peer-agent context; after detected compaction or missing exact proof, it also sends bounded public history from the receiving CLI. Executors must commit in their worktree, and the host only fast-forwards a clean, quiescent HEAD after verification; failure and divergence stay preserved for recovery.
 
 ## Race (head-to-head)

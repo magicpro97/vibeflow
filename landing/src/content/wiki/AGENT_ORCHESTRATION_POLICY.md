@@ -2,7 +2,7 @@
 title: Agent Orchestration Policy
 description: Defines the orchestration policy for the main AI agent — confidence thresholds, debate rules, anti-hallucination, and verification.
 category: explanation
-last_updated: 2026-06-24
+last_updated: 2026-09-24
 ---
 
 # Agent Orchestration Policy
@@ -162,7 +162,10 @@ Debate questions:
 
 ## Parallel execution policy
 
-Parallel work is allowed only when scopes do not overlap.
+Parallel work is allowed only when scopes do not overlap. Independently of scope, a run
+dispatches `pending` work units only (#783): `blocked`, `running`, `verifying`, and `done`
+units stay out of the dispatch set and are reported as skipped — see the dispatch-set
+authority in `WORK_UNIT_ORCHESTRATION.md`.
 
 Safe examples:
 

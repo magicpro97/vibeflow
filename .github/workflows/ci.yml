@@ -79,6 +79,10 @@ jobs:
         include:
           - suite: owned-process
           - suite: package-smoke
+          # #803: bare `vf`/`vf ui` shipped dead on Windows because no CI job ever started the
+          # conversation bootstrap there; only `owned-process` and `package-smoke` ran, and both
+          # stop at `--version`/`vf init`. This row runs the entry point itself.
+          - suite: home-ui-bootstrap
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -92,7 +96,7 @@ jobs:
         with:
           bun-version: 1.4.0
       - uses: actions/setup-node@v4
-        if: matrix.suite == 'package-smoke'
+        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap'
         with:
           node-version: 20
       - run: bun ci
@@ -112,11 +116,41 @@ jobs:
         if: matrix.suite == 'owned-process'
         run: bun test --timeout 30000 test/dispatch-windows-bridge-command.test.ts
       - name: Build shipped artifact
-        if: matrix.suite == 'package-smoke'
+        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap'
         run: bun run build
+      - name: Conversation bootstrap through the shipped CLI (real vf ui on Windows)
+        if: matrix.suite == 'home-ui-bootstrap'
+        run: bun test --timeout 30000 test/windows-conversation-bootstrap-live.test.ts
       - name: Smoke test built CLI through Node
         if: matrix.suite == 'package-smoke'
         run: node dist/cli.js --version
+      - name: Node runtime smoke over the private state path
+        # The koffi backend only loads under Node; every other Windows row spawns bun. Boot the
+        # shipped CLI in a throwaway project so the owner-only state tree goes through the Node
+        # FFI path — a rejected directory exits the CLI before it ever writes the tree.
+        if: matrix.suite == 'package-smoke'
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "vf node state smoke"
+          New-Item -ItemType Directory -Force $root | Out-Null
+          Set-Location $root
+          git init -q .
+          $ui = Start-Process -FilePath node -ArgumentList "$env:GITHUB_WORKSPACE/dist/cli.js", "ui", "--port", "0", "--no-open" -PassThru -NoNewWindow -RedirectStandardOutput ui.log -RedirectStandardError ui.err
+          # Poll rather than sleep a fixed budget: the runner's boot time varies, and the tree is
+          # written by the same bootstrap that #803 rejected before it could run.
+          $deadline = (Get-Date).AddSeconds(60)
+          $tree = ".vibeflow/conversation/trace"
+          while (-not (Test-Path $tree)) {
+            if ($ui.HasExited) {
+              Get-Content ui.log, ui.err
+              throw "vf ui exited before booting (code=$($ui.ExitCode))"
+            }
+            if ((Get-Date) -gt $deadline) {
+              throw "vf ui did not create the private conversation tree within 60s"
+            }
+            Start-Sleep -Milliseconds 500
+          }
+          Stop-Process -Id $ui.Id -Force
       - name: Pack and install shipped artifact in isolated path
         if: matrix.suite == 'package-smoke'
         shell: pwsh

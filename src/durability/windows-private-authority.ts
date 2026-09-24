@@ -43,8 +43,11 @@ export interface WindowsPrivateAuthority {
   verifyNoForeignWrite(handle: bigint): void;
   /** The SID of the account running this process, for callers applying their own descriptor policy. */
   currentUserId(): Buffer;
-  /** Reset an existing file/dir's DACL in-place to owner-only + SE_DACL_PROTECTED. */
-  migrateToOwnerOnly(path: string, kind: WindowsAuthorityPathKind): void;
+  /**
+   * Reset an existing object's owner and DACL in place to owner-only + SE_DACL_PROTECTED, through
+   * its handle.
+   */
+  migrateHandle(handle: bigint, kind: WindowsAuthorityPathKind): void;
 }
 
 export interface WindowsSecurityNativeRuntime {
@@ -76,8 +79,8 @@ export interface WindowsSecurityNativeRuntime {
     sacl: unknown[],
     descriptor: unknown[],
   ): number;
-  setNamedSecurityInfo(
-    path: Buffer,
+  setSecurityInfo(
+    handle: bigint,
     type: number,
     info: number,
     owner: unknown,
@@ -142,7 +145,13 @@ export function createWindowsPrivateAuthority(
         !descriptor.daclPresent ||
         descriptor.daclDefaulted ||
         descriptor.aces.length !== 1 ||
-        !descriptor.owner.equals(user.sid) ||
+        // The owner must be the caller's own principal — which is the token's owner SID, not
+        // necessarily its user SID: Windows stamps the token owner on every object the token
+        // creates, and for an elevated administrator token that is BUILTIN\Administrators. A
+        // freshly created directory on such a host is owned by that group, so comparing against
+        // the user SID alone rejected objects this process had just created and could not be
+        // repaired back (the owner is not the DACL). See #803.
+        (!descriptor.owner.equals(user.sid) && !descriptor.owner.equals(user.ownerSid)) ||
         !ace ||
         ace.type !== WINDOWS_PRIVATE_SECURITY.ACCESS_ALLOWED_ACE_TYPE ||
         ace.flags !== expectedAceFlags(kind) ||
@@ -151,8 +160,8 @@ export function createWindowsPrivateAuthority(
       )
         durabilityError("unsafe_path", "permissive Windows authority DACL rejected");
     },
-    migrateToOwnerOnly(path, kind) {
-      bindings.migrateDacl(path, descriptorSddl(user.sddl, kind));
+    migrateHandle(handle, kind) {
+      bindings.migrateHandle(handle, descriptorSddl(user.sddl, kind));
     },
   };
 }
@@ -181,40 +190,33 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       durabilityError("unsafe_path", "invalid Windows authority ACE SID");
     return Buffer.from(sid);
   };
-  const currentUser = (): { sid: Buffer; sddl: string } => {
+  const tokenSid = (token: bigint, kind: number): unknown => {
+    const needed = [0];
+    if (
+      native.tokenInfo(token, kind, null, 0, needed) ||
+      native.lastError() !== WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER
+    )
+      failed("GetTokenInformation(size)");
+    const output = Buffer.alloc(needed[0] ?? 0);
+    if (!native.tokenInfo(token, kind, output, output.length, needed))
+      failed("GetTokenInformation");
+    // TOKEN_USER and TOKEN_OWNER both begin with the SID pointer, and the reader takes that
+    // pointer rather than a struct, so one read serves both classes.
+    return native.tokenUserSid(output);
+  };
+  const currentUser = (): { sid: Buffer; sddl: string; ownerSid: Buffer } => {
     const token: unknown[] = [null];
     if (!native.openToken(native.getCurrentProcess(), WINDOWS_PRIVATE_SECURITY.TOKEN_QUERY, token))
       failed("OpenProcessToken");
     return withCleanup(() => {
-      const needed = [0];
-      if (
-        native.tokenInfo(
-          token[0] as bigint,
-          WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS,
-          null,
-          0,
-          needed,
-        ) ||
-        native.lastError() !== WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER
-      )
-        failed("GetTokenInformation(size)");
-      const output = Buffer.alloc(needed[0] ?? 0);
-      if (
-        !native.tokenInfo(
-          token[0] as bigint,
-          WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS,
-          output,
-          output.length,
-          needed,
-        )
-      )
-        failed("GetTokenInformation");
-      const sid = native.tokenUserSid(output);
+      const sid = tokenSid(token[0] as bigint, WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS);
+      const ownerSid = tokenSid(token[0] as bigint, WINDOWS_PRIVATE_SECURITY.TOKEN_OWNER_CLASS);
       const text: unknown[] = [null];
       if (!native.sidToString(sid, text)) failed("ConvertSidToStringSidW");
       return withCleanup(
         () => ({
           sid: copySid(sid),
+          ownerSid: copySid(ownerSid),
           sddl: native.wideString(text[0]),
         }),
         [() => native.localFree(text[0])],
@@ -247,7 +249,7 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       release: () => runCleanups([attributes.release, () => native.localFree(descriptor[0])]),
     };
   };
-  const migrateDacl = (path: string, sddl: string): void => {
+  const migrateHandle = (handle: bigint, sddl: string): void => {
     const descriptor: unknown[] = [null];
     if (
       !native.convertDescriptor(
@@ -268,22 +270,29 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
         !dacl[0]
       )
         failed("GetSecurityDescriptorDacl(migrate)");
-      const code = native.setNamedSecurityInfo(
-        Buffer.from(`${path}\0`, "utf16le"),
+      const code = native.setSecurityInfo(
+        handle,
         WINDOWS_PRIVATE_SECURITY.SE_FILE_OBJECT,
         // >>> 0: PROTECTED_DACL_INFORMATION is 0x80000000, so the bitwise OR yields a negative
         // int32 in JS. Passing that to a u32 FFI parameter reaches Windows as garbage flags and
         // the call fails with ERROR_ACCESS_DENIED(5).
-        (WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
+        (WINDOWS_PRIVATE_SECURITY.OWNER_INFORMATION |
+          WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
           WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
           0,
-        null,
+        // The owner is written because the policy verifyHandle enforces names the token user there,
+        // and an elevated token leaves the objects it creates owned by its Administrators group: a
+        // DACL-only write stays one field short, so the repair answered false for every path the
+        // process itself had just created (the Windows package-smoke failure). The write needs
+        // WRITE_OWNER on the handle and, without SeRestorePrivilege, the token user as the new owner,
+        // so it cannot take over an object the caller does not already command.
+        currentUser().sid,
         null,
         dacl[0],
         null,
       );
       if (code !== 0)
-        durabilityError("unsafe_path", `SetNamedSecurityInfoW failed with Windows error ${code}`);
+        durabilityError("unsafe_path", `SetSecurityInfo failed with Windows error ${code}`);
     } finally {
       native.localFree(descriptor[0]);
     }
@@ -363,7 +372,7 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
       };
     }, [() => native.localFree(descriptor[0])]);
   };
-  return { currentUser, createSecurity, inspect, migrateDacl };
+  return { currentUser, createSecurity, inspect, migrateHandle };
 }
 
 export function loadWindowsPrivateAuthorityBindings(

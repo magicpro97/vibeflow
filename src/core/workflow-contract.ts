@@ -127,3 +127,30 @@ export type WorkflowDashboardStatus = ValueOf<typeof WORKFLOW_DASHBOARD_STATUS>;
 export const WORKFLOW_DASHBOARD_STATUSES = Object.freeze(Object.values(WORKFLOW_DASHBOARD_STATUS));
 export const isWorkflowDashboardStatus = (value: unknown): value is WorkflowDashboardStatus =>
   memberOf(WORKFLOW_DASHBOARD_STATUSES, value);
+
+/**
+ * Dispatch disposition of every work-unit status (#783). A run hands ONLY `pending` units to
+ * the engine; every other status stays out of the dispatch set and is reported as skipped
+ * under its disposition, so a `blocked` unit survives a re-run (sequential gating) instead of
+ * being dispatched again or silently dropped.
+ */
+export const WORK_UNIT_DISPATCH = Object.freeze({
+  DISPATCH: "dispatch",
+  IN_FLIGHT: "in-flight",
+  AWAITING_VERIFICATION: "awaiting-verification",
+  ALREADY_COMPLETE: "already-complete",
+  BLOCKED: "blocked",
+} as const);
+export type WorkUnitDispatchDisposition = ValueOf<typeof WORK_UNIT_DISPATCH>;
+
+export const WORK_UNIT_DISPATCH_BY_STATUS = Object.freeze({
+  [WORK_UNIT_STATUS.PENDING]: WORK_UNIT_DISPATCH.DISPATCH,
+  [WORK_UNIT_STATUS.RUNNING]: WORK_UNIT_DISPATCH.IN_FLIGHT,
+  [WORK_UNIT_STATUS.VERIFYING]: WORK_UNIT_DISPATCH.AWAITING_VERIFICATION,
+  [WORK_UNIT_STATUS.DONE]: WORK_UNIT_DISPATCH.ALREADY_COMPLETE,
+  [WORK_UNIT_STATUS.BLOCKED]: WORK_UNIT_DISPATCH.BLOCKED,
+} satisfies Record<WorkUnitStatus, WorkUnitDispatchDisposition>);
+
+/** True only for `pending` — the single status a dispatch run may hand to the engine (#783). */
+export const isWorkUnitDispatchable = (status: WorkUnitStatus): boolean =>
+  WORK_UNIT_DISPATCH_BY_STATUS[status] === WORK_UNIT_DISPATCH.DISPATCH;

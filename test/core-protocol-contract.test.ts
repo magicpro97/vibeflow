@@ -71,6 +71,8 @@ import {
   SECURITY_VERDICTS,
   WORKFLOW_DASHBOARD_STATUS,
   WORKFLOW_DASHBOARD_STATUSES,
+  WORK_UNIT_DISPATCH,
+  WORK_UNIT_DISPATCH_BY_STATUS,
   WORK_UNIT_GATE,
   WORK_UNIT_GATES,
   WORK_UNIT_RISK_CLASS,
@@ -83,6 +85,7 @@ import {
   isKnowledgeHeavySource,
   isSecurityConsent,
   isSecurityVerdict,
+  isWorkUnitDispatchable,
   isWorkUnitGateName,
   isWorkUnitRiskClass,
   isWorkUnitStatus,
@@ -137,6 +140,8 @@ describe("core protocol contracts", () => {
       PRE_REVIEW_WORK_UNIT_GATES,
       WORKFLOW_DASHBOARD_STATUS,
       WORKFLOW_DASHBOARD_STATUSES,
+      WORK_UNIT_DISPATCH,
+      WORK_UNIT_DISPATCH_BY_STATUS,
       HOOK_EVENT,
       HOOK_EVENTS,
       HOOK_DECISION,
@@ -208,5 +213,23 @@ describe("core protocol contracts", () => {
       for (const value of ["", "invented", "toString", "constructor", null, 1, {}])
         expect(guard(value)).toBe(false);
     }
+  });
+
+  test("#783: only `pending` is dispatchable, every other status has a named disposition", () => {
+    const policy = [
+      [WORK_UNIT_STATUS.PENDING, WORK_UNIT_DISPATCH.DISPATCH, true],
+      [WORK_UNIT_STATUS.RUNNING, WORK_UNIT_DISPATCH.IN_FLIGHT, false],
+      [WORK_UNIT_STATUS.VERIFYING, WORK_UNIT_DISPATCH.AWAITING_VERIFICATION, false],
+      [WORK_UNIT_STATUS.DONE, WORK_UNIT_DISPATCH.ALREADY_COMPLETE, false],
+      [WORK_UNIT_STATUS.BLOCKED, WORK_UNIT_DISPATCH.BLOCKED, false],
+    ] as const;
+    for (const [status, disposition, dispatchable] of policy) {
+      expect(WORK_UNIT_DISPATCH_BY_STATUS[status]).toBe(disposition);
+      expect(isWorkUnitDispatchable(status)).toBe(dispatchable);
+    }
+    // Total over the frozen vocabulary: a new status cannot slip in undecided.
+    expect(Object.keys(WORK_UNIT_DISPATCH_BY_STATUS).sort()).toEqual(
+      [...WORK_UNIT_STATUSES].sort(),
+    );
   });
 });

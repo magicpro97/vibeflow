@@ -10,6 +10,8 @@ import {
 } from "../src/dispatch/windows-private-authority.js";
 
 const USER_SID = Buffer.from([1, 1, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0]);
+const ADMINS_SID = Buffer.from([1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 32, 2, 0, 0]);
+const FOREIGN_SID = Buffer.from([1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 42, 2, 0, 0]);
 
 test("formatWindowsSid renders the S-1-5-… form and rejects an unreadable buffer", () => {
   expect(formatWindowsSid(USER_SID)).toBe("S-1-5-21");
@@ -34,19 +36,60 @@ function descriptor(flags = 0): WindowsPrivateDescriptorView {
   };
 }
 
-function fixture(view: WindowsPrivateDescriptorView = descriptor()) {
+/** The koffi surface the security bindings use, over a caller-supplied Win32 dispatch. */
+function fakeSecurityKoffi(dispatch: Record<string, (...args: any[]) => unknown>) {
+  const library = {
+    func:
+      (_convention: string, name: string) =>
+      (...args: unknown[]) =>
+        dispatch[name]?.(...args) ?? 1,
+  };
+  const tokenUserType = { tokenUser: true };
+  return {
+    load: () => library,
+    opaque: () => ({ opaque: true }),
+    pointer: (value: unknown) => ({ pointer: value }),
+    out: (value: unknown) => ({ out: value }),
+    struct: (value: Record<string, unknown>) =>
+      "User" in value ? tokenUserType : { struct: value },
+    alloc: () => ({ allocated: true }),
+    encode: (target: object, _type: unknown, value: object) => Object.assign(target, value),
+    free: () => undefined,
+    sizeof: () => 24,
+    view: (value: Buffer, length: number) =>
+      value.buffer.slice(value.byteOffset, value.byteOffset + length),
+    // The security bindings read the SID pointer out of the TOKEN_USER/TOKEN_OWNER buffer instead of
+    // decoding a TOKEN_USER struct — TOKEN_OWNER is a bare PSID (#803) — so a pointer-typed decode
+    // answers the SID that buffer points at.
+    decode: (value: unknown, type: unknown) =>
+      typeof type === "object" && type !== null && "pointer" in type
+        ? USER_SID
+        : type === "char16_t"
+          ? (value as { text: string }).text
+          : value,
+  };
+}
+
+function fixture(
+  view: WindowsPrivateDescriptorView = descriptor(),
+  identity: { sid: Buffer; sddl: string; ownerSid: Buffer } = {
+    sid: USER_SID,
+    sddl: USER_SDDL,
+    ownerSid: USER_SID,
+  },
+) {
   const sddls: string[] = [];
-  const migrated: [string, string][] = [];
+  const migrated: [bigint, string][] = [];
   let released = 0;
   const bindings: WindowsPrivateAuthorityBindings = {
-    currentUser: () => ({ sid: USER_SID, sddl: USER_SDDL }),
+    currentUser: () => identity,
     createSecurity: (sddl) => {
       sddls.push(sddl);
       return { attributes: { private: true }, release: () => released++ };
     },
     inspect: () => view,
-    migrateDacl: (path, sddl) => {
-      migrated.push([path, sddl]);
+    migrateHandle: (handle, sddl) => {
+      migrated.push([handle, sddl]);
     },
   };
   return {
@@ -112,11 +155,36 @@ describe("Windows private authority", () => {
     );
     const absent = fixture({ ...descriptor(), daclPresent: false, aces: [] });
     expect(() => absent.authority.verifyNoForeignWrite(7n)).toThrow("the DACL is absent");
-    file.authority.migrateToOwnerOnly("C:\\token", WINDOWS_AUTHORITY_PATH_KIND.FILE);
-    // By path, not by handle: see the migrateDacl contract on WindowsPrivateAuthorityBindings.
-    expect(file.migrated).toEqual([["C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`]]);
-    file.authority.migrateToOwnerOnly("C:\\token", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+    file.authority.migrateHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+    // By handle, not by path: see the migrateHandle contract on WindowsPrivateAuthorityBindings.
+    expect(file.migrated).toEqual([[7n, `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`]]);
+    file.authority.migrateHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
     expect(file.migrated[1]?.[1]).toBe(`O:${USER_SDDL}D:P(A;OICI;FA;;;${USER_SDDL})`);
+  });
+
+  test("accepts an object owned by the token's own owner SID, not only by its user SID", () => {
+    // Measured on the Windows runner (#803): an elevated administrator token has the
+    // Administrators group as its owner, so every directory it creates — including the
+    // conversation state directory — is owned by S-1-5-32-544 while its single ACE names the
+    // user SID. The DACL is repaired and correct; only the owner comparison rejected it, and no
+    // repair can change an owner back.
+    const directoryFlags =
+      WINDOWS_PRIVATE_SECURITY.OBJECT_INHERIT_ACE | WINDOWS_PRIVATE_SECURITY.CONTAINER_INHERIT_ACE;
+    const elevated = fixture(
+      { ...descriptor(directoryFlags), owner: ADMINS_SID },
+      { sid: USER_SID, sddl: USER_SDDL, ownerSid: ADMINS_SID },
+    );
+    expect(() =>
+      elevated.authority.verifyHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY),
+    ).not.toThrow();
+    // An owner outside the token's own principals is still rejected.
+    const foreign = fixture(
+      { ...descriptor(directoryFlags), owner: FOREIGN_SID },
+      { sid: USER_SID, sddl: USER_SDDL, ownerSid: ADMINS_SID },
+    );
+    expect(() => foreign.authority.verifyHandle(7n, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY)).toThrow(
+      "permissive Windows authority DACL rejected",
+    );
   });
 
   test("structurally rejects every permissive or ambiguous descriptor shape", () => {
@@ -143,16 +211,17 @@ describe("Windows private authority", () => {
       ).toThrow("permissive Windows authority DACL rejected");
     expect(() =>
       createWindowsPrivateAuthority({
-        currentUser: () => ({ sid: Buffer.alloc(1), sddl: "invalid" }),
+        currentUser: () => ({ sid: Buffer.alloc(1), sddl: "invalid", ownerSid: Buffer.alloc(1) }),
         createSecurity: () => ({ attributes: null, release: () => {} }),
         inspect: () => descriptor(),
-        migrateDacl: () => undefined,
+        migrateHandle: () => undefined,
       }),
     ).toThrow("token user SID is unavailable");
   });
 
   test("constructs and executes handle-based Win32 security bindings", () => {
     const declarations: string[] = [];
+    const setSecurityInfoArgs: unknown[][] = [];
     const freed: unknown[] = [];
     let failEncode = false;
     const ace = Buffer.alloc(8 + USER_SID.length);
@@ -173,8 +242,10 @@ describe("Windows private authority", () => {
         token[0] = 2n;
         return 1;
       },
-      GetTokenInformation: (_token, _kind, output, _bytes, needed) => {
-        needed[0] = 32;
+      GetTokenInformation: (_token, kind, output, _bytes, needed) => {
+        // Win32 reports the documented struct size for each class: TOKEN_USER is the 16-byte
+        // SID_AND_ATTRIBUTES, TOKEN_OWNER is a bare 8-byte PSID.
+        needed[0] = kind === WINDOWS_PRIVATE_SECURITY.TOKEN_USER_CLASS ? 16 : 8;
         return output ? 1 : 0;
       },
       IsValidSid: () => 1,
@@ -208,7 +279,10 @@ describe("Windows private authority", () => {
         output.writeUInt32LE(aclBytesInUse, 4);
         return 1;
       },
-      SetNamedSecurityInfoW: () => 0,
+      SetSecurityInfo: (...args: unknown[]) => {
+        setSecurityInfoArgs.push(args);
+        return 0;
+      },
     };
     const library = {
       func: (_convention: string, name: string) => {
@@ -216,14 +290,12 @@ describe("Windows private authority", () => {
         return (...args: any[]) => dispatch[name]?.(...args) ?? 1;
       },
     };
-    const tokenUserType = { tokenUser: true };
     const koffi = {
       load: () => library,
       opaque: () => ({ opaque: true }),
-      pointer: (value: unknown) => ({ pointer: value }),
+      pointer: (value: unknown) => ({ pointer: value, isPointer: true }),
       out: (value: unknown) => ({ out: value }),
-      struct: (value: Record<string, unknown>) =>
-        "User" in value ? tokenUserType : { struct: value },
+      struct: (value: Record<string, unknown>) => ({ struct: value }),
       alloc: () => ({ allocated: true }),
       encode: (target: object, _type: unknown, value: object) => {
         if (failEncode) throw new Error("injected security attribute encode failure");
@@ -233,18 +305,28 @@ describe("Windows private authority", () => {
       sizeof: () => 24,
       view: (value: Buffer, length: number) =>
         value.buffer.slice(value.byteOffset, value.byteOffset + length),
-      decode: (value: unknown, type: unknown) =>
-        type === tokenUserType
-          ? { User: { Sid: USER_SID } }
-          : type === "char16_t"
-            ? (value as { text: string }).text
-            : value,
+      decode: (value: unknown, type: unknown) => {
+        // koffi refuses a struct read that does not fit the buffer, and the token-info buffer is
+        // sized per class (16 bytes for TOKEN_USER, 8 for TOKEN_OWNER), so the adapter must read
+        // the SID pointer itself instead of decoding a struct.
+        if (Buffer.isBuffer(value)) {
+          if (!(type as { isPointer?: boolean }).isPointer)
+            throw new Error(`token-info buffer decoded as ${JSON.stringify(type)}`);
+          return USER_SID;
+        }
+        if (type === "char16_t") return (value as { text: string }).text;
+        return value;
+      },
     };
     const bindings = loadWindowsPrivateAuthorityBindings({
       requireModule: () => koffi,
       isBun: false,
     });
-    expect(bindings.currentUser()).toEqual({ sid: USER_SID, sddl: USER_SDDL });
+    expect(bindings.currentUser()).toEqual({
+      sid: USER_SID,
+      sddl: USER_SDDL,
+      ownerSid: USER_SID,
+    });
     const security = bindings.createSecurity(`O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
     expect(security.attributes).toMatchObject({ allocated: true });
     security.release();
@@ -260,17 +342,33 @@ describe("Windows private authority", () => {
     expect(() => bindings.inspect(7n)).toThrow("inconsistent Windows authority ACL");
     expect(declarations).toContain("GetSecurityInfo");
     expect(freed.length).toBeGreaterThanOrEqual(3);
-    // migrateDacl replaces the DACL BY PATH: SetSecurityInfo on a CreateFileW handle returns 0
-    // and leaves the DACL untouched, so the retained call is SetNamedSecurityInfoW.
-    bindings.migrateDacl("C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
-    expect(declarations).toContain("SetNamedSecurityInfoW");
-    dispatch.SetNamedSecurityInfoW = () => 5;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
-      "SetNamedSecurityInfoW failed with Windows error 5",
+    // migrateHandle replaces the descriptor BY HANDLE: SetSecurityInfo acts on the object the handle
+    // refers to, so a name that changes during the call cannot receive the write.
+    bindings.migrateHandle(7n, `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
+    expect(declarations).toContain("SetSecurityInfo");
+    // The write asks for the owner as well as the DACL. SetSecurityInfo applies exactly the
+    // components the flags name, and a strict verdict reads the owner: an elevated token leaves the
+    // objects it creates owned by its Administrators group, so a DACL-only request cannot take one of
+    // them to the policy (the Windows package-smoke failure).
+    expect(setSecurityInfoArgs.at(-1)).toEqual([
+      7n,
+      WINDOWS_PRIVATE_SECURITY.SE_FILE_OBJECT,
+      (WINDOWS_PRIVATE_SECURITY.OWNER_INFORMATION |
+        WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
+        WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
+        0,
+      USER_SID,
+      null,
+      acl,
+      null,
+    ]);
+    dispatch.SetSecurityInfo = () => 5;
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow(
+      "SetSecurityInfo failed with Windows error 5",
     );
-    dispatch.SetNamedSecurityInfoW = () => 0;
+    dispatch.SetSecurityInfo = () => 0;
     dispatch.ConvertStringSecurityDescriptorToSecurityDescriptorW = () => 0;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow(
       "ConvertStringSecurityDescriptorToSecurityDescriptorW(migrate)",
     );
     dispatch.ConvertStringSecurityDescriptorToSecurityDescriptorW = (_sddl, _revision, output) => {
@@ -278,9 +376,7 @@ describe("Windows private authority", () => {
       return 1;
     };
     dispatch.GetSecurityDescriptorDacl = () => 0;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
-      "GetSecurityDescriptorDacl(migrate)",
-    );
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow("GetSecurityDescriptorDacl(migrate)");
     dispatch.GetSecurityDescriptorDacl = (_descriptor, present, dacl, defaulted) => {
       present[0] = 1;
       dacl[0] = acl;
@@ -293,6 +389,7 @@ describe("Windows private authority", () => {
 
   test("executes Win32 security bindings through the builtin Bun FFI adapter", () => {
     const memory = new Map<bigint, Buffer>();
+    const setSecurityInfoArgs: unknown[][] = [];
     let nextPointer = 0x1000n;
     const reserve = (bytes: number): bigint => {
       const address = nextPointer;
@@ -381,7 +478,10 @@ describe("Windows private authority", () => {
         buffer.writeUInt32LE(aclBytesInUse, 4);
         return 1;
       },
-      SetNamedSecurityInfoW: () => 0,
+      SetSecurityInfo: (...args: unknown[]) => {
+        setSecurityInfoArgs.push(args);
+        return 0;
+      },
     };
     const ffi = {
       FFIType: { ptr: 1, u32: 2, i32: 3, u64: 4 },
@@ -422,7 +522,11 @@ describe("Windows private authority", () => {
       requireModule: () => ffi,
       isBun: true,
     });
-    expect(bindings.currentUser()).toEqual({ sid: USER_SID, sddl: USER_SDDL });
+    expect(bindings.currentUser()).toEqual({
+      sid: USER_SID,
+      sddl: USER_SDDL,
+      ownerSid: USER_SID,
+    });
     const security = bindings.createSecurity(`O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
     expect(Buffer.isBuffer(security.attributes)).toBe(true);
     expect((security.attributes as Buffer).readUInt32LE(0)).toBe(24);
@@ -433,12 +537,129 @@ describe("Windows private authority", () => {
     expect(bindings.inspect(7n)).toEqual(descriptor());
     aclBytesInUse += 1;
     expect(() => bindings.inspect(7n)).toThrow("inconsistent Windows authority ACL");
-    bindings.migrateDacl("C:\\token", `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
-    dispatch.SetNamedSecurityInfoW = () => 5;
-    expect(() => bindings.migrateDacl("C:\\token", "D:P")).toThrow(
-      "SetNamedSecurityInfoW failed with Windows error 5",
+    bindings.migrateHandle(7n, `O:${USER_SDDL}D:P(A;;FA;;;${USER_SDDL})`);
+    // The address the owner half of the write points at holds the token user's SID.
+    const migrated = setSecurityInfoArgs.at(-1);
+    expect(migrated?.[2]).toBe(
+      (WINDOWS_PRIVATE_SECURITY.OWNER_INFORMATION |
+        WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
+        WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
+        0,
+    );
+    expect(Buffer.from(memory.get(BigInt(Number(migrated?.[3]))) ?? [])).toEqual(USER_SID);
+    dispatch.SetSecurityInfo = () => 5;
+    expect(() => bindings.migrateHandle(7n, "D:P")).toThrow(
+      "SetSecurityInfo failed with Windows error 5",
     );
     dispatch.OpenProcessToken = () => 0;
     expect(() => bindings.currentUser()).toThrow("OpenProcessToken failed");
+  });
+
+  test("writes the owner a strict verdict reads, so a group-owned creation reaches the policy", () => {
+    // Windows records the Administrators group as the owner of every object a process started from an
+    // elevated token creates, and SetSecurityInfo applies exactly the components the caller asks for.
+    // The fake below is that contract: the descriptor state changes only where the request says so. A
+    // migration that asked for the DACL alone leaves the group owner in place and a strict verdict
+    // keeps refusing the object — that is the Windows package-smoke failure on a directory the
+    // process had just created — while one that asks for the owner too brings it to the policy.
+    const ADMINS_SID = Buffer.from([1, 2, 0, 0, 0, 0, 0, 5, 0x20, 0, 0, 0, 0x20, 2, 0, 0]);
+    const SYSTEM_SID = Buffer.from([1, 1, 0, 0, 0, 0, 0, 5, 0x12, 0, 0, 0]);
+    const aclOf = (sids: readonly Buffer[], flags = 0): Buffer => {
+      const aces = sids.map((sid) => {
+        const ace = Buffer.alloc(8 + sid.length);
+        ace.writeUInt16LE(ace.length, 2);
+        ace.writeUInt8(flags, 1);
+        ace.writeUInt32LE(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, 4);
+        sid.copy(ace, 8);
+        return ace;
+      });
+      const acl = Buffer.alloc(
+        WINDOWS_PRIVATE_SECURITY.ACL_HEADER_BYTES +
+          aces.reduce((bytes, ace) => bytes + ace.length, 0),
+      );
+      acl.writeUInt16LE(acl.length, 2);
+      acl.writeUInt16LE(aces.length, 4);
+      let offset = WINDOWS_PRIVATE_SECURITY.ACL_HEADER_BYTES;
+      for (const ace of aces) {
+        ace.copy(acl, offset);
+        offset += ace.length;
+      }
+      return acl;
+    };
+    // What such a token created: the inherited SYSTEM/Administrators/owner DACL, group owner, no
+    // SE_DACL_PROTECTED.
+    const state = {
+      owner: ADMINS_SID as Buffer,
+      dacl: aclOf([SYSTEM_SID, ADMINS_SID, USER_SID]) as Buffer,
+      protected: false,
+    };
+    const migratedDacl = aclOf(
+      [USER_SID],
+      WINDOWS_PRIVATE_SECURITY.OBJECT_INHERIT_ACE | WINDOWS_PRIVATE_SECURITY.CONTAINER_INHERIT_ACE,
+    );
+    const dispatch: Record<string, (...args: any[]) => unknown> = {
+      GetCurrentProcess: () => 1n,
+      CloseHandle: () => 1,
+      LocalFree: () => 0,
+      GetLastError: () => WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER,
+      OpenProcessToken: (_process, _access, token) => {
+        token[0] = 2n;
+        return 1;
+      },
+      GetTokenInformation: (_token, _kind, output, _bytes, needed) => {
+        needed[0] = 32;
+        return output ? 1 : 0;
+      },
+      IsValidSid: () => 1,
+      GetLengthSid: () => USER_SID.length,
+      ConvertSidToStringSidW: (_sid, output) => {
+        output[0] = { text: USER_SDDL };
+        return 1;
+      },
+      ConvertStringSecurityDescriptorToSecurityDescriptorW: (_sddl, _revision, output) => {
+        output[0] = { descriptor: true };
+        return 1;
+      },
+      GetSecurityInfo: (_handle, _type, _info, owner, _group, dacl, _sacl, output) => {
+        owner[0] = state.owner;
+        dacl[0] = state.dacl;
+        output[0] = { descriptor: true };
+        return 0;
+      },
+      GetSecurityDescriptorControl: (_descriptor, control) => {
+        control[0] = state.protected ? WINDOWS_PRIVATE_SECURITY.SE_DACL_PROTECTED : 0;
+        return 1;
+      },
+      GetSecurityDescriptorDacl: (_descriptor, present, dacl, defaulted) => {
+        present[0] = 1;
+        dacl[0] = migratedDacl;
+        defaulted[0] = 0;
+        return 1;
+      },
+      GetAclInformation: (acl, output) => {
+        output.writeUInt32LE(acl.readUInt16LE(4), 0);
+        output.writeUInt32LE(acl.readUInt16LE(2), 4);
+        return 1;
+      },
+      SetSecurityInfo: (_handle, _type, info, owner, _group, dacl) => {
+        if (info & WINDOWS_PRIVATE_SECURITY.OWNER_INFORMATION) state.owner = owner;
+        if (info & WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION) state.dacl = dacl;
+        state.protected = (info & WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) !== 0;
+        return 0;
+      },
+    };
+    const authority = createWindowsPrivateAuthority(
+      loadWindowsPrivateAuthorityBindings({
+        requireModule: () => fakeSecurityKoffi(dispatch),
+        isBun: false,
+      }),
+    );
+    const directory = WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY;
+    expect(() => authority.verifyHandle(7n, directory)).toThrow(
+      "permissive Windows authority DACL rejected",
+    );
+    authority.migrateHandle(7n, directory);
+    expect(() => authority.verifyHandle(7n, directory)).not.toThrow();
+    expect(state.owner).toEqual(USER_SID);
   });
 });

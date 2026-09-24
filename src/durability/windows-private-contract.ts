@@ -18,6 +18,7 @@ export type WindowsAuthorityPathKind =
 export const WINDOWS_PRIVATE_SECURITY = Object.freeze({
   TOKEN_QUERY: 0x8,
   TOKEN_USER_CLASS: 1,
+  TOKEN_OWNER_CLASS: 4,
   OWNER_INFORMATION: 0x1,
   DACL_INFORMATION: 0x4,
   PROTECTED_DACL_INFORMATION: 0x8000_0000,
@@ -146,16 +147,35 @@ export interface WindowsCreationSecurity {
 }
 
 export interface WindowsPrivateAuthorityBindings {
-  currentUser(): { sid: Buffer; sddl: string };
+  /**
+   * The token identity the authority answers with: the user SID and its SDDL form, plus the token's
+   * default owner SID.
+   *
+   * The owner SID is a separate fact because Windows, not the caller, decides the owner of every
+   * object a process creates: it stamps the token's owner, which is the user SID for a filtered
+   * token, BUILTIN\Administrators for an elevated administrator token, and SYSTEM for a service.
+   * Verifying an object's owner against the user SID alone therefore rejects objects the process
+   * just created on any elevated Windows host (see #803).
+   */
+  currentUser(): { sid: Buffer; sddl: string; ownerSid: Buffer };
   createSecurity(sddl: string): WindowsCreationSecurity;
   inspect(handle: bigint): WindowsPrivateDescriptorView;
   /**
-   * Apply a new DACL (derived from sddl) to an existing path in-place.
+   * Replace an existing object's owner and DACL (both derived from sddl) in place, through the
+   * handle that names it.
    *
-   * By path, not by handle: SetSecurityInfo on a CreateFileW handle opened with
-   * READ_CONTROL|WRITE_DAC returns 0 (success) and leaves the DACL untouched. Measured on
-   * Windows 11 — the inherited SYSTEM/Administrators/owner triple survived the call, while
-   * SetNamedSecurityInfoW with the identical security descriptor replaced it correctly.
+   * By handle, not by path: the descriptor lands on the object this handle refers to, so a name
+   * that is replaced while the handle is held cannot receive the write — one measure that closed
+   * the migration window (issue #817). SetSecurityInfo requires WRITE_DAC on the handle for the
+   * DACL half and WRITE_OWNER for the owner half: with WRITE_DAC the call returns 0 and the DACL is
+   * replaced, and without it (a READ_CONTROL-only handle) it fails with ERROR_ACCESS_DENIED(5).
+   * Measured on Windows 11 — see test/durability/windows-acl-identity.test.ts.
+   *
+   * The owner is part of what a strict verdict checks: an elevated token leaves the objects it
+   * creates owned by its Administrators group, so a DACL-only write would leave the object one
+   * field short of the policy and the caller refusing its own files. Windows only accepts the write
+   * for an object the caller already commands (WRITE_OWNER, and the token user as the new owner
+   * without SeRestorePrivilege), so a foreign object stays refused.
    */
-  migrateDacl(path: string, sddl: string): void;
+  migrateHandle(handle: bigint, sddl: string): void;
 }

@@ -15564,6 +15564,28 @@ Both are rejected. A big bang lacks a safe data/authority rehearsal; permanent d
 Reader-first additive migration followed by deliberate deletion provides safe rollout and one final
 implementation.
 
+## Windows private-state permissions
+
+POSIX mode bits do not exist on Windows, so the descriptor is the durability trust boundary there, and
+which rule a path is held to follows from that path's role:
+
+- the durable state a trust check reads — trace records and journals, registry directories, and the
+  conversation catalog — is held to a protected owner-only DACL: one ACE for the owning principal, with
+  `SE_DACL_PROTECTED` set so the ACEs a parent hands down cannot reappear;
+- a shared container and the kernel lock file are held to the weaker rule instead, no ACE granting a
+  modifying right to a principal other than the owner, where `SYSTEM` and `Administrators` are
+  root-equivalent because they can take ownership of any object; the descriptor such a path inherits
+  from its parent therefore passes as it stands, exactly as POSIX accepts a group-readable directory.
+
+State written before the owner-only rule existed carries that inherited descriptor, so a trust check
+migrates the path in place on first use and re-reads it rather than rejecting the install's own files; a
+path that cannot be migrated fails the check instead.
+
+Windows has no handle-based DACL setter, so both the verdict and the migration are path-based. Both are
+bound to the file identity the caller stat'ed: a handle that does not reproduce that identity is neither
+accepted for the object nor rewritten in its name, and a migration whose identity cannot be proven is
+not performed at all.
+
 ## Completion criteria
 
 The program is complete only when all of the following are true:

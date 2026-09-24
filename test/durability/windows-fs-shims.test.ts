@@ -3,18 +3,19 @@ import * as fs from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WINDOWS_AUTHORITY_PATH_KIND } from "../../src/durability/windows-acl-ops.js";
-import type { WindowsFfiRuntime } from "../../src/durability/windows-ffi-runtime.js";
+import {
+  WINDOWS_AUTHORITY_PATH_KIND,
+  windowsHasNoForeignWrite,
+} from "../../src/durability/windows-acl-ops.js";
 import {
   WIN32_FD_PATHS,
   loadWindowsBindings,
   win32LastErrnoValue,
   win32SetErrno,
 } from "../../src/durability/windows-fs-shims.js";
-import type {
-  WindowsAuthorityPathKind,
-  WindowsPrivateAuthority,
-} from "../../src/durability/windows-private-authority.js";
+
+const isWindows = process.platform === "win32";
+const DIRECTORY = WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY;
 
 /**
  * The Windows *at() shims are plain node:fs on top of the fd->path registry, so they run on any
@@ -118,32 +119,17 @@ describe("windows fs shims", () => {
     expect(win32LastErrnoValue()).toBe(2);
   });
 
-  test("fchmodat applies the owner-only ACL to a registered directory", () => {
-    const applied: [string, WindowsAuthorityPathKind][] = [];
-    const authority = {
-      migrateToOwnerOnly: (path: string, kind: WindowsAuthorityPathKind) => {
-        applied.push([path, kind]);
-      },
-    } as unknown as WindowsPrivateAuthority;
-    const bindings = loadWindowsBindings({ authority });
+  test("fchmodat refuses instead of writing an ACL it cannot bind to a caller identity", () => {
+    // Mode bits do not exist on Windows, and this call carries no identity for the leaf it names, so
+    // an ACL write from here would land on whatever the ACL layer happened to open (issue #817). The
+    // durable leaf repair is repairWindowsLeafAcl; reaching this shim at all is EACCES.
+    const bindings = loadWindowsBindings();
     const { fd, path } = pin();
     fs.mkdirSync(join(path, "child"));
-    expect(bindings.fchmodat(fd, "child", 0o700, 0)).toBe(0);
-    expect(win32LastErrnoValue()).toBe(0);
-    expect(applied).toEqual([[join(path, "child"), WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
-  });
-
-  test("fchmodat reports EACCES when the ACL cannot be applied", () => {
-    const unreachable: WindowsFfiRuntime = {
-      isBun: false,
-      requireModule: () => {
-        throw new Error("Advapi32 is unavailable on this host");
-      },
-    };
-    const bindings = loadWindowsBindings({ runtime: unreachable });
-    const { fd } = pin();
     expect(bindings.fchmodat(fd, "child", 0o700, 0)).toBe(-1);
     expect(win32LastErrnoValue()).toBe(13);
+    // Nothing was applied, and nothing was lifted: the child keeps the descriptor it arrived with.
+    if (isWindows) expect(windowsHasNoForeignWrite(join(path, "child"), DIRECTORY)).toBe(true);
   });
 
   test("renameat moves between two pinned directories", () => {

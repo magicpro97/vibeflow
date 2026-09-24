@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
-  windowsApplyOwnerAcl,
   windowsEnsureNoForeignWrite,
   windowsEnsurePrivateAcl,
   windowsHasNoForeignWrite,
@@ -35,19 +34,36 @@ const FILE_GENERIC_READ = 0x0012_0089;
 const FILE_GENERIC_EXECUTE = 0x0012_00a0;
 
 // Every test drives the module through its injection seam, so the suite runs identically on a Linux
-// CI runner and on Windows. The real Win32 round trip is covered by windows-owner-acl.test.ts.
+// CI runner and on Windows. The real Win32 round trip is covered by windows-owner-acl.test.ts and
+// windows-acl-identity.test.ts.
+const IDENTITY_DEV = 7n;
+const IDENTITY_INO = 11n;
+const identity = { dev: IDENTITY_DEV, ino: IDENTITY_INO };
+
+// FILE_ID_INFO as the identity gate reads it: the volume serial number, then the file id at offset 8.
+function fileIdInfo(dev: bigint, ino: bigint) {
+  return (_handle: bigint, informationClass: number, output: Buffer): number => {
+    if (informationClass !== WINDOWS_NATIVE_RECORD.FILE_ID_INFO_CLASS) return 0;
+    output.writeUInt32LE(Number(dev), 0);
+    output.writeBigUInt64LE(ino, 8);
+    return 1;
+  };
+}
+
 function fakeBinding(overrides: Partial<Record<string, unknown>> = {}) {
-  const calls = { closeHandle: 0, paths: [] as string[] };
+  const calls = { closeHandle: 0, paths: [] as string[], access: [] as number[] };
   const binding = {
     invalidHandle: INVALID_HANDLE,
-    createFile: (path: Buffer) => {
+    createFile: (path: Buffer, access: number) => {
       calls.paths.push(path.toString("utf16le"));
+      calls.access.push(access);
       return HANDLE;
     },
     closeHandle: () => {
       calls.closeHandle += 1;
       return 1;
     },
+    fileInfo: fileIdInfo(IDENTITY_DEV, IDENTITY_INO),
     ...overrides,
   } as unknown as WindowsRecordNativeBindings;
   return { binding, calls };
@@ -59,7 +75,7 @@ function fakeAuthority(
 ) {
   const calls = {
     verifyHandle: [] as [bigint, WindowsAuthorityPathKind][],
-    migrated: [] as string[],
+    migrated: [] as [bigint, WindowsAuthorityPathKind][],
   };
   const authority = {
     inspect: typeof descriptor === "function" ? descriptor : () => descriptor,
@@ -67,8 +83,8 @@ function fakeAuthority(
     verifyHandle: (handle: bigint, kind: WindowsAuthorityPathKind) => {
       calls.verifyHandle.push([handle, kind]);
     },
-    migrateToOwnerOnly: (path: string) => {
-      calls.migrated.push(path);
+    migrateHandle: (handle: bigint, kind: WindowsAuthorityPathKind) => {
+      calls.migrated.push([handle, kind]);
     },
     ...overrides,
   } as unknown as WindowsPrivateAuthority;
@@ -174,8 +190,8 @@ describe("windows acl ops", () => {
   });
 
   test("fails closed when the Win32 security bindings cannot be loaded", () => {
-    // The predicates must answer "no" and the mutator must report its failure, rather than letting
-    // a host without Win32 security APIs turn into an unexpected exception at the call site.
+    // Every entry point answers "no" rather than letting a host without Win32 security APIs turn
+    // into an unexpected exception at the call site, and none of them writes without an identity.
     for (const specifier of ["koffi", "bun:ffi"] as const) {
       const runtime = unrunnableRuntime(specifier);
       expect(
@@ -186,9 +202,18 @@ describe("windows acl ops", () => {
           runtime,
         }),
       ).toBe(false);
-      expect(() =>
-        windowsApplyOwnerAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, { runtime }),
-      ).toThrow(specifier);
+      expect(
+        windowsEnsurePrivateAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+          runtime,
+          identity,
+        }),
+      ).toBe(false);
+      expect(
+        windowsEnsureNoForeignWrite("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+          runtime,
+          identity,
+        }),
+      ).toBe(false);
     }
   });
 
@@ -220,9 +245,11 @@ describe("windows acl ops", () => {
       windowsEnsureNoForeignWrite("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
         binding,
         authority,
+        identity,
       }),
     ).toBe(true);
-    expect(calls.migrated).toEqual(["C:\\tmp\\dir"]);
+    // The repair is written through the handle that was verified, never through the path.
+    expect(calls.migrated).toEqual([[HANDLE, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
   });
 
   test("repairs a path that is not owner-only before answering", () => {
@@ -240,16 +267,53 @@ describe("windows acl ops", () => {
       windowsEnsurePrivateAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
         binding,
         authority,
+        identity,
       }),
     ).toBe(true);
-    expect(calls.migrated).toEqual(["C:\\tmp\\dir"]);
+    expect(calls.migrated).toEqual([[HANDLE, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
+  });
+
+  test("asks for the accesses the repair write needs, and no more", () => {
+    const { binding, calls } = fakeBinding();
+    let checks = 0;
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        if (checks++ === 0) throw new Error("permissive Windows authority DACL rejected");
+      },
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    // The repair replaces the descriptor's owner as well as its DACL through this handle, so the open
+    // has to carry WRITE_OWNER: without it SetSecurityInfo leaves the owner an elevated token gave the
+    // object in place and the verdict refuses a path this process just created.
+    expect(calls.access).toEqual([
+      (WINDOWS_NATIVE_RECORD.READ_CONTROL |
+        WINDOWS_NATIVE_RECORD.WRITE_DAC |
+        WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
+        0,
+    ]);
+    expect(authorityCalls.migrated).toEqual([[HANDLE, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
+    // A verdict writes nothing, so it asks for nothing but the read the policy is answered from.
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(calls.access.at(-1)).toBe(WINDOWS_NATIVE_RECORD.READ_CONTROL >>> 0);
   });
 
   test("answers false when the DACL cannot be repaired", () => {
     const { binding } = fakeBinding();
     const foreign = descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OTHER_SID)]);
     const denied = {
-      migrateToOwnerOnly: () => {
+      migrateHandle: () => {
         throw new Error("access denied");
       },
     };
@@ -356,20 +420,249 @@ describe("windows acl ops", () => {
     expect(inspecting.calls.closeHandle).toBe(1);
   });
 
-  test("applies an owner-only DACL by path", () => {
-    const { authority, calls } = fakeAuthority(descriptor([]));
-    windowsApplyOwnerAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, { authority });
-    expect(calls.migrated).toEqual(["C:\\tmp\\dir"]);
-  });
-
-  test("surfaces a migrate failure to the caller", () => {
-    const { authority } = fakeAuthority(descriptor([]), {
-      migrateToOwnerOnly: () => {
-        throw new Error("SetNamedSecurityInfoW failed");
+  test("refuses to repair without the identity of the object the repair is for", () => {
+    const { binding, calls } = fakeBinding();
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        throw new Error("permissive Windows authority DACL rejected");
       },
     });
-    expect(() =>
-      windowsApplyOwnerAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, { authority }),
-    ).toThrow("SetNamedSecurityInfoW failed");
+    // A caller that cannot say which object it measured gets no write at all: repairing whatever the
+    // name holds is the substitution the identity gate exists to refuse.
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+      }),
+    ).toBe(false);
+    expect(
+      windowsEnsureNoForeignWrite("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+      }),
+    ).toBe(false);
+    expect(authorityCalls.migrated).toHaveLength(0);
+    // Not even opened: the refusal is before the path is touched.
+    expect(calls.paths).toHaveLength(0);
+    expect(calls.closeHandle).toBe(0);
+  });
+
+  test("answers false when the path cannot be opened for the repair", () => {
+    const { binding, calls } = fakeBinding({ createFile: () => INVALID_HANDLE });
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(false);
+    expect(authorityCalls.migrated).toHaveLength(0);
+    expect(calls.closeHandle).toBe(0);
+  });
+
+  test("answers false when the repair itself fails", () => {
+    const { binding, calls } = fakeBinding();
+    const { authority } = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      migrateHandle: () => {
+        throw new Error("SetSecurityInfo failed with Windows error 5");
+      },
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(false);
+    expect(calls.closeHandle).toBe(1);
+  });
+});
+
+describe("windows acl ops identity gate", () => {
+  test("accepts a handle that reproduces the identity of the object the caller stat'ed", () => {
+    const { binding } = fakeBinding();
+    const { authority, calls } = fakeAuthority(descriptor([]));
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(
+      windowsHasNoForeignWrite("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(calls.verifyHandle).toHaveLength(1);
+  });
+
+  test("refuses a path that does not hold the object the caller stat'ed", () => {
+    // Both policies, both against a descriptor that would otherwise pass, so the refusal can only
+    // come from the identity.
+    const { binding, calls } = fakeBinding();
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));
+    for (const stale of [
+      { dev: identity.dev, ino: identity.ino + 1n },
+      { dev: identity.dev + 1n, ino: identity.ino },
+    ]) {
+      expect(
+        windowsVerifyPathAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+          binding,
+          authority,
+          identity: stale,
+        }),
+      ).toBe(false);
+      expect(
+        windowsHasNoForeignWrite("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+          binding,
+          authority,
+          identity: stale,
+        }),
+      ).toBe(false);
+    }
+    expect(authorityCalls.verifyHandle).toHaveLength(0);
+    expect(calls.closeHandle).toBe(4);
+  });
+
+  test("refuses a handle that cannot report an identity at all", () => {
+    const { binding, calls } = fakeBinding({ fileInfo: () => 0 });
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(false);
+    expect(authorityCalls.verifyHandle).toHaveLength(0);
+    expect(calls.closeHandle).toBe(1);
+  });
+
+  test("repairs the object it verified, on the handle that verified it", () => {
+    const { binding, calls: bindingCalls } = fakeBinding();
+    let checks = 0;
+    const { authority, calls } = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        if (checks++ === 0) throw new Error("permissive Windows authority DACL rejected");
+      },
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority,
+        identity,
+      }),
+    ).toBe(true);
+    expect(calls.migrated).toEqual([[HANDLE, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY]]);
+    // Verify, repair, verify — all three against the one handle that identified the object, so the
+    // answer after the repair cannot come from a fresh open that landed somewhere else.
+    expect(checks).toBe(2);
+    expect(bindingCalls.closeHandle).toBe(1);
+  });
+
+  test("does not repair a path that no longer holds the object the caller stat'ed", () => {
+    const migrated: bigint[] = [];
+    const stale = { dev: identity.dev, ino: identity.ino + 1n };
+    const { binding } = fakeBinding();
+    const strict = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      migrateHandle: (handle: bigint) => migrated.push(handle),
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority: strict.authority,
+        identity: stale,
+      }),
+    ).toBe(false);
+    const weak = fakeAuthority(
+      descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OTHER_SID)]),
+      { migrateHandle: (handle: bigint) => migrated.push(handle) },
+    );
+    expect(
+      windowsEnsureNoForeignWrite("C:\\tmp\\dir", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority: weak.authority,
+        identity: stale,
+      }),
+    ).toBe(false);
+    expect(migrated).toEqual([]);
+  });
+});
+
+describe("windows acl ops identity exactness above 2^53", () => {
+  // NTFS file ids need 57 bits. Number-typed stats round them, and two neighbours that differ only
+  // above bit 53 collapse onto the same double, so an identity compared as a Number cannot tell the
+  // object the caller measured from its neighbour.
+  const ROUNDED = 2n ** 53n;
+  const NEIGHBOUR = ROUNDED + 1n;
+
+  test("the rounding is real: two distinct file ids share one Number value", () => {
+    expect(Number(NEIGHBOUR)).toBe(Number(ROUNDED));
+    expect(Number(NEIGHBOUR)).toBe(2 ** 53);
+  });
+
+  test("refuses a handle whose exact id is the neighbour of the identity's", () => {
+    // The caller measured an object whose exact id is 2^53; the leaf now at the path is the object
+    // with id 2^53+1, which a Number-typed comparison cannot tell apart from it.
+    const { binding, calls } = fakeBinding({ fileInfo: fileIdInfo(7n, NEIGHBOUR) });
+    const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));
+    const FILE = WINDOWS_AUTHORITY_PATH_KIND.FILE;
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\file", FILE, {
+        binding,
+        authority,
+        identity: { dev: IDENTITY_DEV, ino: ROUNDED },
+      }),
+    ).toBe(false);
+    expect(
+      windowsHasNoForeignWrite("C:\\tmp\\file", FILE, {
+        binding,
+        authority,
+        identity: { dev: IDENTITY_DEV, ino: ROUNDED },
+      }),
+    ).toBe(false);
+    expect(authorityCalls.verifyHandle).toHaveLength(0);
+    expect(calls.closeHandle).toBe(2);
+  });
+
+  test("still accepts the object whose exact id it is", () => {
+    const { binding } = fakeBinding({ fileInfo: fileIdInfo(7n, NEIGHBOUR) });
+    const { authority } = fakeAuthority(descriptor([]));
+    expect(
+      windowsVerifyPathAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity: { dev: IDENTITY_DEV, ino: NEIGHBOUR },
+      }),
+    ).toBe(true);
+  });
+
+  test("does not repair a path whose exact id is the identity's neighbour", () => {
+    const migrated: bigint[] = [];
+    const { binding } = fakeBinding({ fileInfo: fileIdInfo(7n, NEIGHBOUR) });
+    const { authority } = fakeAuthority(descriptor([]), {
+      verifyHandle: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      migrateHandle: (handle: bigint) => migrated.push(handle),
+    });
+    expect(
+      windowsEnsurePrivateAcl("C:\\tmp\\file", WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+        binding,
+        authority,
+        identity: { dev: IDENTITY_DEV, ino: ROUNDED },
+      }),
+    ).toBe(false);
+    expect(migrated).toEqual([]);
   });
 });
