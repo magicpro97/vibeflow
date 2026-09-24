@@ -194,6 +194,19 @@ export { workflow, printVersion } from "./commands/workflow.js";
 // re-exports it so the CLI dispatch keeps working.
 export { canary } from "./commands/canary.js";
 export type { CanaryInject } from "./commands/canary.js";
+// === Re-export the race cluster (#555) ===
+// `vf race` lives in src/commands/race.ts. The facade re-exports it so the CLI
+// dispatch and the server route (`/api/race`) share one entry point.
+export {
+  race,
+  runRace,
+  raceSpawner,
+  parseEngineList,
+  installedEngines,
+  raceBranch,
+  raceWorktreePath,
+} from "./commands/race.js";
+export type { RaceInject, RaceOptions, RaceRunResult, RaceSkip } from "./commands/race.js";
 // === Re-export the help cluster (issue #80, phase 8/14) ===
 // `printHelp` + `hasCommandHelp` + `printCommandHelp` now live in
 // src/commands/help.ts. The facade re-exports them so the CLI

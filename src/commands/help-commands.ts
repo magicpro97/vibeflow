@@ -5,6 +5,7 @@ import {
   CHAT_HELP,
   DEFAULT_UI_PORT,
   EPHEMERAL_UI_PORT,
+  RACE_HELP,
   SUPERPOWERS_HELP,
   UI_LAN_EVENT_SOURCE_TOKEN_QUERY,
   UI_LAN_TOKEN_HEADER,
@@ -139,6 +140,8 @@ ${c.bold("Reviewer result fields:")}
 ${c.bold("Examples:")}
   vf review evidence --base <full-SHA> --result review-result.json
   vf review check --base <full-SHA>`,
+
+  race: RACE_HELP,
 
   demo: () => `${c.bold("vf demo")} ${c.dim("[--engine <e>] [--concurrency <n>]")}
 Stage a fixed file corpus as work units and run them through the orchestrate

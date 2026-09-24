@@ -29,6 +29,7 @@ export function printHelp(): number {
     ${c.cyan("ask <f>:<lines>")}   inline code Q&A: stream an engine's answer about a snippet (--engine)
     ${c.cyan("brainstorm")}        compatibility facade over the shared debate policy (dry by default, --yes to run)
     ${c.cyan("orchestrate")}       plan + dispatch work units in parallel, review, goal-eval (--engine, --yes, --concurrency, --focus)
+    ${c.cyan("race")}              dispatch ONE task to several engines in parallel, rank by confidence (--engines a,b, --yes)
     ${c.cyan("review evidence|check")}   create local commit-anchored evidence (--base <full-SHA> --result <JSON>) or validate it (--base <full-SHA>)
     ${c.cyan("demo")}              run a fixed file corpus through orchestrate --dry --focus (no engine spend, repeatable)
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
