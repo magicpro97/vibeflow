@@ -1555,6 +1555,34 @@ describe("shellLaunchArgv — Windows command strings (#805)", () => {
     }
   });
 
+  // #819: an absolute shim path with spaces reaches the launcher double-quoted, and cmd.exe then
+  // strips the leading and trailing quote of its `/c` remainder and re-splits at the first space.
+  // A never-quoted token in front of the quoted command line disables that rule.
+  test("Windows: a launcher-quoted shim path is prefixed with `call`", () => {
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const shim = "C:\\Program Files\\My Tools\\shim tool.cmd";
+      expect(shellLaunchArgv(`"${shim}" "arg with space"`, [], false)).toEqual([
+        "cmd.exe",
+        "/d",
+        "/c",
+        "call",
+        shim,
+        "arg with space",
+      ]);
+      // A quoted ARGUMENT alone does not move the launch form: only the program token decides.
+      expect(shellLaunchArgv("shim.cmd", ["arg with space"], false)).toEqual([
+        "cmd.exe",
+        "/c",
+        "shim.cmd",
+        "arg with space",
+      ]);
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
   // Copilot review on PR #815: tokenizing the command string is not enough — `copilot --json`
   // carries no `.cmd` suffix on the TOKEN. Shim detection must resolve the token against PATH,
   // or a bare engine name that npm installed as a `.cmd` shim is launched directly.

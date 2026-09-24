@@ -66,6 +66,9 @@ export function splitCommandLine(command: string): string[] {
   return argv;
 }
 
+/** Elements the process launcher wraps in double quotes: whitespace, or an embedded quote. */
+const LAUNCHER_QUOTES_TOKEN = /[\s"]/;
+
 /**
  * Launch argv for a command that needs a shell. POSIX keeps `/bin/sh -c`; on Windows the command
  * string is tokenized and launched directly (see {@link splitCommandLine}) and only a `.cmd`/`.bat`
@@ -79,7 +82,15 @@ export function shellLaunchArgv(
   if (process.platform !== RUNTIME_PLATFORM.WINDOWS)
     return ["/bin/sh", "-c", [cmd, ...args].join(" ")];
   const argv = [...splitCommandLine(cmd), ...args];
-  return windowsShim || needsShellForCommand(argv[0] ?? "") ? ["cmd.exe", "/c", ...argv] : argv;
+  if (!(windowsShim || needsShellForCommand(argv[0] ?? ""))) return argv;
+  // cmd.exe strips the leading and trailing quote of the `/c` remainder whenever that remainder
+  // STARTS with a quote, then re-splits at the first space — a launcher-quoted absolute shim path
+  // (`"C:\Program Files\My Tools\shim tool.cmd" "arg with space"`) becomes `'C:\Program' is not
+  // recognized …` and the shim never runs (#819). A first token that is never a quote itself
+  // disables that rule, so `call` hands cmd.exe the quoted path AND the quoted arguments intact.
+  return LAUNCHER_QUOTES_TOKEN.test(argv[0] ?? "")
+    ? ["cmd.exe", "/d", "/c", "call", ...argv]
+    : ["cmd.exe", "/c", ...argv];
 }
 
 const WINDOWS_SHIM_VARIANTS = [".cmd", ".bat"] as const;
