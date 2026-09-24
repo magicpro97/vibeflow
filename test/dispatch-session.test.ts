@@ -3249,9 +3249,11 @@ describe("dispatch session runtime integration", () => {
           return completedProcess(['```json\n{"confidence":1}\n```\n']);
         },
       });
+      // #805: Windows tokenizes the bridge command string (cmd.exe cannot receive it through
+      // argv without the quotes being re-escaped); POSIX keeps the shell.
       expect(observedArgv).toEqual(
         process.platform === "win32"
-          ? ["cmd.exe", "/c", "bridge-tool --json"]
+          ? ["bridge-tool", "--json"]
           : ["/bin/sh", "-c", "bridge-tool --json"],
       );
       expect(result.mode).toBe("bridge");
