@@ -136,6 +136,23 @@ Copilot and Antigravity use native prompt argv. Copilot's large work-unit fallba
 rejects UTF-8 prompts at or above 30 KiB because its print mode has no supported file/stdin
 replacement.
 
+## Bridge command string (`VIBEFLOW_AI`)
+
+`VIBEFLOW_AI` / `opts.bridgeCmd` is a **command string**; how it is launched differs by platform:
+
+| Platform | Launch form | Semantics |
+| -------- | ----------- | --------- |
+| POSIX | `/bin/sh -c "<string> <args>"` | shell: `>`, `&&`, globs are interpreted |
+| Windows | tokenized argv, launched directly | **no shell**: `>`/`&&` reach the program as literal argv |
+| Windows + first token resolves to `.cmd`/`.bat` | `cmd.exe /c <argv…>`, plus `call` when that program token is launcher-quoted | `CreateProcess` cannot execute a batch file, so `cmd.exe` runs the shim |
+
+Quoting rule (Windows): one double-quoted token is one argv element — quote the program path and
+any argument containing spaces. When the shim path itself must be quoted, the launch gains a
+`call`: `cmd.exe /d /c call "C:\Program Files\My Tools\shim tool.cmd" "arg with space"`. Without
+it `cmd.exe` strips the leading and trailing quote of its `/c` remainder and re-splits the path at
+the first space (#819). A command string is never handed to `cmd.exe` as one argv element: the
+launcher re-escapes the quotes and `cmd.exe` reads them as the program name (#805).
+
 ## Owned process portability
 
 Every canonical owned launch persists supervisor and CLI PIDs, host, operation/attempt, and

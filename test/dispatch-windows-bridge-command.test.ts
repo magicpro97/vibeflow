@@ -32,6 +32,9 @@ const SHIM_NAME = "vf-bridge-shim";
 const SHIM_MARKER = "BRIDGE-SHIM-OK";
 /** Reads stdin to EOF (the prompt) so the parent's write cannot EPIPE, then proves it ran. */
 const SHIM_SCRIPT = `@echo off\r\nmore >nul\r\necho ${SHIM_MARKER}\r\n`;
+/** Echoes the first argument back, so a mis-split argv is observable and not just a bad exit. */
+const SHIM_ARGUMENT_MARKER = "BRIDGE-SHIM-ARG=";
+const SHIM_SCRIPT_WITH_ARGUMENT = `@echo off\r\nmore >nul\r\necho ${SHIM_MARKER}\r\necho ${SHIM_ARGUMENT_MARKER}[%~1]\r\n`;
 
 /** Write the shim into `dir` and PREPEND `dir` to PATH; returns a PATH restore thunk. */
 function withShimOnPath(dir: string): () => void {
@@ -131,6 +134,51 @@ describe("bridge dispatch runs a quoted command string on Windows (#805)", () =>
         expect(result.ok).toBe(true);
       } finally {
         restorePath();
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+    OWNED_LAUNCH_TIMEOUT_MS,
+  );
+
+  // #819: a quoted ABSOLUTE shim path with spaces makes cmd.exe's `/c` remainder START with a
+  // quote, and cmd.exe then strips the leading and trailing quote and re-splits the path at its
+  // first space (`'C:\…\vf' is not recognized …`) — the shim never runs, or runs the wrong
+  // sibling `.cmd` with a mangled argv. The argument has to arrive intact, not just exit clean.
+  windowsOnly(
+    "runDispatchAsync bridge mode runs a quoted absolute .cmd shim path with spaces plus a quoted argument",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "vf bridge quoted shim-"));
+      const base = mkdtempSync(join(tmpdir(), "vf-bridge-quoted-shim-base-"));
+      try {
+        const shim = join(dir, "vf bridge shim tool.cmd");
+        writeFileSync(shim, SHIM_SCRIPT_WITH_ARGUMENT);
+        // Plain quotes, the way `VIBEFLOW_AI` is written; JSON-escaping would double every
+        // backslash in the tokenized path.
+        const bridgeCmd = `"${shim}" "arg with space"`;
+        // The launch form that survives cmd.exe's quote handling: `call` keeps a never-quoted
+        // token in front of the quoted command line, so the leading-quote strip never applies.
+        expect(shellLaunchArgv(bridgeCmd, [], false)).toEqual([
+          "cmd.exe",
+          "/d",
+          "/c",
+          "call",
+          shim,
+          "arg with space",
+        ]);
+        const stderr: string[] = [];
+        const result = await runDispatchAsync({
+          engine: "claude",
+          prompt: "prompt",
+          mode: "bridge",
+          bridgeCmd,
+          base,
+          onStderrChunk: (chunk) => stderr.push(chunk),
+        });
+        expect(result.ok).toBe(true);
+        expect(result.raw).toContain(SHIM_MARKER);
+        expect(result.raw).toContain(`${SHIM_ARGUMENT_MARKER}[arg with space]`);
+      } finally {
         rmSync(dir, { recursive: true, force: true });
         rmSync(base, { recursive: true, force: true });
       }
