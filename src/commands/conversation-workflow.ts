@@ -14,7 +14,7 @@ import {
   orchestrateUnits,
 } from "../orchestrator/run.js";
 import { readSettings } from "../settings.js";
-import { DEFAULT_ENGINE, isComplete, makeDispatcher, makeReviewer } from "./_shared.js";
+import { DEFAULT_ENGINE, makeDispatcher, makeReviewer, selectDispatchUnits } from "./_shared.js";
 
 const WORKFLOW_DISPATCH_FAILED = "workflow dispatch failed";
 const WORKFLOW_CANCELLED = "workflow cancelled";
@@ -121,8 +121,11 @@ export async function executeConversationWorkflow(
   const refreshTotals = deps.recomputeTotals ?? recomputeTotals;
   const workflow = read(base);
   if (!workflow) throw new Error("workflow state not found");
-  const done = workflow.work_units.filter(isComplete);
-  const pending = workflow.work_units.filter((unit) => !isComplete(unit));
+  // #783: the same dispatch policy as `vf orchestrate` — only `pending` units run here. Every
+  // other unit (blocked, in-flight, awaiting verification, already complete) is held out of the
+  // run and merged back untouched, so this path cannot dispatch a blocked unit either.
+  const { dispatch: pending, skipped } = selectDispatchUnits(workflow.work_units);
+  const held = skipped.flatMap((group) => group.units);
   if (pending.length === 0) return { units: [], reviews: [] };
   const engine = (context.bindings[0]?.engine ?? deps.defaultEngine ?? DEFAULT_ENGINE) as Engine;
   const riskClass = pending.find((unit) => unit.riskClass)?.riskClass ?? "feature";
@@ -163,7 +166,7 @@ export async function executeConversationWorkflow(
   if (context.signal.aborted) {
     result = failClosed(pending, WORKFLOW_CANCELLED, result.ran);
   }
-  workflow.work_units = done.length ? [...done, ...result.ran] : result.ran;
+  workflow.work_units = held.length ? [...held, ...result.ran] : result.ran;
   refreshTotals(workflow);
   write(base, workflow);
   return { units: result.ran, reviews: result.reviews };

@@ -99,6 +99,14 @@
       <span>
         <span class="text-neutral-200 font-medium">${{ fmtCost(totals.cost_usd) }}</span>
       </span>
+      <!-- #783: blocked units are gate-held — the run must not dispatch them, so say so. -->
+      <span
+        v-if="blockedCount"
+        class="text-neutral-500"
+        :title="'Blocked units stay out of the dispatch set. Unblock one with: vf units update <name> --status pending'"
+      >
+        {{ blockedCount }} blocked · not dispatched
+      </span>
       <span v-if="anyRunning" class="ml-auto flex items-center gap-1.5 text-neutral-500">
         <span class="inline-block w-1.5 h-1.5 rounded-full bg-white/50 animate-pulse"></span>
         {{ units.filter(u => u.status === WORK_UNIT_STATUS.RUNNING).length }} running
@@ -231,6 +239,10 @@ const totals = computed(
   () => store.state?.totals ?? { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
 );
 const anyRunning = computed(() => units.value.some((u) => u.status === WORK_UNIT_STATUS.RUNNING));
+// #783: blocked units are gate-held — they stay out of the dispatch set a "Run agents" sends.
+const blockedCount = computed(
+  () => units.value.filter((u) => u.status === WORK_UNIT_STATUS.BLOCKED).length,
+);
 const allDone = computed(
   () => units.value.length > 0 && units.value.every((u) => u.status === WORK_UNIT_STATUS.DONE),
 );
