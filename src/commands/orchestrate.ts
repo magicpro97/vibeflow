@@ -7,7 +7,7 @@
 
 import { resolve } from "node:path";
 import { AGENT_ENGINE } from "../core/agent-contract.js";
-import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
+import { WORK_UNIT_DISPATCH, WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { DISPATCH_MODE } from "../dispatch/session-contract.js";
 import { dispatchInWaves } from "../orchestrator/waves.js";
 // Protection cluster lives in src/commands/protection.ts, re-exported from _shared.js.
@@ -15,13 +15,13 @@ import { dispatchInWaves } from "../orchestrator/waves.js";
 import {
   MS_PER_SECOND,
   defaultRun,
-  isComplete,
   makeDispatcher,
   makeReviewer,
   makeSharedTypecheckGate,
   planProtection,
   repoGit,
   resolveProtection,
+  selectDispatchUnits,
 } from "./_shared.js";
 import type { ProtectionRuntime, ScopedGateFn, WorktreeOps } from "./_shared.js";
 import type {
@@ -168,32 +168,24 @@ export async function orchestrate(
       ? state.work_units
       : [normalizeUnit({ name: "task", status: WORK_UNIT_STATUS.PENDING, confidence: 0 })];
 
-  const done = allUnits.filter(isComplete);
-  const blocked = allUnits.filter((u) => u.status === WORK_UNIT_STATUS.BLOCKED);
-  const units: WorkUnit[] = allUnits.filter(
-    (u) => !isComplete(u) && u.status !== WORK_UNIT_STATUS.BLOCKED,
-  );
-  if (done.length) {
+  // #783: dispatch ONLY `pending` units. Blocked (sequential gating), in-flight, awaiting
+  // verification and already-complete units stay out of the run and are reported as skipped
+  // instead of being dispatched or silently dropped.
+  const { dispatch: units, skipped } = selectDispatchUnits(allUnits);
+  for (const group of skipped) {
+    const line = `Skipping ${group.units.length} ${group.disposition} unit(s): ${group.units
+      .map((u) => u.name)
+      .join(", ")}`;
     out(
       "vf",
-      c.dim(
-        `Skipping ${done.length} already-complete unit(s): ${done.map((u) => u.name).join(", ")}`,
-      ),
-    );
-  }
-  if (blocked.length) {
-    out(
-      "vf",
-      c.yellow(
-        `Skipping ${blocked.length} blocked unit(s): ${blocked.map((u) => u.name).join(", ")}`,
-      ),
+      group.disposition === WORK_UNIT_DISPATCH.ALREADY_COMPLETE ? c.dim(line) : c.yellow(line),
     );
   }
 
   // Nothing left to dispatch — exit early.
   if (units.length === 0) {
     out("vf");
-    out("vf", c.green("All work units already complete — nothing to dispatch."));
+    out("vf", c.green("No pending work unit — nothing to dispatch."));
     // issue #90: apply the spec band threshold (per-unit riskClass) to the verdict, not 1.0.
     for (const u of state.work_units) {
       if (!u.riskClass) u.riskClass = riskClass;
@@ -331,8 +323,10 @@ export async function orchestrate(
   });
 
   spinner.succeed(`Dispatched ${ran.length} unit(s)`);
-  // Merge dispatched results back with skipped (complete + blocked) units.
-  state.work_units = [...done, ...blocked, ...ran];
+  // Merge dispatched results back with the units that stayed out of this run (skipped groups:
+  // blocked / in-flight / awaiting verification / already complete) so the ledger keeps every
+  // unit — a blocked unit must survive a run untouched, not vanish (#783).
+  state.work_units = [...skipped.flatMap((group) => group.units), ...ran];
   // issue #90: stamp the resolved risk class onto every unit that didn't declare one, so
   // goalEval applies the spec band (0.7-0.95) instead of the legacy hardcoded 1.0.
   for (const u of state.work_units) {

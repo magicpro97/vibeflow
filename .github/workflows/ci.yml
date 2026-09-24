@@ -109,6 +109,12 @@ jobs:
       - name: Windows PID, Job Object, release, and orphan smoke
         if: matrix.suite == 'owned-process'
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
+      - name: Windows bridge command quoting regression (#805)
+        # A command string with quoted paths (VIBEFLOW_AI / bridgeCmd) must reach the engine
+        # through the owned supervisor. Real launches only, so --timeout covers the Windows
+        # start-identity probe budget and the terminate grace window.
+        if: matrix.suite == 'owned-process'
+        run: bun test --timeout 30000 test/dispatch-windows-bridge-command.test.ts
       - name: Build shipped artifact
         if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap'
         run: bun run build
