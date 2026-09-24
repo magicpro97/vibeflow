@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.19.0](https://github.com/magicpro97/vibeflow/compare/v0.18.0...v0.19.0) (2026-09-24)
+
+
+### Features
+
+* **orchestrator:** add `vf race` head-to-head multi-engine dispatch ([#818](https://github.com/magicpro97/vibeflow/issues/818)) ([1bfe5a2](https://github.com/magicpro97/vibeflow/commit/1bfe5a2a205fe574db5ca7ac8c6e61ed63d28a36))
+
+
+### Bug Fixes
+
+* **dispatch:** launch the Windows bridge command string as argv, not through cmd.exe ([#805](https://github.com/magicpro97/vibeflow/issues/805)) ([#815](https://github.com/magicpro97/vibeflow/issues/815)) ([04dd4fa](https://github.com/magicpro97/vibeflow/commit/04dd4fac653a18e28e786207db1a33f78ed370d5))
+* **dispatch:** run a launcher-quoted Windows shim path through `call` ([#820](https://github.com/magicpro97/vibeflow/issues/820)) ([8a2cac7](https://github.com/magicpro97/vibeflow/commit/8a2cac751278c26528b6a6f155e7311643edfe2d))
+* **durability:** bind Windows ACL verdicts to the object the caller stat'ed ([#817](https://github.com/magicpro97/vibeflow/issues/817)) ([cb1e082](https://github.com/magicpro97/vibeflow/commit/cb1e0829de13b591abd453c48d25ff2e7378bd2f))
+* **durability:** enforce owner-only ACLs on Windows durability paths ([#810](https://github.com/magicpro97/vibeflow/issues/810)) ([6cdf0f1](https://github.com/magicpro97/vibeflow/commit/6cdf0f1b9679d0dc24e8f926f8946258d5c5054a))
+* **durability:** replace Windows start-identity PowerShell spawn with GetProcessTimes FFI ([#812](https://github.com/magicpro97/vibeflow/issues/812)) ([97c0417](https://github.com/magicpro97/vibeflow/commit/97c0417c0403323a052228a4e6cafab1904580e2))
+* **orchestrator:** dispatch only pending work units ([#783](https://github.com/magicpro97/vibeflow/issues/783)) ([#816](https://github.com/magicpro97/vibeflow/issues/816)) ([251e3dc](https://github.com/magicpro97/vibeflow/commit/251e3dc99859855faa9648052069044603a60276))
+
+
+### Continuous Integration
+
+* **windows:** gate the conversation bootstrap on the shipped CLI ([#814](https://github.com/magicpro97/vibeflow/issues/814)) ([fa88f00](https://github.com/magicpro97/vibeflow/commit/fa88f00b0dbbf2bc79ed31ccdbc9c55ba4a6aab2))
+
 ## [0.18.0](https://github.com/magicpro97/vibeflow/compare/v0.17.0...v0.18.0) (2026-09-23)
 
 
