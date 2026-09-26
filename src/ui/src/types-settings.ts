@@ -111,8 +111,11 @@ export function typesafeSaveDisabled(input: {
   saving: boolean;
   status: string;
   thresholdError: string;
+  rowsAreStale: boolean;
 }): boolean {
-  return input.saving || input.status !== "ready" || input.thresholdError !== "";
+  return (
+    input.saving || input.status !== "ready" || input.thresholdError !== "" || input.rowsAreStale
+  );
 }
 
 /**

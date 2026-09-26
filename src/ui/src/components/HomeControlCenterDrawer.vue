@@ -131,12 +131,23 @@ const thresholdError = ref("");
 /** Repo whose System One view the rows currently describe. */
 const typesafeRepo = ref("");
 
-/** The form is seeded from the load, so it must never post before that load succeeded. */
+/**
+ * The form is seeded from the load, so it must never post before that load succeeded — and never
+ * while the rows describe a repo the server is no longer going to write to.
+ *
+ * The race the repo check closes: the Repository input's `@blur` dispatches `POST /api/detect`
+ * (which calls `setActiveRepo` server-side) the moment the user leaves the field, and `POST
+ * /api/settings` writes to whichever repo is active when it lands. Clicking Save in that window
+ * posts the OLD repo's loaded block — the form's `...view.settings` — onto the NEW repo, silently
+ * enabling the judge there. Reloading after `detect()` resolves is too late: it runs after the
+ * write. Blocking the button while the two disagree is what actually closes the window.
+ */
 function typesafeSaveBlocked(): boolean {
   return typesafeSaveDisabled({
     saving: saving.value,
     status: typesafeStatus.value,
     thresholdError: thresholdError.value,
+    rowsAreStale: typesafeNeedsReload(typesafeRepo.value, repoPath.value),
   });
 }
 const settingsForm = reactive({

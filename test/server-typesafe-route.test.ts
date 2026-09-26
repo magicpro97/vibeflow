@@ -200,6 +200,34 @@ describe("handleTypesafeTestRoute", () => {
     expect(body.error).toBe("key missing — set TYPESAFE_API_KEY or run vf config typesafe key");
   });
 
+  test("pays the same call-budget toll as every other call site", async () => {
+    // The probe used to call `judgeAssessment` directly, which left it outside the per-process
+    // call budget and outside the file-backed breaker — both live in `withTypesafeGuard`. A
+    // client holding the page token could therefore loop this route and issue unbounded billed
+    // requests, even while the breaker was open for every real call site. `maxCalls: 0` is the
+    // cheapest way to show the guard is on the path: the judge must not be reached at all.
+    let reached = 0;
+    const res = await handleTypesafeTestRoute({
+      repo: REPO,
+      userRoot: REPO,
+      settings: {
+        ...BASE,
+        typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true, maxCalls: 0 },
+      },
+      env: { TYPESAFE_API_KEY: KEY },
+      judge: async () => {
+        reached += 1;
+        return null;
+      },
+    });
+    const body = (await res.json()) as { ok: boolean; error: string };
+    expect(reached).toBe(0);
+    expect(body.ok).toBe(false);
+    // A refusal is not a judge failure: reporting one would send the user hunting for a key or
+    // network problem that does not exist.
+    expect(body.error).toBe("refused by the call budget or an open circuit breaker");
+  });
+
   test("returns the score, confidence and latency of a live probe", async () => {
     let clock = 1_000;
     const res = await handleTypesafeTestRoute({

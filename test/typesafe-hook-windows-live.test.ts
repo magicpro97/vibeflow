@@ -2,10 +2,11 @@
  * Live Windows gate for the TypeSafe hook path and the key file.
  *
  * Two of this feature's riskiest claims are only testable on a real win32 runtime: the hook
- * adapter's `spawnSync` budget (a non-zero exit past it becomes `decision: "block"`, so a
- * fail-open judge that runs slow blocks a tool call — `src/hooks/adapters.ts`), and the key
- * file being owner-only where POSIX mode bits do not exist (mode bits report 0o666 for every
- * file on win32, so a mode assertion there passes without checking anything).
+ * adapter's `spawnSync` budget (a non-zero exit past it becomes a blocked tool call, so a
+ * fail-open judge that runs slow has blocked a call it is not allowed to block —
+ * `src/hooks/adapters.ts`), and the key file being owner-only where POSIX mode bits do not exist
+ * (mode bits report 0o666 for every file on win32, so a mode assertion there passes without
+ * checking anything).
  *
  * Off win32 both assertions are skipped, and a skipped assertion is evidence of nothing — hence
  * the `windows:` matrix row in `.github/workflows/ci.yml` and the release gate in
@@ -21,17 +22,20 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   constants,
   closeSync,
-  fstatSync,
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hasPrivateMode } from "../src/durability/posix-fs-semantics.js";
 import { RUNTIME_PLATFORM } from "../src/durability/process-identity-contract.js";
+import { descriptorIdentity, windowsVerifyPathAcl } from "../src/durability/windows-acl-ops.js";
+import { WINDOWS_AUTHORITY_PATH_KIND } from "../src/durability/windows-private-contract.js";
 
 const LIVE_WINDOWS_ENV = "VF_REQUIRE_LIVE_WINDOWS";
 const LIVE_WINDOWS_TIMEOUT_MS = 30_000;
@@ -59,6 +63,16 @@ describe("live Windows typesafe hook path", () => {
     () => {
       const root = mkdtempSync(join(tmpdir(), "vf-typesafe-win-"));
       try {
+        // ARM the judge. `readSettings(cwd())` reads `<cwd>/.vibeflow/SETTINGS.json` and the spawn
+        // below runs with cwd = root, so this file is what puts the judge legs inside the measured
+        // window. With the shipped default (`enabled: false`) `integrateRiskJudge` returns before
+        // installing anything, and the number below would measure node's cold start instead.
+        const ctxDir = join(root, ".vibeflow");
+        mkdirSync(ctxDir, { recursive: true });
+        writeFileSync(
+          join(ctxDir, "SETTINGS.json"),
+          JSON.stringify({ typesafe: { enabled: true } }),
+        );
         // A key that cannot authenticate: the judge must fail OPEN and return fast. The budget is
         // what is under test, not the vendor's availability.
         const env = {
@@ -71,14 +85,41 @@ describe("live Windows typesafe hook path", () => {
         const run = spawnSync(
           nodeExecPathOrThrow(),
           [cliEntry, "hook", "--event", "pre-tool-use"],
-          { cwd: root, env, input: JSON.stringify({ tool: "Read", args: {} }), timeout: 20_000 },
+          {
+            cwd: root,
+            env,
+            // A payload the parser accepts. `{tool, args}` alone matches no known shape, so
+            // `parseHookInput` returns null and the CLI fail-closes to a block on EVERY run -
+            // which is not what this row exists to measure. The command is also what makes
+            // `shouldConsultSemantic` true, one of the four conditions on the judge path.
+            input: JSON.stringify({
+              event: "pre-tool-use",
+              tool: "Bash",
+              command: "curl https://example.com",
+            }),
+            timeout: 20_000,
+          },
         );
         const elapsed = Date.now() - started;
         // The hook path's whole contract is this number: past 10000 ms the adapter's non-zero exit
-        // becomes decision "block" and a fail-open judge has blocked a tool call.
+        // becomes a blocked tool call, so a fail-open judge that runs slow has blocked a call it is
+        // not allowed to block.
         expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);
-        const decision = JSON.parse(run.stdout.toString() || "{}");
-        expect(decision.decision).not.toBe("block");
+        // The audit leg is the only witness that the judge was really inside the measured window.
+        // `installLogbus` runs inside `integrateRiskJudge` AFTER all four gate conditions pass
+        // (src/commands/hook-risk-integration.ts), and it is installed "on the enabled path only:
+        // the disabled hook installs nothing" - so this file existing separates "the judge ran"
+        // from "the payload short-circuited before it".
+        expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);
+        // The verdict itself. A well-formed payload is answered in the host's native shape, so
+        // `permissionDecision` is where the decision lives; reading only the flat `decision` field
+        // would compare `undefined` against "block" and pass without checking anything.
+        const out = JSON.parse(run.stdout.toString() || "{}") as {
+          hookSpecificOutput?: { permissionDecision?: string };
+          decision?: string;
+        };
+        expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).toBeDefined();
+        expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -99,12 +140,21 @@ describe("live Windows typesafe hook path", () => {
       });
       const path = join(root, ".vibeflow", "typesafe.env");
       // Only the DACL answers the question on this platform, so the assertion goes through the
-      // same authority the writer used — with the descriptor the stat came from, not a
-      // placeholder: the DACL check reopens the path, so binding it to the fd is what makes the
-      // answer about THIS object.
+      // same authority the writer used - but the VERIFY leg of it, not the ensure leg.
+      // `hasPrivateMode` routes to `windowsEnsurePrivateAcl`, which is repair-then-recheck: it
+      // catches the failed verdict, calls `migrateHandle`, re-runs the verdict and then returns
+      // true unconditionally. Asserting through it mutates the file it just created and then
+      // checks that the mutation worked, so a writer that stopped enforcing owner-only would still
+      // pass and this gate could not catch the regression it exists for. `windowsVerifyPathAcl`
+      // only reads. The descriptor is the identity witness: the check reopens the path, so binding
+      // it is what makes the answer about THIS object rather than whatever now holds that name.
       const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
-        expect(hasPrivateMode(fstatSync(fd), 0o777, 0o600, path, fd)).toBe(true);
+        expect(
+          windowsVerifyPathAcl(path, WINDOWS_AUTHORITY_PATH_KIND.FILE, {
+            identity: descriptorIdentity(fd),
+          }),
+        ).toBe(true);
       } finally {
         closeSync(fd);
       }

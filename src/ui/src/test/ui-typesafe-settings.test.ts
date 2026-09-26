@@ -137,24 +137,31 @@ test("the threshold invariant admits the shipped defaults and rejects an accept 
 
 test("the save control only acts on a view that actually loaded", async () => {
   const { typesafeSaveDisabled } = await import("../types-settings.js");
+  const ready = { saving: false, status: "ready", thresholdError: "", rowsAreStale: false };
   // The form is seeded from the loaded view. If the GET failed, the form still holds
   // `emptyTypesafeForm()` (all zeros), and posting that makes the server refill the whole
   // block from DEFAULT_TYPESAFE_SETTINGS, silently discarding the user's real settings.
-  expect(typesafeSaveDisabled({ saving: false, status: "error", thresholdError: "" })).toBe(true);
-  expect(typesafeSaveDisabled({ saving: false, status: "loading", thresholdError: "" })).toBe(true);
-  expect(typesafeSaveDisabled({ saving: false, status: "ready", thresholdError: "" })).toBe(false);
+  expect(typesafeSaveDisabled({ ...ready, status: "error" })).toBe(true);
+  expect(typesafeSaveDisabled({ ...ready, status: "loading" })).toBe(true);
+  expect(typesafeSaveDisabled(ready)).toBe(false);
   // The two original guards still hold.
-  expect(typesafeSaveDisabled({ saving: true, status: "ready", thresholdError: "" })).toBe(true);
-  expect(
-    typesafeSaveDisabled({ saving: false, status: "ready", thresholdError: "bad ordering" }),
-  ).toBe(true);
+  expect(typesafeSaveDisabled({ ...ready, saving: true })).toBe(true);
+  expect(typesafeSaveDisabled({ ...ready, thresholdError: "bad ordering" })).toBe(true);
+  // And the repo-mismatch guard, which is the one that closes the cross-repo race: the rows on
+  // screen describe a repo the server is about to stop writing to.
+  expect(typesafeSaveDisabled({ ...ready, rowsAreStale: true })).toBe(true);
 });
 
-test("the rows refetch when the active repo changes underneath them", async () => {
+test("the cross-repo guard is wired at its production call site, not only as a predicate", async () => {
   const { typesafeNeedsReload } = await import("../types-settings.js");
-  // POST /api/detect calls setActiveRepo server-side, and POST /api/settings writes to the
-  // active repo. Without a refetch, Save writes the previous repo's block onto the new one.
-  expect(typesafeNeedsReload("", "/repo/a")).toBe(false); // nothing loaded yet: first load owns it
-  expect(typesafeNeedsReload("/repo/a", "/repo/a")).toBe(false);
+  // POST /api/detect calls setActiveRepo server-side and POST /api/settings writes to the active
+  // repo, so the moment the Repository field blurs, a click on Save posts the PREVIOUS repo's
+  // loaded block onto the new one. The predicate alone fixes nothing: `typesafeNeedsReload` was
+  // already used for the post-`detect()` reload, and that reload runs after the write it was
+  // supposed to prevent. The button binding is the actual defence, and this repo has no mount
+  // harness (the drawer is read as text), so pin the wiring by name — deleting it must fail here.
   expect(typesafeNeedsReload("/repo/a", "/repo/b")).toBe(true);
+  expect(drawer).toContain("rowsAreStale: typesafeNeedsReload(typesafeRepo.value, repoPath.value)");
+  expect(drawer).toContain(':disabled="typesafeSaveBlocked()"');
+  expect(drawer).toContain('@click="saveTypesafe"');
 });

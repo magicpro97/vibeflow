@@ -9,6 +9,7 @@
 //      render a tripped breaker green for the whole `cooldownCapMs` while every
 //      judge call short-circuits to null.
 import { PROBE_GOAL, PROBE_STATE } from "../commands/config-typesafe.js";
+import { outBusOnly } from "../logbus.js";
 import { type VibeSettings, readSettings } from "../settings.js";
 import {
   type FailureClass,
@@ -16,6 +17,8 @@ import {
   type TypesafeHealth,
   type TypesafeState,
   readHealth,
+  tuningFor,
+  withTypesafeGuard,
 } from "../typesafe-health.js";
 import {
   DEFAULT_TYPESAFE_SETTINGS,
@@ -159,18 +162,47 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   let failure: FailureClass | undefined;
   let status: number | undefined;
   const startedAt = now();
-  const verdict = await judge(PROBE_STATE, {
-    settings: resolved,
-    env: inject.env,
-    userRoot: inject.userRoot,
-    goal: PROBE_GOAL,
-    timeoutMs: resolved.timeoutMs,
-    onOutcome: (outcome) => {
-      if (!outcome.ok) failure = outcome.class;
-      status = outcome.status;
+  // The probe must go through the SAME choke point as every other call site. Calling
+  // `judgeAssessment` directly left it outside the per-process call budget and outside the
+  // file-backed breaker (both live in `withTypesafeGuard`), so a client holding the page token
+  // could loop this route and issue unbounded billed requests — even while the breaker was open
+  // for every real call site. The CLI probe has the same shape and stays a single human-initiated
+  // command; this one is scriptable, so it pays the same toll.
+  let attempted = false;
+  const verdict = await withTypesafeGuard(
+    "probe",
+    async () => {
+      attempted = true;
+      return judge(PROBE_STATE, {
+        settings: resolved,
+        env: inject.env,
+        userRoot: inject.userRoot,
+        goal: PROBE_GOAL,
+        timeoutMs: resolved.timeoutMs,
+        onOutcome: (outcome) => {
+          if (!outcome.ok) failure = outcome.class;
+          status = outcome.status;
+        },
+      });
     },
-  });
+    {
+      ...(inject.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
+      out: outBusOnly,
+      tuning: tuningFor(resolved),
+    },
+  );
   const ms = now() - startedAt;
+  // A refusal is not a judge failure, and reporting it as one would send the user hunting for a
+  // key or network problem that does not exist. `attempted` is what separates the two: the guard
+  // returns null both when it refuses and when the judge itself returned nothing.
+  if (!attempted) {
+    return Response.json({
+      ok: false,
+      model: resolved.model,
+      ms,
+      error: "refused by the call budget or an open circuit breaker",
+    });
+  }
   if (!verdict) {
     return Response.json({
       ok: false,
