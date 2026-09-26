@@ -627,7 +627,7 @@ describe("vf config typesafe — test", () => {
     globalThis.fetch = (async () => {
       fetched += 1;
       throw new Error("the probe must not reach the wire without a key");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const { lines, out } = collector();
     try {
       // No `judge` double: this exercises the dynamic import of the one socket-owning
