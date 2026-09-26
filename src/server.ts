@@ -454,10 +454,8 @@ export async function startServer(
       if (method === "GET" && path === "/api/typesafe") {
         if (lanExposed && !guarded(req))
           return Response.json({ error: "forbidden" }, { status: 403 });
-        return (
-          handleTypesafeReadRoute(path, activeRepo) ??
-          Response.json({ error: "not found" }, { status: 404 })
-        );
+        const r = handleTypesafeReadRoute(path, activeRepo);
+        if (r) return r;
       }
 
       // --- GET /api/skills/curator (#689: guarded) — recent curator findings ---
