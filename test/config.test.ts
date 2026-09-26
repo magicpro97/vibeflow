@@ -374,7 +374,7 @@ describe("settings eval coerce/writeSettings (#549)", () => {
 // the dynamic-import route are never executed and scripts/coverage-gate.cjs fails the per-file 100%
 // line gate on `src/commands/config-decision.ts` — a gate the task's own focused test cannot see.
 describe("config typesafe route through the decision layer", () => {
-  test('`config typesafe status` runs through the sibling dynamic-import route', async () => {
+  test("`config typesafe status` runs through the sibling dynamic-import route", async () => {
     const dir = tmpRepo();
     try {
       const { code } = await capture(() => config("typesafe", ["status"], dir));
@@ -384,7 +384,7 @@ describe("config typesafe route through the decision layer", () => {
     }
   });
 
-  test('`config typesafe on|off` toggles the block through the same route', async () => {
+  test("`config typesafe on|off` toggles the block through the same route", async () => {
     const dir = tmpRepo();
     try {
       expect(await capture(() => config("typesafe", ["on"], dir))).toBeDefined();

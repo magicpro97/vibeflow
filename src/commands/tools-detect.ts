@@ -4,10 +4,16 @@ import { spawnSync as _spawnSync } from "node:child_process";
 import { ENGINES, type Engine } from "../core.js";
 import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { checkReviewEvidence, defaultGit } from "../hooks/review-evidence.js";
+import { outBusOnly } from "../logbus.js";
 import {
   verifyLockMirrorCompleteness,
   verifyRegistryLockIntegrity,
 } from "../skills/verify-lock.js";
+import { tuningFor, withTypesafeGuard } from "../typesafe-health.js";
+import type { TypesafeSettings } from "../typesafe-settings.js";
+// TYPE-ONLY: erased at compile time, so it evaluates nothing. The HTTP client module is loaded
+// by the `await import` inside the judge gate in `defaultGoalEvalFn` (C27-c).
+import type { judgeAssessment } from "../typesafe.js";
 import {
   type GoalEvaluation,
   type VerifyCoreReport,
@@ -98,6 +104,16 @@ export function parseGoalScore(raw: string): number | undefined {
   return Math.min(1, Math.max(0, n));
 }
 
+/** The System One seam for goal evaluation. Fully injectable, so a test never opens a socket
+ *  and a test's `userRoot` keeps the breaker's health record out of the real `~/.vibeflow`. */
+export interface GoalEvalTypesafeOpts {
+  judge?: typeof judgeAssessment;
+  settings?: TypesafeSettings;
+  env?: NodeJS.ProcessEnv;
+  /** Forwarded VERBATIM into `withTypesafeGuard`'s `HealthIo`. */
+  userRoot?: string;
+}
+
 /** ADR-003 phase 2: real LLM eval via VIBEFLOW_AI bridge. Fail-open when bridge not set. */
 export async function defaultGoalEvalFn(
   goal: string,
@@ -106,6 +122,7 @@ export async function defaultGoalEvalFn(
     ownedRoute?: OwnedAiRouteRunner;
     engine?: Engine;
     cwd?: string;
+    typesafe?: GoalEvalTypesafeOpts;
   } = {},
 ): Promise<{ covered: boolean; uncovered: string[]; score?: number }> {
   const gitSpawn = inject.gitSpawn ?? _spawnSync;
@@ -122,6 +139,48 @@ export async function defaultGoalEvalFn(
     }
   })();
   const prompt = buildReviewerPrompt({ goal, diff: diff || "(no diff available)" });
+  const { judge, settings, env, userRoot } = inject.typesafe ?? {};
+  const timeoutMs = settings?.timeoutMs;
+  if (settings?.enabled && settings.callSites.goalCoverage && timeoutMs !== undefined) {
+    // C27-c: `src/typesafe.ts` (the HTTP client) is evaluated ONLY here, inside the gate, and the
+    // injectable double still wins — so a disabled run never loads the client module.
+    const judgeFn = judge ?? (await import("../typesafe.js")).judgeAssessment;
+    // Defence layer 4: the guard classifies the outcome, updates the breaker and hands back
+    // `null` on ANY failure, so a throwing judge never rejects out of `defaultGoalEvalFn`.
+    const j = await withTypesafeGuard(
+      "goalCoverage",
+      () => judgeFn(diff || "(no diff available)", { settings, env, goal, timeoutMs }),
+      {
+        ...(userRoot === undefined ? {} : { userRoot }),
+        out: outBusOnly,
+        tuning: tuningFor(settings),
+      },
+    );
+    // The `acceptAtConfidence` FLOOR: an answer below it is dropped whole, so the path is
+    // byte-identical to a `null` judge. A score answer with NO confidence reads as zero.
+    const confidence = j?.covers.confidence ?? 0;
+    // JUDGE-ESCALATE-ONLY (see § Judge authority): `diff` and `goal` are both
+    // attacker-influenced (a diff is written by whoever opened the PR, a goal can come from an
+    // issue body), so only the NEGATIVE answer may short-circuit. A confident `covered: true`
+    // falls through and the bridge below decides — the bridge is authoritative for a POSITIVE
+    // coverage claim.
+    if (j !== null && confidence >= settings.acceptAtConfidence) {
+      const covered =
+        j.covers.score >= settings.judgePassLevel &&
+        (j.tests?.noul ?? 1) >= settings.judgeTestFloor;
+      if (!covered) {
+        // `score` is a 0..1 contract, so normalization CLAMPS a vendor overshoot into range.
+        return {
+          covered: false,
+          uncovered: [
+            `System One judge score ${j.covers.score.toFixed(2)} (confidence ${confidence.toFixed(2)})`,
+          ],
+          score: Math.min(1, Math.max(0, j.covers.score / settings.judgeScoreLevels)),
+        };
+      }
+      // covered === true: NO return. Execution continues into the unchanged bridge path.
+    }
+  }
   const bridge = process.env.VIBEFLOW_AI;
   if (!bridge) return { covered: true, uncovered: [] };
   try {
