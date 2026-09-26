@@ -1,9 +1,3 @@
-// src/typesafe-settings.ts
-//
-// Optional TypeSafe "System One" (Jev) integration — settings + key resolution.
-// Split out of src/settings.ts to stay under the 400-line cap and to keep the
-// settings module free of filesystem/env policy. No dependency on src/typesafe.ts
-// (the HTTP client) so the import graph stays acyclic.
 import { randomBytes } from "node:crypto";
 import {
   constants,
@@ -26,25 +20,32 @@ import { dirname, join } from "node:path";
 import { ensurePrivateDirectory } from "./durability/path.js";
 import { hasPrivateMode } from "./durability/posix-fs-semantics.js";
 import type { VibeSettings } from "./settings.js";
+// src/typesafe-settings.ts
+//
+// Optional TypeSafe "System One" (Jev) integration — settings + key resolution.
+// Split out of src/settings.ts to stay under the 400-line cap and to keep the
+// settings module free of filesystem/env policy. No dependency on src/typesafe.ts
+// (the HTTP client) so the import graph stays acyclic.
+import {
+  TYPESAFE_CALL_SITE_NAMES,
+  TYPESAFE_REVIEWER_ENGINE_POLICIES,
+  type TypesafeCallSites,
+  type TypesafeReviewerEnginePolicy,
+} from "./typesafe-contract.js";
 
-/** Which VibeFlow call sites may consult the judge. ONE frozen runtime authority;
- *  the type is INFERRED from it, so adding a site is a single edit here and every
- *  consumer (coerce loop, `vf config typesafe call-site`, the `/api/typesafe` view,
- *  the UI) narrows against it. No `enum`, no second member list in any module. */
-export const TYPESAFE_CALL_SITE_NAMES = Object.freeze([
-  "reviewer",
-  "risk",
-  "goalCoverage",
-  "planner",
-] as const);
-export type TypesafeCallSiteName = (typeof TYPESAFE_CALL_SITE_NAMES)[number];
-/** Each site fails open. Total by construction: a new tuple member is a compile
- *  error in `DEFAULT_TYPESAFE_SETTINGS` until it is given a default. */
-export type TypesafeCallSites = Record<TypesafeCallSiteName, boolean>;
-
-/** Reviewer engine policy vocabulary — same one-authority rule. */
-export const TYPESAFE_REVIEWER_ENGINE_POLICIES = Object.freeze(["unit", "global"] as const);
-export type TypesafeReviewerEnginePolicy = (typeof TYPESAFE_REVIEWER_ENGINE_POLICIES)[number];
+// The closed vocabularies are declared in src/typesafe-contract.ts (no runtime
+// imports) so the web control center can import them without pulling this module's
+// node:fs / bun:ffi graph into its type-check. Re-exported here so a Node caller
+// keeps importing them from the one settings module it already imports.
+export {
+  TYPESAFE_CALL_SITE_NAMES,
+  TYPESAFE_REVIEWER_ENGINE_POLICIES,
+} from "./typesafe-contract.js";
+export type {
+  TypesafeCallSiteName,
+  TypesafeCallSites,
+  TypesafeReviewerEnginePolicy,
+} from "./typesafe-contract.js";
 
 /** The optional `.vibeflow/SETTINGS.json` block. NEVER carries the API key. */
 export interface TypesafeSettings {

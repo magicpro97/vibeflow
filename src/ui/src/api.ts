@@ -7,6 +7,8 @@ import {
 } from "../../core/ui-cli-contract.js";
 import { type LogEvent, decodeLogEvent } from "../../logbus/types.js";
 import { readUiPageToken } from "./browser-ui-token.js";
+import type { VibeSettings } from "./types-settings.js";
+import type { TypesafeSettingsView, TypesafeTestResult } from "./types-settings.js";
 import type {
   DashboardSelection,
   DomainImpact,
@@ -15,7 +17,6 @@ import type {
   RegistryViewEntry,
   SafeSkill,
   TimelineEntry,
-  VibeSettings,
   WorkflowDashboardItem,
   WorkflowState,
 } from "./types.js";
@@ -106,6 +107,12 @@ export const api = {
   },
   detect: (repoPath: string) =>
     req<import("./types.js").RepoDetection>("POST", "/api/detect", { path: repoPath }),
+  // System One (Jev) judge — the key never reaches the browser: the view reports
+  // `keySource` and the probe runs server-side, so a compromised tab cannot exfiltrate it.
+  typesafe: {
+    view: () => req<TypesafeSettingsView>("GET", "/api/typesafe"),
+    test: () => req<TypesafeTestResult>("POST", "/api/typesafe/test", {}),
+  },
   skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
   // #689: recent curator findings (severity-badged, sanitized).
   curator: () =>

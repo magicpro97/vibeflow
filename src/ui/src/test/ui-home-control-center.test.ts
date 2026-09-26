@@ -7,7 +7,7 @@ describe("home control center contracts", () => {
     "utf8",
   );
   const app = readFileSync(new URL("../App.vue", import.meta.url), "utf8");
-  const types = readFileSync(new URL("../types.ts", import.meta.url), "utf8");
+  const types = readFileSync(new URL("../types-settings.ts", import.meta.url), "utf8");
   const api = readFileSync(new URL("../api.ts", import.meta.url), "utf8");
   const settings = readFileSync(new URL("../../../settings.ts", import.meta.url), "utf8");
 

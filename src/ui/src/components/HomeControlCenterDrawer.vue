@@ -35,6 +35,40 @@
         <button class="home-control-save" type="button" :disabled="saving" @click="saveSettings">{{ saving ? "Saving…" : "Save configuration" }}</button>
       </section>
 
+      <section class="home-control-section" aria-labelledby="typesafe-title">
+        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus === 'loading'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
+        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate, skips a review, or picks an engine on its own — and with it off, every path behaves exactly as it does today.</p>
+
+        <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
+        <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
+        <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — key missing: set the environment variable or run <code>vf config typesafe key</code>.</p>
+        <p v-else-if="typesafeView?.state === 'open'" class="home-control-warning" role="alert">Circuit open — judge calls are paused until {{ typesafeView?.cooldownUntil ?? "the cooldown ends" }}.</p>
+
+        <dl v-if="typesafeView" class="home-control-list">
+          <div><dt>enabled</dt><dd>{{ typesafeView.enabled ? "on" : "off" }}</dd></div>
+          <div><dt>configured</dt><dd>{{ typesafeView.configured ? "yes" : "no" }}</dd></div>
+          <div><dt>state</dt><dd :data-state="typesafeView.state">{{ typesafeView.state }}</dd></div>
+          <div><dt>key source</dt><dd>{{ typesafeView.keySource }}</dd></div>
+          <div><dt>model</dt><dd>{{ typesafeView.model }}</dd></div>
+          <div><dt>timeout</dt><dd>{{ typesafeView.timeoutMs }} ms</dd></div>
+          <div v-if="typesafeView.lastCall"><dt>last call</dt><dd>{{ typesafeView.lastCall.caller }} · {{ typesafeView.lastCall.status ?? "—" }} · {{ typesafeView.lastCall.ms }} ms</dd></div>
+        </dl>
+
+        <label for="typesafe-enabled" class="home-control-toggle"><input id="typesafe-enabled" v-model="settingsForm.typesafe.enabled" type="checkbox" /><span><strong>Enable System One judge</strong><small>Off by default. The API key stays on the machine.</small></span></label>
+
+        <label for="typesafe-run-threshold" class="home-control-field"><span>Run judge at confidence</span><input id="typesafe-run-threshold" v-model.number="settingsForm.typesafe.runAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" /></label>
+        <label for="typesafe-accept-threshold" class="home-control-field"><span>Accept verdict at confidence</span><input id="typesafe-accept-threshold" v-model.number="settingsForm.typesafe.acceptAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" /></label>
+        <p v-if="thresholdError" id="typesafe-threshold-error" class="home-control-error" role="alert">{{ thresholdError }}</p>
+
+        <label for="typesafe-callsite-reviewer" class="home-control-toggle"><input id="typesafe-callsite-reviewer" v-model="settingsForm.typesafe.callSites.reviewer" type="checkbox" /><span><strong>reviewer</strong><small>Judge the unit diff before the engine reviewer.</small></span></label>
+        <label for="typesafe-callsite-risk" class="home-control-toggle"><input id="typesafe-callsite-risk" v-model="settingsForm.typesafe.callSites.risk" type="checkbox" /><span><strong>risk</strong><small>Raise the risk tier of a proposed shell command.</small></span></label>
+        <label for="typesafe-callsite-goalCoverage" class="home-control-toggle"><input id="typesafe-callsite-goalCoverage" v-model="settingsForm.typesafe.callSites.goalCoverage" type="checkbox" /><span><strong>goalCoverage</strong><small>Judge whether the change covers the goal.</small></span></label>
+        <label for="typesafe-callsite-planner" class="home-control-toggle"><input id="typesafe-callsite-planner" v-model="settingsForm.typesafe.callSites.planner" type="checkbox" /><span><strong>planner</strong><small>Suggest an engine for a work unit.</small></span></label>
+
+        <p v-if="typesafeProbe" class="home-control-message" role="status" aria-live="polite">{{ typesafeProbe }}</p>
+        <button class="home-control-save typesafe-save" type="button" :disabled="saving || Boolean(thresholdError)" @click="saveTypesafe">{{ saving ? "Saving…" : "Save System One settings" }}</button>
+      </section>
+
       <section class="home-control-section" aria-labelledby="capabilities-title">
         <div class="home-control-section__heading"><span><small>Fabric inventory</small><strong id="capabilities-title">Capabilities</strong></span><button type="button" @click="loadCapabilities">Refresh</button></div>
         <p class="home-control-note">{{ capabilities.length ? `${capabilities.length} capability package(s) visible` : "Open Capabilities drawer for scoped install and repair actions." }}</p>
@@ -62,7 +96,12 @@ import { CAPABILITY_SCOPE } from "../../../core/capability-contract.js";
 import { api } from "../api.js";
 import { conversationHomeApi } from "../conversation-home-api.js";
 import type { ControlCenterCapability } from "../conversation-home-types.js";
-import type { RepoDetection, SafeSkill, VibeSettings } from "../types.js";
+import {
+  type TypesafeSettingsView,
+  type VibeSettings,
+  emptyTypesafeForm,
+} from "../types-settings.js";
+import type { RepoDetection, SafeSkill } from "../types.js";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -80,7 +119,84 @@ const enabledEngines = ref<Engine[]>([...ENGINES]);
 const skills = ref<SafeSkill[]>([]);
 const capabilities = ref<ControlCenterCapability[]>([]);
 const mcpServers = ref<string[]>([]);
-const settingsForm = reactive({ memory: false, tools: { codegraph: true, lsp: true } });
+const typesafeView = ref<TypesafeSettingsView | null>(null);
+const typesafeStatus = ref<"loading" | "ready" | "error">("loading");
+const typesafeError = ref("");
+const typesafeProbe = ref("");
+const typesafeTesting = ref(false);
+const thresholdError = ref("");
+const settingsForm = reactive({
+  memory: false,
+  tools: { codegraph: true, lsp: true },
+  typesafe: emptyTypesafeForm(),
+});
+
+/** A threshold above the run gate would accept verdicts the judge was told to ignore. */
+function validateThresholds(): void {
+  const form = settingsForm.typesafe;
+  thresholdError.value =
+    form.acceptAtConfidence > form.runAtConfidence
+      ? "Accept confidence must not exceed the run threshold."
+      : "";
+}
+
+async function loadTypesafe(): Promise<void> {
+  typesafeStatus.value = "loading";
+  try {
+    typesafeView.value = await api.typesafe.view();
+    settingsForm.typesafe = {
+      enabled: typesafeView.value.enabled,
+      runAtConfidence: typesafeView.value.thresholds.run,
+      acceptAtConfidence: typesafeView.value.thresholds.accept,
+      callSites: { ...typesafeView.value.callSites },
+    };
+    validateThresholds();
+    typesafeStatus.value = "ready";
+  } catch (cause) {
+    typesafeView.value = null;
+    typesafeStatus.value = "error";
+    typesafeError.value = cause instanceof Error ? cause.message : "unreachable";
+  }
+}
+
+async function testConnection(): Promise<void> {
+  if (typesafeTesting.value) return;
+  typesafeTesting.value = true;
+  try {
+    const result = await api.typesafe.test();
+    typesafeProbe.value = result.ok
+      ? `System One responded: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
+      : `System One connection failed — ${result.error ?? "no verdict"}`;
+  } catch (cause) {
+    typesafeProbe.value = `System One connection failed — ${cause instanceof Error ? cause.message : "unreachable"}`;
+  } finally {
+    typesafeTesting.value = false;
+  }
+}
+
+async function saveTypesafe(): Promise<void> {
+  validateThresholds();
+  if (thresholdError.value) return;
+  saving.value = true;
+  try {
+    // Round-trip the server's effective block and overlay only the edited fields.
+    const value = await api.settings.set({
+      typesafe: {
+        ...typesafeView.value?.settings,
+        ...settingsForm.typesafe,
+        callSites: { ...settingsForm.typesafe.callSites },
+      },
+    });
+    applySettings(value);
+    typesafeProbe.value = "";
+    message.value = "System One settings saved.";
+    await loadTypesafe();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "System One save failed";
+  } finally {
+    saving.value = false;
+  }
+}
 
 function applySettings(value: VibeSettings): void {
   settingsForm.memory = Boolean(value.memory);
@@ -96,7 +212,7 @@ async function load(): Promise<void> {
     const value = await api.settings.get();
     applySettings(value);
     await detect();
-    await Promise.all([loadSkills(), loadCapabilities()]);
+    await Promise.all([loadSkills(), loadCapabilities(), loadTypesafe()]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load control center";
   }
@@ -184,3 +300,50 @@ const nextControl = (open: boolean) => {
 watch(() => props.open, nextControl);
 onMounted(() => nextControl(props.open));
 </script>
+
+<style scoped>
+/* WCAG 2.1 §2.4.7: every control in the System One section keeps a visible focus
+   ring. The status colours are never the only signal — each state also carries
+   text and an ARIA role. */
+.home-control-section :focus-visible {
+  outline: 2px solid #f5f5f5;
+  outline-offset: 2px;
+}
+.home-control-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+  font-size: 0.75rem;
+  color: #a3a3a3;
+}
+.home-control-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.home-control-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+  font-size: 0.8125rem;
+  color: #d4d4d4;
+}
+.home-control-field input {
+  width: 6rem;
+  background: transparent;
+  border: 1px solid #262626;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  color: #e5e5e5;
+}
+.home-control-warning {
+  color: #fbbf24;
+  font-size: 0.8125rem;
+}
+dd[data-state="open"],
+dd[data-state="half-open"] {
+  color: #fbbf24;
+}
+</style>

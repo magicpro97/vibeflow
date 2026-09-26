@@ -61,6 +61,7 @@ import {
   handleReleaseProposalsView,
 } from "./server/registry-release-route.js";
 import { handleRegistryView } from "./server/registry-route.js";
+import { handleTypesafeReadRoute } from "./server/routes-typesafe.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { handleSkillAcquisitionPending } from "./server/skill-acquisition-route.js";
 import { UI_LAN_PAGE_ACCESS, UiLanPageAuthority } from "./server/ui-lan-authority.js";
@@ -447,6 +448,16 @@ export async function startServer(
         if (lanExposed && !guarded(req))
           return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json({ ok: true, ...settingsView(activeRepo) });
+      }
+
+      // --- GET /api/typesafe (guarded) — the System One judge view, key source only ---
+      if (method === "GET" && path === "/api/typesafe") {
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        return (
+          handleTypesafeReadRoute(path, activeRepo) ??
+          Response.json({ error: "not found" }, { status: 404 })
+        );
       }
 
       // --- GET /api/skills/curator (#689: guarded) — recent curator findings ---

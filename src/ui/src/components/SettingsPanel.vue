@@ -199,7 +199,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
-import type { PolicyPreview, VibeSettings } from "../types.js";
+import type { VibeSettings } from "../types-settings.js";
+import type { PolicyPreview } from "../types.js";
 import CuratorSettings from "./CuratorSettings.vue";
 import EnvScrubEditor from "./EnvScrubEditor.vue";
 import InfoTip from "./InfoTip.vue";

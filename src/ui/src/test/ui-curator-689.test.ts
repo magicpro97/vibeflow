@@ -3,7 +3,8 @@
 // Backend parser parity tests live in test/curator-cron.test.ts.
 
 import { isValidSchedule } from "../lib/curator-schedule.js";
-import type { CuratorCounts, CuratorFindingView, CuratorSettings, CuratorView } from "../types.js";
+import type { CuratorSettings } from "../types-settings.js";
+import type { CuratorCounts, CuratorFindingView, CuratorView } from "../types.js";
 
 let passed = 0;
 let failed = 0;
