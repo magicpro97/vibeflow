@@ -12,6 +12,7 @@ import { ALWAYS_KEEP, DEFAULT_DENY, filterEnv } from "../dispatch/env-filter.js"
 import { type VibeSettings, readSettings, writeSettings } from "../settings.js";
 import type { UserMcpServer } from "../settings.js";
 import { buildUserEntry, c, cwd, out, writeToolConfigs } from "./_shared.js";
+import { configTypesafe } from "./config-typesafe.js";
 
 function printMemory(base: string): void {
   const mode = readSettings(base).memory;
@@ -22,12 +23,13 @@ function printMemory(base: string): void {
 const VALID_MODES = ["on", "off", "builtin", "claude-mem"] as const;
 type MemoryArg = (typeof VALID_MODES)[number];
 
-export function config(
+export async function config(
   key: string | undefined,
   rest: string[],
   base: string = cwd(),
   flags: Record<string, string | boolean> = {},
-): number {
+): Promise<number> {
+  if (key === "typesafe") return await configTypesafe(rest, base, flags);
   if (key === "memory") return configMemory(rest, base);
   if (key === "env-policy") return configEnvPolicy(rest, base);
   if (key === "mcp") return configMcp(rest, base, flags);

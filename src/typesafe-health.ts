@@ -43,6 +43,7 @@ import type { TypesafeHealth } from "./typesafe-health-file.js";
 export {
   FAILURE_CLASS,
   FAILURE_CLASSES,
+  idleHealth,
   isFailureClass,
   isTypesafeHealth,
   isTypesafeState,
