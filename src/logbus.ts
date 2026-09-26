@@ -16,7 +16,7 @@ import type { LogContext, LogEvent, LogEventInput } from "./logbus/types.js";
 import type { PublicStoredTraceEvent } from "./orchestrator/trace/types.js";
 
 // Re-exports from moved modules
-export { out } from "./logbus/out.js";
+export { out, outBusOnly } from "./logbus/out.js";
 export { watchLogbus } from "./logbus/watch.js";
 export { decodeLogEvent } from "./logbus/types.js";
 export type { Channel, LogLevel, LogEvent, LogEventInput, WatchHandle } from "./logbus/types.js";
