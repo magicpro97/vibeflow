@@ -467,6 +467,56 @@ describe("matrix (e) — C05: a SETTINGS.json retune reaches EVERY call site", (
   });
 });
 
+describe("matrix (f) — every guard call site hands the guard its outcome probe", () => {
+  test("no call site can silently record a vendor failure as a success", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((entry) => {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) return walk(full);
+        return full.endsWith(".ts") ? [full] : [];
+      });
+    // The guard reads `inject.outcome?.()` and falls back to `FAILURE_CLASS.NONE`. A call site
+    // that omits it records EVERY vendor failure as a success, so the failStreakLimit ladder never
+    // advances and the file-backed breaker never trips — the seam looks healthy while the key is
+    // revoked. Three of the five call sites shipped that way (risk, goalCoverage and the probe),
+    // which is why this is asserted mechanically rather than per seam: the per-seam tests all
+    // passed, because each one injected a judge double and never inspected the health record.
+    //
+    // The slice runs from each `withTypesafeGuard(` to its matching close paren, with string
+    // literals blanked first so a paren inside a message cannot unbalance the count.
+    const blankStrings = (text: string): string =>
+      text.replace(/"(?:[^"\\\n]|\\.)*"/g, '""').replace(/'(?:[^'\\\n]|\\.)*'/g, "''");
+    const violations: string[] = [];
+    let checked = 0;
+    for (const file of walk("src")) {
+      const text = blankStrings(readFileSync(file, "utf8"));
+      let from = 0;
+      for (;;) {
+        const at = text.indexOf("withTypesafeGuard(", from);
+        if (at === -1) break;
+        from = at + 1;
+        const open = at + "withTypesafeGuard(".length;
+        let depth = 1;
+        let i = open;
+        while (i < text.length && depth > 0) {
+          const ch = text[i];
+          if (ch === "(") depth += 1;
+          else if (ch === ")") depth -= 1;
+          i += 1;
+        }
+        const slice = text.slice(open, i);
+        checked += 1;
+        if (!slice.includes("outcome:"))
+          violations.push(`${file}:${text.slice(0, at).split("\n").length}`);
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(4);
+    expect(violations).toEqual([]);
+  });
+});
+
 describe("matrix (e) — the goal-coverage seam hands the judge config to the goal eval", () => {
   test("`?goal-eval=1` forwards the repo's block, and no goal means no seam at all", async () => {
     const { goalEvalOptions } = await import("../src/server/routes-verify.js");

@@ -129,6 +129,12 @@ export function typesafeNeedsReload(loadedRepo: string, activeRepo: string): boo
 
 /** `GET /api/typesafe` — redacted by construction: `keySource`, never the key. */
 export interface TypesafeSettingsView {
+  /** The repo the server READ this view from. The client stamps its "which repo do these rows
+   *  describe" ref from THIS, never from its own text field: the field is live and mutable while
+   *  the request is in flight, so a stamp taken from it after the `await` would describe whatever
+   *  the user typed next rather than what the server answered for — and the save guard built on
+   *  that stamp would wave through a cross-repo write. */
+  repo: string;
   state: string;
   cooldownUntil?: string;
   lastClass?: string;

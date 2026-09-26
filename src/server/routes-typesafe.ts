@@ -16,6 +16,7 @@ import {
   TYPESAFE_STATE,
   type TypesafeHealth,
   type TypesafeState,
+  outcomeProbe,
   readHealth,
   tuningFor,
   withTypesafeGuard,
@@ -34,6 +35,12 @@ import type { judgeAssessment } from "../typesafe.js";
 
 /** What `/api/typesafe` and `GET /api/settings` expose. Redacted by construction. */
 export interface TypesafeSettingsView {
+  /** The repo the server READ this view from. The client stamps its "which repo do these rows
+   *  describe" ref from THIS, never from its own text field: the field is live and mutable while
+   *  the request is in flight, so a stamp taken from it after the `await` would describe whatever
+   *  the user typed next rather than what the server answered for. Kept in sync with the UI copy
+   *  in src/ui/src/types-settings.ts. */
+  repo: string;
   state: TypesafeState;
   cooldownUntil?: string;
   lastClass?: FailureClass;
@@ -93,6 +100,7 @@ export function typesafeSettingsView(
     userRoot: inject.userRoot,
   });
   return {
+    repo,
     state: effectiveState(enabled, key !== null, health.state),
     ...(health.cooldown_until ? { cooldownUntil: health.cooldown_until } : {}),
     ...(health.last_class ? { lastClass: health.last_class } : {}),
@@ -159,8 +167,6 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   }
   const judge = inject.judge ?? (await import("../typesafe.js")).judgeAssessment;
   const now = inject.now ?? Date.now;
-  let failure: FailureClass | undefined;
-  let status: number | undefined;
   const startedAt = now();
   // The probe must go through the SAME choke point as every other call site. Calling
   // `judgeAssessment` directly left it outside the per-process call budget and outside the
@@ -168,6 +174,14 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   // could loop this route and issue unbounded billed requests — even while the breaker was open
   // for every real call site. The CLI probe has the same shape and stays a single human-initiated
   // command; this one is scriptable, so it pays the same toll.
+  //
+  // `outcome: probe.outcome` is not decoration. The guard reads `inject.outcome?.()` and falls back
+  // to `FAILURE_CLASS.NONE`, so a guard call that omits it stamps every vendor failure as a
+  // SUCCESS: the streak/trip ladder becomes unreachable and a probe against a rotated-away key can
+  // reset an open breaker to idle. `judgeAssessment` never throws (it collapses classified
+  // failures to null), so the guard's catch arm cannot classify in its place. Mirrors
+  // src/commands/dispatch-reviewer-llm.ts.
+  const probe = outcomeProbe();
   let attempted = false;
   const verdict = await withTypesafeGuard(
     "probe",
@@ -179,19 +193,18 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
         userRoot: inject.userRoot,
         goal: PROBE_GOAL,
         timeoutMs: resolved.timeoutMs,
-        onOutcome: (outcome) => {
-          if (!outcome.ok) failure = outcome.class;
-          status = outcome.status;
-        },
+        onOutcome: probe.onOutcome,
       });
     },
     {
       ...(inject.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
       out: outBusOnly,
       tuning: tuningFor(resolved),
+      outcome: probe.outcome,
     },
   );
   const ms = now() - startedAt;
+  const signal = probe.outcome();
   // A refusal is not a judge failure, and reporting it as one would send the user hunting for a
   // key or network problem that does not exist. `attempted` is what separates the two: the guard
   // returns null both when it refuses and when the judge itself returned nothing.
@@ -208,8 +221,8 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
       ok: false,
       model: resolved.model,
       ms,
-      ...(status !== undefined ? { status } : {}),
-      error: describeFailure(failure),
+      ...(signal?.status === undefined ? {} : { status: signal.status }),
+      error: describeFailure(signal?.cls),
     });
   }
   return Response.json({

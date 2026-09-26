@@ -5,7 +5,7 @@
 // C27-c: `src/typesafe.ts` (the HTTP client) is evaluated ONLY here, inside the gate, and the
 // injectable double still wins — so a disabled run never loads the client module.
 import { outBusOnly } from "../logbus.js";
-import { tuningFor, withTypesafeGuard } from "../typesafe-health.js";
+import { outcomeProbe, tuningFor, withTypesafeGuard } from "../typesafe-health.js";
 import type { TypesafeSettings } from "../typesafe-settings.js";
 import type { judgeAssessment } from "../typesafe.js";
 
@@ -34,13 +34,29 @@ export async function typesafeGoalCoverageVerdict(input: {
   const judgeFn = judge ?? (await import("../typesafe.js")).judgeAssessment;
   // Defence layer 4: the guard classifies the outcome, updates the breaker and hands back
   // `null` on ANY failure, so a throwing judge never rejects out of the caller.
+  //
+  // `outcome: probe.outcome` is REQUIRED, not decoration. The guard reads `inject.outcome?.()`
+  // and falls back to `FAILURE_CLASS.NONE`, so a guard call that omits it records every vendor
+  // failure as a SUCCESS: the failStreakLimit ladder never advances, the file-backed breaker
+  // never trips, and a run against a rotated-away key looks healthy forever. `judgeAssessment`
+  // never throws (classified failures collapse to null), so the guard's catch arm cannot
+  // classify in its place. Mirrors src/commands/dispatch-reviewer-llm.ts.
+  const probe = outcomeProbe();
   const j = await withTypesafeGuard(
     "goalCoverage",
-    () => judgeFn(diff || "(no diff available)", { settings, env, goal, timeoutMs }),
+    () =>
+      judgeFn(diff || "(no diff available)", {
+        settings,
+        env,
+        goal,
+        timeoutMs,
+        onOutcome: probe.onOutcome,
+      }),
     {
       ...(userRoot === undefined ? {} : { userRoot }),
       out: outBusOnly,
       tuning: tuningFor(settings),
+      outcome: probe.outcome,
     },
   );
   // The `acceptAtConfidence` FLOOR: an answer below it is dropped whole, so the path is

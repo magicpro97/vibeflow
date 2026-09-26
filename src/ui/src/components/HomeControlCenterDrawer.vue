@@ -171,7 +171,12 @@ async function loadTypesafe(): Promise<void> {
       callSites: { ...typesafeView.value.callSites },
     };
     validateThresholds();
-    typesafeRepo.value = repoPath.value;
+    // Stamped from the RESPONSE, never from `repoPath.value`. The field is live text: while this
+    // request is in flight the user can type another path, so a stamp read after the `await`
+    // describes what they typed rather than the repo the server answered for. The save guard is
+    // built on this ref, so a forged stamp waves through exactly the cross-repo write it exists
+    // to stop. The server echoes the repo it read for that reason.
+    typesafeRepo.value = typesafeView.value.repo;
     typesafeStatus.value = "ready";
   } catch (cause) {
     typesafeView.value = null;

@@ -48,7 +48,7 @@ import { scoreRisk } from "../hooks/risk.js";
 import type { ResolvedHookPolicy } from "../hooks/templates.js";
 import { installLogbus, outBusOnly } from "../logbus.js";
 import type { VibeSettings } from "../settings.js";
-import { type HealthIo, tuningFor, withTypesafeGuard } from "../typesafe-health.js";
+import { type HealthIo, outcomeProbe, tuningFor, withTypesafeGuard } from "../typesafe-health.js";
 import {
   HOOK_BUS_LOCK_RETRIES_MAX,
   HOOK_HEALTH_WRITE_BUDGET_MS,
@@ -161,6 +161,14 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
   // (mkdir / appendFile / chmod at construction) a module import performs no I/O, so a load
   // cannot throw inside this gate.
   const judge = inject.judgeRisk ?? (await import("../typesafe.js")).judgeRisk;
+  // `outcome: probe.outcome` is REQUIRED, not decoration. The guard reads `inject.outcome?.()`
+  // and falls back to `FAILURE_CLASS.NONE`, so a guard call that omits it records every vendor
+  // failure as a SUCCESS: the failStreakLimit ladder never advances and the file-backed breaker
+  // can never trip on this path. That matters most here — `vf hook` is a fresh process per tool
+  // call, so `callsThisRun` restarts at 0 and the breaker is the ONLY ceiling this seam has.
+  // `judgeRisk` never throws (classified failures collapse to null), so the guard's catch arm
+  // cannot classify in its place. Mirrors src/commands/dispatch-reviewer-llm.ts.
+  const probe = outcomeProbe();
   const tier = await withTypesafeGuard(
     "risk",
     () =>
@@ -169,12 +177,18 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
         env: inject.env ?? process.env,
         userRoot: healthIo.userRoot as string,
         timeoutMs: hookTimeoutMs,
+        onOutcome: probe.onOutcome,
       }),
     // Transition lines only; the per-call audit record uses outBusOnly directly. `tuning`
     // MUST come from settings or the breaker ignores failStreakLimit/cooldown* entirely, and
     // `...healthIo` carries the two seam-passed disk bounds so the breaker's own I/O legs stay
     // inside the arithmetic above.
-    { ...healthIo, out: outBusOnly, tuning: tuningFor(ts as TypesafeSettings) },
+    {
+      ...healthIo,
+      out: outBusOnly,
+      tuning: tuningFor(ts as TypesafeSettings),
+      outcome: probe.outcome,
+    },
   );
   // `scoreRisk` re-applies the raise-only merge (src/hooks/risk.ts:176) — there is exactly ONE
   // comparator; this seam only decides WHETHER the judge has an opinion.

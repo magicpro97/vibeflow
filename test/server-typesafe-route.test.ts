@@ -2,7 +2,7 @@
 // settings view, its GET route, and the server-side "Test connection" probe.
 // The browser never holds the key, so every assertion here is about what the
 // wire DOES NOT carry as much as what it does.
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ import {
 import { handleMutationRoute } from "../src/server/routes.js";
 import { type VibeSettings, readSettings } from "../src/settings.js";
 import { TYPESAFE_STATE } from "../src/typesafe-health-file.js";
+import { resetCallBudget } from "../src/typesafe-health.js";
 import type { TypesafeHealth } from "../src/typesafe-health.js";
 import {
   DEFAULT_TYPESAFE_SETTINGS,
@@ -171,9 +172,23 @@ describe("handleTypesafeReadRoute", () => {
 });
 
 describe("handleTypesafeTestRoute", () => {
+  // Two pieces of state leak between tests here now that the probe goes through the guard.
+  // `callsThisRun` is PROCESS-global (src/typesafe-health.ts:243), and the breaker lives in the
+  // health FILE under `userRoot` — so a root shared by the whole file carries the previous test's
+  // classified failures forward, trips `failStreakLimit`, and makes the next probe report a
+  // refusal instead of the answer under test. A fresh root per test also keeps the suite off the
+  // developer's real ~/.vibeflow, which is where these tests used to write their health records.
+  let root = "";
+  beforeEach(() => {
+    resetCallBudget();
+    root = mkdtempSync(join(tmpdir(), "vf-typesafe-probe-"));
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
   test("refuses while the judge is disabled, without opening a socket", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      userRoot: root,
       settings: { ...BASE, typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: false } },
       env: { TYPESAFE_API_KEY: KEY },
       judge: async () => {
@@ -189,6 +204,7 @@ describe("handleTypesafeTestRoute", () => {
   test("names the missing key instead of probing", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      userRoot: root,
       settings: settings(),
       env: {},
       judge: async () => {
@@ -209,7 +225,7 @@ describe("handleTypesafeTestRoute", () => {
     let reached = 0;
     const res = await handleTypesafeTestRoute({
       repo: REPO,
-      userRoot: REPO,
+      userRoot: root,
       settings: {
         ...BASE,
         typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true, maxCalls: 0 },
@@ -232,6 +248,7 @@ describe("handleTypesafeTestRoute", () => {
     let clock = 1_000;
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
       now: () => {
@@ -257,6 +274,7 @@ describe("handleTypesafeTestRoute", () => {
   test("omits the confidence the API did not return", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
       now: () => 5,
@@ -273,6 +291,7 @@ describe("handleTypesafeTestRoute", () => {
   test("reports a classified failure with its status", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
       now: () => 7,
@@ -293,6 +312,7 @@ describe("handleTypesafeTestRoute", () => {
   test("distinguishes a silent no-verdict from a classified failure", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
       now: () => 7,
