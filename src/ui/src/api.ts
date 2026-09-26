@@ -94,7 +94,18 @@ export const api = {
       req<{ settings: VibeSettings }>("GET", "/api/settings", undefined, signal).then(
         (r) => r.settings,
       ),
-    set: (s: Partial<VibeSettings>, signal?: AbortSignal) =>
+    set: (
+      s: Partial<VibeSettings> & {
+        /**
+         * The repository these settings were READ from. The write lands in whichever repo is
+         * active server-side, which another client can move between this panel's load and its
+         * save; the server refuses with 409 when the two disagree. Optional so the other panels,
+         * which post the same block, keep working — this section always sends it.
+         */
+        expectRepo?: string;
+      },
+      signal?: AbortSignal,
+    ) =>
       req<{ settings: VibeSettings }>("POST", "/api/settings", s, signal).then((r) => r.settings),
     previewPolicy: (s: Pick<VibeSettings, "envPolicy" | "hooks">) =>
       req<import("./types.js").PolicyPreview>("POST", "/api/settings/preview", s),

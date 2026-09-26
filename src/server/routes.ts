@@ -24,12 +24,10 @@ import {
 import { handleCuratorSetupRoute } from "./curator-setup-route.js";
 import {
   ATTACH_CAP,
-  applySettings,
   attachDir,
   replayFromLog,
   runPreflight,
   safeAttachName,
-  settingsView,
   syncAttachments,
 } from "./handlers.js";
 import { listPending, resolvePending } from "./pending-hooks.js";
@@ -40,6 +38,7 @@ import {
   handlePlanReviewPost,
 } from "./plan-review.js";
 import { handleRegistryPreview } from "./registry-route.js";
+import { handleSettingsRoute } from "./routes-settings.js";
 import { handleTypesafeTestRoute } from "./routes-typesafe.js";
 import { handleVerifyRoute } from "./routes-verify.js";
 import { handleSkillAcquisitionDecision } from "./skill-acquisition-route.js";
@@ -295,10 +294,7 @@ export async function handleMutationRoute(
     return Response.json(await runPreflight(payload));
   }
 
-  if (path === "/api/settings" && ("envPolicy" in payload || "hooks" in payload))
-    return Response.json({ error: "policy changes require preview approval" }, { status: 400 });
-  // biome-ignore format: keep compact so `}` is not a standalone line (bun:coverage gap)
-  if (path === "/api/settings") { applySettings(ctx.getActiveRepo(), payload); return Response.json({ ok: true, ...settingsView(ctx.getActiveRepo()) }); }
+  if (path === "/api/settings") return handleSettingsRoute(ctx.getActiveRepo(), payload);
 
   // POST /api/verify — async so the server keeps serving state/SSE while gates run.
   if (path === "/api/verify") {

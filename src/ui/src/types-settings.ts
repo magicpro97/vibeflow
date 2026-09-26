@@ -106,6 +106,13 @@ export function typesafeThresholdError(
     if (typeof value !== "number" || !Number.isFinite(value)) {
       return "Both confidence floors must be numbers between 0 and 1.";
     }
+    // The message above promises a range and `min`/`max` on the inputs do not constrain typing:
+    // there is no <form> and nothing calls reportValidity, so the field can hold 5. The ordering
+    // test would pass it, the save would post 5, and the server's clamp would silently rewrite it
+    // to 1 on the reload — the same "edit disappears with no message" shape as a cleared field.
+    if (value < 0 || value > 1) {
+      return "Both confidence floors must be numbers between 0 and 1.";
+    }
   }
   return form.acceptAtConfidence < form.runAtConfidence
     ? "Accept confidence must not be below the run confidence."

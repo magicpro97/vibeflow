@@ -144,6 +144,12 @@ test("the threshold invariant admits the shipped defaults and rejects an accept 
   expect(
     typesafeThresholdError({ runAtConfidence: 0.7, acceptAtConfidence: Number.NaN } as never),
   ).not.toBe("");
+  // Out of range is rejected too, and for the same reason: `min`/`max` on the inputs do not
+  // constrain typing (no <form>, no reportValidity), so the field can hold 5. The ordering test
+  // passes it, the POST carries 5, and the server clamps it to 1 on the reload — the edit gone.
+  expect(typesafeThresholdError({ runAtConfidence: 5, acceptAtConfidence: 9 })).not.toBe("");
+  expect(typesafeThresholdError({ runAtConfidence: -1, acceptAtConfidence: 0.85 })).not.toBe("");
+  expect(typesafeThresholdError({ runAtConfidence: 0.7, acceptAtConfidence: 1 })).toBe("");
 });
 
 test("the save control only acts on a view that actually loaded", async () => {
@@ -175,4 +181,16 @@ test("the cross-repo guard is wired at its production call site, not only as a p
   expect(drawer).toContain("rowsAreStale: typesafeNeedsReload(typesafeRepo.value, repoPath.value)");
   expect(drawer).toContain(':disabled="typesafeSaveBlocked()"');
   expect(drawer).toContain('@click="saveTypesafe"');
+});
+
+test("the save names the repository its rows describe, so the server can refuse a moved target", () => {
+  // The server-side comparison is only reachable if the panel actually sends the repo the block
+  // was read from. Without this the 409 guard never fires and the cross-repo write is back.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const save = drawer.slice(drawer.indexOf("async function saveTypesafe"));
+  const call = save.slice(0, save.indexOf("};"));
+  expect(call).toContain("expectRepo: view.repo");
 });

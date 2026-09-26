@@ -216,6 +216,12 @@ async function saveTypesafe(): Promise<void> {
     // silently reverted edits staged in the others (untick "Memory", save System One, and the box
     // re-ticks with no message). The call below is what refreshes the rows this section owns.
     await api.settings.set({
+      // The write lands in the server's process-global active repo, so it must say which repo
+      // these rows describe and let the server compare. Another client (another tab, another
+      // page load) can move that global with POST /api/detect between this panel's load and this
+      // save, and the guard below cannot see it: it compares two client-side mirrors, which still
+      // agree with each other. Server-side is the only place the comparison means anything.
+      expectRepo: view.repo,
       typesafe: {
         ...view.settings,
         ...settingsForm.typesafe,
