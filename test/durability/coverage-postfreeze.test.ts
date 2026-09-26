@@ -722,7 +722,16 @@ test("native runtime initialization exercises Node, unsupported, and Linux loade
   } finally {
     Object.defineProperty(process.versions, "bun", bunDescriptor);
     Object.defineProperty(process, "platform", platformDescriptor);
-    nativeRuntime.loadBunBindings();
+    // Re-initialise for the REAL host. The calls above bound the module-wide errno table and reader
+    // to whichever platform ran last, and the Windows branch replaces that table with Win32 errno
+    // numbers. Restoring `process.platform` does not touch them, so a host whose EAGAIN differs from
+    // the Win32 value (darwin: 35 vs 11) would classify every later lock failure as an unrunnable
+    // syscall instead of a busy lock.
+    nativeRuntime.initializeNativeRuntime({
+      disabled: process.env.VF_TEST_DISABLE_NATIVE_DURABILITY === "1",
+      platform: realHostPlatform,
+      isBun: true,
+    });
   }
 });
 
