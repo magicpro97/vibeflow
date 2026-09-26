@@ -37,7 +37,7 @@
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
         <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus === 'loading'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
-        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate, skips a review, or picks an engine on its own — and with it off, every path behaves exactly as it does today.</p>
+        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. With it off, every path behaves exactly as it does today.</p>
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
         <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
@@ -206,14 +206,17 @@ async function saveTypesafe(): Promise<void> {
   saving.value = true;
   try {
     // Round-trip the server's effective block and overlay only the edited fields.
-    const value = await api.settings.set({
+    // The response is deliberately discarded. `applySettings(value)` used to consume it, and that
+    // helper overwrites memory, tools, enabledEngines and mcpServers — so saving this section
+    // silently reverted edits staged in the others (untick "Memory", save System One, and the box
+    // re-ticks with no message). The call below is what refreshes the rows this section owns.
+    await api.settings.set({
       typesafe: {
         ...view.settings,
         ...settingsForm.typesafe,
         callSites: { ...settingsForm.typesafe.callSites },
       },
     });
-    applySettings(value);
     typesafeProbe.value = "";
     message.value = "System One settings saved.";
     await loadTypesafe();

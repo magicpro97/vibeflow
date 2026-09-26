@@ -321,8 +321,9 @@ and in the DOM-less settings view, not as UI fields.
 `keySource`, `model`, `timeoutMs`, and `lastCall`. **The API key is never part of the
 response**, so it can never reach the DOM; the section states that the key stays on the
 machine. The one-line note at the top of the section carries the authority rule, in
-product language: the judge can only reject a change sooner or raise a risk tier, and it
-never opens a gate, skips a review, or picks an engine on its own.
+product language: the judge can only reject a change sooner or raise a risk tier; it never
+opens a gate or skips a review, and it can only suggest an engine from the pool preflight
+already admitted.
 
 ---
 
