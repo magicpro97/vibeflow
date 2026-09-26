@@ -86,6 +86,44 @@ export function emptyTypesafeForm(): TypesafeFormSettings {
   };
 }
 
+/**
+ * Both thresholds are LOWER FLOORS. The judge's answer exists once confidence reaches
+ * `runAtConfidence`, and may act once confidence reaches `acceptAtConfidence`. An accept floor
+ * below the run floor therefore makes the accept gate unreachable: every answer that exists may
+ * also act. That is the only ordering worth rejecting. The shipped default runs at 0.7 and
+ * accepts at 0.85, which is the intended shape, so it must load clean.
+ */
+export function typesafeThresholdError(
+  form: Pick<TypesafeFormSettings, "runAtConfidence" | "acceptAtConfidence">,
+): string {
+  return form.acceptAtConfidence < form.runAtConfidence
+    ? "Accept confidence must not be below the run confidence."
+    : "";
+}
+
+/**
+ * The section's form is seeded from `GET /api/typesafe`. When that read has not succeeded the form
+ * still holds `emptyTypesafeForm()` (all zeros), and posting that block makes the server refill it
+ * from `DEFAULT_TYPESAFE_SETTINGS`, silently discarding whatever the user had configured. So the
+ * save control may only act on a view that actually loaded.
+ */
+export function typesafeSaveDisabled(input: {
+  saving: boolean;
+  status: string;
+  thresholdError: string;
+}): boolean {
+  return input.saving || input.status !== "ready" || input.thresholdError !== "";
+}
+
+/**
+ * `POST /api/detect` calls `setActiveRepo` server-side and `POST /api/settings` writes to whichever
+ * repo is active, while the rows on screen still describe the repo whose view was last loaded. An
+ * empty `loadedRepo` means nothing has loaded yet, so the first successful load owns the rows.
+ */
+export function typesafeNeedsReload(loadedRepo: string, activeRepo: string): boolean {
+  return loadedRepo !== "" && loadedRepo !== activeRepo;
+}
+
 /** `GET /api/typesafe` — redacted by construction: `keySource`, never the key. */
 export interface TypesafeSettingsView {
   state: string;
@@ -137,7 +175,12 @@ export interface VibeSettings {
   mcpServers?: Record<string, UserMcpServerView>;
   curator?: CuratorSettings;
   /** System One (Jev) decision judge — optional, off by default. */
-  typesafe?: TypesafeFormSettings;
+  /**
+   * The server reports the full coerced block here, not the four editable fields, and the save
+   * path posts the whole block back (it spreads `typesafeView.settings` first). Typing it as the
+   * four-field form under-described the payload.
+   */
+  typesafe?: TypesafeSettings;
   projectClassification?: ProjectClassificationPatch["projectClassification"];
   updatedAt?: string;
 }

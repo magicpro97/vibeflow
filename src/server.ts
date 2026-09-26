@@ -981,6 +981,7 @@ export async function startServer(
             path === "/api/curator/setup/preview" ||
             path === "/api/curator/setup/apply" ||
             path === "/api/verify" ||
+            path === "/api/typesafe/test" ||
             path === UI_HOOK_ROUTE.APPROVE ||
             path === "/api/skills/acquisitions/decision" ||
             path.startsWith("/api/guidance/") ||

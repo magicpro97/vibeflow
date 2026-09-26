@@ -4,15 +4,14 @@ import { spawnSync as _spawnSync } from "node:child_process";
 import { ENGINES, type Engine } from "../core.js";
 import { type OwnedAiRouteRunner, runOwnedAiRoute } from "../dispatch/owned-ai-route.js";
 import { checkReviewEvidence, defaultGit } from "../hooks/review-evidence.js";
-import { outBusOnly } from "../logbus.js";
 import {
   verifyLockMirrorCompleteness,
   verifyRegistryLockIntegrity,
 } from "../skills/verify-lock.js";
-import { tuningFor, withTypesafeGuard } from "../typesafe-health.js";
 import type { TypesafeSettings } from "../typesafe-settings.js";
 // TYPE-ONLY: erased at compile time, so it evaluates nothing. The HTTP client module is loaded
-// by the `await import` inside the judge gate in `defaultGoalEvalFn` (C27-c).
+// by the `await import` inside the judge gate, which now lives in
+// `src/verify/typesafe-goal-coverage.ts` (C27-c).
 import type { judgeAssessment } from "../typesafe.js";
 import {
   type GoalEvaluation,
@@ -30,6 +29,7 @@ import {
 } from "../verify/normative-proof-run-async.js";
 import type { NormativeProofRunV2 } from "../verify/normative-proof-run.js";
 import { VERIFY_RUNTIME_AUTHORITY } from "../verify/runtime-authority.js";
+import { typesafeGoalCoverageVerdict } from "../verify/typesafe-goal-coverage.js";
 import {
   e2eEvaluateDynamicImportWarning,
   e2eUnicodeSelectorWarning,
@@ -139,48 +139,11 @@ export async function defaultGoalEvalFn(
     }
   })();
   const prompt = buildReviewerPrompt({ goal, diff: diff || "(no diff available)" });
-  const { judge, settings, env, userRoot } = inject.typesafe ?? {};
-  const timeoutMs = settings?.timeoutMs;
-  if (settings?.enabled && settings.callSites.goalCoverage && timeoutMs !== undefined) {
-    // C27-c: `src/typesafe.ts` (the HTTP client) is evaluated ONLY here, inside the gate, and the
-    // injectable double still wins — so a disabled run never loads the client module.
-    const judgeFn = judge ?? (await import("../typesafe.js")).judgeAssessment;
-    // Defence layer 4: the guard classifies the outcome, updates the breaker and hands back
-    // `null` on ANY failure, so a throwing judge never rejects out of `defaultGoalEvalFn`.
-    const j = await withTypesafeGuard(
-      "goalCoverage",
-      () => judgeFn(diff || "(no diff available)", { settings, env, goal, timeoutMs }),
-      {
-        ...(userRoot === undefined ? {} : { userRoot }),
-        out: outBusOnly,
-        tuning: tuningFor(settings),
-      },
-    );
-    // The `acceptAtConfidence` FLOOR: an answer below it is dropped whole, so the path is
-    // byte-identical to a `null` judge. A score answer with NO confidence reads as zero.
-    const confidence = j?.covers.confidence ?? 0;
-    // JUDGE-ESCALATE-ONLY (see § Judge authority): `diff` and `goal` are both
-    // attacker-influenced (a diff is written by whoever opened the PR, a goal can come from an
-    // issue body), so only the NEGATIVE answer may short-circuit. A confident `covered: true`
-    // falls through and the bridge below decides — the bridge is authoritative for a POSITIVE
-    // coverage claim.
-    if (j !== null && confidence >= settings.acceptAtConfidence) {
-      const covered =
-        j.covers.score >= settings.judgePassLevel &&
-        (j.tests?.noul ?? 1) >= settings.judgeTestFloor;
-      if (!covered) {
-        // `score` is a 0..1 contract, so normalization CLAMPS a vendor overshoot into range.
-        return {
-          covered: false,
-          uncovered: [
-            `System One judge score ${j.covers.score.toFixed(2)} (confidence ${confidence.toFixed(2)})`,
-          ],
-          score: Math.min(1, Math.max(0, j.covers.score / settings.judgeScoreLevels)),
-        };
-      }
-      // covered === true: NO return. Execution continues into the unchanged bridge path.
-    }
-  }
+  // The judge runs only when the block is enabled AND `callSites.goalCoverage` is on; the gate
+  // lives with the verdict so a disabled run never loads the HTTP client. `null` means "fall
+  // through unchanged", never "allowed".
+  const verdict = await typesafeGoalCoverageVerdict({ goal, diff, ...inject.typesafe });
+  if (verdict) return verdict;
   const bridge = process.env.VIBEFLOW_AI;
   if (!bridge) return { covered: true, uncovered: [] };
   try {
@@ -273,7 +236,12 @@ export async function collectVerifyReportAsync(
     goal?: string; // ADR-003
     goalEvalFn?: (
       goal: string,
+      inject?: Parameters<typeof defaultGoalEvalFn>[1],
     ) => Promise<{ covered: boolean; uncovered: string[]; score?: number }>; // ADR-003
+    /** Task 4 (C27-c): the System One seam for the goal-coverage call site. `defaultGoalEvalFn`
+     *  reads the judge config out of its second argument, so without this inject the judge never
+     *  runs and the `callSites.goalCoverage` toggle does nothing. */
+    goalEvalInject?: Parameters<typeof defaultGoalEvalFn>[1];
     allowUnverifiedEvidence?: boolean; // ADR-004 escape hatch
     requireReviewEvidence?: boolean;
     reviewBase?: string; // #748: pushed-range fallback base
@@ -331,7 +299,7 @@ export async function collectVerifyReportAsync(
     toolchain.every((gate) => gate.pass) &&
     coverageResult.status !== "fail"
   ) {
-    const result = await inject.goalEvalFn(inject.goal);
+    const result = await inject.goalEvalFn(inject.goal, inject.goalEvalInject);
     goalEval = { pass: result.covered, uncovered: result.uncovered, score: result.score };
   }
   let waiverResult = gateResult("skipped", "waiver-policy.cjs not found");

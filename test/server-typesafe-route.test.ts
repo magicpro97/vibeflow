@@ -6,6 +6,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { UI_LAN_TOKEN_HEADER } from "../src/core/ui-cli-contract.js";
+import { startServer } from "../src/server.js";
 import {
   handleTypesafeReadRoute,
   handleTypesafeTestRoute,
@@ -300,6 +302,44 @@ describe("POST /api/typesafe/test through the mutation dispatcher", () => {
     const body = (await (res as Response).json()) as { ok: boolean };
     // No key in this environment: the route must answer, not throw, and never hold one.
     expect(typeof body.ok).toBe("boolean");
+  });
+});
+
+describe("POST /api/typesafe/test is on the server's write surface", () => {
+  test("the running server reaches the probe instead of falling through to the bare 404", async () => {
+    // Calling handleMutationRoute directly bypasses the `isWrite` allowlist in server.ts, so a
+    // route that is missing from that allowlist still looks green here. Drive the real server.
+    const server = await startServer(0, { repoDir: REPO });
+    try {
+      const page = await (await fetch(`${server.url}/`)).text();
+      const token = /<meta\s+name="vf-token"\s+content="([^"]+)"\s*\/?>/i.exec(page)?.[1] ?? "";
+      expect(token).not.toBe("");
+
+      // The probe is a write, so the CSRF guard must refuse it without the token.
+      const unguarded = await fetch(`${server.url}/api/typesafe/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      expect(unguarded.status).toBe(403);
+
+      // With the token it must reach the probe and answer JSON. Before the allowlist entry it
+      // fell through to `new Response("not found", { status: 404 })`, which made the control
+      // centre's "Test connection" button fail on every install.
+      const guarded = await fetch(`${server.url}/api/typesafe/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", [UI_LAN_TOKEN_HEADER]: token },
+        body: "{}",
+      });
+      expect(guarded.status).toBe(200);
+      expect(guarded.headers.get("content-type")).toContain("application/json");
+      const body = (await guarded.json()) as { ok: boolean; error?: string };
+      expect(typeof body.ok).toBe("boolean");
+      // No key is configured in this repo, so the probe reports the refusal rather than a result.
+      expect(body.ok).toBe(false);
+    } finally {
+      await server.server.stop(true);
+    }
   });
 });
 

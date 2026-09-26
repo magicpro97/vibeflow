@@ -466,3 +466,29 @@ describe("matrix (e) — C05: a SETTINGS.json retune reaches EVERY call site", (
     expect(consulted).toBe(1); // refused by the open breaker, not re-called
   });
 });
+
+describe("matrix (e) — the goal-coverage seam hands the judge config to the goal eval", () => {
+  test("`?goal-eval=1` forwards the repo's block, and no goal means no seam at all", async () => {
+    const { goalEvalOptions } = await import("../src/server/routes-verify.js");
+    const { DEFAULT_TYPESAFE_SETTINGS } = await import("../src/typesafe-settings.js");
+    // The seam exists because `defaultGoalEvalFn` reads the judge config out of its SECOND
+    // argument. `POST /api/verify?goal-eval=1` used to build the goal eval without it, so the
+    // callee always saw `inject.typesafe === undefined` and `callSites.goalCoverage` was dead in
+    // production while its per-seam test stayed green.
+    const retuned = {
+      ...DEFAULT_TYPESAFE_SETTINGS,
+      enabled: true,
+      callSites: { ...DEFAULT_TYPESAFE_SETTINGS.callSites, goalCoverage: true },
+    };
+    const options = goalEvalOptions("ship the thing", retuned);
+    expect(options?.goal).toBe("ship the thing");
+    expect(options?.goalEvalInject.typesafe.settings).toBe(retuned);
+    // An absent block still receives the defaults, which are disabled.
+    expect(goalEvalOptions("ship the thing", undefined)?.goalEvalInject.typesafe.settings).toBe(
+      DEFAULT_TYPESAFE_SETTINGS,
+    );
+    // No recorded goal: no goal eval at all, so the chain sees pre-Task-4 behavior.
+    expect(goalEvalOptions(undefined, retuned)).toBeNull();
+    expect(goalEvalOptions("", retuned)).toBeNull();
+  });
+});

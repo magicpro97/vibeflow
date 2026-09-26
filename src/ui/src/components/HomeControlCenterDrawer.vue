@@ -66,7 +66,7 @@
         <label for="typesafe-callsite-planner" class="home-control-toggle"><input id="typesafe-callsite-planner" v-model="settingsForm.typesafe.callSites.planner" type="checkbox" /><span><strong>planner</strong><small>Suggest an engine for a work unit.</small></span></label>
 
         <p v-if="typesafeProbe" class="home-control-message" role="status" aria-live="polite">{{ typesafeProbe }}</p>
-        <button class="home-control-save typesafe-save" type="button" :disabled="saving || Boolean(thresholdError)" @click="saveTypesafe">{{ saving ? "Saving…" : "Save System One settings" }}</button>
+        <button class="home-control-save typesafe-save" type="button" :disabled="typesafeSaveBlocked()" @click="saveTypesafe">{{ saving ? "Saving…" : "Save System One settings" }}</button>
       </section>
 
       <section class="home-control-section" aria-labelledby="capabilities-title">
@@ -100,6 +100,9 @@ import {
   type TypesafeSettingsView,
   type VibeSettings,
   emptyTypesafeForm,
+  typesafeNeedsReload,
+  typesafeSaveDisabled,
+  typesafeThresholdError,
 } from "../types-settings.js";
 import type { RepoDetection, SafeSkill } from "../types.js";
 
@@ -125,19 +128,25 @@ const typesafeError = ref("");
 const typesafeProbe = ref("");
 const typesafeTesting = ref(false);
 const thresholdError = ref("");
+/** Repo whose System One view the rows currently describe. */
+const typesafeRepo = ref("");
+
+/** The form is seeded from the load, so it must never post before that load succeeded. */
+function typesafeSaveBlocked(): boolean {
+  return typesafeSaveDisabled({
+    saving: saving.value,
+    status: typesafeStatus.value,
+    thresholdError: thresholdError.value,
+  });
+}
 const settingsForm = reactive({
   memory: false,
   tools: { codegraph: true, lsp: true },
   typesafe: emptyTypesafeForm(),
 });
 
-/** A threshold above the run gate would accept verdicts the judge was told to ignore. */
 function validateThresholds(): void {
-  const form = settingsForm.typesafe;
-  thresholdError.value =
-    form.acceptAtConfidence > form.runAtConfidence
-      ? "Accept confidence must not exceed the run threshold."
-      : "";
+  thresholdError.value = typesafeThresholdError(settingsForm.typesafe);
 }
 
 async function loadTypesafe(): Promise<void> {
@@ -151,6 +160,7 @@ async function loadTypesafe(): Promise<void> {
       callSites: { ...typesafeView.value.callSites },
     };
     validateThresholds();
+    typesafeRepo.value = repoPath.value;
     typesafeStatus.value = "ready";
   } catch (cause) {
     typesafeView.value = null;
@@ -177,12 +187,17 @@ async function testConnection(): Promise<void> {
 async function saveTypesafe(): Promise<void> {
   validateThresholds();
   if (thresholdError.value) return;
+  // The control is disabled until the view has loaded, so this is unreachable from the UI. It
+  // stays as a guard because posting a zeros-only block makes the server refill the whole thing
+  // from DEFAULT_TYPESAFE_SETTINGS, and because the payload must not be built from `undefined`.
+  const view = typesafeView.value;
+  if (!view) return;
   saving.value = true;
   try {
     // Round-trip the server's effective block and overlay only the edited fields.
     const value = await api.settings.set({
       typesafe: {
-        ...typesafeView.value?.settings,
+        ...view.settings,
         ...settingsForm.typesafe,
         callSites: { ...settingsForm.typesafe.callSites },
       },
@@ -225,6 +240,8 @@ async function detect(): Promise<void> {
     detection.value = await api.detect(repoPath.value);
     repoPath.value = detection.value.repo;
     detected.value = true;
+    // The server just made this repo active, so the rows on screen still describe the old one.
+    if (typesafeNeedsReload(typesafeRepo.value, repoPath.value)) await loadTypesafe();
   } catch (cause) {
     detected.value = false;
     error.value = cause instanceof Error ? cause.message : "Repository detection failed";

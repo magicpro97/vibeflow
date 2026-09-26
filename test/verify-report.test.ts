@@ -246,6 +246,28 @@ describe("collectVerifyReportAsync", () => {
     expect(report.goalEval?.uncovered).toHaveLength(0);
   });
 
+  test("collectVerifyReportAsync: forwards the goal-eval inject into the goal eval function", async () => {
+    // `defaultGoalEvalFn` reads the judge config out of its SECOND argument. Omitting that
+    // argument is exactly how the System One `callSites.goalCoverage` toggle silently did
+    // nothing: the gate always saw `inject.typesafe === undefined`.
+    const spawner = async () => ({ status: 0 });
+    const seen: (Parameters<typeof defaultGoalEvalFn>[1] | undefined)[] = [];
+    const goalEvalFn = async (_goal: string, inject?: Parameters<typeof defaultGoalEvalFn>[1]) => {
+      seen.push(inject);
+      return { covered: true, uncovered: [] as string[] };
+    };
+    const goalEvalInject = { typesafe: { settings: DEFAULT_TYPESAFE_SETTINGS, env: {} } };
+    await collectVerifyReportAsync(tmp, {
+      spawner,
+      goalEvalFn,
+      goal: "add X",
+      goalEvalInject,
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(goalEvalInject);
+    expect(seen[0]?.typesafe?.settings?.enabled).toBe(false);
+  });
+
   test("collectVerifyReportAsync: goalEvalFn inject returning uncovered items causes goalEval.pass=false", async () => {
     const spawner = async () => ({ status: 0 });
     const goalEvalFn = async () => ({ covered: false, uncovered: ["edge case: empty input"] });
