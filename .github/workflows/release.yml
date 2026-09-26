@@ -107,6 +107,12 @@ jobs:
           bun run scripts/assert-win32.ts
       - name: Windows PID, Job Object, release, and orphan release gate
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
+      - name: Build shipped artifact
+        run: bun run build
+      - name: Windows typesafe hook budget release gate
+        # A release must not ship a Windows hook path that was never launched: the 10s spawn
+        # budget and the owner-only key-file DACL are win32-only claims.
+        run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts
 
   release-prerequisites:
     needs:

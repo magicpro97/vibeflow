@@ -120,6 +120,11 @@ describe("coverage anti-patterns (test/ only)", () => {
     // only an exited OS process can prove the persisted PID becomes an orphan and
     // that Windows Job Object recovery reaps the exact live tree.
     .filter((p) => !p.endsWith("dispatch-owned-process-windows-live.test.ts"))
+    // The win32-only typesafe hook gate must launch the SHIPPED artifact
+    // (`node dist/cli.js`) in a real child process: the 10s spawn budget is
+    // wall-clock, and the key file's owner-only DACL only exists on a real
+    // filesystem. A fake spawner measures nothing and asserts nothing.
+    .filter((p) => !p.endsWith("typesafe-hook-windows-live.test.ts"))
     // Scanner itself proves subprocess behavior; coverage policy excludes this
     // dedicated process-boundary regression test from raw-spawn lint only.
     .filter((p) => !p.endsWith("anti-patterns.test.ts"));
