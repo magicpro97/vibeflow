@@ -550,9 +550,16 @@ test.describe("AI-first conversation Home", () => {
     const codexToggle = controlCenter.getByRole("checkbox", { name: /codex/i });
     await expect(codexToggle).toBeChecked();
     await codexToggle.uncheck();
-    await expect(controlCenter.getByRole("status")).toContainText("Configuration saved");
+    // Scope by text: the drawer now carries several polite status regions because the System One
+    // section reports its own state, so an unscoped getByRole("status") matches more than one. This
+    // mirrors the "Saved" indicator assertion further down this spec.
+    await expect(
+      controlCenter.getByRole("status").filter({ hasText: "Configuration saved" }),
+    ).toContainText("Configuration saved");
     await codexToggle.check();
-    await expect(controlCenter.getByRole("status")).toContainText("Configuration saved");
+    await expect(
+      controlCenter.getByRole("status").filter({ hasText: "Configuration saved" }),
+    ).toContainText("Configuration saved");
     await page.keyboard.press("Escape");
     await expect(controlCenter).toBeHidden();
     await expect(controlCenterTrigger).toBeFocused();
