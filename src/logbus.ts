@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { LOG_CHANNEL, LOG_LEVEL } from "./core/log-contract.js";
-import { DEFAULTS, nowEpoch, safeText, stringifyEvent } from "./logbus/types.js";
+import { DEFAULTS, lockRetryPolicy, nowEpoch, safeText, stringifyEvent } from "./logbus/types.js";
 import type { LogContext, LogEvent, LogEventInput } from "./logbus/types.js";
 import type { PublicStoredTraceEvent } from "./orchestrator/trace/types.js";
 
@@ -30,6 +30,7 @@ export class Logbus {
   private readonly retentionDays: number;
   private readonly retentionMaxBytes: number;
   private readonly lockfilePath: string;
+  private readonly lockRetries: number;
 
   private seq = 0;
   private subscribers = new Set<(ev: LogEvent) => void>();
@@ -46,6 +47,8 @@ export class Logbus {
     retentionDays?: number;
     retentionMaxBytes?: number;
     context?: LogContext;
+    /** Omitted ⇒ the repo's default lock-retry policy; see `lockRetryPolicy`. */
+    lockRetries?: number;
   }) {
     this.runId = opts.runId;
     void this.runId;
@@ -56,6 +59,7 @@ export class Logbus {
     this.retentionDays = opts.retentionDays ?? DEFAULTS.retentionDays;
     this.retentionMaxBytes = opts.retentionMaxBytes ?? DEFAULTS.retentionMaxBytes;
     this.lockfilePath = join(this.dir, "current.log.lock");
+    this.lockRetries = lockRetryPolicy(opts.lockRetries).retries;
 
     mkdirSync(this.dir, { recursive: true });
     if (!existsSync(this.currentFile())) {
@@ -156,12 +160,7 @@ export class Logbus {
     return lockfile.lock(this.currentFile(), {
       realpath: false,
       lockfilePath: this.lockfilePath,
-      retries: {
-        retries: Math.ceil(DEFAULTS.lockTimeoutMs / DEFAULTS.lockRetryMs),
-        factor: 1,
-        minTimeout: DEFAULTS.lockRetryMs,
-        maxTimeout: DEFAULTS.lockRetryMs,
-      },
+      retries: lockRetryPolicy(this.lockRetries),
       stale: 2_000,
     });
   }
@@ -203,10 +202,9 @@ export class Logbus {
   async rotate(): Promise<void> {
     let release: (() => Promise<void>) | undefined;
     try {
-      // Issue #163 (F2): ensure the log dir exists BEFORE the lockfile
-      // call. The writeLocked path already does this (L191); rotate
-      // was missing it — when the dir was removed mid-run the lockfile
-      // would fail with ENOENT and the event would drop silently.
+      // Issue #163 (F2): ensure the log dir exists BEFORE the lockfile call — the
+      // writeLocked path already does this, but rotate did not, and a removed dir
+      // made the lockfile fail with ENOENT and the event drop silently.
       mkdirSync(this.dir, { recursive: true });
       release = await lockfile.lock(this.currentFile(), {
         realpath: false,
@@ -370,11 +368,11 @@ export class Logbus {
 let active: Logbus | null = null;
 
 export function installLogbus(
-  opts: { dir?: string; runId?: string; context?: LogContext } = {},
+  opts: { dir?: string; runId?: string; context?: LogContext; lockRetries?: number } = {},
 ): Logbus {
   const dir = opts.dir ?? join(process.cwd(), ".vibeflow", "logs");
   const runId = opts.runId ?? `run-${Date.now().toString(36)}`;
-  active = new Logbus({ runId, dir, context: opts.context });
+  active = new Logbus({ runId, dir, context: opts.context, lockRetries: opts.lockRetries });
   return active;
 }
 
