@@ -10,6 +10,8 @@ import { GATE_STATE, PRE_REVIEW_WORK_UNIT_GATES } from "../core/workflow-contrac
 import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
 import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
+import { readSettings } from "../settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS } from "../typesafe-settings.js";
 import { out } from "./_shared.js";
 import type { Engine, Reviewer } from "./_shared.js";
 import { type DiffReader, analyzeDiff, defaultDiffReader } from "./dispatch-diff.js";
@@ -41,6 +43,9 @@ export function makeReviewer(
 ): Reviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
   const cwd = inject?.cwd ?? process.cwd();
+  // Task 4: the settings load the System One seam reads. Read ONCE per makeReviewer (not per
+  // reviewed unit) so a run's judge configuration cannot change mid-run under it.
+  const settings = readSettings(cwd);
   // ADR-001: auto-wire llmFn only when VF_LLM_REVIEW=1 (opt-in) to avoid smoke/test interference.
   const llmReviewFn = inject?.llmReviewFn;
   const autoLlmReview =
@@ -102,6 +107,10 @@ export function makeReviewer(
         diff: llmDiff,
         ...(llmReviewFn ? { llmFn: llmReviewFn } : {}),
         cwd,
+        // Task 4: the System One judge seam. `runLLMReview` re-checks `enabled` and
+        // `callSites.reviewer` before it resolves anything, so forwarding the settings here
+        // costs a disabled run nothing — no HTTP, and no touch of the per-user health root.
+        typesafe: { settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS, env: process.env },
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
         ...(inject?.implementer
