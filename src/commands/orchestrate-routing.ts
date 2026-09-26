@@ -14,6 +14,15 @@ import type { TypesafeSettings } from "../typesafe-settings.js";
 import type { judgeEngineKey } from "../typesafe.js";
 import type { PreflightFn } from "./_shared.js";
 
+/** Membership in the ready pool, as a TYPE GUARD, so the branch that assigns `unit.engine`
+ *  narrows `string` to `Engine` at compile time. `judgeEngineKey` already filters its own
+ *  answer (src/typesafe.ts:346); this is the seam-side authority, and it must compare against
+ *  the SAME `pool` array the judge was handed — not against ENGINES — because a user's
+ *  `callSites`-independent `--engine` choice and preflight's readiness are different things. */
+function inPool(pool: readonly Engine[], name: string): name is Engine {
+  return (pool as readonly string[]).includes(name);
+}
+
 /** The ONE field list for this seam. It is NOT a `JudgeInject`: it is destructured
  *  field-by-field and its parts are forwarded explicitly, so nothing unreviewed can leak
  *  into a judge call. */
@@ -76,8 +85,19 @@ export async function routeUnits(
         ...(userRoot === undefined ? {} : { userRoot }),
       },
     );
-    // fail-open: no judge answer ⇒ no routing decision, dispatch keeps resolveEngine(flags)
-    out.push(routed ? { ...u, engine: routed as Engine } : u);
+    // READY-SET GUARD (Task 10): the pool `preflight` found is the ONLY authority on which
+    // engine may implement a unit. `judgeEngineKey` filters its own answer against the pool
+    // it was handed (src/typesafe.ts:346), but a client regression, a parse slip, or a
+    // future seam that builds its own prompt would hand back a name that was never verified
+    // as runnable — and `unit.engine` is what dispatch acts on, so an unverified name marks an
+    // UNREADY plan ready and the failure surfaces as a dispatch error, not a routing no-op.
+    // The guard is deliberately COMPILE-CHECKED: `inPool` narrows `string` to `Engine` on the
+    // branch that passes, so a later edit that widens `pool` to a non-engine string fails to
+    // typecheck instead of silently assigning an unverified name to a unit.
+    const admissible = routed !== null && inPool(pool, routed) ? routed : undefined;
+    // fail-open: no admissible judge answer ⇒ no routing decision, dispatch keeps
+    // resolveEngine(flags)
+    out.push(admissible === undefined ? u : { ...u, engine: admissible });
   }
   return out;
 }

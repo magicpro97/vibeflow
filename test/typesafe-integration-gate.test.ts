@@ -16,7 +16,12 @@ import { RISK_LEVEL } from "../src/core/hook-contract.js";
 import {
   DEFAULT_TYPESAFE_SETTINGS,
   HOOK_BUS_LOCK_RETRIES_MAX,
+  HOOK_BUS_LOCK_RETRY_MS,
   HOOK_HEALTH_WRITE_BUDGET_MS,
+  HOOK_SAFETY_MARGIN_MS,
+  HOOK_SPAWN_BUDGET_MS,
+  HOOK_STDIN_BUDGET_MS,
+  HOOK_TIMEOUT_CAP_MS,
   type TypesafeSettings,
 } from "../src/typesafe-settings.js";
 
@@ -227,6 +232,27 @@ describe("System One hook gate — the audit leg's budget is settings-derived", 
     expect(busSeen[0]?.lockRetries).toBe(HOOK_BUS_LOCK_RETRIES_MAX);
     expect(healthIoSeen?.lockWaitMs).toBe(0);
     expect(healthIoSeen?.writeBudgetMs).toBe(HOOK_HEALTH_WRITE_BUDGET_MS);
+  });
+
+  test("the five legs at their MAXIMA sum to 9 000 ms, strictly under the spawn budget", () => {
+    // The plan's C05 arithmetic as a NUMBER, not as prose. The prose in
+    // src/commands/hook-risk-integration.ts:10-42 is only a claim; this is the gate. The audit
+    // leg is `2 x HOOK_BUS_LOCK_RETRIES_MAX x HOOK_BUS_LOCK_RETRY_MS` — the 2x is the DOUBLED
+    // acquisition (`recoverAndRelock` re-locks on ENOENT), which is the easiest term to lose.
+    // `HOOK_SAFETY_MARGIN_MS` is asserted unspent so a future leg cannot quietly eat it.
+    const legs = {
+      stdin: HOOK_STDIN_BUDGET_MS,
+      judge: HOOK_TIMEOUT_CAP_MS,
+      // `lockWaitMs: 0` — the seam value is asserted literally in
+      // "the seam passes both health disk bounds…" above, so this 0 is not a free-floating guess.
+      healthWrite: HOOK_HEALTH_WRITE_BUDGET_MS,
+      auditBus: 2 * HOOK_BUS_LOCK_RETRIES_MAX * HOOK_BUS_LOCK_RETRY_MS,
+    };
+    const total = Object.values(legs).reduce((a, b) => a + b, 0);
+    expect(legs.auditBus).toBe(2_000);
+    expect(total).toBe(9_000);
+    expect(total).toBeLessThan(HOOK_SPAWN_BUDGET_MS);
+    expect(HOOK_SPAWN_BUDGET_MS - total).toBe(HOOK_SAFETY_MARGIN_MS);
   });
 
   test("the bus is installed only on the enabled path (disabled hook installs nothing)", async () => {
