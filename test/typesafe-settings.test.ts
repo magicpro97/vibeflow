@@ -365,7 +365,9 @@ describe("resolveTypesafeKey", () => {
       // code using `env.X ?? fallback` stops falling back, and any assertion of the form
       // `not.toContain(env.X ?? "literal")` becomes vacuously true-against-everything (every string
       // contains ""). Delete the key instead of materialising it.
-      if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
+      // `Reflect.deleteProperty` is the lint-clean form of the same removal: assigning
+      // `undefined` would stringify to "undefined" and defeat the point of the restore.
+      if (previous === undefined) Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY");
       else process.env.TYPESAFE_API_KEY = previous;
     }
   });
@@ -470,7 +472,9 @@ describe("isTypesafeEnabled / isTypesafeConfigured", () => {
       // code using `env.X ?? fallback` stops falling back, and any assertion of the form
       // `not.toContain(env.X ?? "literal")` becomes vacuously true-against-everything (every string
       // contains ""). Delete the key instead of materialising it.
-      if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
+      // `Reflect.deleteProperty` is the lint-clean form of the same removal: assigning
+      // `undefined` would stringify to "undefined" and defeat the point of the restore.
+      if (previous === undefined) Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY");
       else process.env.TYPESAFE_API_KEY = previous;
     }
   });

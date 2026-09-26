@@ -16,6 +16,7 @@ last_updated: 2026-08-27
 - [5. End-to-End Walkthrough (Verifiable)](#5-end-to-end-walkthrough-verifiable)
 - [6. Generated Files](#6-generated-files)
 - [7. Troubleshooting](#7-troubleshooting)
+- [8. Optional: the System One judge](#8-optional-the-system-one-judge)
 
 VibeFlow is a local-first CLI (`vf`) that opens a web UI and coordinates Claude Code,
 Codex CLI, GitHub Copilot CLI, OpenCode, and Antigravity CLI (`agy`) through shared context,
@@ -562,3 +563,35 @@ canonical context. Work units and skills appear only when a task actually needs 
 
 **Related:** [Command Reference](./COMMAND_REFERENCE.md) · [Workflow](./WORKFLOW.md)
 [Edit this page on GitHub](https://github.com/magicpro97/vibeflow/edit/main/docs/USER_GUIDE.md)
+
+---
+
+## 8. Optional: the System One judge
+
+VibeFlow can call TypeSafe System One (Jev) as an optional decision judge over **four
+call sites**: `reviewer`, `goalCoverage`, `risk`, and `planner`. It is **off by default**
+and it is **fail-open**: with no key, a `401`, a `429`, a timeout, or a malformed body,
+every gate behaves exactly as it did before you turned it on. The full contract is in
+[TYPESAFE.md](./TYPESAFE.md).
+
+```bash
+vf config typesafe key        # paste the key into hidden stdin
+vf config typesafe on         # prints what would leave the machine BEFORE it enables
+vf config typesafe test       # one live probe using fixed literal content, no repo content
+vf config typesafe status     # breaker state, thresholds, call sites, last call
+```
+
+The key resolves from `TYPESAFE_API_KEY` first, else from `~/.vibeflow/typesafe.env`,
+which is owner-only on both POSIX (`0600`) and Windows (a migrated owner-only DACL). It is
+never written to `.vibeflow/SETTINGS.json`. The judge can only escalate: a passing
+`reviewer` or `goalCoverage` answer still reaches the engine reviewer or the
+`VIBEFLOW_AI` bridge, `risk` can only raise the deterministic tier, and `planner` only
+picks among ready engines.
+
+To stop it, per call site or entirely:
+
+```bash
+vf config typesafe call-site risk off     # stop shell commands leaving the machine
+vf config typesafe off                    # stop all four
+rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe.env   # remove both artifacts
+```

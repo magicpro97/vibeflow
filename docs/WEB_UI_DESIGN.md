@@ -15,6 +15,7 @@ last_updated: 2026-08-27
 - [Approval UX](#approval-ux)
 - [Contextual Loading and Empty States](#contextual-loading-and-empty-states)
 - [Real-Time Updates](#real-time-updates)
+- [System One (Jev) Section](#system-one-jev-section)
 
 ## Purpose
 
@@ -290,6 +291,38 @@ Use Server-Sent Events for:
 - verification progress
 - (dashboard) selected workflow durable log tail
 ```
+
+## System One (Jev) section
+
+The Home Control Center drawer carries one **System One (Jev)** section, labelled
+*Optional decision judge*, for the optional TypeSafe judge. It is always rendered (it is
+the on-demand disclosure surface) and it renders these states in priority order, so the
+most consequential one wins:
+
+1. **loading** - `Loading System One settings...`, `role="status"`, `aria-busy="true"`;
+2. **view request failed** - `System One connection failed - <error>`, `role="alert"`;
+3. **unconfigured** - `No System One key configured - key missing: set the environment
+   variable or run vf config typesafe key`;
+4. **breaker open** - `Circuit open - judge calls are paused until <cooldownUntil>`,
+   `role="alert"`;
+5. **otherwise** - the read-only list below.
+
+The read-only list is `enabled`, `configured`, `state` (carrying a `data-state`
+attribute), `key source`, `model`, `timeout`, and `last call` (caller, status, ms) when a
+call has been recorded. The controls are the enable toggle, the two confidence thresholds
+(`Run judge at confidence`, `Accept verdict at confidence`, both `0..1` step `0.05` with
+an inline threshold error), a toggle per call site with a one-line description of what
+that site does, **Test connection** in the section heading, and a save button. The breaker
+tuning numbers (`failStreakLimit`, `cooldownBaseMs`, `cooldownCapMs`, `hookTimeoutMs`,
+`hookBusLockRetries`) are settings-only: they are visible in `vf config typesafe status`
+and in the DOM-less settings view, not as UI fields.
+
+`settingsView` returns a redacted `typesafe` object: `enabled`, `configured`, `state`,
+`keySource`, `model`, `timeoutMs`, and `lastCall`. **The API key is never part of the
+response**, so it can never reach the DOM; the section states that the key stays on the
+machine. The one-line note at the top of the section carries the authority rule, in
+product language: the judge can only reject a change sooner or raise a risk tier, and it
+never opens a gate, skips a review, or picks an engine on its own.
 
 ---
 
