@@ -43,13 +43,13 @@ import {
   tryLinkAt,
   unlinkAt,
 } from "../../src/durability/native.js";
-import { RUNTIME_PLATFORM } from "../../src/durability/process-identity-contract.js";
 import {
   assertNoSymlinkComponents,
   createPrivateFileAt,
   openOrCreatePrivateFileAt,
   writePrivateTemporaryAt,
 } from "../../src/durability/path.js";
+import { RUNTIME_PLATFORM } from "../../src/durability/process-identity-contract.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
   windowsVerifyPathAcl,
