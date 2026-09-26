@@ -83,7 +83,9 @@ describe("executeConversationWorkflow", () => {
         },
         makeReviewer: (actor, threshold, meta) => {
           reviewerArgs = { actor, threshold, meta };
-          return async () => ({ pass: true, reason: "review" }) as never;
+          return Object.assign(async () => ({ pass: true, reason: "review" }), {
+            __implementerFor: () => undefined,
+          }) as never;
         },
         dispatch: async ({ units, signal }) => {
           seenSignal = signal;
