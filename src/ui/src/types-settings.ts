@@ -96,6 +96,17 @@ export function emptyTypesafeForm(): TypesafeFormSettings {
 export function typesafeThresholdError(
   form: Pick<TypesafeFormSettings, "runAtConfidence" | "acceptAtConfidence">,
 ): string {
+  // A CLEARED input is not zero. `v-model.number` falls back to the raw string when `parseFloat`
+  // is NaN, so select-all + Delete in either field leaves `""` in a value the contract declares as
+  // `number`. `"" < 0.85` coerces to `0 < 0.85` and is FALSE, so the ordering check below waves it
+  // through, the save guard opens, and the server's own `finite()` rejects the string and restores
+  // the shipped default — the edit disappears with no message. Anything that is not a finite
+  // number is not a floor, whatever its ordering.
+  for (const value of [form.runAtConfidence, form.acceptAtConfidence]) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return "Both confidence floors must be numbers between 0 and 1.";
+    }
+  }
   return form.acceptAtConfidence < form.runAtConfidence
     ? "Accept confidence must not be below the run confidence."
     : "";

@@ -133,6 +133,17 @@ test("the threshold invariant admits the shipped defaults and rejects an accept 
   expect(typesafeThresholdError({ runAtConfidence: 0.85, acceptAtConfidence: 0.7 })).not.toBe("");
   // Equal floors are degenerate but coherent: every answer that exists may act.
   expect(typesafeThresholdError({ runAtConfidence: 0.7, acceptAtConfidence: 0.7 })).toBe("");
+  // A CLEARED input does not arrive as 0: `v-model.number` falls back to the raw string when
+  // `parseFloat` is NaN, so the field holds `""`. `"" < 0.85` is false, so the ordering check alone
+  // would pass it, the save guard would open, and the server would reject the string and restore
+  // the default — the user's edit gone with no message. Cast because the declared type says
+  // `number`, which is exactly the lie the runtime check exists to cover.
+  expect(
+    typesafeThresholdError({ runAtConfidence: "", acceptAtConfidence: 0.85 } as never),
+  ).not.toBe("");
+  expect(
+    typesafeThresholdError({ runAtConfidence: 0.7, acceptAtConfidence: Number.NaN } as never),
+  ).not.toBe("");
 });
 
 test("the save control only acts on a view that actually loaded", async () => {

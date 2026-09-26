@@ -132,14 +132,6 @@ describe("typesafeSettingsView", () => {
     for (const site of TYPESAFE_CALL_SITE_NAMES) {
       expect(view.callSites[site]).toBe(DEFAULT_TYPESAFE_SETTINGS.callSites[site]);
     }
-    const bare = typesafeSettingsView(REPO, {
-      settings: settings(),
-      env: { TYPESAFE_API_KEY: KEY },
-      health: health(),
-    });
-    for (const site of TYPESAFE_CALL_SITE_NAMES) {
-      expect(bare.callSites[site]).toBe(bare.callSites[site]);
-    }
   });
 
   test("falls back to the defaults when settings carry no typesafe block", () => {
