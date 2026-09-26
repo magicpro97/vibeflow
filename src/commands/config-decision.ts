@@ -12,7 +12,6 @@ import { ALWAYS_KEEP, DEFAULT_DENY, filterEnv } from "../dispatch/env-filter.js"
 import { type VibeSettings, readSettings, writeSettings } from "../settings.js";
 import type { UserMcpServer } from "../settings.js";
 import { buildUserEntry, c, cwd, out, writeToolConfigs } from "./_shared.js";
-import { configTypesafe } from "./config-typesafe.js";
 
 function printMemory(base: string): void {
   const mode = readSettings(base).memory;
@@ -29,7 +28,13 @@ export async function config(
   base: string = cwd(),
   flags: Record<string, string | boolean> = {},
 ): Promise<number> {
-  if (key === "typesafe") return await configTypesafe(rest, base, flags);
+  if (key === "typesafe") {
+    // Sibling commands MUST be reached by dynamic import: a static `./` edge here would join the
+    // two command modules into one ESM cycle (issue #80, "no sibling imports" rule). `_shared` is
+    // the only static sibling allowed, and it carries no command entry points.
+    const { configTypesafe } = await import("./config-typesafe.js");
+    return await configTypesafe(rest, base, flags);
+  }
   if (key === "memory") return configMemory(rest, base);
   if (key === "env-policy") return configEnvPolicy(rest, base);
   if (key === "mcp") return configMcp(rest, base, flags);

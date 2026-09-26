@@ -447,7 +447,7 @@
         "src/cli.ts"
       ],
       "test_sha256": "cee85522624eabc26381b1e7fb3d72236cc94be147d0d35508d25786a27569c4",
-      "production_sha256": "6eee887cc79cb68c10515f7e96fbbfde8601bfd215e35db74bda6e202e76847c"
+      "production_sha256": "f223b4b1f4c2453940e2b51c80b113ab9ab76d76104a0db7b8e56efaa01a3bdf"
     },
     {
       "id": "proof:bun:test/capability-cli-routing.test.ts#early-cli-routing",
@@ -463,7 +463,7 @@
         "src/cli.ts"
       ],
       "test_sha256": "3b02b8134fe89d265d65f6195ce52167b3df277f0c645f3f26e11d8920f37ebe",
-      "production_sha256": "6eee887cc79cb68c10515f7e96fbbfde8601bfd215e35db74bda6e202e76847c"
+      "production_sha256": "f223b4b1f4c2453940e2b51c80b113ab9ab76d76104a0db7b8e56efaa01a3bdf"
     },
     {
       "id": "proof:bun:test/capability-command.test.ts#private-input-no-echo",
