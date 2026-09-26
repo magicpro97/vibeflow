@@ -36,7 +36,7 @@ import {
   withTypesafeGuard,
   writeHealth,
 } from "../src/typesafe-health.js";
-import { DEFAULT_TYPESAFE_SETTINGS } from "../src/typesafe-settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS, TYPESAFE_CALL_SITE_NAMES } from "../src/typesafe-settings.js";
 
 const root = (): string => mkdtempSync(join(tmpdir(), "vf-ts-health-"));
 const T0 = Date.parse("2026-09-21T20:40:00.000Z");
@@ -938,5 +938,196 @@ describe("outBusOnly (the bus-only audit sink, created by this task)", () => {
     log.mockRestore();
     err.mockRestore();
     expect(printed).toBe(0);
+  });
+});
+
+// Task 2c — the guard's INTEGRATION CONTRACT, locked before any production call site wires it.
+// Every case here is what a reviewer/goalCoverage/risk/planner seam is entitled to rely on:
+// a refusal is ALWAYS `null` (so the caller's existing fallback runs byte-for-byte), the
+// caller name survives into `last_call.caller`, and the audit record reaches the bus only.
+describe("guard integration contract (Task 2c)", () => {
+  const CALLER_FALLBACK = "engine-bridge";
+
+  /** The seam shape every call site uses: guard first, the pre-existing authority on null. */
+  async function judgeOrFallback<T>(
+    caller: string,
+    fn: () => Promise<T | null>,
+    inst: Parameters<typeof withTypesafeGuard<T>>[2],
+  ): Promise<T | typeof CALLER_FALLBACK> {
+    const judged = await withTypesafeGuard<T>(caller, fn, inst);
+    return judged ?? CALLER_FALLBACK;
+  }
+
+  test("an open breaker refuses: null, fn never runs, the caller's fallback is authoritative", async () => {
+    const inst = { userRoot: root(), now: () => T0 };
+    await writeHealth(transition(readHealth(inst), FAILURE_CLASS.AUTH, T0, undefined, 401), inst);
+    let called = 0;
+    const result = await judgeOrFallback(
+      "reviewer",
+      async () => {
+        called++;
+        return "judge says pass";
+      },
+      inst,
+    );
+    expect(result).toBe(CALLER_FALLBACK);
+    expect(called).toBe(0);
+  });
+
+  test("a disabled call site returns null and parks the record at OFF", async () => {
+    const inst = { userRoot: root(), now: () => T0 };
+    const result = await judgeOrFallback("risk", async () => "high", {
+      ...inst,
+      outcome: () => ({ cls: FAILURE_CLASS.DISABLED }),
+    });
+    expect(result).toBe(CALLER_FALLBACK);
+    expect(readHealth(inst).state).toBe(TYPESAFE_STATE.OFF);
+    expect(readHealth(inst).fail_streak).toBe(0);
+  });
+
+  test("an unconfigured call site returns null and parks the record at UNCONFIGURED", async () => {
+    const inst = { userRoot: root(), now: () => T0 };
+    const result = await judgeOrFallback("planner", async () => "codex", {
+      ...inst,
+      outcome: () => ({ cls: FAILURE_CLASS.UNCONFIGURED }),
+    });
+    expect(result).toBe(CALLER_FALLBACK);
+    expect(readHealth(inst).state).toBe(TYPESAFE_STATE.UNCONFIGURED);
+  });
+
+  test("an aborted call returns null, stays streak-neutral, and falls through", async () => {
+    const inst = { userRoot: root(), now: () => T0 };
+    const result = await judgeOrFallback(
+      "goalCoverage",
+      async () => {
+        throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+      },
+      inst,
+    );
+    expect(result).toBe(CALLER_FALLBACK);
+    expect(readHealth(inst).last_class).toBe(FAILURE_CLASS.ABORT);
+    expect(readHealth(inst).fail_streak).toBe(0);
+    expect(readHealth(inst).state).toBe(TYPESAFE_STATE.IDLE);
+  });
+
+  test("a failed call returns null and falls through, even when the judge ANSWERED", async () => {
+    const inst = { userRoot: root(), now: () => T0 };
+    const result = await judgeOrFallback(
+      "reviewer",
+      async () => {
+        throw new Error("ECONNRESET");
+      },
+      inst,
+    );
+    expect(result).toBe(CALLER_FALLBACK);
+    expect(readHealth(inst).fail_streak).toBe(1);
+  });
+
+  test("a null refusal is classified from the outcome probe, never from the null alone", async () => {
+    const quiet = { userRoot: root(), now: () => T0 };
+    expect(await judgeOrFallback("goalCoverage", async () => null, quiet)).toBe(CALLER_FALLBACK);
+    expect(readHealth(quiet).last_class).toBe(FAILURE_CLASS.NONE);
+    expect(readHealth(quiet).fail_streak).toBe(0);
+
+    const loud = { userRoot: root(), now: () => T0 };
+    expect(
+      await judgeOrFallback("goalCoverage", async () => null, {
+        ...loud,
+        outcome: () => ({ cls: FAILURE_CLASS.SCHEMA, status: 422 }),
+      }),
+    ).toBe(CALLER_FALLBACK);
+    expect(readHealth(loud).last_class).toBe(FAILURE_CLASS.SCHEMA);
+    expect(readHealth(loud).fail_streak).toBe(1);
+  });
+
+  test("last_call.caller preserves every frozen call-site name", async () => {
+    for (const caller of TYPESAFE_CALL_SITE_NAMES) {
+      resetCallBudget();
+      const inst = { userRoot: root(), now: () => T0 };
+      await withTypesafeGuard(caller, async () => "ok", inst);
+      expect(readHealth(inst).last_call?.caller).toBe(caller);
+    }
+  });
+
+  test("a per-call audit record reaches the bus and NEVER the console", async () => {
+    const previous = getLogbus();
+    const seen: { channel: string; text: string }[] = [];
+    setLogbusForTests({
+      runId: "r1",
+      write: (e: { channel: string; text: string }) => seen.push(e),
+    } as unknown as Logbus);
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await withTypesafeGuard("risk", async () => "high", {
+        userRoot: root(),
+        now: () => T0,
+        out: outBusOnly,
+      });
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+      setLogbusForTests(previous);
+    }
+    expect(log).not.toHaveBeenCalled();
+    expect(err).not.toHaveBeenCalled();
+    expect(seen.length).toBe(0); // a routine success is not announced at all
+  });
+
+  test("an announced transition reaches the bus, and nothing is printed without one", async () => {
+    const previous = getLogbus();
+    const seen: { channel: string; text: string; level?: string }[] = [];
+    setLogbusForTests({
+      runId: "r1",
+      write: (e: { channel: string; text: string; level?: string }) => seen.push(e),
+    } as unknown as Logbus);
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const inst = { userRoot: root(), now: () => T0, out: outBusOnly };
+      await withTypesafeGuard(
+        "risk",
+        async () => {
+          throw new Error("ECONNRESET");
+        },
+        inst,
+      );
+      await withTypesafeGuard(
+        "risk",
+        async () => {
+          throw new Error("ECONNRESET");
+        },
+        inst,
+      );
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+      setLogbusForTests(previous);
+    }
+    expect(log).not.toHaveBeenCalled();
+    expect(err).not.toHaveBeenCalled();
+    expect(seen.length).toBe(1);
+    expect(seen[0]?.text).toContain("circuit open");
+  });
+
+  test("with no bus installed the audit sink is a silent no-op, not a console write", async () => {
+    const previous = getLogbus();
+    setLogbusForTests(null);
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await judgeOrFallback("reviewer", async () => null, {
+        userRoot: root(),
+        now: () => T0,
+        out: outBusOnly,
+      });
+      expect(result).toBe(CALLER_FALLBACK);
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+      setLogbusForTests(previous);
+    }
+    expect(log).not.toHaveBeenCalled();
+    expect(err).not.toHaveBeenCalled();
   });
 });

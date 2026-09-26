@@ -342,7 +342,13 @@ export async function withTypesafeGuard<T>(
   try {
     const value = await fn();
     const signal = inject.outcome?.();
-    await record(caller, signal?.cls ?? FAILURE_CLASS.NONE, signal?.status, now, inject);
+    const cls = signal?.cls ?? FAILURE_CLASS.NONE;
+    await record(caller, cls, signal?.status, now, inject);
+    // `disabled` and `unconfigured` are REFUSALS, not answers: the call site that reported one
+    // had no key or no permission, so whatever `fn` returned is not a verdict the seam may act
+    // on. The record is still written (so `status` tells the truth) and the caller still gets the
+    // `null` that sends it down its pre-existing fallback.
+    if (cls === FAILURE_CLASS.DISABLED || cls === FAILURE_CLASS.UNCONFIGURED) return null;
     return value;
   } catch (err) {
     await record(
