@@ -12,7 +12,8 @@
 // The agent spawns `vf hook` with `timeout: 10_000` (src/hooks/adapters.ts:281) and turns a
 // non-zero exit into `{ decision: "block" }` (:283-284), so the legs must sum STRICTLY below it:
 //
-//     5_000  stdin drain            (HOOK_STDIN_BUDGET_MS, src/commands/hooks.ts:128)
+//     5_000  stdin drain            (HOOK_STDIN_BUDGET_MS, defined in src/typesafe-settings.ts:107;
+//                                    the drain it bounds is src/commands/hooks.ts:118-130)
 //   + 1_500  judge HTTP + its one retry, ONE shared AbortSignal deadline (HOOK_TIMEOUT_CAP_MS)
 //   +     0  health LOCK wait     (`lockWaitMs: 0` in healthIo below)
 //   +   500  health WRITE         (`writeBudgetMs: HOOK_HEALTH_WRITE_BUDGET_MS`, below)
@@ -21,8 +22,8 @@
 //
 // The AUDIT leg is easy to miss because `Logbus.write` LOOKS fire-and-forget. It is not, in
 // wall-clock terms: it queues `this.chain = this.chain.then(() => this.writeLocked(ev))`
-// (src/logbus.ts:106) and `writeLocked` awaits `acquireLock()` (`:112`) with the repo default
-// of `ceil(5000/50) = 100` x `50 ms` (:159-163) — up to 5 s. src/cli.ts:373 sets
+// (src/logbus.ts:110) and `writeLocked` awaits `acquireLock()` (`:116`) with the repo default
+// of `ceil(5000/50) = 100` x `50 ms` (:213) — up to 5 s. src/cli.ts:373 sets
 // `process.exitCode` rather than calling `process.exit`, so those pending lock-retry timers
 // keep the event loop alive and `vf hook` cannot exit until the chain settles. Contention is
 // structural: every concurrent hook process installs its own bus against the same
@@ -30,7 +31,7 @@
 // the gate returns on time — a lost audit line is fail-open, a blocked tool call is not.
 //
 // The leg is DOUBLED: a single event can acquire the lock twice, because on ENOENT
-// `recoverAndRelock` (src/logbus.ts:119) re-locks via `acquireLock()` (:182), and proper-
+// `recoverAndRelock` (src/logbus.ts:123) re-locks via `acquireLock()` (:181), and proper-
 // lockfile's `retry` retries every error without an `errorFilter`
 // (node_modules/proper-lockfile/lib/lockfile.js:236) — so a missing log dir burns the whole
 // first budget before the second acquisition starts. The ceiling is therefore
