@@ -360,7 +360,13 @@ describe("resolveTypesafeKey", () => {
         typesafeEnvPath(process.env.VF_USER_VIBEFLOW_ROOT ?? join(homedir(), ".vibeflow")),
       );
     } finally {
-      process.env.TYPESAFE_API_KEY = previous ?? "";
+      // Restore EXACTLY: a bare `= previous ?? ""` CREATES the variable as an empty string when it
+      // was never set, which is a different process state. `""` is not `undefined`, so downstream
+      // code using `env.X ?? fallback` stops falling back, and any assertion of the form
+      // `not.toContain(env.X ?? "literal")` becomes vacuously true-against-everything (every string
+      // contains ""). Delete the key instead of materialising it.
+      if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = previous;
     }
   });
 });
@@ -459,7 +465,13 @@ describe("isTypesafeEnabled / isTypesafeConfigured", () => {
     try {
       expect(isTypesafeConfigured(on)).toBe(true);
     } finally {
-      process.env.TYPESAFE_API_KEY = previous ?? "";
+      // Restore EXACTLY: a bare `= previous ?? ""` CREATES the variable as an empty string when it
+      // was never set, which is a different process state. `""` is not `undefined`, so downstream
+      // code using `env.X ?? fallback` stops falling back, and any assertion of the form
+      // `not.toContain(env.X ?? "literal")` becomes vacuously true-against-everything (every string
+      // contains ""). Delete the key instead of materialising it.
+      if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = previous;
     }
   });
 });
