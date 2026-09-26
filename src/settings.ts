@@ -3,8 +3,10 @@ import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
 import { ENGINES, type Engine } from "./core/types.js";
 import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
 import * as projectClassification from "./project-classification-settings.js";
+import { type MemoryMode, coerceMemory } from "./settings-memory.js";
 import * as curator from "./skills/curator-settings.js";
 import type { UserMcpServer } from "./tools/index.js";
+import * as typesafeSettings from "./typesafe-settings.js";
 
 export type { UserMcpServer };
 
@@ -13,17 +15,6 @@ export type ToolTier = "codegraph" | "lsp" | "native";
 
 /** All valid tiers, in the canonical default order (highest preference first). */
 const TIERS: ToolTier[] = ["codegraph", "lsp", "native"];
-
-/** Memory recall mode. false = off (default). "builtin" = bun:sqlite FTS5.
- *  "claude-mem" = opt-in external claude-mem CLI. Legacy boolean true → "builtin". */
-export type MemoryMode = false | "builtin" | "claude-mem";
-
-/** Coerce stored memory field to MemoryMode. Legacy boolean true→"builtin". */
-export function coerceMemory(v: unknown): MemoryMode {
-  if (v === true) return "builtin";
-  if (v === "builtin" || v === "claude-mem") return v;
-  return false;
-}
 
 /**
  * Source-protection policy for real (cli) dispatch. All conservative by default so an
@@ -76,6 +67,7 @@ export interface VibeSettings {
   /** Project classification policy: the auto-classify switch + the classifier engine. */
   projectClassification?: projectClassification.ProjectClassificationSettings;
   curator?: curator.CuratorSettings;
+  typesafe?: typesafeSettings.TypesafeSettings;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -322,6 +314,7 @@ function coerce(raw: unknown): VibeSettings {
   if (sk) out.skills = sk;
   projectClassification.applyProjectClassificationSettings(out, obj.projectClassification);
   curator.applyCuratorSettings(out, obj.curator);
+  typesafeSettings.applyTypesafeSettings(out, obj.typesafe);
   return out;
 }
 
@@ -384,6 +377,7 @@ export function writeSettings(
     current.projectClassification ?? projectClassification.DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
   );
   curator.mergeCuratorSettings(merged, next, current);
+  typesafeSettings.mergeTypesafeSettings(merged, next, current);
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
   return merged;
 }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { coerceMemory } from "../src/settings.js";
+import { coerceMemory } from "../src/settings-memory.js";
 
 test("coerceMemory: legacy true → builtin", () => {
   expect(coerceMemory(true)).toBe("builtin");

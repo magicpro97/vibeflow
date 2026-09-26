@@ -17,7 +17,7 @@ import {
   appendMemoryGuide as realAppendMemoryGuide,
   ensureInstalledForEngines as realEnsureInstalledForEngines,
 } from "../memory.js";
-import { coerceMemory } from "../settings.js";
+import { coerceMemory } from "../settings-memory.js";
 import { confirmInput } from "../terminal-prompts/prompts.js";
 import { type Engine, c, out, writeSettings } from "./_shared.js";
 
