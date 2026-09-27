@@ -236,6 +236,16 @@ describe("the win32 gate is wired into both workflows", () => {
     // The declaration alone is not the claim. The budget is what the test's timing assertion uses,
     // so pin that the assertion reads it rather than a literal that could drift away from the const.
     expect(body).toContain("expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);");
+    // And the two assertions that prove the measured window was a real judge run, not just a fast
+    // one. The timing claim is empty if nothing shows the judge was consulted: replacing the audit
+    // log witness with `expect(true).toBe(true)` left every gate green (probe), and a win32
+    // regression in the arming/consult path would then pass a row that verified nothing.
+    expect(body).toContain('expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);');
+    // The fail-open half: the shipped artifact must not return `block` for a failing judge on a real
+    // win32 runtime. Loosening this matcher to `.toBeDefined()` also left every gate green (probe).
+    expect(body).toContain(
+      'expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");',
+    );
     // The DACL half needs the same treatment: it is the other win32-only claim, and `.toBe(true)`
     // against the reader with an identity witness is the only shape that can fail when a writer
     // stops enforcing owner-only. A loosened matcher here would leave the row green over it.
