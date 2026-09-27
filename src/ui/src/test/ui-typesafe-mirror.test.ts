@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+// Dynamic import on purpose: src/ui/tsconfig sets `types: []`, so a static `bun:test` import is
+// unresolvable for `vue-tsc --noEmit` and fails the UI typecheck half of `bun run check`. The other
+// UI tests in this directory do the same for the same reason.
+const { describe, expect, test } = await import(String("bun:test"));
 import { readFileSync } from "node:fs";
 
 /** Field names declared on a TS interface body, in order of appearance. */

@@ -21,6 +21,19 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 /** One step's own lines: from its `- name:` to the next step, so checks see the whole mapping. */
+/** Text of the call starting at `callAt`, up to its matching close paren. */
+function callText(src: string, callAt: number): string {
+  let depth = 0;
+  for (let i = src.indexOf("(", callAt); i < src.length; i++) {
+    if (src[i] === "(") depth += 1;
+    else if (src[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return src.slice(callAt, i + 1);
+    }
+  }
+  return src.slice(callAt);
+}
+
 function stepBlock(job: string, marker: string): string {
   const from = job.indexOf(marker);
   expect(from).toBeGreaterThan(-1);
@@ -125,6 +138,9 @@ describe("the win32 gate is wired into both workflows", () => {
       "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
     expect(releaseStep).not.toContain("continue-on-error");
+    // Unlike the ci.yml row this step has no matrix, so it is unconditional: an `if:` appearing at
+    // this indent is the release gate being switched off, and the run line would still match.
+    expect(releaseStep).not.toContain("\n        if:");
     expect(release).toContain('if ($env:WINDOWS_RESULT -ne "success")');
     // The aggregate the release decision reads is the job result, so the job must exist.
     expect(release).toContain("WINDOWS_RESULT");
@@ -159,5 +175,18 @@ describe("the win32 gate is wired into both workflows", () => {
     // The declaration alone is not the claim. The budget is what the test's timing assertion uses,
     // so pin that the assertion reads it rather than a literal that could drift away from the const.
     expect(body).toContain("expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);");
+    // The DACL half needs the same treatment: it is the other win32-only claim, and `.toBe(true)`
+    // against the reader with an identity witness is the only shape that can fail when a writer
+    // stops enforcing owner-only. A loosened matcher here would leave the row green over it.
+    const aclAt = body.indexOf("windowsVerifyPathAcl(");
+    expect(aclAt).toBeGreaterThan(-1);
+    const aclCall = callText(body, aclAt);
+    expect(aclCall).toContain("identity: descriptorIdentity(fd),");
+    // The matcher that closes THIS call, not any `.toBe(true)` elsewhere in the file - a bare
+    // `toContain` matched another assertion and left the probe green when the DACL one was loosened.
+    // `expect(<call>).toBe(true)` - the comma closes the argument, so the matcher follows it.
+    expect(/^,\s*\)\s*\.toBe\(true\);/.test(body.slice(aclAt + aclCall.length).trimStart())).toBe(
+      true,
+    );
   });
 });
