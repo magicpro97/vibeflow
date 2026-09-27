@@ -348,7 +348,18 @@ async function save() {
     if (JSON.stringify(originalPolicy) !== JSON.stringify(nextPolicy)) {
       policyPreview.value = await api.settings.previewPolicy(nextPolicy);
     } else {
-      const savedSettings = await api.settings.set(form.value);
+      // This panel has no System One UI, and `form` is a snapshot of the WHOLE settings taken when
+      // the dialog opened, so posting it back would write the System One block too — a stale copy
+      // of the judge's enabled flag, model, thresholds and call-site toggles, into whatever repo is
+      // active by then, which this panel never names and cannot see change. It is not this panel's
+      // block to write, so it is dropped from the payload. The server refuses the combination
+      // outright, so a client that forgets gets a 400 rather than a silent overwrite.
+      // `delete` is banned by lint, and assigning `undefined` would NOT be equivalent here: the key
+      // would still be present, and the server keys its refusal on `"typesafe" in payload`, so a
+      // payload that kept the key with an undefined value would be refused. Rebuild without it.
+      const { typesafe: unmanaged, ...payload } = form.value;
+      void unmanaged;
+      const savedSettings = await api.settings.set(payload);
       original.value = JSON.parse(JSON.stringify(savedSettings)) as VibeSettings;
       saved.value = true;
       setTimeout(() => emit("close"), 1500);

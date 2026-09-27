@@ -35,13 +35,32 @@ function windowsMatrixSuites(text: string): string[] {
   return [...head.matchAll(/^\s*-\s*suite:\s*(\S+)\s*$/gm)].map((m) => m[1] ?? "");
 }
 
+/**
+ * One top-level job's block, so an assertion can say which JOB a step belongs to.
+ *
+ * A whole-file `toContain` cannot: a command moved into another job is still present as text, and
+ * the job that must run it can stay green while running nothing.
+ */
+function jobBlock(text: string, name: string): string {
+  const start = text.indexOf(`\n  ${name}:`);
+  expect(start).toBeGreaterThan(-1);
+  const rest = text.slice(start + 1);
+  const next = /\n {2}[a-z][\w-]*:\s*$/m.exec(rest.slice(1));
+  return next ? rest.slice(0, next.index + 1) : rest;
+}
+
 describe("the win32 gate is wired into both workflows", () => {
   test("ci.yml lists the typesafe-hook row and runs the live test on it", () => {
     const suites = windowsMatrixSuites(ci);
     expect(suites).toContain("typesafe-hook");
-    // The step must be gated on THAT value, or a rename leaves the row running nothing.
-    expect(ci).toContain("if: matrix.suite == 'typesafe-hook'");
-    expect(ci).toContain("bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts");
+    // `if:` and `run:` were asserted as two independent whole-file substrings, so swapping the
+    // run body for anything else, or moving the real command to a decoy step, left both green.
+    // Anchoring the gate to end-of-line matters on its own: `toContain("if: matrix.suite ==
+    // 'typesafe-hook'")` is a prefix with no terminator, so appending `&& matrix.suite ==
+    // 'package-smoke'` kept it matching while the step could never run.
+    expect(ci).toContain(
+      "if: matrix.suite == 'typesafe-hook'\n        run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
+    );
     // The live test needs the built artifact and node on PATH, and both must be gated on the same
     // row. Assert the GATING, not the string `bun run build`: that string also occurs in four
     // other jobs, so `toContain("bun run build")` could not fail for a change confined to this
@@ -55,8 +74,18 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(ci).toContain(`uses: actions/setup-node@v4\n        ${gatedOnRow}`);
   });
 
-  test("release.yml runs the same live test, so a release cannot skip it", () => {
-    expect(release).toContain("bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts");
+  test("release.yml runs the same live test, and runs it inside the Windows job", () => {
+    // Belonging to the right JOB is the whole point: moved into the ubuntu `verify` job the
+    // command still exists, `WINDOWS_RESULT` and `VF_REQUIRE_LIVE_WINDOWS` still exist as
+    // substrings, and `needs.windows-owned-process.result` stays success — a release would ship
+    // with no win32 evidence and every assertion here would still pass.
+    const inWindowsJob = jobBlock(release, "windows-owned-process");
+    expect(inWindowsJob).toContain(
+      "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
+    );
+    expect(jobBlock(release, "verify")).not.toContain(
+      "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
+    );
     // The aggregate the release decision reads is the job result, so the job must exist.
     expect(release).toContain("WINDOWS_RESULT");
     expect(release).toContain("VF_REQUIRE_LIVE_WINDOWS");
@@ -84,5 +113,8 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(body).toContain(
       "const liveWindowsTest = process.platform === RUNTIME_PLATFORM.WINDOWS ? test : test.skip;",
     );
+    // The row exists for the 10s spawn budget, which is the number this test's own docstring and
+    // the workflows' comments both name. Raising it here would silently change what CI verified.
+    expect(body).toContain("const HOOK_BUDGET_MS = 10_000;");
   });
 });

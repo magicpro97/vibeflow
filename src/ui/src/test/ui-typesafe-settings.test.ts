@@ -208,3 +208,16 @@ test("the save names the repository its rows describe, so the server can refuse 
   expect(payloadEnd).toBeGreaterThan(payloadStart);
   expect(call.slice(payloadStart, payloadEnd)).toContain("expectRepo: view.repo");
 });
+
+test("the generic settings panel does not write the System One block", () => {
+  // That panel has no System One UI and its `form` is a snapshot of the WHOLE settings taken when
+  // its dialog opened, so posting it back wrote a stale judge configuration - enabled flag, model,
+  // thresholds, call-site toggles - into whatever repo was active by then, which the panel never
+  // names and cannot see change. `mergeTypesafeSettings` is replace-on-write on mere key presence,
+  // so the snapshot did not even have to be edited. The server now refuses the combination; this
+  // pins the client half so the panel keeps working instead of returning 400.
+  const panel = readFileSync(new URL("../components/SettingsPanel.vue", import.meta.url), "utf8");
+  const start = panel.indexOf("const { typesafe: unmanaged, ...payload } = form.value;");
+  expect(start).toBeGreaterThan(-1);
+  expect(panel.slice(start, start + 220)).toContain("api.settings.set(payload)");
+});

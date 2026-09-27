@@ -26,6 +26,17 @@ export function handleSettingsRoute(
     return Response.json({ error: "policy changes require preview approval" }, { status: 400 });
   }
   const expectRepo = typeof payload.expectRepo === "string" ? payload.expectRepo : "";
+  // A write that carries a System One block MUST name the repo it was read from. `expectRepo` is
+  // optional for the blocks that other panels own, but `mergeTypesafeSettings` is replace-on-write
+  // on mere key PRESENCE, so any client that posts a whole settings snapshot it took earlier can
+  // silently overwrite the judge — including into a repo it never named. Refusing the combination
+  // outright is what makes the guard structural rather than dependent on each caller opting in.
+  if ("typesafe" in payload && expectRepo === "") {
+    return Response.json(
+      { error: "a System One write must name the repository it was read from" },
+      { status: 400 },
+    );
+  }
   if (expectRepo !== "" && expectRepo !== activeRepo) {
     return Response.json(
       { error: "the active repository changed; reload before saving" },

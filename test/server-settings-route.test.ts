@@ -60,15 +60,30 @@ describe("handleSettingsRoute", () => {
     expect(readSettings(described).typesafe?.enabled).toBeUndefined();
   });
 
-  test("an absent or non-string expectRepo stays allowed, so the other panels keep working", async () => {
+  test("a System One block that names no repo is refused, and writes nothing", async () => {
+    // The shape SettingsPanel used to send: a whole settings snapshot taken at dialog mount,
+    // carrying the stored `typesafe` block and naming no repo. `mergeTypesafeSettings` is
+    // replace-on-write on mere key PRESENCE, so allowing this wrote a stale judge configuration -
+    // enabled flag, model, thresholds, call-site toggles - into whatever repo was active by then.
     for (const payload of [
       { typesafe: { enabled: true } },
       { expectRepo: 42, typesafe: { enabled: true } },
     ]) {
-      const active = repo("absent");
+      const active = repo("unnamed");
       const res = handleSettingsRoute(active, payload);
-      expect(res.status).toBe(200);
-      expect(readSettings(active).typesafe?.enabled).toBe(true);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("must name the repository");
+      expect(readSettings(active).typesafe).toBeUndefined();
     }
+  });
+
+  test("blocks that are not System One still save without naming a repo", async () => {
+    // The refusal is scoped to the block it protects: the other panels post the same payload shape
+    // and must keep working without knowing about any of this.
+    const active = repo("other");
+    const res = handleSettingsRoute(active, { failureProtection: { timeoutSeconds: 5 } });
+    expect(res.status).toBe(200);
+    expect(readSettings(active).failureProtection.timeoutSeconds).toBe(5);
   });
 });
