@@ -35,6 +35,14 @@ function callText(src: string, callAt: number): string {
 }
 
 /** The YAML mapping keys a step actually carries, so a new one cannot slip past a text check. */
+/** A step's own YAML lines: its keys and values, excluding blanks and comments. */
+function stepLines(step: string): string[] {
+  return step
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !l.startsWith("#"));
+}
+
 function stepKeys(step: string): string[] {
   // `stepBlock` starts AT the `- name:` bullet, so the first key has no leading spaces; the rest
   // sit at 8. A key this misses shows up as a mismatch, which is the intended direction.
@@ -118,6 +126,13 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(step).toMatch(
       /^\s*run: bun test --timeout 30000 test\/typesafe-hook-windows-live\.test\.ts$/m,
     );
+    // ...and that is NOT the end of the command. A `$` anchors the LINE, while YAML folds a plain
+    // scalar across lines into one value, so
+    //     run: bun test ...live.test.ts
+    //       || true
+    // matches the regex above and still executes with the suffix. Counting the step's own
+    // non-comment lines closes both that and a `run: |` block: either adds a line.
+    expect(stepLines(step)).toHaveLength(3);
     // The WHOLE step, not just the text before `run:`. A YAML mapping key may sit after `run:` in
     // the same step, so a scan that stops at `run:` walks straight past `continue-on-error` there.
     // A WHITELIST, not a list of escapes. Enumerating them was whack-a-mole and lost: the step may
@@ -170,7 +185,9 @@ describe("the win32 gate is wired into both workflows", () => {
     // Unlike the ci.yml row this step has no matrix, so it is unconditional: an `if:` appearing at
     // this indent is the release gate being switched off, and the run line would still match.
     expect(releaseStep).not.toContain("\n        if:");
-    expect(release).toContain('if ($env:WINDOWS_RESULT -ne "success")');
+    expect(jobBlock(release, "release-prerequisites")).toContain(
+      'if ($env:WINDOWS_RESULT -ne "success")',
+    );
     // The aggregate the release decision reads is the job result, so the job must exist.
     expect(release).toContain("WINDOWS_RESULT");
     // The row is only loud because the JOB runs on Windows and hands the live test its arming env.
