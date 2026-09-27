@@ -156,8 +156,11 @@ describe("the win32 gate is wired into both workflows", () => {
       inWindowsJob,
       "- name: Windows typesafe hook budget release gate",
     );
-    expect(releaseStep).toContain(
-      "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
+    // Anchored to the end of the line, exactly as the ci.yml half is. This one was left as an
+    // unanchored `toContain`, so `... .ts || true` or `; exit 0` on the release step kept matching
+    // here while defusing the release gate - the same defect that was fixed on the other half only.
+    expect(releaseStep).toMatch(
+      /^\s*run: bun test --timeout 30000 test\/typesafe-hook-windows-live\.test\.ts$/m,
     );
     expect(stepKeys(releaseStep)).toEqual(["- name", "run"]);
     // "Same two ways out as ci.yml" was only true for the step. The JOB-level escape applies to
