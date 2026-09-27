@@ -246,6 +246,22 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(body).toContain(
       'expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");',
     );
+    // The pins above are the assertions I happened to remember. Five rounds of review found the next
+    // one from the other side - the companion `toBeDefined()`, a loosened matcher on a call that was
+    // already pinned elsewhere - because a per-string list can always be asked for one more. This
+    // closes the class: EVERY `expect(...)` statement in the live test must appear in the inventory,
+    // so a new assertion, a dropped one, or an edited matcher fails this meta-test until someone
+    // deliberately classifies it here.
+    const assertions = [...body.matchAll(/^[ \t]*(expect\(.*\);)$/gm)].map((m) =>
+      (m[1] ?? "").trim(),
+    );
+    expect(assertions).toEqual([
+      "expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);",
+      'expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);',
+      "expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).toBeDefined();",
+      'expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");',
+      'expect(readFileSync(path, "utf8")).toContain("TYPESAFE_API_KEY=");',
+    ]);
     // The DACL half needs the same treatment: it is the other win32-only claim, and `.toBe(true)`
     // against the reader with an identity witness is the only shape that can fail when a writer
     // stops enforcing owner-only. A loosened matcher here would leave the row green over it.
