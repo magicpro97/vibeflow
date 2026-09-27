@@ -190,7 +190,21 @@ test("the save names the repository its rows describe, so the server can refuse 
     new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
     "utf8",
   );
-  const save = drawer.slice(drawer.indexOf("async function saveTypesafe"));
-  const call = save.slice(0, save.indexOf("};"));
-  expect(call).toContain("expectRepo: view.repo");
+  // Bound the slice to the function AND assert the bound. The previous version ended the slice at
+  // the first `};`, which sits 136 lines further down, so the window covered load, detect,
+  // initialize and loadSkills — moving `expectRepo` to any of those satisfied the test while the
+  // call site no longer sent it.
+  const start = drawer.indexOf("async function saveTypesafe");
+  expect(start).toBeGreaterThan(-1);
+  const nexts = ["\nasync function", "\nfunction", "\nconst "]
+    .map((marker) => drawer.indexOf(marker, start + 1))
+    .filter((at) => at !== -1);
+  const call = drawer.slice(start, nexts.length ? Math.min(...nexts) : drawer.length);
+  expect(call.split("\n").length).toBeLessThan(40);
+  // And it has to be inside the request payload, not merely somewhere in the function.
+  const payloadStart = call.indexOf("api.settings.set(");
+  const payloadEnd = call.indexOf("});", payloadStart);
+  expect(payloadStart).toBeGreaterThan(-1);
+  expect(payloadEnd).toBeGreaterThan(payloadStart);
+  expect(call.slice(payloadStart, payloadEnd)).toContain("expectRepo: view.repo");
 });

@@ -42,8 +42,17 @@ describe("the win32 gate is wired into both workflows", () => {
     // The step must be gated on THAT value, or a rename leaves the row running nothing.
     expect(ci).toContain("if: matrix.suite == 'typesafe-hook'");
     expect(ci).toContain("bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts");
-    // The live test needs the built artifact and node on PATH; both are gated on the same row.
-    expect(ci).toContain("bun run build");
+    // The live test needs the built artifact and node on PATH, and both must be gated on the same
+    // row. Assert the GATING, not the string `bun run build`: that string also occurs in four
+    // other jobs, so `toContain("bun run build")` could not fail for a change confined to this
+    // job — which is exactly what this assertion claims to cover.
+    const gatedOnRow =
+      "if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap' || matrix.suite == 'typesafe-hook'";
+    expect(ci.split(gatedOnRow).length - 1).toBe(2);
+    // One gates `actions/setup-node`, the other gates the build step itself.
+    expect(ci).toContain(`${gatedOnRow}\n        run: bun run build`);
+    // `uses:` precedes `if:` on the setup-node step, unlike the build step above.
+    expect(ci).toContain(`uses: actions/setup-node@v4\n        ${gatedOnRow}`);
   });
 
   test("release.yml runs the same live test, so a release cannot skip it", () => {
@@ -68,5 +77,12 @@ describe("the win32 gate is wired into both workflows", () => {
     const firstDescribe = body.indexOf("describe(");
     expect(firstDescribe).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(firstDescribe);
+    // The guard above only fires on a runner that is NOT win32. On windows-latest it passes, so
+    // the two assertions in that file are real only because of this selector: a one-token edit to
+    // `const liveWindowsTest = test.skip;` skips both, `bun test` exits 0, and every assertion in
+    // THIS file still passes because they all read text. Nothing else in the repo pins it.
+    expect(body).toContain(
+      "const liveWindowsTest = process.platform === RUNTIME_PLATFORM.WINDOWS ? test : test.skip;",
+    );
   });
 });
