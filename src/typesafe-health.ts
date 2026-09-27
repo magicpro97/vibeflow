@@ -238,14 +238,39 @@ export function allowCall(
   return { allow: true, next: h };
 }
 
+/** Which counter a call charges. Frozen runtime authority, the repo's convention for a closed
+ *  vocabulary: the two buckets are NOT interchangeable, and the Spy/typesafe-ui panel writes one
+ *  of them, so a bare string that drifts would silently re-merge them. */
+export const TYPESAFE_BUDGET_BUCKET = Object.freeze({
+  /** Hook, verify, review: the calls whose refusal is the judge losing its veto. */
+  ENFORCEMENT: "enforcement",
+  /** The operator-triggered "test connection" probe. */
+  PROBE: "probe",
+} as const);
+export type TypesafeBudgetBucket =
+  (typeof TYPESAFE_BUDGET_BUCKET)[keyof typeof TYPESAFE_BUDGET_BUCKET];
+
 /** The per-RUN call budget's storage. Module scope is the point: `vf hook` is a fresh process
- *  per tool call, while the orchestrator's reviewer/goalCoverage/planner calls share one. */
+ *  per tool call, while the orchestrator's reviewer/goalCoverage/planner calls share one.
+ *
+ *  Two counters, not one. `probeCallsThisRun` exists because a page token can reach
+ *  `POST /api/typesafe/test`, which runs through the same guard: charging it here let a client
+ *  with no business touching the judge spend the ENFORCEMENT budget, after which every
+ *  hook/verify/review call in that process returns `null` - the seam reports fall-through, the
+ *  veto is gone, and `GET /api/typesafe` still reads `idle` because a budget stop returns before
+ *  `record`. Separation means neither bucket can exhaust the other; each is still capped by the
+ *  same `maxCalls`, so a probe cadence cannot run up an unbounded vendor bill either. */
 let callsThisRun = 0;
+let probeCallsThisRun = 0;
 export function callsUsedThisRun(): number {
   return callsThisRun;
 }
+export function probeCallsUsedThisRun(): number {
+  return probeCallsThisRun;
+}
 export function resetCallBudget(): void {
   callsThisRun = 0;
+  probeCallsThisRun = 0;
 }
 
 /** One line per TRANSITION (never per call), shaped by the user-facing error table. */
@@ -272,6 +297,8 @@ function transitionLine(
  *  src/logbus/out.ts — a `(channel, ...parts) => void` line sink, NOT a string printer — so a
  *  call site passes `outBusOnly` directly with no adapter. */
 export type GuardIo = HealthClockIo & {
+  /** Defaults to the enforcement bucket; the probe route names PROBE explicitly. */
+  bucket?: TypesafeBudgetBucket;
   out?: (channel: LogChannel, ...parts: unknown[]) => void;
   tuning?: BreakerTuning;
   outcome?: () => OutcomeSignal | undefined;
@@ -331,8 +358,11 @@ export async function withTypesafeGuard<T>(
 ): Promise<T | null> {
   const now = (inject.now ?? Date.now)();
   const maxCalls = inject.tuning?.maxCalls ?? BREAKER_DEFAULTS.maxCalls;
-  if (callsThisRun >= maxCalls) return null;
-  callsThisRun += 1;
+  const probe = inject.bucket === TYPESAFE_BUDGET_BUCKET.PROBE;
+  const used = probe ? probeCallsThisRun : callsThisRun;
+  if (used >= maxCalls) return null;
+  if (probe) probeCallsThisRun += 1;
+  else callsThisRun += 1;
   const allow = await mutateHealth((h) => {
     const r = allowCall(h, now);
     return { next: r.next, result: r.allow };

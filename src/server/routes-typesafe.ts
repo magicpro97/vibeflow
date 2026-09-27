@@ -13,6 +13,7 @@ import { outBusOnly } from "../logbus.js";
 import { type VibeSettings, readSettings } from "../settings.js";
 import {
   type FailureClass,
+  TYPESAFE_BUDGET_BUCKET,
   TYPESAFE_STATE,
   type TypesafeHealth,
   type TypesafeState,
@@ -198,6 +199,9 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
     },
     {
       ...(inject.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
+      // The probe charges its OWN bucket: a caller holding a page token must not be able to spend
+      // the budget the hook/verify/review seams depend on for their veto.
+      bucket: TYPESAFE_BUDGET_BUCKET.PROBE,
       out: outBusOnly,
       tuning: tuningFor(resolved),
       outcome: probe.outcome,

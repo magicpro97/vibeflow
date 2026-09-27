@@ -18,6 +18,7 @@ import {
   FAILURE_CLASS,
   FAILURE_CLASSES,
   type FailureClass,
+  TYPESAFE_BUDGET_BUCKET,
   TYPESAFE_STATE,
   type TypesafeHealth,
   allowCall,
@@ -28,6 +29,7 @@ import {
   isTypesafeHealth,
   mutateHealth,
   outcomeProbe,
+  probeCallsUsedThisRun,
   readHealth,
   resetCallBudget,
   transition,
@@ -1129,5 +1131,44 @@ describe("guard integration contract (Task 2c)", () => {
     }
     expect(log).not.toHaveBeenCalled();
     expect(err).not.toHaveBeenCalled();
+  });
+});
+
+describe("the probe charges its own budget bucket", () => {
+  test("a probe cadence cannot spend the enforcement budget, so the veto survives", async () => {
+    resetCallBudget();
+    const root = mkdtempSync(join(tmpdir(), "typesafe-bucket-"));
+    const tuning = { ...BREAKER_DEFAULTS, maxCalls: 2 };
+    const fn = async () => 1;
+    const probeIo = {
+      userRoot: root,
+      out: outBusOnly,
+      tuning,
+      bucket: TYPESAFE_BUDGET_BUCKET.PROBE,
+    };
+    // A page token can reach the probe route. Spend well past `maxCalls` there.
+    for (let i = 0; i < 5; i++) await withTypesafeGuard("probe", fn, probeIo);
+    expect(probeCallsUsedThisRun()).toBeGreaterThanOrEqual(tuning.maxCalls);
+    // The enforcement budget is untouched: this is the whole point, because a spent enforcement
+    // budget makes every hook/verify/review call return null and the judge silently loses its veto.
+    expect(callsUsedThisRun()).toBe(0);
+    const v = await withTypesafeGuard("reviewer", fn, { userRoot: root, out: outBusOnly, tuning });
+    expect(v).toBe(1);
+  });
+
+  test("the probe is still capped, so its own cadence cannot bill without bound", async () => {
+    resetCallBudget();
+    const root = mkdtempSync(join(tmpdir(), "typesafe-bucket-"));
+    const tuning = { ...BREAKER_DEFAULTS, maxCalls: 2 };
+    const probeIo = {
+      userRoot: root,
+      out: outBusOnly,
+      tuning,
+      bucket: TYPESAFE_BUDGET_BUCKET.PROBE,
+    };
+    const results = [];
+    for (let i = 0; i < 4; i++)
+      results.push(await withTypesafeGuard("probe", async () => 1, probeIo));
+    expect(results).toEqual([1, 1, null, null]);
   });
 });
