@@ -155,9 +155,9 @@ export interface TypesafeSettingsView {
    *  the user typed next rather than what the server answered for — and the save guard built on
    *  that stamp would wave through a cross-repo write. */
   repo: string;
-  state: string;
+  state: "off" | "unconfigured" | "idle" | "open" | "half-open";
   cooldownUntil?: string;
-  lastClass?: string;
+  lastClass?: "timeout" | "http" | "parse" | "other";
   calls?: number;
   enabled: boolean;
   configured: boolean;

@@ -112,6 +112,10 @@ describe("the win32 gate is wired into both workflows", () => {
     // And not at the JOB level either: `jobs.<id>.continue-on-error` is valid there and would make
     // the whole row contribute success while every step in it fails.
     expect(jobBlock(ci, "windows")).not.toContain("continue-on-error");
+    // Same escape one level up: `if: ${{ matrix.suite != 'typesafe-hook' }}` on the job skips the
+    // leg while every per-step assertion above still matches, and `needs.windows.result` stays
+    // success. The job is unconditional by design, so any job-level `if:` is the gate being shut.
+    expect(jobBlock(ci, "windows")).not.toMatch(/^ {4}if:/m);
     // The aggregate the release gate reads must still exist, or a green row decides nothing.
     expect(ci).toContain("WINDOWS_RESULT: ${{ needs.windows.result }}");
   });

@@ -29,4 +29,38 @@ describe("the UI's System One types are a mirror, and this is what keeps it hone
     expect(mirrored.length).toBeGreaterThan(0);
     expect(mirrored.filter((f) => !serverFields.has(f))).toEqual([]);
   });
+
+  test("the view the drawer reads is held to the server's, including the repo stamp", () => {
+    // `TypesafeSettingsView` carries `repo`, which the whole cross-repo guard is built on: the UI
+    // stamps `expectRepo` from it. It was outside this test, so a rename there compiled fine and
+    // `expectRepo` serialized as absent - every save then refused. Fail-closed, but silent.
+    const ui = readFileSync(new URL("../types-settings.ts", import.meta.url), "utf8");
+    const serverView = readFileSync(
+      new URL("../../../../src/server/routes-typesafe.ts", import.meta.url),
+      "utf8",
+    );
+    const serverFields = new Set(fields(serverView, "TypesafeSettingsView"));
+    const uiFields = fields(ui, "TypesafeSettingsView");
+    expect(uiFields).toContain("repo");
+    expect(uiFields.filter((f) => !serverFields.has(f))).toEqual([]);
+  });
+
+  test("the state vocabulary is the server's, not a bare string", () => {
+    // `state: string` accepted any value, so a sixth server state would have compiled and rendered
+    // as whatever the string happened to be.
+    const ui = readFileSync(new URL("../types-settings.ts", import.meta.url), "utf8");
+    const health = readFileSync(
+      new URL("../../../../src/typesafe-health-file.ts", import.meta.url),
+      "utf8",
+    );
+    // The authority is a frozen object, not an array: `Object.freeze({ OFF: "off", ... } as const)`.
+    const body = health.slice(health.indexOf("TYPESAFE_STATE = Object.freeze({"));
+    const members = [...body.slice(0, body.indexOf("} as const")).matchAll(/: "([^"]+)"/g)].map(
+      (m) => m[1] ?? "",
+    );
+    expect(members.length).toBeGreaterThan(0);
+    const union = ui.match(/^\s{2}state: (.+);$/m)?.[1] ?? "";
+    expect(union).not.toBe("string");
+    for (const member of members) expect(union).toContain(`"${member}"`);
+  });
 });

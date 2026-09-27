@@ -77,6 +77,16 @@ export function applyPolicy(
   const nonPolicy = (rawSettings ?? {}) as Record<string, unknown>;
   if ("envPolicy" in nonPolicy || "hooks" in nonPolicy)
     return Response.json({ error: "policy changes require preview approval" }, { status: 400 });
+  // This route applies a POLICY preview: envPolicy and hooks. Everything else rides along in
+  // `nonPolicy`, which made `/api/settings/apply` a second writer of the System One block - the
+  // preview that authorises the request owns no such field, and the audit-failure rollback below
+  // then restored a snapshot that had been read before the smuggle. Refuse it here; the routes that
+  // do own the block are `/api/settings` and the CLI, and the UI's policy path never sends one.
+  if ("typesafe" in nonPolicy)
+    return Response.json(
+      { error: "use /api/settings to change System One settings" },
+      { status: 400 },
+    );
   const current = deps.read(repo);
   const preview = policyPreviews.consume(previewId, repo, current, confirmationText);
   if (!preview)
@@ -107,12 +117,15 @@ export function applyPolicy(
     )
   ) {
     try {
-      const { typesafe: _rollbackDoesNotOwnTypesafe, ...restorable } = current;
-      void _rollbackDoesNotOwnTypesafe;
+      // A faithful restore of the pre-write snapshot, which `current` is: it was read before the
+      // apply. Naming the repo is what the choke point needs - the previous version STRIPPED the
+      // block instead, so a System One write that arrived with the request survived a write this
+      // route reports as failed. Every other piggy-backed field was restored; the block was not.
       deps.write(repo, {
-        ...restorable,
+        ...current,
         envPolicy: current.envPolicy,
         hooks: current.hooks,
+        expectRepo: repo,
       } as Partial<VibeSettings>);
     } catch {
       return Response.json({ error: "policy audit failed; rollback failed" }, { status: 500 });

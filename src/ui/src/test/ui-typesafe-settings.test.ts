@@ -77,10 +77,13 @@ test("configured and state are separate rows, and an open breaker warns with its
   // `state` and `configured` on their own appear elsewhere in the file (an MCP note uses
   // "configured"), so asserting the bare words passes without either row existing. These are the
   // expressions that only the two rows produce.
-  expect(drawer).toContain("typesafeView?.state");
-  expect(drawer).toContain("typesafeView.configured");
+  // These four strings all appear elsewhere in the same file (the breaker banner, the
+  // "no key configured" branch, and a CSS selector), so deleting both ROWS left this green. The
+  // rows themselves are what the name claims, so pin the row markup.
+  expect(drawer).toContain("<dt>configured</dt><dd>{{ typesafeView.configured");
+  expect(drawer).toContain("<dt>state</dt><dd");
+  expect(drawer).toContain('role="alert">Circuit open');
   expect(drawer).toContain("cooldownUntil");
-  expect(drawer).toContain('data-state="open"');
 });
 
 test("thresholds come from settingsForm.typesafe, never from literals in the component", () => {

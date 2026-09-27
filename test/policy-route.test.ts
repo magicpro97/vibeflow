@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { applyPolicy, handlePolicyRoute, previewPolicy } from "../src/server/policy-route.js";
-import type { VibeSettings } from "../src/settings.js";
+import { type VibeSettings, readSettings, writeSettings } from "../src/settings.js";
 import { DEFAULT_TYPESAFE_SETTINGS } from "../src/typesafe-settings.js";
 
 const current = {
@@ -73,7 +76,14 @@ describe("policy routes", () => {
       },
     );
     expect(response.status).toBe(500);
-    expect(writes).toEqual([candidate, { envPolicy: current.envPolicy, hooks: current.hooks }]);
+    // The restore is the pre-write snapshot, `current` - which was read before the apply - with the
+    // repo named so the write is allowed to carry the System One block it holds. Stripping the block
+    // instead (the previous behaviour) let a block that arrived with the request survive a write this
+    // route reports as failed.
+    expect(writes).toEqual([
+      candidate,
+      { ...current, envPolicy: current.envPolicy, hooks: current.hooks, expectRepo: "repo-audit" },
+    ]);
   });
 
   test("preview returns exactly the public DTO keys, leaking no internal state", async () => {
@@ -218,37 +228,61 @@ describe("policy routes", () => {
     expect(await response.json()).toEqual({ error: "policy audit failed; rollback failed" });
   });
 
-  test("an audit failure on a repo with a System One block reports the AUDIT, not a rollback", async () => {
-    // The rollback re-writes the whole stored snapshot. `current` is a VibeSettings, so it carries
-    // `typesafe` - and `writeSettings` refuses a System One write that does not name its repo. The
-    // rollback therefore threw into its own catch and the user was told the ROLLBACK failed, when
-    // the audit was the actual problem. Dropping the key is the fix; this pins the payload.
-    const withTypesafe = {
-      ...current,
-      typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
-    } as unknown as VibeSettings;
-    const rollbackWrites: Record<string, unknown>[] = [];
-    const deps = {
-      read: () => withTypesafe,
-      write: (_repo: string, next: Partial<VibeSettings>) => {
-        rollbackWrites.push(next as Record<string, unknown>);
-        return withTypesafe;
-      },
-      audit: () => false,
+  test("an audit failure rolls the WHOLE snapshot back, on disk, block included", async () => {
+    // Real `writeSettings` on a real repo. The previous version injected a stub `write`, so it pinned
+    // the payload shape and never the disk outcome - and the shape it pinned was the bug: the
+    // rollback STRIPPED the System One block, so a block that arrived with the request through
+    // `nonPolicy` survived a write this route reports as failed, while every other piggy-backed
+    // field was restored.
+    const target = mkdtempSync(join(tmpdir(), "vf-policy-"));
+    try {
+      writeSettings(target, {
+        expectRepo: target,
+        typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+      });
+      const seeded = readSettings(target);
+      const deps = { read: readSettings, write: writeSettings, audit: () => false };
+      const previewResponse = await previewPolicy(target, request(candidate), deps);
+      const preview = (await previewResponse.json()) as { id: string };
+      const response = applyPolicy(
+        target,
+        { previewId: preview.id, confirmationText: "ALLOW POLICY RELAXATION" },
+        deps,
+      );
+      expect(response.status).toBe(500);
+      // The write it is reporting as failed must not have changed the judge's configuration: it was
+      // read before the apply, so the restore has to put it back exactly as it was.
+      expect(readSettings(target).typesafe).toEqual(seeded.typesafe);
+      expect(readSettings(target).envPolicy).toEqual(seeded.envPolicy);
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  test("a payload carrying a System One block is refused: this route applies a policy", async () => {
+    // `/api/settings/apply` consumes a preview that owns envPolicy/hooks only, so a block arriving
+    // alongside it has no authorisation behind it. It used to be written.
+    const withBlock = {
+      envPolicy: { deny: [], allow: ["HOME", "PATH"] },
+      hooks: { templates: [], custom: [] },
     };
-    const previewResponse = await previewPolicy("repo-ts", request(candidate), deps);
+    const previewResponse = await previewPolicy("repo-smuggle", request(candidate), {
+      read: () => current,
+      write: () => current,
+    });
     const preview = (await previewResponse.json()) as { id: string };
     const response = applyPolicy(
-      "repo-ts",
-      { previewId: preview.id, confirmationText: "ALLOW POLICY RELAXATION" },
-      deps,
+      "repo-smuggle",
+      {
+        previewId: preview.id,
+        confirmationText: "ALLOW POLICY RELAXATION",
+        settings: { typesafe: { enabled: true }, expectRepo: "repo-smuggle" },
+      },
+      { read: () => current, write: () => current },
     );
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
-    expect(body.error).toBe("policy audit failed");
-    // And the payload it tried to write must not carry the block, which is exactly what made the
-    // real `writeSettings` refuse it.
-    expect(rollbackWrites.length).toBeGreaterThan(0);
-    expect(rollbackWrites.at(-1)).not.toHaveProperty("typesafe");
+    expect(body.error).toContain("/api/settings");
+    void withBlock;
   });
 });
