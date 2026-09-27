@@ -324,3 +324,28 @@ export function mergeTypesafeSettings(
   const typesafeCfg = "typesafe" in next ? coerceTypesafeSettings(next.typesafe) : current.typesafe;
   if (typesafeCfg) merged.typesafe = typesafeCfg;
 }
+
+/**
+ * Refuse a System One write that does not name the repository it was read from.
+ *
+ * This block is replace-on-write on mere key PRESENCE (`mergeTypesafeSettings` above), so any
+ * caller that posts a settings snapshot it took earlier silently overwrites the judge - enabled
+ * flag, model, thresholds, call-site toggles - in whichever repo is active by then. The write
+ * target is a process-global in the server, so "the settings the panel loaded" and "the settings
+ * that get written" are not the same repo without this check.
+ *
+ * It is asserted from `writeSettings` rather than from a route because there are two routes into
+ * disk: `/api/settings` and `/api/settings/apply`, the second reached through the policy preview in
+ * `policy-route.ts`, which does not consult the first. `writeSettings` is the one place both pass
+ * through, and the only place the target repo is known. Guarding routes makes the rule per-route.
+ *
+ * `expectRepo` is compared, never stored: `writeSettings` builds its result field by field.
+ */
+export function assertTypesafeWriteNamed(
+  base: string,
+  next: { typesafe?: unknown; expectRepo?: string },
+): void {
+  if (next.typesafe !== undefined && next.expectRepo !== base) {
+    throw new Error("a System One write must name the repository it was read from");
+  }
+}

@@ -15,6 +15,7 @@ import {
   writeSettings,
 } from "../src/settings.js";
 import { DEFAULT_CURATOR_SETTINGS } from "../src/skills/curator-settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS } from "../src/typesafe-settings.js";
 
 /** Make a throwaway repo dir and return its path. */
 function tmpRepo(): string {
@@ -653,5 +654,48 @@ describe("settings.curator (#689)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("writeSettings refuses an unnamed System One write", () => {
+  // Every settings write passes through this function, and the repo it writes is only known here.
+  // Two routes reach disk - /api/settings and /api/settings/apply - so a rule enforced in one of
+  // them is a rule the other one does not have; this is where the rule holds for both.
+  test("accepts a System One write that names the repo it is for", () => {
+    const repo = tmpRepo();
+    writeSettings(repo, {
+      expectRepo: repo,
+      typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+    });
+    expect(readSettings(repo).typesafe?.enabled).toBe(true);
+  });
+
+  test("refuses one that names nothing, and changes neither repo", () => {
+    const repo = tmpRepo();
+    expect(() =>
+      writeSettings(repo, { typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true } }),
+    ).toThrow("must name the repository");
+    expect(readSettings(repo).typesafe).toBeUndefined();
+  });
+
+  test("refuses one that names a different repo, and changes neither", () => {
+    const target = tmpRepo();
+    const named = tmpRepo();
+    expect(() =>
+      writeSettings(target, {
+        expectRepo: named,
+        typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+      }),
+    ).toThrow("must name the repository");
+    expect(readSettings(target).typesafe).toBeUndefined();
+    expect(readSettings(named).typesafe).toBeUndefined();
+  });
+
+  test("blocks the settings a panel does own still write without naming a repo", () => {
+    const repo = tmpRepo();
+    writeSettings(repo, {
+      failureProtection: { ...DEFAULT_FAILURE_PROTECTION, timeoutSeconds: 7 },
+    });
+    expect(readSettings(repo).failureProtection.timeoutSeconds).toBe(7);
   });
 });

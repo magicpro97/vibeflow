@@ -716,3 +716,25 @@ describe("vf config typesafe — real dispatcher", () => {
     expect(`${r.stdout}${r.stderr}`).toContain("Usage: vf config typesafe ...");
   });
 });
+
+describe("the CLI's own writes satisfy the repo-identity rule", () => {
+  test("`on` goes through the REAL writeSettings, not an injected one", async () => {
+    // Every other test in this file injects `writeSettings`. `writeSettings` refuses a System One
+    // write that does not name its target repo, so a missing `expectRepo` in config-typesafe.ts
+    // would not show up in any of them - it would surface as a thrown `vf config typesafe on`
+    // for a real user. This test takes the real path, so it fails if that name is dropped.
+    const base = repo();
+    const lines: string[] = [];
+    const code = await configTypesafe(
+      ["on"],
+      base,
+      {},
+      {
+        out: (m: string) => lines.push(m),
+        env: { TYPESAFE_API_KEY: "not-a-real-key" },
+      },
+    );
+    expect(code).toBe(0);
+    expect(readSettings(base).typesafe?.enabled).toBe(true);
+  });
+});

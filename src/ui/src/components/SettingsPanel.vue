@@ -257,9 +257,19 @@ onMounted(async () => {
   dialogEl.value?.focus();
   try {
     const settings = await api.settings.get();
-    // Deep clone so edits don't mutate the API-cached object
-    form.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
-    original.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
+    // Deep clone so edits don't mutate the API-cached object.
+    // This panel has no System One UI, so that block is not carried into the form at all. It used
+    // to ride along on BOTH save paths - the direct one and the policy-preview one - because the
+    // form is a snapshot of the WHOLE settings and `mergeTypesafeSettings` is replace-on-write on
+    // mere key presence, so saving anything at all rewrote the judge from a stale copy. Dropping it
+    // here covers both branches at once instead of one guard per branch, and keeps the dirty check
+    // honest: neither side carries it.
+    const { typesafe: unmanagedTypesafe, ...managed } = JSON.parse(
+      JSON.stringify(settings),
+    ) as VibeSettings;
+    void unmanagedTypesafe;
+    form.value = managed as VibeSettings;
+    original.value = JSON.parse(JSON.stringify(managed)) as VibeSettings;
     // Coerce envPolicy → {} on BOTH so EnvScrubEditor's v-model binds an object
     // AND the dirty-check baseline matches (else isDirty is true on open).
     if (form.value && !form.value.envPolicy) form.value.envPolicy = {};
@@ -348,18 +358,7 @@ async function save() {
     if (JSON.stringify(originalPolicy) !== JSON.stringify(nextPolicy)) {
       policyPreview.value = await api.settings.previewPolicy(nextPolicy);
     } else {
-      // This panel has no System One UI, and `form` is a snapshot of the WHOLE settings taken when
-      // the dialog opened, so posting it back would write the System One block too — a stale copy
-      // of the judge's enabled flag, model, thresholds and call-site toggles, into whatever repo is
-      // active by then, which this panel never names and cannot see change. It is not this panel's
-      // block to write, so it is dropped from the payload. The server refuses the combination
-      // outright, so a client that forgets gets a 400 rather than a silent overwrite.
-      // `delete` is banned by lint, and assigning `undefined` would NOT be equivalent here: the key
-      // would still be present, and the server keys its refusal on `"typesafe" in payload`, so a
-      // payload that kept the key with an undefined value would be refused. Rebuild without it.
-      const { typesafe: unmanaged, ...payload } = form.value;
-      void unmanaged;
-      const savedSettings = await api.settings.set(payload);
+      const savedSettings = await api.settings.set(form.value);
       original.value = JSON.parse(JSON.stringify(savedSettings)) as VibeSettings;
       saved.value = true;
       setTimeout(() => emit("close"), 1500);

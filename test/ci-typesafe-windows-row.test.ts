@@ -53,12 +53,18 @@ describe("the win32 gate is wired into both workflows", () => {
   test("ci.yml lists the typesafe-hook row and runs the live test on it", () => {
     const suites = windowsMatrixSuites(ci);
     expect(suites).toContain("typesafe-hook");
+    // Scoped to the JOB, not the file. As whole-file substrings all of these survived moving the
+    // step into any other job - the matrix row is unchanged, the strings still occur, and the
+    // count still matches - while `matrix.suite` is null there, so the step skips and the Windows
+    // job reports success with both win32 claims unverified. `jobBlock` was applied to release.yml
+    // only, which is exactly the asymmetry this closes.
+    const windowsJob = jobBlock(ci, "windows");
     // `if:` and `run:` were asserted as two independent whole-file substrings, so swapping the
-    // run body for anything else, or moving the real command to a decoy step, left both green.
+    // run body for anything else, or parking the real command on a decoy step, left both green.
     // Anchoring the gate to end-of-line matters on its own: `toContain("if: matrix.suite ==
     // 'typesafe-hook'")` is a prefix with no terminator, so appending `&& matrix.suite ==
     // 'package-smoke'` kept it matching while the step could never run.
-    expect(ci).toContain(
+    expect(windowsJob).toContain(
       "if: matrix.suite == 'typesafe-hook'\n        run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
     // The live test needs the built artifact and node on PATH, and both must be gated on the same
@@ -67,11 +73,11 @@ describe("the win32 gate is wired into both workflows", () => {
     // job — which is exactly what this assertion claims to cover.
     const gatedOnRow =
       "if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap' || matrix.suite == 'typesafe-hook'";
-    expect(ci.split(gatedOnRow).length - 1).toBe(2);
+    expect(windowsJob.split(gatedOnRow).length - 1).toBe(2);
     // One gates `actions/setup-node`, the other gates the build step itself.
-    expect(ci).toContain(`${gatedOnRow}\n        run: bun run build`);
+    expect(windowsJob).toContain(`${gatedOnRow}\n        run: bun run build`);
     // `uses:` precedes `if:` on the setup-node step, unlike the build step above.
-    expect(ci).toContain(`uses: actions/setup-node@v4\n        ${gatedOnRow}`);
+    expect(windowsJob).toContain(`uses: actions/setup-node@v4\n        ${gatedOnRow}`);
   });
 
   test("release.yml runs the same live test, and runs it inside the Windows job", () => {

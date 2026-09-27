@@ -331,10 +331,16 @@ export function readSettings(base?: string): VibeSettings {
 /** Read-modify-write: merge `next` over current settings, stamp `updatedAt`, persist, return it. */
 export function writeSettings(
   base: string,
-  next: Partial<VibeSettings>,
+  next: Partial<VibeSettings> & {
+    /** The repo this write is FOR, as the caller understood it. Required with `next.typesafe` —
+     *  see `assertTypesafeWriteNamed`, which this function asserts. Compared, never stored. */
+    expectRepo?: string;
+  },
   opts?: { now?: () => string },
 ): VibeSettings {
   const now = opts?.now ?? (() => new Date().toISOString());
+  // Refused before anything is read or written, so a rejected write leaves the file untouched.
+  typesafeSettings.assertTypesafeWriteNamed(base, next);
   const current = readSettings(base);
   const merged: VibeSettings = {
     ...coerceEnabledEngines(next.enabledEngines ?? current.enabledEngines),

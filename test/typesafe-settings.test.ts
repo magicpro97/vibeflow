@@ -518,6 +518,7 @@ describe("settings round-trip", () => {
   test("writeSettings persists the typesafe block and readSettings returns it", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-ts-repo-"));
     writeSettings(dir, {
+      expectRepo: dir,
       typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true, model: "jev-1.13.0" },
     });
     const back = readSettings(dir);

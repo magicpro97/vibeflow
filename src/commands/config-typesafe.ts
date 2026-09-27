@@ -199,7 +199,7 @@ export async function configTypesafe(
   if (sub === "on" || sub === "off") {
     const enabled = sub === "on";
     if (enabled) for (const line of TYPESAFE_EGRESS_LINES) print(line);
-    const next = write(base, { typesafe: { ...current, enabled } });
+    const next = write(base, { expectRepo: base, typesafe: { ...current, enabled } });
     print(`enabled: ${String(next.typesafe?.enabled ?? enabled)}`);
     print(thresholdsLine(coerceTypesafeSettings(next.typesafe) ?? current));
     if (!enabled) print("sends: nothing — all four call sites disabled");
@@ -212,7 +212,7 @@ export async function configTypesafe(
       print(MODEL_USAGE);
       return 2;
     }
-    write(base, { typesafe: { ...current, model: id } });
+    write(base, { expectRepo: base, typesafe: { ...current, model: id } });
     print(`model: ${id}`);
     return 0;
   }
@@ -225,7 +225,7 @@ export async function configTypesafe(
       return 2;
     }
     const field = which === "run" ? "runAtConfidence" : "acceptAtConfidence";
-    const next = write(base, { typesafe: { ...current, [field]: raw } });
+    const next = write(base, { expectRepo: base, typesafe: { ...current, [field]: raw } });
     print(thresholdsLine(coerceTypesafeSettings(next.typesafe) ?? current));
     return 0;
   }
@@ -242,6 +242,7 @@ export async function configTypesafe(
       return 2;
     }
     write(base, {
+      expectRepo: base,
       typesafe: { ...current, callSites: { ...current.callSites, [name]: mode === "on" } },
     });
     print(`call site: ${name}=${mode}`);
