@@ -107,8 +107,10 @@ export function applyPolicy(
     )
   ) {
     try {
+      const { typesafe: _rollbackDoesNotOwnTypesafe, ...restorable } = current;
+      void _rollbackDoesNotOwnTypesafe;
       deps.write(repo, {
-        ...current,
+        ...restorable,
         envPolicy: current.envPolicy,
         hooks: current.hooks,
       } as Partial<VibeSettings>);

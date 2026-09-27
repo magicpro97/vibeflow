@@ -63,10 +63,20 @@ const OPEN_COOLDOWN_LINE = (root: string) =>
 
 describe("vf config typesafe — status", () => {
   test("status on a fresh repo reports off + no key source", async () => {
+    // Hermetic userRoot. Without one this reads the developer's real ~/.vibeflow/typesafe.env, so
+    // the key-source line differs per machine and the loose `toContain("off")` below was the only
+    // thing that held on both - "off" is a substring of plenty.
     const { lines, out } = collector();
-    const code = await configTypesafe(["status"], repo(), {}, { out, env: {} });
+    const code = await configTypesafe(
+      ["status"],
+      repo(),
+      {},
+      { out, env: {}, userRoot: userRoot() },
+    );
     expect(code).toBe(0);
-    expect(lines.join("\n")).toContain("off");
+    const text = lines.join("\n");
+    expect(text).toContain("breaker state: off");
+    expect(text).toContain("key source: none");
   });
 
   test("bare `vf config typesafe` is status", async () => {

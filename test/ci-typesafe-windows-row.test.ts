@@ -96,6 +96,9 @@ describe("the win32 gate is wired into both workflows", () => {
     // The WHOLE step, not just the text before `run:`. A YAML mapping key may sit after `run:` in
     // the same step, so a scan that stops at `run:` walks straight past `continue-on-error` there.
     expect(step).not.toContain("continue-on-error");
+    // And not at the JOB level either: `jobs.<id>.continue-on-error` is valid there and would make
+    // the whole row contribute success while every step in it fails.
+    expect(jobBlock(ci, "windows")).not.toContain("continue-on-error");
     // The aggregate the release gate reads must still exist, or a green row decides nothing.
     expect(ci).toContain("WINDOWS_RESULT: ${{ needs.windows.result }}");
   });
@@ -153,5 +156,8 @@ describe("the win32 gate is wired into both workflows", () => {
     // The row exists for the 10s spawn budget, which is the number this test's own docstring and
     // the workflows' comments both name. Raising it here would silently change what CI verified.
     expect(body).toContain("const HOOK_BUDGET_MS = 10_000;");
+    // The declaration alone is not the claim. The budget is what the test's timing assertion uses,
+    // so pin that the assertion reads it rather than a literal that could drift away from the const.
+    expect(body).toContain("expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);");
   });
 });

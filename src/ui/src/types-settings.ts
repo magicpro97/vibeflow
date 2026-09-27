@@ -63,8 +63,10 @@ export interface TypesafeSettings {
   callSites: TypesafeCallSites;
 }
 
-/** The subset the control center actually edits. A `Pick` of the mirror, so a
- *  renamed server field breaks the build here instead of drifting silently. */
+/** The subset the control center actually edits. A `Pick` of the MIRROR above, not of the server
+ *  type - the UI cannot import it (the drawer is pinned against importing `typesafe-settings.js`),
+ *  so a renamed server field does NOT break this build. `ui-typesafe-mirror.test.ts` is what holds
+ *  the mirror to the server's field names. */
 export type TypesafeFormSettings = Pick<
   TypesafeSettings,
   "enabled" | "runAtConfidence" | "acceptAtConfidence" | "callSites"

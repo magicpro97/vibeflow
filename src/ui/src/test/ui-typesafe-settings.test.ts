@@ -69,8 +69,11 @@ test("every call site is individually toggleable", () => {
 test("configured and state are separate rows, and an open breaker warns with its resume time", () => {
   // `configured` answers "is a key set"; `state` answers "is it working". Rendering
   // only the first would paint a tripped 15-minute breaker green.
-  expect(drawer).toContain("state");
-  expect(drawer).toContain("configured");
+  // `state` and `configured` on their own appear elsewhere in the file (an MCP note uses
+  // "configured"), so asserting the bare words passes without either row existing. These are the
+  // expressions that only the two rows produce.
+  expect(drawer).toContain("typesafeView?.state");
+  expect(drawer).toContain("typesafeView.configured");
   expect(drawer).toContain("cooldownUntil");
   expect(drawer).toContain('data-state="open"');
 });
@@ -218,9 +221,11 @@ test("the generic settings panel never carries the System One block into its for
   // branches; a guard per branch would have to be repeated on the policy-apply route too, which
   // does not go through the settings route at all.
   const panel = readFileSync(new URL("../components/SettingsPanel.vue", import.meta.url), "utf8");
-  const loadAt = panel.indexOf("const { typesafe: unmanagedTypesafe, ...managed }");
-  expect(loadAt).toBeGreaterThan(-1);
-  expect(panel.slice(loadAt, loadAt + 400)).toContain("form.value = managed");
+  // No window and no offset: both tokens are distinctive, so a character bound here would only
+  // start silently asserting against whatever moved into the window.
+  expect(panel).toContain("const { typesafe: unmanagedTypesafe, ...managed }");
+  expect(panel).toContain("void unmanagedTypesafe;");
+  expect(panel).toContain("form.value = managed");
   // Both paths post the form, so with the block absent from the form neither can send it.
   expect(panel).toContain("api.settings.set(form.value)");
   expect(panel).toContain("{ ...nonPolicy }");
