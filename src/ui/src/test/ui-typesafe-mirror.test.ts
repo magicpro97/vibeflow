@@ -59,8 +59,20 @@ describe("the UI's System One types are a mirror, and this is what keeps it hone
       (m) => m[1] ?? "",
     );
     expect(members.length).toBeGreaterThan(0);
-    const union = ui.match(/^\s{2}state: (.+);$/m)?.[1] ?? "";
-    expect(union).not.toBe("string");
-    for (const member of members) expect(union).toContain(`"${member}"`);
+    const state = ui.match(/^\s{2}state: (.+);$/m)?.[1] ?? "";
+    expect(state).not.toBe("string");
+    for (const member of members) expect(state).toContain(`"${member}"`);
+
+    // `lastClass` had the same exposure and did not get the same treatment: the union written into
+    // the mirror was invented - four members the server cannot produce - and nothing checked it,
+    // because only `state` was held to the server.
+    const failures = health.slice(health.indexOf("FAILURE_CLASS = Object.freeze({"));
+    const classes = [
+      ...failures.slice(0, failures.indexOf("} as const")).matchAll(/: "([^"]+)"/g),
+    ].map((m) => m[1] ?? "");
+    expect(classes.length).toBeGreaterThan(0);
+    const lastClass = ui.match(/^\s{2}lastClass\?:\n([\s\S]*?);$/m)?.[1] ?? "";
+    expect(lastClass).not.toBe("");
+    for (const member of classes) expect(lastClass).toContain(`"${member}"`);
   });
 });

@@ -157,7 +157,18 @@ export interface TypesafeSettingsView {
   repo: string;
   state: "off" | "unconfigured" | "idle" | "open" | "half-open";
   cooldownUntil?: string;
-  lastClass?: "timeout" | "http" | "parse" | "other";
+  lastClass?:
+    | "none"
+    | "disabled"
+    | "unconfigured"
+    | "cooldown"
+    | "abort"
+    | "network"
+    | "auth"
+    | "budget"
+    | "schema"
+    | "server"
+    | "malformed";
   calls?: number;
   enabled: boolean;
   configured: boolean;

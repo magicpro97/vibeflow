@@ -105,7 +105,12 @@ describe("the win32 gate is wired into both workflows", () => {
     // with both win32 claims unverified - `WINDOWS_RESULT` reads success and the release decision
     // proceeds. Asserting the step's text is not the same as asserting the step can fail.
     const step = stepBlock(windowsJob, "- name: Live Windows typesafe hook budget");
-    expect(step).toContain("run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts");
+    // Anchored to the end of the line: `run: bun test ... || true` or `; exit 0` leaves the command
+    // as a substring and the step still reports success, which is the whole gate defused. Pinning
+    // where the line ENDS is what makes the command the whole run script.
+    expect(step).toMatch(
+      /^\s*run: bun test --timeout 30000 test\/typesafe-hook-windows-live\.test\.ts$/m,
+    );
     // The WHOLE step, not just the text before `run:`. A YAML mapping key may sit after `run:` in
     // the same step, so a scan that stops at `run:` walks straight past `continue-on-error` there.
     expect(step).not.toContain("continue-on-error");
