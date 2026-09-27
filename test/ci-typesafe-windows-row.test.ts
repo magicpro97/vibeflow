@@ -138,13 +138,25 @@ describe("the win32 gate is wired into both workflows", () => {
       "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
     expect(releaseStep).not.toContain("continue-on-error");
+    // "Same two ways out as ci.yml" was only true for the step. The JOB-level escape applies to
+    // release.yml too: `jobs.<id>.continue-on-error` makes needs.<id>.result success even when the
+    // live test fails, and the prereq guard reads exactly that.
+    expect(inWindowsJob).not.toContain("continue-on-error");
     // Unlike the ci.yml row this step has no matrix, so it is unconditional: an `if:` appearing at
     // this indent is the release gate being switched off, and the run line would still match.
     expect(releaseStep).not.toContain("\n        if:");
     expect(release).toContain('if ($env:WINDOWS_RESULT -ne "success")');
     // The aggregate the release decision reads is the job result, so the job must exist.
     expect(release).toContain("WINDOWS_RESULT");
-    expect(release).toContain("VF_REQUIRE_LIVE_WINDOWS");
+    // The row is only loud because the JOB runs on Windows and hands the live test its arming env.
+    // Move either to another job and the platform selector becomes `test.skip`, the module-scope
+    // guard has no env to fire on, and the whole thing reports success with 2 skips while both
+    // win32 claims are unverified - with WINDOWS_RESULT reading success. A whole-file `toContain`
+    // for the env name did not pin any of that; these are scoped to the jobs that must carry them.
+    for (const job of [jobBlock(ci, "windows"), inWindowsJob]) {
+      expect(job).toContain("runs-on: windows-latest");
+      expect(job).toContain('VF_REQUIRE_LIVE_WINDOWS: "1"');
+    }
   });
 
   test("the module-scope guard makes a non-Windows runner fail loudly, not skip to green", () => {

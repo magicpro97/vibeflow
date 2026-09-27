@@ -41,21 +41,26 @@ test("control center exposes a System One section with the four states and acces
   }
 });
 
-test("status states include text and ARIA, not colour alone", () => {
-  for (const snippet of [
-    "No System One key configured",
-    "Loading System One settings",
-    "System One connection failed",
-    'role="status"',
-    'aria-live="polite"',
-    'role="alert"',
-  ]) {
-    expect(drawer).toContain(snippet);
-  }
+test("each state is announced as TEXT inside a live-region element, not by colour alone", () => {
+  // Asserting those six strings again proved nothing: every one of them is already asserted by the
+  // test above against the same `drawer` constant, so this could not fail while that one passed.
+  // The claim in the name is about the pairing - a role AND literal text - so pin the pairing.
+  // `[^<{]` is the load-bearing part: replace the text with an interpolation and the state is no
+  // longer announced, which the old version could not see.
+  expect(drawer).toMatch(/role="status"[^>]*>\s*[A-Z][^<{]{5,}/);
+  expect(drawer).toMatch(/role="alert"[^>]*>\s*[A-Z][^<{]{5,}/);
 });
 
 test("the drawer never renders a secret: no key value, only a source label", () => {
-  expect(drawer).toContain("keySource");
+  expect(drawer).toContain("typesafeView.keySource");
+  // What holds this property is that the SOURCE LABEL is the only key-related field the drawer
+  // reads off the view. Greps for a literal could not fail: adding `{{ typesafeView.keyPreview }}`
+  // to the template matched neither negative regex, so a key value could be rendered while this
+  // stayed green.
+  const viewFields = new Set([...drawer.matchAll(/typesafeView[?.]?\.(\w+)/g)].map((m) => m[1]));
+  expect([...viewFields].filter((f) => /key|secret|token|credential/i.test(f ?? ""))).toEqual([
+    "keySource",
+  ]);
   expect(drawer).not.toMatch(/TYPESAFE_API_KEY\s*[:=]\s*["'`]/);
   expect(drawer).not.toContain("Bearer");
 });
