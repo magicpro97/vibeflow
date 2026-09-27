@@ -190,6 +190,13 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(body).toContain(
       "const liveWindowsTest = process.platform === RUNTIME_PLATFORM.WINDOWS ? test : test.skip;",
     );
+    // The declaration is not where it is USED. Swapping either call site to `test.skip` leaves that
+    // string byte-identical and every assertion in this file green - and on windows-latest both
+    // tests then skip, `bun test` exits 0, the row succeeds, WINDOWS_RESULT reads success and the
+    // release guard passes. So pin the use sites too: two registrations, both through the selector,
+    // and nothing that skips unconditionally.
+    expect([...body.matchAll(/liveWindowsTest\(/g)]).toHaveLength(2);
+    expect(body).not.toMatch(/test\.skip\s*\(/);
     // The row exists for the 10s spawn budget, which is the number this test's own docstring and
     // the workflows' comments both name. Raising it here would silently change what CI verified.
     expect(body).toContain("const HOOK_BUDGET_MS = 10_000;");
