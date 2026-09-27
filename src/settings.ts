@@ -333,14 +333,14 @@ export function writeSettings(
   base: string,
   next: Partial<VibeSettings> & {
     /** The repo this write is FOR, as the caller understood it. Required with `next.typesafe` —
-     *  see `assertTypesafeWriteNamed`, which this function asserts. Compared, never stored. */
+     *  see `assertTypesafeWriteAllowed`, which this function asserts. Compared, never stored. */
     expectRepo?: string;
   },
   opts?: { now?: () => string },
 ): VibeSettings {
   const now = opts?.now ?? (() => new Date().toISOString());
   // Refused before anything is read or written, so a rejected write leaves the file untouched.
-  typesafeSettings.assertTypesafeWriteNamed(base, next);
+  typesafeSettings.assertTypesafeWriteAllowed(base, next);
   const current = readSettings(base);
   const merged: VibeSettings = {
     ...coerceEnabledEngines(next.enabledEngines ?? current.enabledEngines),

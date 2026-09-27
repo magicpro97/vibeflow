@@ -121,13 +121,20 @@ const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.m
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /** Coerce a stored block; absent/garbage yields undefined so the key stays out of SETTINGS.json. */
-export function coerceTypesafeSettings(raw: unknown): TypesafeSettings | undefined {
+export function coerceTypesafeSettings(
+  raw: unknown,
+  /**
+   * Block to take UNSENT fields from. The read path uses the shipped defaults; a write passes the
+   * stored block, so a payload that names some fields updates those and leaves the rest alone —
+   * the same semantics as every other settings block. Starting from the defaults instead made a
+   * partial write a silent reset: `{"typesafe":{"model":"x"}}` turned `enabled` back off and
+   * relaxed every tightened threshold and call-site toggle.
+   */
+  base: TypesafeSettings = DEFAULT_TYPESAFE_SETTINGS,
+): TypesafeSettings | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const obj = raw as Record<string, unknown>;
-  const out: TypesafeSettings = {
-    ...DEFAULT_TYPESAFE_SETTINGS,
-    callSites: { ...DEFAULT_TYPESAFE_SETTINGS.callSites },
-  };
+  const out: TypesafeSettings = { ...base, callSites: { ...base.callSites } };
   if (typeof obj.enabled === "boolean") out.enabled = obj.enabled;
   if (typeof obj.model === "string" && obj.model.trim().length > 0) out.model = obj.model.trim();
   if (finite(obj.retryBackoffMs))
@@ -321,12 +328,15 @@ export function mergeTypesafeSettings(
   next: { typesafe?: TypesafeSettings },
   current: { typesafe?: TypesafeSettings },
 ): void {
-  const typesafeCfg = "typesafe" in next ? coerceTypesafeSettings(next.typesafe) : current.typesafe;
+  const typesafeCfg =
+    "typesafe" in next
+      ? coerceTypesafeSettings(next.typesafe, current.typesafe ?? DEFAULT_TYPESAFE_SETTINGS)
+      : current.typesafe;
   if (typesafeCfg) merged.typesafe = typesafeCfg;
 }
 
 /**
- * Refuse a System One write that does not name the repository it was read from.
+ * Refuse a System One write that is malformed or does not name the repository it was read from.
  *
  * This block is replace-on-write on mere key PRESENCE (`mergeTypesafeSettings` above), so any
  * caller that posts a settings snapshot it took earlier silently overwrites the judge - enabled
@@ -341,11 +351,20 @@ export function mergeTypesafeSettings(
  *
  * `expectRepo` is compared, never stored: `writeSettings` builds its result field by field.
  */
-export function assertTypesafeWriteNamed(
+export function assertTypesafeWriteAllowed(
   base: string,
   next: { typesafe?: unknown; expectRepo?: string },
 ): void {
-  if (next.typesafe !== undefined && next.expectRepo !== base) {
+  if (!("typesafe" in next) || next.typesafe === undefined) return;
+  // A value that is not a plain object is not a partial update. `null`, a string and an array all
+  // coerce to `undefined`, which the merge reads as "no block" and DELETES the stored one - the
+  // guardrail's configuration gone, reported as success. Omitting the key is the documented way to
+  // leave the block alone.
+  const block = next.typesafe;
+  if (block === null || typeof block !== "object" || Array.isArray(block)) {
+    throw new Error("a System One write must send a block object");
+  }
+  if (next.expectRepo !== base) {
     throw new Error("a System One write must name the repository it was read from");
   }
 }

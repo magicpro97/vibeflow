@@ -78,6 +78,20 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(windowsJob).toContain(`${gatedOnRow}\n        run: bun run build`);
     // `uses:` precedes `if:` on the setup-node step, unlike the build step above.
     expect(windowsJob).toContain(`uses: actions/setup-node@v4\n        ${gatedOnRow}`);
+    // And the step must still be able to FAIL its job. `continue-on-error: true` inserted anywhere
+    // in the step leaves the `if:`+`run:` pair byte-identical, and the row then reports success
+    // with both win32 claims unverified - `WINDOWS_RESULT` reads success and the release decision
+    // proceeds. Asserting the step's text is not the same as asserting the step can fail.
+    const liveStep = windowsJob.slice(
+      windowsJob.indexOf("- name: Live Windows typesafe hook budget"),
+    );
+    const runAt = liveStep.indexOf(
+      "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
+    );
+    expect(runAt).toBeGreaterThan(-1);
+    expect(liveStep.slice(0, runAt)).not.toContain("continue-on-error");
+    // The aggregate the release gate reads must still exist, or a green row decides nothing.
+    expect(ci).toContain("WINDOWS_RESULT: ${{ needs.windows.result }}");
   });
 
   test("release.yml runs the same live test, and runs it inside the Windows job", () => {
@@ -92,6 +106,17 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(jobBlock(release, "verify")).not.toContain(
       "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
+    // Same two ways out as ci.yml: the step must not be defeatable, and the job result must still
+    // be able to stop the release.
+    const releaseStep = inWindowsJob.slice(
+      inWindowsJob.indexOf("- name: Windows typesafe hook budget release gate"),
+    );
+    const rRunAt = releaseStep.indexOf(
+      "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
+    );
+    expect(rRunAt).toBeGreaterThan(-1);
+    expect(releaseStep.slice(0, rRunAt)).not.toContain("continue-on-error");
+    expect(release).toContain('if ($env:WINDOWS_RESULT -ne "success")');
     // The aggregate the release decision reads is the job result, so the job must exist.
     expect(release).toContain("WINDOWS_RESULT");
     expect(release).toContain("VF_REQUIRE_LIVE_WINDOWS");

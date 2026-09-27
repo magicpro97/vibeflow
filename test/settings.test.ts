@@ -691,6 +691,34 @@ describe("writeSettings refuses an unnamed System One write", () => {
     expect(readSettings(named).typesafe).toBeUndefined();
   });
 
+  test("refuses a block that is not an object, instead of deleting the stored one", () => {
+    // Reached directly here because the route rejects these before the choke point, which is what
+    // makes the choke point's own check the thing that has to hold for every other caller. A
+    // malformed payload must not read as "no block": that DELETES the stored configuration.
+    for (const bad of [null, "x", []]) {
+      const target = tmpRepo();
+      writeSettings(target, {
+        expectRepo: target,
+        typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+      });
+      expect(() => writeSettings(target, { expectRepo: target, typesafe: bad as never })).toThrow(
+        "block object",
+      );
+      expect(readSettings(target).typesafe?.enabled).toBe(true);
+    }
+  });
+
+  test("omitting the block entirely leaves the stored one alone", () => {
+    // The documented way to NOT touch the block, as opposed to the malformed shapes above.
+    const target = tmpRepo();
+    writeSettings(target, {
+      expectRepo: target,
+      typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+    });
+    writeSettings(target, { memory: false });
+    expect(readSettings(target).typesafe?.enabled).toBe(true);
+  });
+
   test("blocks the settings a panel does own still write without naming a repo", () => {
     const repo = tmpRepo();
     writeSettings(repo, {

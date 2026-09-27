@@ -86,4 +86,15 @@ describe("handleSettingsRoute", () => {
     expect(res.status).toBe(200);
     expect(readSettings(active).failureProtection.timeoutSeconds).toBe(5);
   });
+
+  test("a block that is not an object is refused, not treated as a delete", () => {
+    // `null`, a string and an array all coerce to "no block", which the merge reads as a delete of
+    // the stored configuration - reported as success. Omitting the key is how you leave it alone.
+    for (const bad of [null, "x", []]) {
+      const active = repo("malformed");
+      const res = handleSettingsRoute(active, { expectRepo: active, typesafe: bad });
+      expect(res.status).toBe(400);
+      expect(readSettings(active).typesafe).toBeUndefined();
+    }
+  });
 });

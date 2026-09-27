@@ -30,6 +30,7 @@ import {
   HOOK_STDIN_BUDGET_MS,
   HOOK_TIMEOUT_CAP_MS,
   TYPESAFE_CALL_SITE_NAMES,
+  type TypesafeSettings,
   applyTypesafeSettings,
   coerceTypesafeSettings,
   isTypesafeConfigured,
@@ -497,10 +498,14 @@ describe("applyTypesafeSettings / mergeTypesafeSettings", () => {
       ...DEFAULT_SETTINGS,
       typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true, model: "jev-1.13.0" },
     };
+    // A present block still replaces the block object, but a payload that names only SOME fields
+    // keeps the stored values of the rest. It used to start from the shipped defaults, so naming
+    // `enabled` alone silently reset the model, the thresholds and the call-site toggles - the
+    // same class of silent loss, from the other direction.
     const replaced: VibeSettings = { ...DEFAULT_SETTINGS };
     mergeTypesafeSettings(replaced, { typesafe: { enabled: false } as never }, current);
     expect(replaced.typesafe?.enabled).toBe(false);
-    expect(replaced.typesafe?.model).toBe(DEFAULT_TYPESAFE_SETTINGS.model);
+    expect(replaced.typesafe?.model).toBe("jev-1.13.0");
 
     const kept: VibeSettings = { ...DEFAULT_SETTINGS };
     mergeTypesafeSettings(kept, { memory: false } as never, current);
@@ -530,5 +535,36 @@ describe("settings round-trip", () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-ts-repo-"));
     writeSettings(dir, { memory: false });
     expect(readSettings(dir).typesafe).toBeUndefined();
+  });
+});
+
+describe("a partial System One write updates only what it names", () => {
+  test("unsent fields survive instead of reverting to the shipped defaults", () => {
+    // Starting the coercion from the defaults made a partial write a silent reset: naming only
+    // `model` turned the judge back OFF and relaxed every tightened threshold and call-site toggle,
+    // and the response said the save succeeded.
+    const stored = {
+      ...DEFAULT_TYPESAFE_SETTINGS,
+      enabled: true,
+      runAtConfidence: 0.95,
+      maxCalls: 7,
+      callSites: { ...DEFAULT_TYPESAFE_SETTINGS.callSites, risk: true },
+    };
+    const merged: { typesafe?: TypesafeSettings } = {};
+    mergeTypesafeSettings(merged, { typesafe: { model: "jev-1.13.0" } } as never, {
+      typesafe: stored,
+    });
+    expect(merged.typesafe?.model).toBe("jev-1.13.0");
+    expect(merged.typesafe?.enabled).toBe(true);
+    expect(merged.typesafe?.runAtConfidence).toBe(0.95);
+    expect(merged.typesafe?.maxCalls).toBe(7);
+    expect(merged.typesafe?.callSites.risk).toBe(true);
+  });
+
+  test("a first write still starts from the shipped defaults", () => {
+    const merged: { typesafe?: TypesafeSettings } = {};
+    mergeTypesafeSettings(merged, { typesafe: { enabled: true } } as never, {});
+    expect(merged.typesafe?.enabled).toBe(true);
+    expect(merged.typesafe?.acceptAtConfidence).toBe(DEFAULT_TYPESAFE_SETTINGS.acceptAtConfidence);
   });
 });

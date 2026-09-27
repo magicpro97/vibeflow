@@ -31,6 +31,17 @@ export function handleSettingsRoute(
   // on mere key PRESENCE, so any client that posts a whole settings snapshot it took earlier can
   // silently overwrite the judge — including into a repo it never named. Refusing the combination
   // outright is what makes the guard structural rather than dependent on each caller opting in.
+  // Malformed block: `null`, a string or an array coerces to "no block", and the merge would read
+  // that as a DELETE of the stored guardrail configuration while reporting success. The invariant is
+  // enforced in `assertTypesafeWriteAllowed`; this only picks the status code the client sees.
+  if (
+    "typesafe" in payload &&
+    (payload.typesafe === null ||
+      typeof payload.typesafe !== "object" ||
+      Array.isArray(payload.typesafe))
+  ) {
+    return Response.json({ error: "the System One block must be an object" }, { status: 400 });
+  }
   if ("typesafe" in payload && expectRepo === "") {
     return Response.json(
       { error: "a System One write must name the repository it was read from" },
