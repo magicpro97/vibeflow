@@ -191,6 +191,10 @@ test("the cross-repo guard is wired at its production call site, not only as a p
   expect(typesafeNeedsReload("/repo/a", "/repo/b")).toBe(true);
   expect(drawer).toContain("rowsAreStale: typesafeNeedsReload(typesafeRepo.value, repoPath.value)");
   expect(drawer).toContain(':disabled="typesafeSaveBlocked()"');
+  // The probe acts on the server's PROCESS-GLOBAL active repo too, so it needs the same staleness
+  // guard Save has: without it, a probe clicked from a stale panel bills and reports against
+  // whichever repo is active by then, under rows that describe the one it was opened for.
+  expect(drawer).toMatch(/:disabled="typesafeTesting[^"]*typesafeSaveBlocked\(\)"/);
   expect(drawer).toContain('@click="saveTypesafe"');
 });
 

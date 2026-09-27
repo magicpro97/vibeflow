@@ -34,6 +34,13 @@ function callText(src: string, callAt: number): string {
   return src.slice(callAt);
 }
 
+/** The YAML mapping keys a step actually carries, so a new one cannot slip past a text check. */
+function stepKeys(step: string): string[] {
+  // `stepBlock` starts AT the `- name:` bullet, so the first key has no leading spaces; the rest
+  // sit at 8. A key this misses shows up as a mismatch, which is the intended direction.
+  return [...step.matchAll(/^\s{0,8}(- )?([a-z-]+):/gm)].map((m) => `${m[1] ?? ""}${m[2]}`);
+}
+
 function stepBlock(job: string, marker: string): string {
   const from = job.indexOf(marker);
   expect(from).toBeGreaterThan(-1);
@@ -113,9 +120,15 @@ describe("the win32 gate is wired into both workflows", () => {
     );
     // The WHOLE step, not just the text before `run:`. A YAML mapping key may sit after `run:` in
     // the same step, so a scan that stops at `run:` walks straight past `continue-on-error` there.
-    expect(step).not.toContain("continue-on-error");
-    // And not at the JOB level either: `jobs.<id>.continue-on-error` is valid there and would make
-    // the whole row contribute success while every step in it fails.
+    // A WHITELIST, not a list of escapes. Enumerating them was whack-a-mole and lost: the step may
+    // also carry `working-directory:` (the run script then resolves the test relative to the wrong
+    // path, `bun test` prints "no test files matched" and EXITS 0), `shell:`, `env:`, `continue-
+    // on-error:` after `run:` and so on. Each of those leaves every text assertion above byte-
+    // identical. Requiring the step to hold exactly these keys means a new one has to be a
+    // deliberate edit to this test, which is the point of pinning it at all.
+    expect(stepKeys(step)).toEqual(["- name", "if", "run"]);
+    // And the JOB level, where `continue-on-error` and `if:` are both valid and would make the whole
+    // row contribute success while every step in it fails or is skipped.
     expect(jobBlock(ci, "windows")).not.toContain("continue-on-error");
     // Same escape one level up: `if: ${{ matrix.suite != 'typesafe-hook' }}` on the job skips the
     // leg while every per-step assertion above still matches, and `needs.windows.result` stays
@@ -146,7 +159,7 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(releaseStep).toContain(
       "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
-    expect(releaseStep).not.toContain("continue-on-error");
+    expect(stepKeys(releaseStep)).toEqual(["- name", "run"]);
     // "Same two ways out as ci.yml" was only true for the step. The JOB-level escape applies to
     // release.yml too: `jobs.<id>.continue-on-error` makes needs.<id>.result success even when the
     // live test fails, and the prereq guard reads exactly that.

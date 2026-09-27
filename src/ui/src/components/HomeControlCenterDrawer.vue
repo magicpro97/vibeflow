@@ -36,7 +36,7 @@
       </section>
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
-        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus === 'loading'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
+        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus === 'loading' || typesafeSaveBlocked()" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
         <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. With it off, every path behaves exactly as it does today.</p>
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
