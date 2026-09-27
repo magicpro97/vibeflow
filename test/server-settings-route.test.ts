@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleSettingsRoute } from "../src/server/routes-settings.js";
-import { readSettings } from "../src/settings.js";
+import { readSettings, writeSettings } from "../src/settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS } from "../src/typesafe-settings.js";
 
 const roots: string[] = [];
 
@@ -92,9 +93,15 @@ describe("handleSettingsRoute", () => {
     // the stored configuration - reported as success. Omitting the key is how you leave it alone.
     for (const bad of [null, "x", []]) {
       const active = repo("malformed");
+      // Store a block first. Asserting a repo that never had one stays empty passes whether or not
+      // the write deleted anything, so it could not fail on the behaviour it names.
+      writeSettings(active, {
+        expectRepo: active,
+        typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+      });
       const res = handleSettingsRoute(active, { expectRepo: active, typesafe: bad });
       expect(res.status).toBe(400);
-      expect(readSettings(active).typesafe).toBeUndefined();
+      expect(readSettings(active).typesafe?.enabled).toBe(true);
     }
   });
 });

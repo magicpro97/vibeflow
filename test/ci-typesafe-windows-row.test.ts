@@ -20,6 +20,15 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
+/** One step's own lines: from its `- name:` to the next step, so checks see the whole mapping. */
+function stepBlock(job: string, marker: string): string {
+  const from = job.indexOf(marker);
+  expect(from).toBeGreaterThan(-1);
+  const rest = job.slice(from);
+  const nextStep = rest.indexOf("\n      - ");
+  return nextStep === -1 ? rest : rest.slice(0, nextStep);
+}
+
 const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
 const release = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 
@@ -82,14 +91,11 @@ describe("the win32 gate is wired into both workflows", () => {
     // in the step leaves the `if:`+`run:` pair byte-identical, and the row then reports success
     // with both win32 claims unverified - `WINDOWS_RESULT` reads success and the release decision
     // proceeds. Asserting the step's text is not the same as asserting the step can fail.
-    const liveStep = windowsJob.slice(
-      windowsJob.indexOf("- name: Live Windows typesafe hook budget"),
-    );
-    const runAt = liveStep.indexOf(
-      "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
-    );
-    expect(runAt).toBeGreaterThan(-1);
-    expect(liveStep.slice(0, runAt)).not.toContain("continue-on-error");
+    const step = stepBlock(windowsJob, "- name: Live Windows typesafe hook budget");
+    expect(step).toContain("run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts");
+    // The WHOLE step, not just the text before `run:`. A YAML mapping key may sit after `run:` in
+    // the same step, so a scan that stops at `run:` walks straight past `continue-on-error` there.
+    expect(step).not.toContain("continue-on-error");
     // The aggregate the release gate reads must still exist, or a green row decides nothing.
     expect(ci).toContain("WINDOWS_RESULT: ${{ needs.windows.result }}");
   });
@@ -108,14 +114,14 @@ describe("the win32 gate is wired into both workflows", () => {
     );
     // Same two ways out as ci.yml: the step must not be defeatable, and the job result must still
     // be able to stop the release.
-    const releaseStep = inWindowsJob.slice(
-      inWindowsJob.indexOf("- name: Windows typesafe hook budget release gate"),
+    const releaseStep = stepBlock(
+      inWindowsJob,
+      "- name: Windows typesafe hook budget release gate",
     );
-    const rRunAt = releaseStep.indexOf(
+    expect(releaseStep).toContain(
       "run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
-    expect(rRunAt).toBeGreaterThan(-1);
-    expect(releaseStep.slice(0, rRunAt)).not.toContain("continue-on-error");
+    expect(releaseStep).not.toContain("continue-on-error");
     expect(release).toContain('if ($env:WINDOWS_RESULT -ne "success")');
     // The aggregate the release decision reads is the job result, so the job must exist.
     expect(release).toContain("WINDOWS_RESULT");
