@@ -132,7 +132,16 @@ describe("live Windows typesafe hook path", () => {
     try {
       // `homedir()` is where the shipped CLI resolves `~/.vibeflow`, so the child gets a throwaway
       // home instead of the runner's. USERPROFILE is the win32 source; HOME covers the POSIX run.
-      const home = { ...process.env, USERPROFILE: root, HOME: root };
+      const home = {
+        ...process.env,
+        USERPROFILE: root,
+        HOME: root,
+        // `typesafeEnvPath` resolves `VF_USER_VIBEFLOW_ROOT` BEFORE the home directory, and
+        // test/preload.ts sets it for every `bun test` run - so the child inherited the preload's
+        // temp dir and this test asserted on a path the CLI never wrote. HOME/USERPROFILE alone
+        // cannot redirect it.
+        VF_USER_VIBEFLOW_ROOT: root,
+      };
       execFileSync(nodeExecPathOrThrow(), [cliEntry, "config", "typesafe", "key"], {
         cwd: root,
         env: home,
