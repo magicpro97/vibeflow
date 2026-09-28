@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/magicpro97/vibeflow/compare/v0.19.0...v0.19.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **durability:** adopt an inherited-DACL records directory before the private write ([#822](https://github.com/magicpro97/vibeflow/issues/822)) ([ecd17e4](https://github.com/magicpro97/vibeflow/commit/ecd17e49dfe116df27c83fc3a1c86b3dd79b525d))
+
 ## [0.19.0](https://github.com/magicpro97/vibeflow/compare/v0.18.0...v0.19.0) (2026-09-24)
 
 
