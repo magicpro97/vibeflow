@@ -115,9 +115,8 @@ export function isWindowsDriveQualifiedPath(input: string): boolean {
 }
 
 export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRuntime): string {
-  // The drive-qualified guard is asked first when this runtime enforces local Windows storage: it
-  // names the actual requirement, so a UNC path is judged by it on every host instead of being
-  // reported as "not absolute" by whichever absoluteness rule the host happens to have.
+  // Ask the drive-qualified guard first when this runtime enforces local Windows storage: it names
+  // the actual requirement, so a UNC path is judged by it on every host.
   if (runtime.enforceLocalWindowsPath && !isWindowsDriveQualifiedPath(input))
     durabilityError("unsafe_path", "Windows record storage must use a drive-qualified path");
   if (!runtime.isAbsolutePath(input))
@@ -136,13 +135,10 @@ function ensureWindowsDirectoryComponents(
 ): void {
   const root = parse(absolute).root;
   const parts = absolute.slice(root.length).split(sep).filter(Boolean);
-  // Create what is missing and adopt what this install owns. A component above the storage surface
-  // is the user's own filesystem — a previous release, a plain fs call, mkdtemp — and re-securing it
-  // means opening %TEMP% or C:\ with WRITE_DAC and migrating a descriptor we were merely handed. The
-  // surface itself is the component adopted: a directory this install did not create carries
-  // whatever DACL its parent handed it, the private write refuses that, and adoption migrates it
-  // instead of failing the first write. A caller whose own surface is one level further down — the
-  // runtime root under tmpdir() — says adopt=false, because the parent it names there is the user's.
+  // Create what is missing and adopt what this install owns: a directory this install did not create
+  // carries the DACL its parent handed it, and adoption migrates it instead of failing the first
+  // write. A caller whose own surface is one level further down (the runtime root under tmpdir())
+  // passes adopt=false: the parent it names there is the user's own directory.
   // ponytail: <root>/<dir> is the whole storage surface; the caller states the boundary.
   for (const [index, part] of parts.entries()) {
     safeWindowsRecordLeaf(part);
@@ -154,9 +150,8 @@ function ensureWindowsDirectoryComponents(
       try {
         runtime.pathAuthority.createPrivateDirectory(cursor);
       } catch (error) {
-        // createPrivateDirectory mints a missing name and adopts an existing one, so an EEXIST here
-        // is a lost race with another creator: the name now exists and owes the adoption the first
-        // attempt never got to perform. One retry decides it — the second call finds the directory.
+        // A lost race: createPrivateDirectory adopts an existing name, so the name the winner made
+        // owes the same adoption this attempt never got to perform.
         if (windowsErrorCode(error) !== "EEXIST") throw error;
         runtime.pathAuthority.createPrivateDirectory(cursor);
       }
@@ -221,11 +216,9 @@ export function createPortableWindowsPathAuthority(
     },
     directoryIdentity,
     createPrivateDirectory(path) {
-      // Mint when the name is missing, adopt when it is already there. The two seams answer the same
-      // question because the caller cannot tell which one it got, and the native authority adopts an
-      // existing directory rather than refusing it: a re-run that hit EEXIST and stopped left the
-      // inherited DACL in place, which is the whole defect. The policy is then applied to whatever
-      // was found, so a first run and a re-run land on the same descriptor.
+      // Mint when the name is missing, adopt when it is already there: the two seams answer the same
+      // question because the caller cannot tell which one it got, and a re-run that stopped at EEXIST
+      // left the inherited DACL in place, which is the whole defect.
       try {
         files.mkdirSync(path, { mode: 0o700 });
       } catch (error) {
