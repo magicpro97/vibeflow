@@ -148,6 +148,22 @@ describe("windows acl ops", () => {
     expect(calls.paths[0]?.startsWith("\\\\?\\C:\\tmp\\dir")).toBe(true);
   });
 
+  test("normalises forward slashes before the \\\\?\\ prefix", () => {
+    const { binding, calls } = fakeBinding();
+    windowsVerifyPathAcl("F:/Code/proj/.vibeflow/private", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+      binding,
+      authority: fakeAuthority(
+        descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OWNER_SID)]),
+      ).authority,
+      identity,
+    });
+    // `\\?\` bypasses Win32 path normalisation, so a forward slash stays a literal filename
+    // character and CreateFileW answers ERROR_FILE_NOT_FOUND for a directory that exists — which is
+    // how every Windows ACL open failed. The name also keeps its NUL terminator.
+    expect(calls.paths[0]).toBe("\\\\?\\F:\\Code\\proj\\.vibeflow\\private\0");
+    expect(calls.paths[0]).not.toContain("/");
+  });
+
   test("reports no verification when the handle cannot be opened", () => {
     const { binding, calls } = fakeBinding({ createFile: () => INVALID_HANDLE });
     const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));

@@ -111,7 +111,11 @@ const isDirectory = (kind: WindowsAuthorityPathKind): boolean =>
   kind === WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY;
 
 function widePath(path: string): Buffer {
-  return Buffer.from(`\\\\?\\${path}\0`, "utf16le");
+  // The `\\?\` prefix bypasses all Win32 path normalisation, so a forward slash survives as a
+  // literal filename character and CreateFileW answers ERROR_FILE_NOT_FOUND for a directory that
+  // exists — measured on this host: `\\?\F:/Code/…` = err 2, `\\?\F:\Code\…` = OK. Convert the
+  // separators first; only then does the prefix do the one thing it is for (extending past MAX_PATH).
+  return Buffer.from(`\\\\?\\${path.replace(/\//gu, "\\")}\0`, "utf16le");
 }
 
 // CreateFileW refuses a directory unless FILE_FLAG_BACKUP_SEMANTICS is set, so a directory ACL
