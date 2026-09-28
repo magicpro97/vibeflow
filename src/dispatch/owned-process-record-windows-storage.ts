@@ -115,12 +115,13 @@ export function isWindowsDriveQualifiedPath(input: string): boolean {
 }
 
 export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRuntime): string {
+  // The drive-qualified guard is asked first when this runtime enforces local Windows storage: it
+  // names the actual requirement, so a UNC path is judged by it on every host instead of being
+  // reported as "not absolute" by whichever absoluteness rule the host happens to have.
+  if (runtime.enforceLocalWindowsPath && !isWindowsDriveQualifiedPath(input))
+    durabilityError("unsafe_path", "Windows record storage must use a drive-qualified path");
   if (!runtime.isAbsolutePath(input))
     durabilityError("unsafe_path", "Windows record path must be absolute");
-  if (runtime.enforceLocalWindowsPath) {
-    if (!isWindowsDriveQualifiedPath(input))
-      durabilityError("unsafe_path", "Windows record storage must use a drive-qualified path");
-  }
   const absolute = runtime.resolvePath(input);
   if (runtime.enforceLocalWindowsPath) {
     runtime.validateLocalPath(absolute);
@@ -188,8 +189,10 @@ export function createPortableWindowsPathAuthority(
       if (windowsErrorCode(error) === "ENOENT") return null;
       throw error;
     }
-    if (link.isSymbolicLink() || !link.isDirectory())
-      durabilityError("unsafe_path", `reparse or non-directory storage path rejected: ${path}`);
+    if (link.isSymbolicLink())
+      durabilityError("unsafe_path", `Windows authority reparse point rejected: ${path}`);
+    if (!link.isDirectory())
+      durabilityError("unsafe_path", `Windows authority path type changed: ${path}`);
     const target = files.statSync(path, { bigint: true });
     if (!target.isDirectory() || link.dev !== target.dev || link.ino !== target.ino)
       durabilityError("unsafe_path", `storage directory identity mismatch: ${path}`);
@@ -231,12 +234,13 @@ export function createPortableWindowsPathAuthority(
         if (windowsErrorCode(error) === "ENOENT") return null;
         throw error;
       }
-      if (
-        before.isSymbolicLink() ||
-        !before.isFile() ||
-        before.nlink !== 1n ||
-        before.size > BigInt(maxBytes)
-      )
+      if (before.isSymbolicLink())
+        durabilityError("unsafe_path", `Windows authority reparse point rejected: ${path}`);
+      if (!before.isFile())
+        durabilityError("unsafe_path", `Windows authority path type changed: ${path}`);
+      if (before.nlink !== 1n)
+        durabilityError("unsafe_path", `unsafe Windows authority link state: ${path}`);
+      if (before.size > BigInt(maxBytes))
         durabilityError("unsafe_path", `unsafe or oversized Windows record: ${path}`);
       const fd = files.openSync(path, fs.constants.O_RDONLY);
       return withCleanup(() => {
