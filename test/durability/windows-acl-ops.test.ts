@@ -21,6 +21,7 @@ import {
 
 const INVALID_HANDLE = 18_446_744_073_709_551_615n;
 const HANDLE = 42n;
+const WINDOWS_ERROR_ACCESS_DENIED = 5;
 
 const SYSTEM_SID = Buffer.from([0x01, 0x01, 0, 0, 0, 0, 0, 5, 0x12, 0, 0, 0]);
 const ADMINS_SID = Buffer.from([0x01, 0x02, 0, 0, 0, 0, 0, 5, 0x20, 0, 0, 0, 0x20, 0x02, 0, 0]);
@@ -54,6 +55,8 @@ function fakeBinding(overrides: Partial<Record<string, unknown>> = {}) {
   const calls = { closeHandle: 0, paths: [] as string[], access: [] as number[] };
   const binding = {
     invalidHandle: INVALID_HANDLE,
+    // Every refused open on this volume is an access-denied, which is what the diagnostic reads.
+    lastError: () => WINDOWS_ERROR_ACCESS_DENIED,
     createFile: (path: Buffer, access: number) => {
       calls.paths.push(path.toString("utf16le"));
       calls.access.push(access);
@@ -143,6 +146,22 @@ describe("windows acl ops", () => {
       authority,
     });
     expect(calls.paths[0]?.startsWith("\\\\?\\C:\\tmp\\dir")).toBe(true);
+  });
+
+  test("normalises forward slashes before the \\\\?\\ prefix", () => {
+    const { binding, calls } = fakeBinding();
+    windowsVerifyPathAcl("F:/Code/proj/.vibeflow/private", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+      binding,
+      authority: fakeAuthority(
+        descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OWNER_SID)]),
+      ).authority,
+      identity,
+    });
+    // `\\?\` bypasses Win32 path normalisation, so a forward slash stays a literal filename
+    // character and CreateFileW answers ERROR_FILE_NOT_FOUND for a directory that exists — which is
+    // how every Windows ACL open failed. The name also keeps its NUL terminator.
+    expect(calls.paths[0]).toBe("\\\\?\\F:\\Code\\proj\\.vibeflow\\private\0");
+    expect(calls.paths[0]).not.toContain("/");
   });
 
   test("reports no verification when the handle cannot be opened", () => {
@@ -445,6 +464,39 @@ describe("windows acl ops", () => {
     // Not even opened: the refusal is before the path is touched.
     expect(calls.paths).toHaveLength(0);
     expect(calls.closeHandle).toBe(0);
+  });
+
+  test("falls back to a DACL-only handle when the volume refuses WRITE_OWNER", () => {
+    const accesses: number[] = [];
+    const { binding } = fakeBinding({
+      createFile: (_path: Buffer, access: number) => {
+        accesses.push(access);
+        // Refuse anything that asks for WRITE_OWNER, exactly as a volume whose inherited ACL carries
+        // no ACE for this user does (measured on F:\Code: WRITE_OWNER = err 5, DACL-only = OK).
+        return (access & WINDOWS_NATIVE_RECORD.WRITE_OWNER) === 0 ? HANDLE : INVALID_HANDLE;
+      },
+    });
+    const repairAccess =
+      (WINDOWS_NATIVE_RECORD.READ_CONTROL |
+        WINDOWS_NATIVE_RECORD.WRITE_DAC |
+        WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
+      0;
+    const daclAccess = (WINDOWS_NATIVE_RECORD.READ_CONTROL | WINDOWS_NATIVE_RECORD.WRITE_DAC) >>> 0;
+    expect(
+      windowsEnsurePrivateAcl("C:\\p\\private", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority: fakeAuthority(
+          descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OWNER_SID)]),
+        ).authority,
+        identity,
+      }),
+    ).toBe(true);
+    // The retry drops exactly WRITE_OWNER and keeps WRITE_DAC: that is the right the DACL write
+    // needs, and demanding the owner right is what made the whole repair unreachable.
+    expect(accesses).toEqual([repairAccess, daclAccess]);
+    const retry = accesses[1] ?? 0;
+    expect(retry & WINDOWS_NATIVE_RECORD.WRITE_OWNER).toBe(0);
+    expect(retry & WINDOWS_NATIVE_RECORD.WRITE_DAC).toBe(WINDOWS_NATIVE_RECORD.WRITE_DAC);
   });
 
   test("answers false when the path cannot be opened for the repair", () => {

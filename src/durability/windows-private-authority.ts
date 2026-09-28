@@ -270,29 +270,37 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
         !dacl[0]
       )
         failed("GetSecurityDescriptorDacl(migrate)");
-      const code = native.setSecurityInfo(
-        handle,
-        WINDOWS_PRIVATE_SECURITY.SE_FILE_OBJECT,
-        // >>> 0: PROTECTED_DACL_INFORMATION is 0x80000000, so the bitwise OR yields a negative
-        // int32 in JS. Passing that to a u32 FFI parameter reaches Windows as garbage flags and
-        // the call fails with ERROR_ACCESS_DENIED(5).
-        (WINDOWS_PRIVATE_SECURITY.OWNER_INFORMATION |
-          WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
-          WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
-          0,
-        // The owner is written because the policy verifyHandle enforces names the token user there,
-        // and an elevated token leaves the objects it creates owned by its Administrators group: a
-        // DACL-only write stays one field short, so the repair answered false for every path the
-        // process itself had just created (the Windows package-smoke failure). The write needs
-        // WRITE_OWNER on the handle and, without SeRestorePrivilege, the token user as the new owner,
-        // so it cannot take over an object the caller does not already command.
-        currentUser().sid,
-        null,
-        dacl[0],
-        null,
-      );
-      if (code !== 0)
-        durabilityError("unsafe_path", `SetSecurityInfo failed with Windows error ${code}`);
+      const setSecurity = (info: number, owner: unknown): number =>
+        native.setSecurityInfo(
+          handle,
+          WINDOWS_PRIVATE_SECURITY.SE_FILE_OBJECT,
+          // >>> 0: PROTECTED_DACL_INFORMATION is 0x80000000, so the bitwise OR yields a negative
+          // int32 in JS. Passing that to a u32 FFI parameter reaches Windows as garbage flags and
+          // the call fails with ERROR_ACCESS_DENIED(5).
+          (info |
+            WINDOWS_PRIVATE_SECURITY.DACL_INFORMATION |
+            WINDOWS_PRIVATE_SECURITY.PROTECTED_DACL_INFORMATION) >>>
+            0,
+          owner,
+          null,
+          dacl[0],
+          null,
+        );
+      // The owner is written because the policy verifyHandle enforces names the token user there, and
+      // an elevated token leaves the objects it creates owned by its Administrators group: a
+      // DACL-only write stays one field short, so the repair answered false for every path the
+      // process itself had just created (the Windows package-smoke failure).
+      //
+      // It needs WRITE_OWNER on the handle, though — a right a volume whose inherited ACL carries no
+      // ACE for this user does not grant (measured on F:\Code: the owner write answers
+      // ERROR_ACCESS_DENIED and changes nothing, the DACL-only write answers 0). Protection is the
+      // mandatory half, so the owner is best-effort: the retry keeps PROTECTED_DACL_INFORMATION,
+      // drops only OWNER_INFORMATION, and still verifies, because verifyHandle accepts the token
+      // owner SID — which is the owner the object keeps. Reported with the first code: that is the
+      // right this volume refused, and it stays the reason whether or not the retry also failed.
+      const ownerCode = setSecurity(WINDOWS_PRIVATE_SECURITY.OWNER_INFORMATION, currentUser().sid);
+      if (ownerCode !== 0 && setSecurity(0, null) !== 0)
+        durabilityError("unsafe_path", `SetSecurityInfo failed with Windows error ${ownerCode}`);
     } finally {
       native.localFree(descriptor[0]);
     }

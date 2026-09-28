@@ -317,9 +317,15 @@ describe("native Windows path authority", () => {
   test("creates private directories and durable files through protected native handles", () => {
     const fixture = nativeFixture();
     fixture.authority.createPrivateDirectory("C:\\authority");
-    expect(() => fixture.authority.createPrivateDirectory("C:\\authority")).toThrow(
-      "Windows error 183",
+    // A caller minting a name of its own asks for the other contract: the directory that is already
+    // there is refused instead of adopted.
+    expect(() => fixture.authority.createPrivateDirectory("C:\\authority", false)).toThrow(
+      "Windows authority directory already exists",
     );
+    // A name that is already there is adopted, not re-created: CreateDirectoryW would answer EEXIST
+    // and leave the inherited DACL in place, which is exactly the shape verifyHandle refuses.
+    // Adoption is what lets the descriptor be migrated first and judged after.
+    expect(() => fixture.authority.createPrivateDirectory("C:\\authority")).not.toThrow();
     expect(fixture.authority.directoryIdentity("C:\\authority", true)?.value).toHaveLength(48);
     fixture.authority.writePrivateFile("C:\\authority\\record", Buffer.from("value"), 10);
     expect(fixture.authority.readPrivateFile("C:\\authority\\record", 10)?.toString()).toBe(
@@ -334,6 +340,50 @@ describe("native Windows path authority", () => {
       ),
     ).toBe(true);
     expect(fixture.calls.close).toBeGreaterThan(5);
+  });
+
+  test("refuses a foreign-writable directory before it migrates the inherited DACL", () => {
+    const fixture = nativeFixture();
+    const migrations: string[] = [];
+    const privacy: WindowsPrivateAuthority = {
+      ...fixture.privacy,
+      verifyNoForeignWrite: () => {
+        throw new Error("permissive Windows authority DACL rejected");
+      },
+      migrateHandle: () => migrations.push("migrate"),
+    };
+    const authority = createNativeWindowsPathAuthority(fixture.binding, privacy);
+    fixture.addDirectory("C:\\shared");
+    fixture.setVerifyFailure(new Error("inherited DACL refused"));
+    expect(() => authority.createPrivateDirectory("C:\\shared")).toThrow(
+      "permissive Windows authority DACL rejected",
+    );
+    // The verdict order is the guarantee: a location another principal can write is reported, never
+    // re-secured into ours and then reported as private.
+    expect(migrations).toHaveLength(0);
+  });
+
+  test("migrates an adopted directory whose inherited DACL the verifier refuses", () => {
+    const fixture = nativeFixture();
+    const migrations: string[] = [];
+    const verified: bigint[] = [];
+    let refusals = 1;
+    const privacy: WindowsPrivateAuthority = {
+      ...fixture.privacy,
+      verifyHandle: (handle) => {
+        verified.push(handle);
+        if (refusals-- > 0) throw new Error("inherited DACL refused");
+      },
+      migrateHandle: () => migrations.push("migrate"),
+    };
+    const authority = createNativeWindowsPathAuthority(fixture.binding, privacy);
+    fixture.addDirectory("C:\\inherited");
+    // Adoption exists for exactly this shape: a directory an earlier release or mkdtemp made, whose
+    // descriptor is safe to rewrite. The first verdict refuses, the repair is applied, and the same
+    // descriptor is judged again — the migration is never reported as verified.
+    expect(() => authority.createPrivateDirectory("C:\\inherited")).not.toThrow();
+    expect(migrations).toHaveLength(1);
+    expect(verified).toHaveLength(2);
   });
 
   test("distinguishes colliding Number projections with the full ReFS FileIdInfo", () => {

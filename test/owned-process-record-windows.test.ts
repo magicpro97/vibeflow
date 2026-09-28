@@ -5,6 +5,7 @@ import {
   existsSync,
   linkSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -16,7 +17,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { OWNED_PROCESS_STORAGE_NAME } from "../src/dispatch/owned-process-persistence-contract.js";
 import {
   WINDOWS_NATIVE_RECORD,
   type WindowsKernelLock,
@@ -29,6 +31,7 @@ import {
   trustedWindowsSystemRoot,
 } from "../src/dispatch/owned-process-record-windows-native.js";
 import {
+  createPortableWindowsPathAuthority,
   createWindowsRecordRuntime,
   isWindowsDriveQualifiedPath,
   resolveWindowsRecordPath,
@@ -38,6 +41,7 @@ import {
   WindowsOwnedProcessRecordBackend,
   type WindowsRecordRuntime,
 } from "../src/dispatch/owned-process-record-windows.js";
+import type { WindowsPathAuthority } from "../src/dispatch/windows-path-authority.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
   type WindowsAuthorityPathKind,
@@ -45,6 +49,7 @@ import {
 } from "../src/dispatch/windows-private-authority.js";
 import { canonicalJsonBytes } from "../src/durability/canonical.js";
 import type { ProcessLockOwnerV1 } from "../src/durability/lock-owner.js";
+import { RUNTIME_PLATFORM } from "../src/durability/process-identity-contract.js";
 import { createFakeFfi } from "./helpers/fake-windows-ffi.js";
 
 const roots: string[] = [];
@@ -56,10 +61,46 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+/**
+ * The path authority the platform seam picks, without the kernel seams only win32 can supply: the
+ * runtime factory refuses off win32 when they are missing, and this suite also runs in the Linux
+ * full suite, where createWindowsRecordRuntime deliberately selects the portable authority.
+ */
+function platformPathAuthority(): WindowsPathAuthority {
+  return process.platform === RUNTIME_PLATFORM.WINDOWS
+    ? createWindowsRecordRuntime({}).pathAuthority
+    : createPortableWindowsPathAuthority(
+        nodeFs,
+        () => {},
+        () => {},
+      );
+}
+
 function temporaryRoot(): string {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "vf-win-record-")));
   roots.push(root);
   return root;
+}
+
+/**
+ * Seed a record file the way an earlier process on this path would have left it: through the
+ * same private authority the backend reads with, so the file carries a protected DACL and a
+ * single link. A plain writeFileSync leaves a file the authority refuses to open at all, which
+ * hides every check the record is actually meant to exercise.
+ */
+function seedRecord(recordsRoot: string, name: string, bytes: Uint8Array | string): void {
+  const path = join(recordsRoot, name);
+  // The private write refuses to clobber (CreateFileW without OPEN_ALWAYS is error 80), which is
+  // the point in production — here a seed replaces a record on purpose, so drop it first.
+  if (existsSync(path)) unlinkSync(path);
+  // The authority comes from the same platform seam the backend builds: this suite also runs in the
+  // Linux full suite, where the native Win32 authority cannot load bun:ffi/Kernel32 at all and the
+  // portable one is what production uses.
+  platformPathAuthority().writePrivateFile(
+    path,
+    typeof bytes === "string" ? Buffer.from(bytes) : Buffer.from(bytes),
+    Number.MAX_SAFE_INTEGER,
+  );
 }
 
 class SimulatedKernel implements WindowsKernelLockProvider {
@@ -159,6 +200,79 @@ function harness(
 }
 
 describe("Windows owned-process transactional backend", () => {
+  test("adopts a pre-existing records directory that carries an inherited DACL", () => {
+    // A directory the install did not create itself — mkdtemp, an earlier release, a plain fs
+    // call — carries whatever DACL its parent handed it. ensureWindowsDirectoryComponents asked
+    // for directoryIdentity(cursor, false), so it never verified and never repaired it, and the
+    // first private write then hit verifyHandle and refused: 3 inherited ACEs, none protected,
+    // on a path this process owns. Adopting it is the whole behaviour.
+    const root = temporaryRoot();
+    const preExisting = join(root, OWNED_PROCESS_STORAGE_NAME.RECORD_DIRECTORY);
+    nodeFs.mkdirSync(preExisting);
+    const { backend } = harness({ root });
+    expect(backend.recordsRoot).toBe(preExisting);
+    expect(() =>
+      backend.compareAndSwap(ENTRY, null, Buffer.from("first"), { operation: "create" }),
+    ).not.toThrow();
+    expect(backend.read(ENTRY)).toEqual(Buffer.from("first"));
+  });
+
+  test("adopts the storage leaf without re-securing the ancestors the user owns", () => {
+    // The boundary is ownership, not depth. On the first call the leaf is the evidence root and its
+    // parent is the user's own %TEMP% (or C:\): walking that with an ACL write migrates a descriptor
+    // this install was merely handed, and a depth-based boundary did exactly that whenever the root
+    // sat directly under %TEMP%, which is where the runtime root is minted.
+    const parent = temporaryRoot();
+    const root = join(parent, "evidence");
+    const touched: string[] = [];
+    const platform = platformPathAuthority();
+    const { backend } = harness({
+      root,
+      runtime: {
+        pathAuthority: {
+          ...platform,
+          createPrivateDirectory: (path) => {
+            touched.push(path);
+            platform.createPrivateDirectory(path);
+          },
+        },
+      },
+    });
+    expect(backend.root).toBe(root);
+    expect(touched).toEqual([root, join(root, OWNED_PROCESS_STORAGE_NAME.RECORD_DIRECTORY)]);
+    expect(touched).not.toContain(parent);
+  });
+
+  test("retries the leaf when another creator wins the race", () => {
+    // createPrivateDirectory mints or adopts, so an EEXIST here means another creator got there
+    // between the existence check and the call: the name now exists and owes the same adoption the
+    // first attempt never got to perform. Skipping it is how a raced directory kept its inherited
+    // DACL, and that is the defect the adopting walk exists to close.
+    const parent = temporaryRoot();
+    const root = join(parent, "raced");
+    const platform = platformPathAuthority();
+    let attempts = 0;
+    const { backend } = harness({
+      root,
+      runtime: {
+        pathAuthority: {
+          ...platform,
+          createPrivateDirectory: (path) => {
+            // The loser of the race sees the directory appear under it and gets 183, the way
+            // CreateDirectoryW answers once the name is taken.
+            if (path === root && attempts++ === 0) {
+              platform.createPrivateDirectory(path);
+              throw Object.assign(new Error("Windows error 183"), { code: "EEXIST" });
+            }
+            platform.createPrivateDirectory(path);
+          },
+        },
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(backend.root).toBe(root);
+  });
+
   test("creates, lists, reads, and replaces records under a kernel lock", () => {
     const { backend, kernel, renames } = harness();
     const first = Buffer.from("first");
@@ -271,8 +385,9 @@ describe("Windows owned-process transactional backend", () => {
       operation: "recover-under-lease",
       nonce: recoveredNonce,
     };
-    writeFileSync(
-      `${backend.lockPath}${WINDOWS_RECORD_STORAGE.OWNER_SUFFIX}${WINDOWS_RECORD_STORAGE.RELEASE_MARKER}${recoveredNonce}`,
+    seedRecord(
+      backend.recordsRoot,
+      `${basename(backend.lockPath)}${WINDOWS_RECORD_STORAGE.OWNER_SUFFIX}${WINDOWS_RECORD_STORAGE.RELEASE_MARKER}${recoveredNonce}`,
       canonicalJsonBytes(recoveredOwner),
     );
     phase = "acquire";
@@ -287,7 +402,7 @@ describe("Windows owned-process transactional backend", () => {
       backend.recordsRoot,
       `${WINDOWS_RECORD_STORAGE.CAS_STAGE_PREFIX}${ENTRY}${WINDOWS_RECORD_STORAGE.CAS_STAGE_SUFFIX}`,
     );
-    writeFileSync(casStage, "stale-stage");
+    seedRecord(backend.recordsRoot, basename(casStage), "stale-stage");
     phase = "compareAndSwap";
     backend.compareAndSwap(ENTRY, null, Buffer.from("leased"), { operation: "leased-cas" });
     phase = "done";
@@ -424,25 +539,34 @@ describe("Windows owned-process transactional backend", () => {
 
   test("keeps directory identity lossless above Number.MAX_SAFE_INTEGER", () => {
     const root = temporaryRoot();
-    const base = nodeFs.lstatSync(root, { bigint: true });
-    let identity = 9_007_199_254_740_992n;
-    const files = {
-      ...nodeFs,
-      lstatSync: (path: nodeFs.PathLike, options?: nodeFs.StatOptions) => {
-        const stat = nodeFs.lstatSync(path, { bigint: true });
-        return options && "bigint" in options && options.bigint
-          ? Object.assign(stat, { ino: identity })
-          : nodeFs.lstatSync(path);
+    // The directory identity is a 96-bit FileId the native authority reports — 24 hex digits, far
+    // past what a JS number carries losslessly — and the subject here is that the backend keeps it a
+    // string end to end and compares it exactly. The identity is supplied rather than read: loading
+    // the native Win32 authority would make this file unloadable in the Linux full suite, and the
+    // real 96-bit read already has its own live Windows round-trip.
+    const identity = "1f4b3c2d5e6a7b8c9d0e1f2a";
+    const platform = platformPathAuthority();
+    const authority: WindowsPathAuthority = {
+      ...platform,
+      directoryIdentity: (path, verifyPrivate) =>
+        platform.directoryIdentity(path, verifyPrivate) ? { value: identity, size: 0n } : null,
+    };
+    authority.createPrivateDirectory(root);
+
+    let swapped = "";
+    const { backend } = harness({
+      root,
+      runtime: {
+        pathAuthority: {
+          ...authority,
+          withVerifiedDirectory: (path, expectedIdentity, operation) =>
+            authority.withVerifiedDirectory(path, expectedIdentity + swapped, operation),
+        },
       },
-      statSync: (path: nodeFs.PathLike, options?: nodeFs.StatOptions) => {
-        const stat = nodeFs.statSync(path, { bigint: true });
-        return options && "bigint" in options && options.bigint
-          ? Object.assign(stat, { ino: identity, dev: base.dev })
-          : nodeFs.statSync(path);
-      },
-    } as unknown as WindowsRecordRuntime["files"];
-    const { backend } = harness({ root, runtime: { files } });
-    identity += 1n;
+    });
+    // A re-read compares equal; a changed last digit is caught. The value above Number.MAX_SAFE_INTEGER
+    // is the point: as a number, identity and identity with a trailing 0 would collide.
+    swapped = "0";
     expect(() => backend.entries()).toThrow("storage directory changed");
   });
 
@@ -491,7 +615,10 @@ describe("Windows owned-process transactional backend", () => {
 
   test("keeps opened record identity lossless across colliding number projections", () => {
     const { backend, recordsRoot } = harness();
-    writeFileSync(join(recordsRoot, ENTRY), "value");
+    seedRecord(recordsRoot, ENTRY, "value");
+    // "identity changed before read" lives in the portable (files.*) authority: it re-stats the
+    // name after opening and compares dev/ino/size. The native authority holds the handle, so it
+    // reports "changed during read" instead — this seam has to drive the portable one to reach it.
     const first = 9_007_199_254_740_992n;
     let opened = first;
     const files = {
@@ -509,9 +636,74 @@ describe("Windows owned-process transactional backend", () => {
           : nodeFs.fstatSync(fd);
       },
     } as unknown as WindowsRecordRuntime["files"];
-    const swapped = harness({ root: backend.root, runtime: { files } }).backend;
+    const swapped = harness({
+      root: backend.root,
+      runtime: {
+        files,
+        pathAuthority: createPortableWindowsPathAuthority(
+          files,
+          () => {},
+          () => {},
+        ),
+      },
+    }).backend;
     opened = first + 1n;
     expect(() => swapped.read(ENTRY)).toThrow("identity changed before read");
+  });
+
+  test("refuses a directory and a hard-linked file where a record entry belongs", () => {
+    const root = temporaryRoot();
+    const recordsRoot = join(root, "records");
+    mkdirSync(recordsRoot, { recursive: true });
+    const pathAuthority = createPortableWindowsPathAuthority(
+      nodeFs,
+      () => {},
+      () => {},
+    );
+    pathAuthority.createPrivateDirectory(recordsRoot);
+
+    // A directory in the entry's place is not a record the authority reads: the verdict names the
+    // shape, and the record-name scan never runs.
+    mkdirSync(join(recordsRoot, ENTRY));
+    expect(() => pathAuthority.readPrivateFile(join(recordsRoot, ENTRY), 4096)).toThrow(
+      "Windows authority path type changed",
+    );
+
+    // A second link to the same bytes is the other hazard: the descriptor is not the one this
+    // install wrote, so another name still reaches it.
+    const linked = join(recordsRoot, `${"b".repeat(64)}.json`);
+    const alias = join(recordsRoot, `${"c".repeat(64)}.json`);
+    writeFileSync(linked, "{}");
+    linkSync(linked, alias);
+    expect(() => pathAuthority.readPrivateFile(alias, 4096)).toThrow(
+      "unsafe Windows authority link state",
+    );
+  });
+
+  test("reads absence as an answer and keeps every other lstat failure fatal", () => {
+    const root = temporaryRoot();
+    const pathAuthority = createPortableWindowsPathAuthority(
+      nodeFs,
+      () => {},
+      () => {},
+    );
+    // The walk asks about components before it creates them, so a missing name has to answer
+    // "absent" instead of raising: ENOENT is the verdict that tells the caller to mint it.
+    expect(pathAuthority.directoryIdentity(join(root, "missing"), false)).toBeNull();
+
+    // Any other lstat failure stays fatal. A denied read is not an absent name, and treating it as
+    // one would let the walk mint a component over a path it was never allowed to inspect.
+    const denied = createPortableWindowsPathAuthority(
+      {
+        ...nodeFs,
+        lstatSync: () => {
+          throw Object.assign(new Error("access denied"), { code: "EPERM" });
+        },
+      },
+      () => {},
+      () => {},
+    );
+    expect(() => denied.directoryIdentity(join(root, "denied"), false)).toThrow("access denied");
   });
 
   test("discards unpublished owner stages and recovers proved-dead release tombs", () => {
@@ -519,7 +711,7 @@ describe("Windows owned-process transactional backend", () => {
     const abandoned = staged.backend.acquire("staged-owner");
     const ownerPath = `${staged.backend.lockPath}${WINDOWS_RECORD_STORAGE.OWNER_SUFFIX}`;
     const ownerStage = `${ownerPath}${WINDOWS_RECORD_STORAGE.CAS_STAGE_SUFFIX}`;
-    writeFileSync(ownerStage, "partial-owner-stage");
+    seedRecord(dirname(ownerStage), basename(ownerStage), "partial-owner-stage");
     unlinkSync(ownerPath);
     staged.kernel.crash();
     staged.setAlive(true);
@@ -611,7 +803,7 @@ describe("Windows owned-process transactional backend", () => {
     expect(() => backend.read("CON.json")).toThrow("unsafe Windows storage name");
     expect(() => backend.read("stream:name.json")).toThrow("unsafe Windows storage name");
     expect(() => backend.read("trailing. ")).toThrow("unsafe Windows storage name");
-    writeFileSync(join(recordsRoot, OTHER_ENTRY), Buffer.alloc(9));
+    seedRecord(recordsRoot, OTHER_ENTRY, Buffer.alloc(9));
     expect(() => backend.read(OTHER_ENTRY)).toThrow("oversized Windows record");
   });
 
@@ -619,9 +811,9 @@ describe("Windows owned-process transactional backend", () => {
     const { backend, recordsRoot } = harness();
     const original = join(recordsRoot, ENTRY);
     const linked = join(recordsRoot, OTHER_ENTRY);
-    writeFileSync(original, "linked");
+    seedRecord(recordsRoot, ENTRY, "linked");
     linkSync(original, linked);
-    expect(() => backend.read(ENTRY)).toThrow("unsafe or oversized");
+    expect(() => backend.read(ENTRY)).toThrow("unsafe Windows authority link state");
     unlinkSync(linked);
     unlinkSync(original);
 
@@ -629,7 +821,7 @@ describe("Windows owned-process transactional backend", () => {
       backend.compareAndSwap(ENTRY, null, Buffer.from("ours"), {
         operation: "raced",
         fault: (point) => {
-          if (point === "before-publication") writeFileSync(original, "theirs");
+          if (point === "before-publication") seedRecord(recordsRoot, ENTRY, "theirs");
         },
       }),
     ).toThrow("preimage raced");
@@ -639,7 +831,9 @@ describe("Windows owned-process transactional backend", () => {
     renameSync(recordsRoot, moved);
     roots.push(moved);
     writeFileSync(recordsRoot, "replacement");
-    expect(() => backend.entries()).toThrow("non-directory storage path");
+    // The native authority opens the path and reads the type off the handle; the portable
+    // lstat.isDirectory() check that used to name this is only reached off win32.
+    expect(() => backend.entries()).toThrow("Windows authority path type changed");
   });
 
   test("rejects relative, network-like, escaped, symlinked, and unsafe entry paths", () => {
@@ -654,9 +848,10 @@ describe("Windows owned-process transactional backend", () => {
       "must be absolute",
     );
     const root = temporaryRoot();
+    // A UNC path is absolute but not drive-qualified, which is exactly what this guard refuses.
     expect(
       () =>
-        new WindowsOwnedProcessRecordBackend(root, {
+        new WindowsOwnedProcessRecordBackend(`\\\\server\\share${root}`, {
           runtime: { ...seams, enforceLocalWindowsPath: true },
         }),
     ).toThrow("drive-qualified path");
@@ -687,7 +882,7 @@ describe("Windows owned-process transactional backend", () => {
     roots.push(alias);
     symlinkSync(target, alias, "dir");
     expect(() => new WindowsOwnedProcessRecordBackend(alias, { runtime: seams })).toThrow(
-      "reparse or non-directory",
+      "Windows authority reparse point rejected",
     );
 
     const validated: string[] = [];
@@ -750,7 +945,10 @@ describe("Windows owned-process transactional backend", () => {
     const outside = join(temporaryRoot(), "outside.json");
     writeFileSync(outside, "outside");
     symlinkSync(outside, join(recordsRoot, ENTRY));
-    expect(() => backend.read(ENTRY)).toThrow("unsafe or oversized");
+    // The native authority opens the entry itself and refuses a reparse point, so the rejection
+    // lands before the record-name scan ever runs.
+    expect(() => backend.read(ENTRY)).toThrow("Windows authority reparse point rejected");
+    // Enumeration never opens the entry, so the scan itself names it.
     expect(() => backend.entries()).toThrow("unsafe Windows record entry");
   });
 
@@ -760,7 +958,7 @@ describe("Windows owned-process transactional backend", () => {
       backend.compareAndSwap(ENTRY, null, Buffer.from("expected"), {
         operation: "corrupt",
         fault: (point) => {
-          if (point === "after-publication") writeFileSync(join(recordsRoot, ENTRY), "corrupt");
+          if (point === "after-publication") seedRecord(recordsRoot, ENTRY, "corrupt");
         },
       }),
     ).toThrow("postimage mismatch");

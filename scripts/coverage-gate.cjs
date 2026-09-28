@@ -55,6 +55,13 @@ for (const r of records) {
   const daEntries = r.match(/^DA:\d+,\d+$/gm) ?? [];
   const lf = daEntries.length;
   const lh = daEntries.filter((m) => Number(m.split(",")[1]) > 0).length;
+  // Name the lines that were never executed. A gate that reports only a percentage makes the
+  // reader diff the whole file against its tests; the ranges are the actionable part.
+  const gaps = daEntries
+    .map((m) => m.slice(3).split(","))
+    .filter(([, hits]) => Number(hits) === 0)
+    .map(([line]) => Number(line))
+    .sort((a, b) => a - b);
   const brf = (r.match(/^BRF:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
   const brh = (r.match(/^BRH:(\d+)$/gm) ?? []).reduce((a, m) => a + Number(m.split(":")[1]), 0);
   totalLines += lf;
@@ -68,7 +75,19 @@ for (const r of records) {
   // are still reported in the output as a notice so reviewers
   // see the gap.
   const waived = COVERAGE_WAIVERS.has(sf) || COVERAGE_WAIVERS.has(sf.replace(/\\/g, "/"));
-  perFile.push({ sf, lf, lh, brf, brh, lpct, bpct, waived });
+  perFile.push({ sf, lf, lh, brf, brh, lpct, bpct, waived, gaps });
+}
+
+/** Compress sorted line numbers into `1-3,7` ranges for the CI annotation. */
+function lineRanges(lines) {
+  const parts = [];
+  for (let i = 0; i < lines.length; ) {
+    let end = i;
+    while (end + 1 < lines.length && lines[end + 1] === lines[end] + 1) end += 1;
+    parts.push(end === i ? `${lines[i]}` : `${lines[i]}-${lines[end]}`);
+    i = end + 1;
+  }
+  return parts.join(",");
 }
 
 const overallLine = totalLines > 0 ? (100 * hitLines) / totalLines : 100;
@@ -109,7 +128,7 @@ for (const f of perFile) {
       continue;
     }
     console.error(
-      `::error file=${f.sf},line=1,col=1::${f.sf}: line ${f.lpct.toFixed(2)}% (${f.lh}/${f.lf}) / branch ${f.bpct.toFixed(2)}% (${f.brh}/${f.brf}) — must be 100%`,
+      `::error file=${f.sf},line=1,col=1::${f.sf}: line ${f.lpct.toFixed(2)}% (${f.lh}/${f.lf}) / branch ${f.bpct.toFixed(2)}% (${f.brh}/${f.brf}) — must be 100% (uncovered lines: ${f.gaps.length > 0 ? lineRanges(f.gaps) : "none"})`,
     );
     failed = true;
   }

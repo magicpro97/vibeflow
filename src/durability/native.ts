@@ -146,10 +146,12 @@ function openDirectoryAt(
   // set. Securing the name *before* the open is not available: by the time a path-based write ran
   // there would be nothing to say which object it was for.
   const repair = created || (privateLeaf && process.platform === RUNTIME_PLATFORM.WINDOWS);
-  if (repair && process.platform === RUNTIME_PLATFORM.WINDOWS && !repairWindowsLeafAcl(path, fd)) {
+  if (repair && process.platform === RUNTIME_PLATFORM.WINDOWS) {
     let primary: unknown;
     try {
-      syscallFailure(`fchmodat directory ${path}`);
+      // Never a POSIX syscall name: this is a Win32 DACL write, so the failure is not an errno.
+      if (repairWindowsLeafAcl(path, fd)) return fd;
+      syscallFailure(`secure private directory ${path}`);
     } catch (error) {
       primary = error;
     }

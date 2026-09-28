@@ -83,6 +83,15 @@ export interface WindowsAclOpsOptions {
    * object the caller measured is refused rather than performed.
    */
   identity?: WindowsFileIdentity;
+  /**
+   * Raise a failure to act instead of answering it as the boolean "no".
+   *
+   * Both mean the same to a yes/no caller and nothing is written either way, so the default keeps
+   * the predicate shape. A caller that has to say *why* it could not secure a path — the directory
+   * walk, which takes a half-made private directory back out and reports the reason — asks for the
+   * failure itself, with its Win32 cause attached.
+   */
+  reportFailure?: boolean;
 }
 
 // READ_CONTROL answers what the DACL says; a repair additionally needs WRITE_DAC and WRITE_OWNER,
@@ -97,12 +106,23 @@ const REPAIR_ACCESS =
     WINDOWS_NATIVE_RECORD.WRITE_DAC |
     WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
   0;
+// WRITE_OWNER is held only by a token with SeTakeOwnership or the object's current owner. A volume
+// whose inherited ACL carries no ACE for this user refuses it outright — measured on F:\Code:
+// WRITE_OWNER = err 5 while WRITE_DAC = OK — and CreateFileW AND-gates the mask, so asking for it
+// took the whole repair down with it, not just the owner field. This is the mask for a handle that
+// only has to write the DACL, which is the half SetSecurityInfo cannot do without.
+const DACL_REPAIR_ACCESS =
+  (WINDOWS_NATIVE_RECORD.READ_CONTROL | WINDOWS_NATIVE_RECORD.WRITE_DAC) >>> 0;
 
 const isDirectory = (kind: WindowsAuthorityPathKind): boolean =>
   kind === WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY;
 
 function widePath(path: string): Buffer {
-  return Buffer.from(`\\\\?\\${path}\0`, "utf16le");
+  // The `\\?\` prefix bypasses all Win32 path normalisation, so a forward slash survives as a
+  // literal filename character and CreateFileW answers ERROR_FILE_NOT_FOUND for a directory that
+  // exists — measured on this host: `\\?\F:/Code/…` = err 2, `\\?\F:\Code\…` = OK. Convert the
+  // separators first; only then does the prefix do the one thing it is for (extending past MAX_PATH).
+  return Buffer.from(`\\\\?\\${path.replace(/\//gu, "\\")}\0`, "utf16le");
 }
 
 // CreateFileW refuses a directory unless FILE_FLAG_BACKUP_SEMANTICS is set, so a directory ACL
@@ -128,7 +148,16 @@ function openForAcl(
     flags,
     null,
   );
-  if (handle === binding.invalidHandle) return null;
+  // A refused open is not an answer, so it is not the boolean "no": only the Win32 code separates
+  // an access-denied (WRITE_OWNER is not held here) from a file-not-found (the path shape is
+  // wrong), and both used to reach the caller as an undiagnosable `false` — the whole of the
+  // Windows `vf init` crash. Callers that want the yes/no meaning still get it: their own catch
+  // is what turns this into false, and nothing is written either way.
+  if (handle === binding.invalidHandle)
+    durabilityError(
+      "unsafe_path",
+      `CreateFileW ${path} failed with Windows error ${binding.lastError()}`,
+    );
   if (identity === undefined || identityMatches(binding, handle, identity)) return handle;
   // The path does not hold the object the caller stat'ed. Hand back no handle at all: a substitute
   // must not get a verdict attached to it, and must not be repaired in the caller's name either.
@@ -263,6 +292,12 @@ export { WINDOWS_AUTHORITY_PATH_KIND };
  * policy the verdict enforces. So the answer after the repair is read from the same object the answer
  * before it was rejected on, whatever happens to the path meanwhile.
  *
+ * Two opens, and no more: REPAIR_ACCESS first, then DACL_REPAIR_ACCESS. A volume that refuses
+ * WRITE_OWNER refuses the whole first request, and a repair that cannot run at all is the one outcome
+ * this must not produce — the second mask is the same transaction minus the owner field, which
+ * migrateHandle writes best-effort anyway. Nothing is retried past the second rung: the rights are
+ * the only thing the mask decides, so a third attempt would ask for what the second already asked.
+ *
  * No identity, no repair. A caller that cannot say which object it measured has nothing this module
  * can tie the write to, and repairing whatever the name holds would be exactly the substitution the
  * identity gate exists to refuse (issue #817), so the answer is false and no write is attempted.
@@ -276,22 +311,41 @@ function ensureAcl(
   if (options.identity === undefined) return false;
   const context = aclContext(options);
   if (context === null) return false;
-  let handle: bigint | null = null;
-  try {
-    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity, REPAIR_ACCESS);
+  let refused: unknown;
+  for (const access of [REPAIR_ACCESS, DACL_REPAIR_ACCESS]) {
+    let handle: bigint | null;
+    try {
+      handle = openForAcl(context.binding, path, isDirectory(kind), options.identity, access);
+    } catch (error) {
+      // The mask itself was refused. The next rung asks for strictly less, so it is the volume's
+      // answer about this mask and not about the path — which is why it is worth another open.
+      refused = error;
+      continue;
+    }
+    // The path does not hold the object the caller measured. No mask changes that, so the answer is
+    // the "no" the identity gate exists to give — and nothing has been written.
     if (handle === null) return false;
     try {
-      verdict(context, handle);
-    } catch {
-      context.authority.migrateHandle(handle, kind);
-      verdict(context, handle);
+      try {
+        verdict(context, handle);
+      } catch {
+        context.authority.migrateHandle(handle, kind);
+        verdict(context, handle);
+      }
+      return true;
+    } catch (error) {
+      // A caller that asked for the failure gets it, cause and all; the predicate callers keep the
+      // "no" they branch on, and neither path has written anything.
+      if (options.reportFailure) throw error;
+      return false;
+    } finally {
+      closeQuietly(context.binding, handle);
     }
-    return true;
-  } catch {
-    return false;
-  } finally {
-    if (handle !== null) closeQuietly(context.binding, handle);
   }
+  // Every mask was refused. A caller that asked for the failure gets the last rung's reason; the
+  // predicate callers keep the "no" they branch on, and nothing was written either way.
+  if (options.reportFailure) throw refused;
+  return false;
 }
 
 /**

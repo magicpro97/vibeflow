@@ -72,7 +72,9 @@ export function pinWindowsDirectory(
  * replaced ours without proving it is ours. Here the write is gated on the identity of the object
  * this walk just opened, so the descriptor reaches the object that is about to be pinned or the
  * write does not happen at all — an open that cannot carry the identity (or a leaf that no longer
- * reproduces it) returns false and leaves the substitute's DACL alone.
+ * reproduces it) returns false and leaves the substitute's DACL alone. A failure the ACL layer
+ * itself raises (an unidentifiable descriptor, a denied write) is thrown with its cause instead of
+ * being collapsed into false, so the caller can say why the leaf could not be secured.
  *
  * ponytail: identity is read from the fd, not from a Win32 handle — the fd cannot be retargeted, and
  * the pair it reports is the same pair the pin carries, so the ACL layer's reopen has something
@@ -88,10 +90,22 @@ export function repairWindowsLeafAcl(
     return windowsEnsurePrivateAcl(path, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
       ...acl,
       identity: descriptorIdentity(fd),
+      // This caller cannot use the boolean: the walk that holds the leaf has a half-made directory
+      // to take back out and a user to tell, so an inability to secure it has to arrive as a
+      // failure — with the Win32 code that says whether it was access-denied or a missing name.
+      reportFailure: true,
     });
-  } catch {
-    // A descriptor that cannot be identified is not a descriptor this write can be tied to.
-    return false;
+  } catch (error) {
+    // A descriptor that cannot be identified is not a descriptor this write can be tied to, and a
+    // refusal from the ACL layer is the case a standard volume produces: the DACL write is denied
+    // where the inherited ACL carries no ACE for this user. Keep the reason — the caller reported
+    // this as "fchmodat directory … errno 0", which is not diagnosable, and telling an
+    // access-denied apart from a file-not-found is the whole of the diagnosis. false still means
+    // what it did: the path is not the object the caller measured, so nothing was written.
+    throw durabilityError(
+      "unsafe_path",
+      `cannot secure private directory ${path}: ${(error as Error).message}`,
+    );
   }
 }
 

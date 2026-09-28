@@ -140,6 +140,8 @@ describe("repairWindowsLeafAcl", () => {
     const calls = { migrated: [] as WindowsAuthorityPathKind[], closed: 0 };
     const binding = {
       invalidHandle: 0n,
+      // The code a refused open answers with on this host: access-denied, the F:\Code case.
+      lastError: () => 5,
       createFile: options.createFile ?? (() => 42n),
       closeHandle: () => {
         calls.closed += 1;
@@ -226,11 +228,43 @@ describe("repairWindowsLeafAcl", () => {
     }
   });
 
-  test("refuses a descriptor whose identity cannot be read", () => {
-    expect(repairWindowsLeafAcl("C:\\state", -1)).toBe(false);
+  test("surfaces the reason it could not secure the leaf", () => {
+    const path = scratch();
+    const fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    try {
+      const denied = () => {
+        throw new Error("SetSecurityInfo failed with Windows error 5");
+      };
+      const { binding } = fakeAcl({ fileInfo: identityInfo(reportedIdentity(fd)) });
+      const authority = {
+        migrateHandle: denied,
+        verifyHandle: denied,
+      } as unknown as WindowsPrivateAuthority;
+      // The verdict and the repair are both refused — the F:\Code case, where the write is denied
+      // because the volume's inherited ACL carries no ACE for this user. The caller reached the
+      // report as "fchmodat directory … errno 0" because the reason was discarded here.
+      expect(() => repairWindowsLeafAcl(path, fd, { binding, authority })).toThrow(
+        /SetSecurityInfo failed with Windows error 5/,
+      );
+      // The other failure the report could not name: the open itself, refused with a Win32 code
+      // that only GetLastError knows — access-denied and file-not-found are one boolean otherwise.
+      const refused = fakeAcl({ createFile: () => 0n });
+      expect(() => repairWindowsLeafAcl(path, fd, { binding: refused.binding, authority })).toThrow(
+        /cannot secure private directory .*Windows error 5/,
+      );
+    } finally {
+      fs.closeSync(fd);
+      cleanup();
+    }
+  });
+
+  test("refuses a descriptor whose identity cannot be read, naming the reason", () => {
+    expect(() => repairWindowsLeafAcl("C:\\state", -1)).toThrow(/cannot secure private directory/);
     const closed = fs.openSync(scratch(), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
     fs.closeSync(closed);
-    expect(repairWindowsLeafAcl("C:\\state", closed)).toBe(false);
+    expect(() => repairWindowsLeafAcl("C:\\state", closed)).toThrow(
+      /cannot secure private directory/,
+    );
   });
 
   test("refuses when the host has no Win32 security bindings at all", () => {

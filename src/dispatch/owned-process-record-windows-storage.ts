@@ -115,12 +115,12 @@ export function isWindowsDriveQualifiedPath(input: string): boolean {
 }
 
 export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRuntime): string {
+  // Ask the drive-qualified guard first when this runtime enforces local Windows storage: it names
+  // the actual requirement, so a UNC path is judged by it on every host.
+  if (runtime.enforceLocalWindowsPath && !isWindowsDriveQualifiedPath(input))
+    durabilityError("unsafe_path", "Windows record storage must use a drive-qualified path");
   if (!runtime.isAbsolutePath(input))
     durabilityError("unsafe_path", "Windows record path must be absolute");
-  if (runtime.enforceLocalWindowsPath) {
-    if (!isWindowsDriveQualifiedPath(input))
-      durabilityError("unsafe_path", "Windows record storage must use a drive-qualified path");
-  }
   const absolute = runtime.resolvePath(input);
   if (runtime.enforceLocalWindowsPath) {
     runtime.validateLocalPath(absolute);
@@ -128,17 +128,30 @@ export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRu
   return absolute;
 }
 
-function ensureWindowsDirectoryComponents(absolute: string, runtime: WindowsRecordRuntime): void {
+function ensureWindowsDirectoryComponents(
+  absolute: string,
+  runtime: WindowsRecordRuntime,
+  adopt: boolean,
+): void {
   const root = parse(absolute).root;
-  let cursor = root;
-  for (const part of absolute.slice(root.length).split(sep).filter(Boolean)) {
+  const parts = absolute.slice(root.length).split(sep).filter(Boolean);
+  // Create what is missing and adopt what this install owns: a directory this install did not create
+  // carries the DACL its parent handed it, and adoption migrates it instead of failing the first
+  // write. A caller whose own surface is one level further down (the runtime root under tmpdir())
+  // passes adopt=false: the parent it names there is the user's own directory.
+  // ponytail: <root>/<dir> is the whole storage surface; the caller states the boundary.
+  for (const [index, part] of parts.entries()) {
     safeWindowsRecordLeaf(part);
-    cursor = join(cursor, part);
-    if (!runtime.pathAuthority.directoryIdentity(cursor, false)) {
+    const cursor = join(root, ...parts.slice(0, index + 1));
+    const owned = index === parts.length - 1 && adopt;
+    if (owned || !runtime.pathAuthority.directoryIdentity(cursor, false)) {
       try {
         runtime.pathAuthority.createPrivateDirectory(cursor);
-      } catch (race) {
-        if (windowsErrorCode(race) !== "EEXIST") throw race;
+      } catch (error) {
+        // A lost race: another creator made the name between the check and the create. An owned
+        // component adopts the winner; an ancestor is left to whoever made it.
+        if (windowsErrorCode(error) !== "EEXIST") throw error;
+        if (owned) runtime.pathAuthority.createPrivateDirectory(cursor);
       }
     }
     if (!runtime.pathAuthority.directoryIdentity(cursor, false))
@@ -146,22 +159,26 @@ function ensureWindowsDirectoryComponents(absolute: string, runtime: WindowsReco
   }
 }
 
-export function ensureWindowsRecordParent(input: string, runtime: WindowsRecordRuntime): string {
+export function ensureWindowsRecordParent(
+  input: string,
+  runtime: WindowsRecordRuntime,
+  adopt = true,
+): string {
   const absolute = resolveWindowsRecordPath(input, runtime);
   safeWindowsRecordLeaf(parse(absolute).base);
   const parent = dirname(absolute);
-  ensureWindowsDirectoryComponents(parent, runtime);
+  ensureWindowsDirectoryComponents(parent, runtime, adopt);
   return parent;
 }
 
 export function ensureWindowsRecordDirectory(input: string, runtime: WindowsRecordRuntime): string {
   const absolute = resolveWindowsRecordPath(input, runtime);
-  ensureWindowsDirectoryComponents(absolute, runtime);
+  ensureWindowsDirectoryComponents(absolute, runtime, true);
   windowsDirectoryIdentity(absolute, runtime);
   return absolute;
 }
 
-function createPortableWindowsPathAuthority(
+export function createPortableWindowsPathAuthority(
   files: FileRuntime,
   protect: (path: string) => void,
   verify: (path: string) => void,
@@ -174,8 +191,10 @@ function createPortableWindowsPathAuthority(
       if (windowsErrorCode(error) === "ENOENT") return null;
       throw error;
     }
-    if (link.isSymbolicLink() || !link.isDirectory())
-      durabilityError("unsafe_path", `reparse or non-directory storage path rejected: ${path}`);
+    if (link.isSymbolicLink())
+      durabilityError("unsafe_path", `Windows authority reparse point rejected: ${path}`);
+    if (!link.isDirectory())
+      durabilityError("unsafe_path", `Windows authority path type changed: ${path}`);
     const target = files.statSync(path, { bigint: true });
     if (!target.isDirectory() || link.dev !== target.dev || link.ino !== target.ino)
       durabilityError("unsafe_path", `storage directory identity mismatch: ${path}`);
@@ -194,8 +213,17 @@ function createPortableWindowsPathAuthority(
       return result;
     },
     directoryIdentity,
-    createPrivateDirectory(path) {
-      files.mkdirSync(path, { mode: 0o700 });
+    createPrivateDirectory(path, adoptExisting = true) {
+      // Mint when the name is missing, adopt when it is already there: the two seams answer the same
+      // question because the caller cannot tell which one it got, and a re-run that stopped at EEXIST
+      // left the inherited DACL in place, which is the whole defect. A caller minting a name of its
+      // own (a fresh runtime-root nonce) passes adoptExisting=false, so a stale candidate is refused
+      // rather than claimed.
+      try {
+        files.mkdirSync(path, { mode: 0o700 });
+      } catch (error) {
+        if (windowsErrorCode(error) !== "EEXIST" || !adoptExisting) throw error;
+      }
       protect(path);
       if (!directoryIdentity(path, true))
         durabilityError("unsafe_path", "created directory vanished");
@@ -208,12 +236,13 @@ function createPortableWindowsPathAuthority(
         if (windowsErrorCode(error) === "ENOENT") return null;
         throw error;
       }
-      if (
-        before.isSymbolicLink() ||
-        !before.isFile() ||
-        before.nlink !== 1n ||
-        before.size > BigInt(maxBytes)
-      )
+      if (before.isSymbolicLink())
+        durabilityError("unsafe_path", `Windows authority reparse point rejected: ${path}`);
+      if (!before.isFile())
+        durabilityError("unsafe_path", `Windows authority path type changed: ${path}`);
+      if (before.nlink !== 1n)
+        durabilityError("unsafe_path", `unsafe Windows authority link state: ${path}`);
+      if (before.size > BigInt(maxBytes))
         durabilityError("unsafe_path", `unsafe or oversized Windows record: ${path}`);
       const fd = files.openSync(path, fs.constants.O_RDONLY);
       return withCleanup(() => {
