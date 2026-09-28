@@ -40,7 +40,7 @@ import {
   WindowsOwnedProcessRecordBackend,
   type WindowsRecordRuntime,
 } from "../src/dispatch/owned-process-record-windows.js";
-import { createNativeWindowsPathAuthority } from "../src/dispatch/windows-path-authority.js";
+import type { WindowsPathAuthority } from "../src/dispatch/windows-path-authority.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
   type WindowsAuthorityPathKind,
@@ -76,7 +76,10 @@ function seedRecord(recordsRoot: string, name: string, bytes: Uint8Array | strin
   // The private write refuses to clobber (CreateFileW without OPEN_ALWAYS is error 80), which is
   // the point in production — here a seed replaces a record on purpose, so drop it first.
   if (existsSync(path)) unlinkSync(path);
-  createNativeWindowsPathAuthority().writePrivateFile(
+  // The authority comes from the same platform seam the backend builds: this suite also runs in the
+  // Linux full suite, where the native Win32 authority cannot load bun:ffi/Kernel32 at all and the
+  // portable one is what production uses.
+  createWindowsRecordRuntime({}).pathAuthority.writePrivateFile(
     path,
     typeof bytes === "string" ? Buffer.from(bytes) : Buffer.from(bytes),
     Number.MAX_SAFE_INTEGER,
@@ -195,6 +198,32 @@ describe("Windows owned-process transactional backend", () => {
       backend.compareAndSwap(ENTRY, null, Buffer.from("first"), { operation: "create" }),
     ).not.toThrow();
     expect(backend.read(ENTRY)).toEqual(Buffer.from("first"));
+  });
+
+  test("adopts the storage leaf without re-securing the ancestors the user owns", () => {
+    // The boundary is ownership, not depth. On the first call the leaf is the evidence root and its
+    // parent is the user's own %TEMP% (or C:\): walking that with an ACL write migrates a descriptor
+    // this install was merely handed, and a depth-based boundary did exactly that whenever the root
+    // sat directly under %TEMP%, which is where the runtime root is minted.
+    const parent = temporaryRoot();
+    const root = join(parent, "evidence");
+    const touched: string[] = [];
+    const platform = createWindowsRecordRuntime({}).pathAuthority;
+    const { backend } = harness({
+      root,
+      runtime: {
+        pathAuthority: {
+          ...platform,
+          createPrivateDirectory: (path) => {
+            touched.push(path);
+            platform.createPrivateDirectory(path);
+          },
+        },
+      },
+    });
+    expect(backend.root).toBe(root);
+    expect(touched).toEqual([root, join(root, OWNED_PROCESS_STORAGE_NAME.RECORD_DIRECTORY)]);
+    expect(touched).not.toContain(parent);
   });
 
   test("creates, lists, reads, and replaces records under a kernel lock", () => {
@@ -463,14 +492,19 @@ describe("Windows owned-process transactional backend", () => {
 
   test("keeps directory identity lossless above Number.MAX_SAFE_INTEGER", () => {
     const root = temporaryRoot();
-    // The directory identity is the 96-bit FileId the native authority reports — 24 hex digits,
-    // far past what a JS number carries losslessly. Keep it a string end to end, and prove a
-    // re-read compares equal while a changed last digit is caught: both facts in one assertion.
-    const authority = createNativeWindowsPathAuthority();
+    // The directory identity is a 96-bit FileId the native authority reports — 24 hex digits, far
+    // past what a JS number carries losslessly — and the subject here is that the backend keeps it a
+    // string end to end and compares it exactly. The identity is supplied rather than read: loading
+    // the native Win32 authority would make this file unloadable in the Linux full suite, and the
+    // real 96-bit read already has its own live Windows round-trip.
+    const identity = "1f4b3c2d5e6a7b8c9d0e1f2a";
+    const platform = createWindowsRecordRuntime({}).pathAuthority;
+    const authority: WindowsPathAuthority = {
+      ...platform,
+      directoryIdentity: (path, verifyPrivate) =>
+        platform.directoryIdentity(path, verifyPrivate) ? { value: identity, size: 0n } : null,
+    };
     authority.createPrivateDirectory(root);
-    const identity = authority.directoryIdentity(root, true);
-    expect(identity?.value).toMatch(/^[\da-f]{48}$/u);
-    expect(authority.directoryIdentity(root, true)?.value).toBe(identity?.value);
 
     let swapped = "";
     const { backend } = harness({
@@ -483,6 +517,8 @@ describe("Windows owned-process transactional backend", () => {
         },
       },
     });
+    // A re-read compares equal; a changed last digit is caught. The value above Number.MAX_SAFE_INTEGER
+    // is the point: as a number, identity and identity with a trailing 0 would collide.
     swapped = "0";
     expect(() => backend.entries()).toThrow("storage directory changed");
   });

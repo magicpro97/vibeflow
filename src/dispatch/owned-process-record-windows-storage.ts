@@ -131,25 +131,29 @@ export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRu
 function ensureWindowsDirectoryComponents(absolute: string, runtime: WindowsRecordRuntime): void {
   const root = parse(absolute).root;
   const parts = absolute.slice(root.length).split(sep).filter(Boolean);
-  // Adopt what already exists, create what does not. A component this install did not create —
-  // a previous release, a plain fs call — carries the inherited DACL its parent handed it, and the
-  // private write refuses that, so asking only when the name was missing left those components
-  // unmigrated until a write failed on a directory we own.
+  // Create what is missing and adopt only what this install owns. A component above the leaf is the
+  // user's own filesystem — a previous release, a plain fs call, mkdtemp — and re-securing it means
+  // opening %TEMP% or C:\ with WRITE_DAC and migrating a descriptor we were merely handed. The leaf
+  // is the storage surface itself, so it is the one component adopted: a directory this install did
+  // not create carries whatever DACL its parent handed it, the private write refuses that, and
+  // adoption is what migrates it instead of failing the first write.
+  // ponytail: <root>/<dir> is the whole storage surface; only the trailing component is ours.
   for (const [index, part] of parts.entries()) {
     safeWindowsRecordLeaf(part);
     const cursor = join(root, ...parts.slice(0, index + 1));
-    // The ancestors above the records root are the user's own filesystem. Repairing a descriptor
-    // this process may not write is refused (error 5), and walking C:\Users with an ACL write per
-    // component costs a full chain open per level — so the name is only asked to be created here,
-    // never adopted, above the two components this install owns.
-    // ponytail: <root>/<dir> is the whole storage surface. Add a parameter if it ever nests deeper.
-    if (index < parts.length - 2 && runtime.pathAuthority.directoryIdentity(cursor, false))
+    if (index < parts.length - 1) {
+      if (!runtime.pathAuthority.directoryIdentity(cursor, false))
+        runtime.pathAuthority.createPrivateDirectory(cursor);
       continue;
+    }
     try {
       runtime.pathAuthority.createPrivateDirectory(cursor);
     } catch (error) {
-      if (windowsErrorCode(error) === "EEXIST") continue;
-      throw error;
+      // createPrivateDirectory mints a missing name and adopts an existing one, so an EEXIST here
+      // is a lost race with another creator: the name now exists and owes the adoption the first
+      // attempt never got to perform. One retry decides it — the second call finds the directory.
+      if (windowsErrorCode(error) !== "EEXIST") throw error;
+      runtime.pathAuthority.createPrivateDirectory(cursor);
     }
     if (!runtime.pathAuthority.directoryIdentity(cursor, false))
       durabilityError("unsafe_path", `storage ancestor changed: ${cursor}`);
@@ -205,7 +209,16 @@ export function createPortableWindowsPathAuthority(
     },
     directoryIdentity,
     createPrivateDirectory(path) {
-      files.mkdirSync(path, { mode: 0o700 });
+      // Mint when the name is missing, adopt when it is already there. The two seams answer the same
+      // question because the caller cannot tell which one it got, and the native authority adopts an
+      // existing directory rather than refusing it: a re-run that hit EEXIST and stopped left the
+      // inherited DACL in place, which is the whole defect. The policy is then applied to whatever
+      // was found, so a first run and a re-run land on the same descriptor.
+      try {
+        files.mkdirSync(path, { mode: 0o700 });
+      } catch (error) {
+        if (windowsErrorCode(error) !== "EEXIST") throw error;
+      }
       protect(path);
       if (!directoryIdentity(path, true))
         durabilityError("unsafe_path", "created directory vanished");
