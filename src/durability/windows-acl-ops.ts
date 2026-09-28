@@ -106,6 +106,13 @@ const REPAIR_ACCESS =
     WINDOWS_NATIVE_RECORD.WRITE_DAC |
     WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
   0;
+// WRITE_OWNER is held only by a token with SeTakeOwnership or the object's current owner. A volume
+// whose inherited ACL carries no ACE for this user refuses it outright — measured on F:\Code:
+// WRITE_OWNER = err 5 while WRITE_DAC = OK — and CreateFileW AND-gates the mask, so asking for it
+// took the whole repair down with it, not just the owner field. This is the mask for a handle that
+// only has to write the DACL, which is the half SetSecurityInfo cannot do without.
+const DACL_REPAIR_ACCESS =
+  (WINDOWS_NATIVE_RECORD.READ_CONTROL | WINDOWS_NATIVE_RECORD.WRITE_DAC) >>> 0;
 
 const isDirectory = (kind: WindowsAuthorityPathKind): boolean =>
   kind === WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY;
@@ -285,6 +292,12 @@ export { WINDOWS_AUTHORITY_PATH_KIND };
  * policy the verdict enforces. So the answer after the repair is read from the same object the answer
  * before it was rejected on, whatever happens to the path meanwhile.
  *
+ * Two opens, and no more: REPAIR_ACCESS first, then DACL_REPAIR_ACCESS. A volume that refuses
+ * WRITE_OWNER refuses the whole first request, and a repair that cannot run at all is the one outcome
+ * this must not produce — the second mask is the same transaction minus the owner field, which
+ * migrateHandle writes best-effort anyway. Nothing is retried past the second rung: the rights are
+ * the only thing the mask decides, so a third attempt would ask for what the second already asked.
+ *
  * No identity, no repair. A caller that cannot say which object it measured has nothing this module
  * can tie the write to, and repairing whatever the name holds would be exactly the substitution the
  * identity gate exists to refuse (issue #817), so the answer is false and no write is attempted.
@@ -298,25 +311,41 @@ function ensureAcl(
   if (options.identity === undefined) return false;
   const context = aclContext(options);
   if (context === null) return false;
-  let handle: bigint | null = null;
-  try {
-    handle = openForAcl(context.binding, path, isDirectory(kind), options.identity, REPAIR_ACCESS);
+  let refused: unknown;
+  for (const access of [REPAIR_ACCESS, DACL_REPAIR_ACCESS]) {
+    let handle: bigint | null;
+    try {
+      handle = openForAcl(context.binding, path, isDirectory(kind), options.identity, access);
+    } catch (error) {
+      // The mask itself was refused. The next rung asks for strictly less, so it is the volume's
+      // answer about this mask and not about the path — which is why it is worth another open.
+      refused = error;
+      continue;
+    }
+    // The path does not hold the object the caller measured. No mask changes that, so the answer is
+    // the "no" the identity gate exists to give — and nothing has been written.
     if (handle === null) return false;
     try {
-      verdict(context, handle);
-    } catch {
-      context.authority.migrateHandle(handle, kind);
-      verdict(context, handle);
+      try {
+        verdict(context, handle);
+      } catch {
+        context.authority.migrateHandle(handle, kind);
+        verdict(context, handle);
+      }
+      return true;
+    } catch (error) {
+      // A caller that asked for the failure gets it, cause and all; the predicate callers keep the
+      // "no" they branch on, and neither path has written anything.
+      if (options.reportFailure) throw error;
+      return false;
+    } finally {
+      closeQuietly(context.binding, handle);
     }
-    return true;
-  } catch (error) {
-    // A caller that asked for the failure gets it, cause and all; the predicate callers keep the
-    // "no" they branch on, and neither path has written anything.
-    if (options.reportFailure) throw error;
-    return false;
-  } finally {
-    if (handle !== null) closeQuietly(context.binding, handle);
   }
+  // Every mask was refused. A caller that asked for the failure gets the last rung's reason; the
+  // predicate callers keep the "no" they branch on, and nothing was written either way.
+  if (options.reportFailure) throw refused;
+  return false;
 }
 
 /**

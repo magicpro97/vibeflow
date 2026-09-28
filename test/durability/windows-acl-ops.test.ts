@@ -466,6 +466,39 @@ describe("windows acl ops", () => {
     expect(calls.closeHandle).toBe(0);
   });
 
+  test("falls back to a DACL-only handle when the volume refuses WRITE_OWNER", () => {
+    const accesses: number[] = [];
+    const { binding } = fakeBinding({
+      createFile: (_path: Buffer, access: number) => {
+        accesses.push(access);
+        // Refuse anything that asks for WRITE_OWNER, exactly as a volume whose inherited ACL carries
+        // no ACE for this user does (measured on F:\Code: WRITE_OWNER = err 5, DACL-only = OK).
+        return (access & WINDOWS_NATIVE_RECORD.WRITE_OWNER) === 0 ? HANDLE : INVALID_HANDLE;
+      },
+    });
+    const repairAccess =
+      (WINDOWS_NATIVE_RECORD.READ_CONTROL |
+        WINDOWS_NATIVE_RECORD.WRITE_DAC |
+        WINDOWS_NATIVE_RECORD.WRITE_OWNER) >>>
+      0;
+    const daclAccess = (WINDOWS_NATIVE_RECORD.READ_CONTROL | WINDOWS_NATIVE_RECORD.WRITE_DAC) >>> 0;
+    expect(
+      windowsEnsurePrivateAcl("C:\\p\\private", WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, {
+        binding,
+        authority: fakeAuthority(
+          descriptor([ace(WINDOWS_PRIVATE_SECURITY.FILE_ALL_ACCESS, OWNER_SID)]),
+        ).authority,
+        identity,
+      }),
+    ).toBe(true);
+    // The retry drops exactly WRITE_OWNER and keeps WRITE_DAC: that is the right the DACL write
+    // needs, and demanding the owner right is what made the whole repair unreachable.
+    expect(accesses).toEqual([repairAccess, daclAccess]);
+    const retry = accesses[1] ?? 0;
+    expect(retry & WINDOWS_NATIVE_RECORD.WRITE_OWNER).toBe(0);
+    expect(retry & WINDOWS_NATIVE_RECORD.WRITE_DAC).toBe(WINDOWS_NATIVE_RECORD.WRITE_DAC);
+  });
+
   test("answers false when the path cannot be opened for the repair", () => {
     const { binding, calls } = fakeBinding({ createFile: () => INVALID_HANDLE });
     const { authority, calls: authorityCalls } = fakeAuthority(descriptor([]));
