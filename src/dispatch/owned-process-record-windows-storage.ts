@@ -129,49 +129,58 @@ export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRu
   return absolute;
 }
 
-function ensureWindowsDirectoryComponents(absolute: string, runtime: WindowsRecordRuntime): void {
+function ensureWindowsDirectoryComponents(
+  absolute: string,
+  runtime: WindowsRecordRuntime,
+  adopt: boolean,
+): void {
   const root = parse(absolute).root;
   const parts = absolute.slice(root.length).split(sep).filter(Boolean);
-  // Create what is missing and adopt only what this install owns. A component above the leaf is the
-  // user's own filesystem — a previous release, a plain fs call, mkdtemp — and re-securing it means
-  // opening %TEMP% or C:\ with WRITE_DAC and migrating a descriptor we were merely handed. The leaf
-  // is the storage surface itself, so it is the one component adopted: a directory this install did
-  // not create carries whatever DACL its parent handed it, the private write refuses that, and
-  // adoption is what migrates it instead of failing the first write.
-  // ponytail: <root>/<dir> is the whole storage surface; only the trailing component is ours.
+  // Create what is missing and adopt what this install owns. A component above the storage surface
+  // is the user's own filesystem — a previous release, a plain fs call, mkdtemp — and re-securing it
+  // means opening %TEMP% or C:\ with WRITE_DAC and migrating a descriptor we were merely handed. The
+  // surface itself is the component adopted: a directory this install did not create carries
+  // whatever DACL its parent handed it, the private write refuses that, and adoption migrates it
+  // instead of failing the first write. A caller whose own surface is one level further down — the
+  // runtime root under tmpdir() — says adopt=false, because the parent it names there is the user's.
+  // ponytail: <root>/<dir> is the whole storage surface; the caller states the boundary.
   for (const [index, part] of parts.entries()) {
     safeWindowsRecordLeaf(part);
     const cursor = join(root, ...parts.slice(0, index + 1));
-    if (index < parts.length - 1) {
+    if (index < parts.length - 1 || !adopt) {
       if (!runtime.pathAuthority.directoryIdentity(cursor, false))
         runtime.pathAuthority.createPrivateDirectory(cursor);
-      continue;
-    }
-    try {
-      runtime.pathAuthority.createPrivateDirectory(cursor);
-    } catch (error) {
-      // createPrivateDirectory mints a missing name and adopts an existing one, so an EEXIST here
-      // is a lost race with another creator: the name now exists and owes the adoption the first
-      // attempt never got to perform. One retry decides it — the second call finds the directory.
-      if (windowsErrorCode(error) !== "EEXIST") throw error;
-      runtime.pathAuthority.createPrivateDirectory(cursor);
+    } else {
+      try {
+        runtime.pathAuthority.createPrivateDirectory(cursor);
+      } catch (error) {
+        // createPrivateDirectory mints a missing name and adopts an existing one, so an EEXIST here
+        // is a lost race with another creator: the name now exists and owes the adoption the first
+        // attempt never got to perform. One retry decides it — the second call finds the directory.
+        if (windowsErrorCode(error) !== "EEXIST") throw error;
+        runtime.pathAuthority.createPrivateDirectory(cursor);
+      }
     }
     if (!runtime.pathAuthority.directoryIdentity(cursor, false))
       durabilityError("unsafe_path", `storage ancestor changed: ${cursor}`);
   }
 }
 
-export function ensureWindowsRecordParent(input: string, runtime: WindowsRecordRuntime): string {
+export function ensureWindowsRecordParent(
+  input: string,
+  runtime: WindowsRecordRuntime,
+  adopt = true,
+): string {
   const absolute = resolveWindowsRecordPath(input, runtime);
   safeWindowsRecordLeaf(parse(absolute).base);
   const parent = dirname(absolute);
-  ensureWindowsDirectoryComponents(parent, runtime);
+  ensureWindowsDirectoryComponents(parent, runtime, adopt);
   return parent;
 }
 
 export function ensureWindowsRecordDirectory(input: string, runtime: WindowsRecordRuntime): string {
   const absolute = resolveWindowsRecordPath(input, runtime);
-  ensureWindowsDirectoryComponents(absolute, runtime);
+  ensureWindowsDirectoryComponents(absolute, runtime, true);
   windowsDirectoryIdentity(absolute, runtime);
   return absolute;
 }

@@ -48,6 +48,7 @@ import {
 } from "../src/dispatch/windows-private-authority.js";
 import { canonicalJsonBytes } from "../src/durability/canonical.js";
 import type { ProcessLockOwnerV1 } from "../src/durability/lock-owner.js";
+import { RUNTIME_PLATFORM } from "../src/durability/process-identity-contract.js";
 import { createFakeFfi } from "./helpers/fake-windows-ffi.js";
 
 const roots: string[] = [];
@@ -58,6 +59,21 @@ const IDENTITY = "win32:638602314960000001";
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+/**
+ * The path authority the platform seam picks, without the kernel seams only win32 can supply: the
+ * runtime factory refuses off win32 when they are missing, and this suite also runs in the Linux
+ * full suite, where createWindowsRecordRuntime deliberately selects the portable authority.
+ */
+function platformPathAuthority(): WindowsPathAuthority {
+  return process.platform === RUNTIME_PLATFORM.WINDOWS
+    ? createWindowsRecordRuntime({}).pathAuthority
+    : createPortableWindowsPathAuthority(
+        nodeFs,
+        () => {},
+        () => {},
+      );
+}
 
 function temporaryRoot(): string {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "vf-win-record-")));
@@ -79,7 +95,7 @@ function seedRecord(recordsRoot: string, name: string, bytes: Uint8Array | strin
   // The authority comes from the same platform seam the backend builds: this suite also runs in the
   // Linux full suite, where the native Win32 authority cannot load bun:ffi/Kernel32 at all and the
   // portable one is what production uses.
-  createWindowsRecordRuntime({}).pathAuthority.writePrivateFile(
+  platformPathAuthority().writePrivateFile(
     path,
     typeof bytes === "string" ? Buffer.from(bytes) : Buffer.from(bytes),
     Number.MAX_SAFE_INTEGER,
@@ -208,7 +224,7 @@ describe("Windows owned-process transactional backend", () => {
     const parent = temporaryRoot();
     const root = join(parent, "evidence");
     const touched: string[] = [];
-    const platform = createWindowsRecordRuntime({}).pathAuthority;
+    const platform = platformPathAuthority();
     const { backend } = harness({
       root,
       runtime: {
@@ -233,7 +249,7 @@ describe("Windows owned-process transactional backend", () => {
     // DACL, and that is the defect the adopting walk exists to close.
     const parent = temporaryRoot();
     const root = join(parent, "raced");
-    const platform = createWindowsRecordRuntime({}).pathAuthority;
+    const platform = platformPathAuthority();
     let attempts = 0;
     const { backend } = harness({
       root,
@@ -528,7 +544,7 @@ describe("Windows owned-process transactional backend", () => {
     // the native Win32 authority would make this file unloadable in the Linux full suite, and the
     // real 96-bit read already has its own live Windows round-trip.
     const identity = "1f4b3c2d5e6a7b8c9d0e1f2a";
-    const platform = createWindowsRecordRuntime({}).pathAuthority;
+    const platform = platformPathAuthority();
     const authority: WindowsPathAuthority = {
       ...platform,
       directoryIdentity: (path, verifyPrivate) =>
