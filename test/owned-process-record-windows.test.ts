@@ -5,6 +5,7 @@ import {
   existsSync,
   linkSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -648,6 +649,35 @@ describe("Windows owned-process transactional backend", () => {
     }).backend;
     opened = first + 1n;
     expect(() => swapped.read(ENTRY)).toThrow("identity changed before read");
+  });
+
+  test("refuses a directory and a hard-linked file where a record entry belongs", () => {
+    const root = temporaryRoot();
+    const recordsRoot = join(root, "records");
+    mkdirSync(recordsRoot, { recursive: true });
+    const pathAuthority = createPortableWindowsPathAuthority(
+      nodeFs,
+      () => {},
+      () => {},
+    );
+    pathAuthority.createPrivateDirectory(recordsRoot);
+
+    // A directory in the entry's place is not a record the authority reads: the verdict names the
+    // shape, and the record-name scan never runs.
+    mkdirSync(join(recordsRoot, ENTRY));
+    expect(() => pathAuthority.readPrivateFile(join(recordsRoot, ENTRY), 4096)).toThrow(
+      "Windows authority path type changed",
+    );
+
+    // A second link to the same bytes is the other hazard: the descriptor is not the one this
+    // install wrote, so another name still reaches it.
+    const linked = join(recordsRoot, `${"b".repeat(64)}.json`);
+    const alias = join(recordsRoot, `${"c".repeat(64)}.json`);
+    writeFileSync(linked, "{}");
+    linkSync(linked, alias);
+    expect(() => pathAuthority.readPrivateFile(alias, 4096)).toThrow(
+      "unsafe Windows authority link state",
+    );
   });
 
   test("discards unpublished owner stages and recovers proved-dead release tombs", () => {

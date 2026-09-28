@@ -317,6 +317,11 @@ describe("native Windows path authority", () => {
   test("creates private directories and durable files through protected native handles", () => {
     const fixture = nativeFixture();
     fixture.authority.createPrivateDirectory("C:\\authority");
+    // A caller minting a name of its own asks for the other contract: the directory that is already
+    // there is refused instead of adopted.
+    expect(() => fixture.authority.createPrivateDirectory("C:\\authority", false)).toThrow(
+      "Windows authority directory already exists",
+    );
     // A name that is already there is adopted, not re-created: CreateDirectoryW would answer EEXIST
     // and leave the inherited DACL in place, which is exactly the shape verifyHandle refuses.
     // Adoption is what lets the descriptor be migrated first and judged after.
