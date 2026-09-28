@@ -22,11 +22,13 @@ import {
 export const WINDOWS_PATH_AUTHORITY = WINDOWS_FILE_NATIVE;
 export { loadWindowsPathNativeBindings } from "./windows-path-native-bindings.js";
 export type { WindowsPathNativeBindings } from "./windows-path-native-bindings.js";
+// The identity shape used to live here; the established import path keeps answering for it.
+export type { WindowsPathIdentity } from "./windows-path-info.js";
 
 export interface WindowsPathAuthority {
   withVerifiedDirectory<T>(path: string, expectedIdentity: string, operation: () => T): T;
   directoryIdentity(path: string, verifyPrivate: boolean): WindowsPathIdentity | null;
-  createPrivateDirectory(path: string): void;
+  createPrivateDirectory(path: string, adoptExisting?: boolean): void;
   readPrivateFile(path: string, maxBytes: number): Buffer | null;
   writePrivateFile(path: string, bytes: Uint8Array, maxBytes: number): void;
 }
@@ -270,15 +272,16 @@ export function createNativeWindowsPathAuthority(
       const result = withDirectoryChain(path, verifyPrivate, null, (identity) => identity);
       return result.found ? result.value : null;
     },
-    createPrivateDirectory(path) {
+    createPrivateDirectory(path, adoptExisting = true) {
       requireParent(path, () => {
-        // A directory that already exists is not created, it is adopted. CreateDirectoryW would
-        // answer EEXIST and leave the inherited DACL in place, which is exactly what verifyHandle
-        // refuses; opening with the repair right and no verdict is what lets the descriptor be
-        // migrated first and judged after.
+        // An existing directory is adopted, not created: CreateDirectoryW would answer EEXIST and
+        // leave the inherited DACL in place. A caller minting a name of its own (a runtime-root
+        // nonce) passes adoptExisting=false: that directory is not ours to claim.
         const existed = open(path, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, false, true);
         if (existed) {
           withCleanup(() => {
+            if (!adoptExisting)
+              durabilityError("unsafe_path", `Windows authority directory already exists: ${path}`);
             const after = queryInfo(
               binding,
               existed.handle,

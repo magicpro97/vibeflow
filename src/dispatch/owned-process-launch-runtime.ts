@@ -45,9 +45,10 @@ export function createWindowsOwnedRuntimeRoot(
   (seams.validate ?? assertWindowsLocalRecordPath)(path);
   const runtime = createWindowsRecordRuntime(seams.runtime ?? {});
   // The parent of a runtime root minted under tmpdir() is the user's own directory, so this chain is
-  // created when missing and never adopted; the root itself is claimed on the next line.
+  // created when missing and never adopted. The root itself is minted exclusively: the nonce is
+  // fresh, so a name that is already there is a candidate this install did not make.
   ensureWindowsRecordParent(path, runtime, false);
-  runtime.pathAuthority.createPrivateDirectory(path);
+  runtime.pathAuthority.createPrivateDirectory(path, false);
 }
 
 export function defaultOwnedSupervisorLaunchRuntime(): OwnedSupervisorLaunchRuntime {

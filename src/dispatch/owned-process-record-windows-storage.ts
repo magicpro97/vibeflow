@@ -143,17 +143,15 @@ function ensureWindowsDirectoryComponents(
   for (const [index, part] of parts.entries()) {
     safeWindowsRecordLeaf(part);
     const cursor = join(root, ...parts.slice(0, index + 1));
-    if (index < parts.length - 1 || !adopt) {
-      if (!runtime.pathAuthority.directoryIdentity(cursor, false))
-        runtime.pathAuthority.createPrivateDirectory(cursor);
-    } else {
+    const owned = index === parts.length - 1 && adopt;
+    if (owned || !runtime.pathAuthority.directoryIdentity(cursor, false)) {
       try {
         runtime.pathAuthority.createPrivateDirectory(cursor);
       } catch (error) {
-        // A lost race: createPrivateDirectory adopts an existing name, so the name the winner made
-        // owes the same adoption this attempt never got to perform.
+        // A lost race: another creator made the name between the check and the create. An owned
+        // component adopts the winner; an ancestor is left to whoever made it.
         if (windowsErrorCode(error) !== "EEXIST") throw error;
-        runtime.pathAuthority.createPrivateDirectory(cursor);
+        if (owned) runtime.pathAuthority.createPrivateDirectory(cursor);
       }
     }
     if (!runtime.pathAuthority.directoryIdentity(cursor, false))
@@ -215,14 +213,16 @@ export function createPortableWindowsPathAuthority(
       return result;
     },
     directoryIdentity,
-    createPrivateDirectory(path) {
+    createPrivateDirectory(path, adoptExisting = true) {
       // Mint when the name is missing, adopt when it is already there: the two seams answer the same
       // question because the caller cannot tell which one it got, and a re-run that stopped at EEXIST
-      // left the inherited DACL in place, which is the whole defect.
+      // left the inherited DACL in place, which is the whole defect. A caller minting a name of its
+      // own (a fresh runtime-root nonce) passes adoptExisting=false, so a stale candidate is refused
+      // rather than claimed.
       try {
         files.mkdirSync(path, { mode: 0o700 });
       } catch (error) {
-        if (windowsErrorCode(error) !== "EEXIST") throw error;
+        if (windowsErrorCode(error) !== "EEXIST" || !adoptExisting) throw error;
       }
       protect(path);
       if (!directoryIdentity(path, true))
