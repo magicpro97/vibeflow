@@ -92,10 +92,18 @@ export function isValidCuratorCron(s: string): boolean {
 }
 
 /** #689: validate a stored curator block → defaults on garbage/absent-field. */
-export function coerceCuratorSettings(raw: unknown): CuratorSettings | undefined {
+export function coerceCuratorSettings(
+  raw: unknown,
+  base: CuratorSettings = DEFAULT_CURATOR_SETTINGS,
+): CuratorSettings | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const obj = raw as Record<string, unknown>;
-  const out: CuratorSettings = { ...DEFAULT_CURATOR_SETTINGS };
+  // `base` is the block the caller is updating, and it is what a field the payload does NOT mention
+  // is filled from. Starting from the defaults instead rewrote unmentioned fields: a partial
+  // `{curator:{enabled:true}}` through the settings route reset observeMode, schedule and
+  // severityThreshold - three fields the client never sent - which is the defect this parameter
+  // exists to close. The read path passes nothing and still means "defaults for anything absent".
+  const out: CuratorSettings = { ...base };
   if (typeof obj.enabled === "boolean") out.enabled = obj.enabled;
   if (typeof obj.observeMode === "boolean") out.observeMode = obj.observeMode;
   if (
@@ -122,6 +130,9 @@ export function mergeCuratorSettings(
   next: { curator?: CuratorSettings },
   current: { curator?: CuratorSettings },
 ): void {
-  const curatorCfg = "curator" in next ? coerceCuratorSettings(next.curator) : current.curator;
+  const curatorCfg =
+    "curator" in next
+      ? coerceCuratorSettings(next.curator, current.curator ?? DEFAULT_CURATOR_SETTINGS)
+      : current.curator;
   if (curatorCfg) merged.curator = curatorCfg;
 }

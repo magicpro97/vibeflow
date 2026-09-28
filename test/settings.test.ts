@@ -14,7 +14,7 @@ import {
   settingsPath,
   writeSettings,
 } from "../src/settings.js";
-import { DEFAULT_CURATOR_SETTINGS } from "../src/skills/curator-settings.js";
+import { type CuratorSettings, DEFAULT_CURATOR_SETTINGS } from "../src/skills/curator-settings.js";
 import { DEFAULT_TYPESAFE_SETTINGS } from "../src/typesafe-settings.js";
 
 /** Make a throwaway repo dir and return its path. */
@@ -640,17 +640,33 @@ describe("settings.curator (#689)", () => {
   test("a partial curator write preserves unmentioned fields via coerce", () => {
     const dir = tmpRepo();
     try {
+      // Write NON-default values first, then a PARTIAL curator block. The previous version wrote
+      // the full block, so the three "preserved" assertions were byte-identical to the defaults and
+      // passed with a coerce that always started from them - it could not fail on what it names.
       writeSettings(
         dir,
-        { curator: { ...DEFAULT_CURATOR_SETTINGS, enabled: true } },
+        {
+          curator: {
+            ...DEFAULT_CURATOR_SETTINGS,
+            enabled: false,
+            observeMode: false,
+            schedule: "15 3 * * 2",
+            severityThreshold: "high",
+          },
+        },
         { now: fixedNow },
       );
+      // Cast because the TYPE spells a full block while the WIRE does not: `POST /api/settings`
+      // hands this shape through `coerceCuratorSettings`, which is exactly where the defect lived.
+      // Writing the full block here - what the type invites - is what made the test unfailable.
+      const partial = { curator: { enabled: true } as CuratorSettings };
+      writeSettings(dir, partial, { now: fixedNow });
       writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
       const c = readSettings(dir).curator;
       expect(c?.enabled).toBe(true);
-      expect(c?.observeMode).toBe(true);
-      expect(c?.schedule).toBe("0 9 * * 1");
-      expect(c?.severityThreshold).toBe("medium");
+      expect(c?.observeMode).toBe(false);
+      expect(c?.schedule).toBe("15 3 * * 2");
+      expect(c?.severityThreshold).toBe("high");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
