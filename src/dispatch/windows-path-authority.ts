@@ -287,6 +287,13 @@ export function createNativeWindowsPathAuthority(
             );
             if (!after.raw.equals(existed.info.raw))
               durabilityError("unsafe_path", "adopted Windows authority directory changed");
+            // A foreign write right is not a shape to migrate, it is a boundary to refuse: rewriting
+            // the descriptor would take a directory another principal can write and hand it back as
+            // private, hiding the hazard instead of reporting it. The inherited DACL adoption
+            // exists for (a mkdtemp root, an earlier release) carries no foreign ACE, so the two
+            // judgements do not overlap: no foreign writer, but the wrong shape, is the migratable
+            // case.
+            privacy.verifyNoForeignWrite(existed.handle);
             try {
               privacy.verifyHandle(existed.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
             } catch {
