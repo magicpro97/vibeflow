@@ -5,16 +5,21 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CTX_DIR } from "../src/core.js";
 import {
+  DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+  type ProjectClassificationSettings,
+} from "../src/project-classification-settings.js";
+import {
   DEFAULT_FAILURE_PROTECTION,
   DEFAULT_SETTINGS,
-  DEFAULT_SKILLS_CONFIG,
   DEFAULT_TIMEOUT_SECONDS,
+  type SkillsConfig,
   priorityRank,
   readSettings,
   settingsPath,
   writeSettings,
 } from "../src/settings.js";
 import { type CuratorSettings, DEFAULT_CURATOR_SETTINGS } from "../src/skills/curator-settings.js";
+import { DEFAULT_SKILLS_CONFIG } from "../src/skills/skills-settings.js";
 import { DEFAULT_TYPESAFE_SETTINGS } from "../src/typesafe-settings.js";
 
 /** Make a throwaway repo dir and return its path. */
@@ -632,6 +637,46 @@ describe("settings.curator (#689)", () => {
     try {
       writeRaw(dir, JSON.stringify({ curator: "nonsense" }));
       expect(readSettings(dir).curator).toEqual(DEFAULT_CURATOR_SETTINGS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial skills write preserves unmentioned fields via coerce", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(
+        dir,
+        { skills: { autoResolve: false, mirrorMode: "full", targetEngines: ["claude"] } },
+        { now: fixedNow },
+      );
+      writeSettings(dir, { skills: { autoResolve: true } as SkillsConfig }, { now: fixedNow });
+      const sk = readSettings(dir).skills;
+      expect(sk?.autoResolve).toBe(true);
+      expect(sk?.mirrorMode).toBe("full");
+      expect(sk?.targetEngines).toEqual(["claude"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial project-classification write preserves unmentioned fields via coerce", () => {
+    const dir = tmpRepo();
+    try {
+      const eng = DEFAULT_PROJECT_CLASSIFICATION_SETTINGS.engine;
+      writeSettings(
+        dir,
+        { projectClassification: { enabled: true, engine: { ...eng, model: "sentinel-model" } } },
+        { now: fixedNow },
+      );
+      writeSettings(
+        dir,
+        { projectClassification: { enabled: false } as ProjectClassificationSettings },
+        { now: fixedNow },
+      );
+      const pc = readSettings(dir).projectClassification;
+      expect(pc?.enabled).toBe(false);
+      expect(pc?.engine.model).toBe("sentinel-model");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

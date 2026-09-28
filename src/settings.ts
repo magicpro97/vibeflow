@@ -3,6 +3,13 @@ import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
 import { ENGINES, type Engine } from "./core/types.js";
 import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
 import * as projectClassification from "./project-classification-settings.js";
+import {
+  DEFAULT_SKILLS_CONFIG,
+  type SkillsConfig,
+  coerceSkillsConfig,
+  mergeSkillsConfig,
+} from "./skills/skills-settings.js";
+export type { SkillsConfig } from "./skills/skills-settings.js";
 import { type MemoryMode, coerceMemory } from "./settings-memory.js";
 import * as curator from "./skills/curator-settings.js";
 import type { UserMcpServer } from "./tools/index.js";
@@ -72,16 +79,6 @@ export interface VibeSettings {
   updatedAt: string;
 }
 
-/** #687: skills resolution and mirroring policy. */
-export interface SkillsConfig {
-  /** When true, auto-resolve draft skills on init/sync. Default: true. */
-  autoResolve: boolean;
-  /** Mirror mode: "pointer" (symlink into each engine skill dir) or "full" (copy). Default: "pointer". */
-  mirrorMode: "pointer" | "full";
-  /** Target engines to mirror skills into. Default: all ENGINES. */
-  targetEngines: Engine[];
-}
-
 /** Default dispatch timeout (seconds) — long enough for a real engine run, short enough to unstick. */
 export const DEFAULT_TIMEOUT_SECONDS = 3600;
 
@@ -91,13 +88,6 @@ export const DEFAULT_FAILURE_PROTECTION: FailureProtection = {
   autoWip: false,
   rollbackOnFail: false,
   requireGit: false,
-};
-
-/** Default baseline. `readSettings` always returns a fresh copy, never this object. */
-export const DEFAULT_SKILLS_CONFIG: SkillsConfig = {
-  autoResolve: true,
-  mirrorMode: "pointer",
-  targetEngines: [...ENGINES],
 };
 
 export const DEFAULT_SETTINGS: VibeSettings = {
@@ -233,22 +223,6 @@ function coerceEval(raw: unknown): { minPassRate?: number; minSamples?: number }
   return out.minPassRate === undefined && out.minSamples === undefined ? undefined : out;
 }
 
-/** Validate skills resolution and mirroring policy. */
-function coerceSkillsConfig(raw: unknown): SkillsConfig | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const obj = raw as Record<string, unknown>;
-  const out: SkillsConfig = { ...DEFAULT_SKILLS_CONFIG };
-  if (typeof obj.autoResolve === "boolean") out.autoResolve = obj.autoResolve;
-  if (obj.mirrorMode === "pointer" || obj.mirrorMode === "full") out.mirrorMode = obj.mirrorMode;
-  if (Array.isArray(obj.targetEngines)) {
-    const wanted = obj.targetEngines.filter(
-      (e): e is Engine => typeof e === "string" && (ENGINES as readonly string[]).includes(e),
-    );
-    if (wanted.length > 0) out.targetEngines = wanted;
-  }
-  return out;
-}
-
 /** Keep only valid engine names; empty/garbage input -> {} so defaults stay untouched. */
 function coerceEnabledEngines(raw: unknown): Pick<VibeSettings, "enabledEngines"> {
   if (!Array.isArray(raw)) return {};
@@ -375,8 +349,7 @@ export function writeSettings(
   const evalCfg = "eval" in next ? coerceEval(next.eval) : current.eval;
   if (evalCfg) merged.eval = evalCfg;
   // #687: skills is replace-on-write — coerce the handed block over defaults.
-  const skillsCfg = "skills" in next ? coerceSkillsConfig(next.skills) : current.skills;
-  if (skillsCfg) merged.skills = skillsCfg;
+  mergeSkillsConfig(merged, next, current);
   // Replace-on-write like skills: the panel hands a complete block, so a partial one is kept.
   merged.projectClassification = projectClassification.mergeProjectClassificationSettings(
     next,
