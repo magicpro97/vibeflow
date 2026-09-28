@@ -233,6 +233,13 @@ describe("the win32 gate is wired into both workflows", () => {
     // The row exists for the 10s spawn budget, which is the number this test's own docstring and
     // the workflows' comments both name. Raising it here would silently change what CI verified.
     expect(body).toContain("const HOOK_BUDGET_MS = 10_000;");
+    // The fail-loud guard is armed by a VALUE, and pinning the const name alone let someone change
+    // `=== "1"` to `=== "0"`: the guard then never fires, the "loudly" half of the contract is gone,
+    // and every assertion in this file - which reads text, not behaviour - stays green.
+    expect(body).toContain('const LIVE_WINDOWS_ENV = "VF_REQUIRE_LIVE_WINDOWS";');
+    expect(body).toContain(
+      'process.env[LIVE_WINDOWS_ENV] === "1" && process.platform !== RUNTIME_PLATFORM.WINDOWS',
+    );
     // The declaration alone is not the claim. The budget is what the test's timing assertion uses,
     // so pin that the assertion reads it rather than a literal that could drift away from the const.
     expect(body).toContain("expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);");

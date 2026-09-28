@@ -63,6 +63,13 @@ test("the drawer never renders a secret: no key value, only a source label", () 
   ]);
   expect(drawer).not.toMatch(/TYPESAFE_API_KEY\s*[:=]\s*["'`]/);
   expect(drawer).not.toContain("Bearer");
+  // The enumeration above reads `typesafeView.<field>`, which is what the TEMPLATE does. A key could
+  // still reach the screen through an interpolated local (`const k = ...` then `{{ k }}`), so pin the
+  // interpolation expressions too: the source label must be the only key-ish thing rendered.
+  const interpolations = [...drawer.matchAll(/\{\{([^}]*)\}\}/g)].map((m) => (m[1] ?? "").trim());
+  expect(interpolations.filter((e) => /key|secret|token|credential/i.test(e))).toEqual([
+    "typesafeView.keySource",
+  ]);
 });
 
 test("every call site is individually toggleable", () => {
