@@ -130,16 +130,26 @@ export function resolveWindowsRecordPath(input: string, runtime: WindowsRecordRu
 
 function ensureWindowsDirectoryComponents(absolute: string, runtime: WindowsRecordRuntime): void {
   const root = parse(absolute).root;
-  let cursor = root;
-  for (const part of absolute.slice(root.length).split(sep).filter(Boolean)) {
+  const parts = absolute.slice(root.length).split(sep).filter(Boolean);
+  // Adopt what already exists, create what does not. A component this install did not create —
+  // a previous release, a plain fs call — carries the inherited DACL its parent handed it, and the
+  // private write refuses that, so asking only when the name was missing left those components
+  // unmigrated until a write failed on a directory we own.
+  for (const [index, part] of parts.entries()) {
     safeWindowsRecordLeaf(part);
-    cursor = join(cursor, part);
-    if (!runtime.pathAuthority.directoryIdentity(cursor, false)) {
-      try {
-        runtime.pathAuthority.createPrivateDirectory(cursor);
-      } catch (race) {
-        if (windowsErrorCode(race) !== "EEXIST") throw race;
-      }
+    const cursor = join(root, ...parts.slice(0, index + 1));
+    // The ancestors above the records root are the user's own filesystem. Repairing a descriptor
+    // this process may not write is refused (error 5), and walking C:\Users with an ACL write per
+    // component costs a full chain open per level — so the name is only asked to be created here,
+    // never adopted, above the two components this install owns.
+    // ponytail: <root>/<dir> is the whole storage surface. Add a parameter if it ever nests deeper.
+    if (index < parts.length - 2 && runtime.pathAuthority.directoryIdentity(cursor, false))
+      continue;
+    try {
+      runtime.pathAuthority.createPrivateDirectory(cursor);
+    } catch (error) {
+      if (windowsErrorCode(error) === "EEXIST") continue;
+      throw error;
     }
     if (!runtime.pathAuthority.directoryIdentity(cursor, false))
       durabilityError("unsafe_path", `storage ancestor changed: ${cursor}`);
@@ -161,7 +171,7 @@ export function ensureWindowsRecordDirectory(input: string, runtime: WindowsReco
   return absolute;
 }
 
-function createPortableWindowsPathAuthority(
+export function createPortableWindowsPathAuthority(
   files: FileRuntime,
   protect: (path: string) => void,
   verify: (path: string) => void,

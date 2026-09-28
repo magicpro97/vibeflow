@@ -3,6 +3,11 @@ import { runCleanups, withCleanup } from "../durability/cleanup.js";
 import { durabilityError } from "../durability/errors.js";
 import { WINDOWS_FILE_NATIVE } from "./windows-native-contract.js";
 import {
+  type WindowsPathIdentity,
+  type WindowsPathNativeInfo,
+  queryInfo,
+} from "./windows-path-info.js";
+import {
   type WindowsNativeHandle,
   type WindowsPathNativeBindings,
   loadWindowsPathNativeBindings,
@@ -18,11 +23,6 @@ export const WINDOWS_PATH_AUTHORITY = WINDOWS_FILE_NATIVE;
 export { loadWindowsPathNativeBindings } from "./windows-path-native-bindings.js";
 export type { WindowsPathNativeBindings } from "./windows-path-native-bindings.js";
 
-export interface WindowsPathIdentity {
-  value: string;
-  size: bigint;
-}
-
 export interface WindowsPathAuthority {
   withVerifiedDirectory<T>(path: string, expectedIdentity: string, operation: () => T): T;
   directoryIdentity(path: string, verifyPrivate: boolean): WindowsPathIdentity | null;
@@ -31,13 +31,9 @@ export interface WindowsPathAuthority {
   writePrivateFile(path: string, bytes: Uint8Array, maxBytes: number): void;
 }
 
-interface NativeInfo extends WindowsPathIdentity {
-  raw: Buffer;
-}
-
 interface OpenedPath {
   handle: WindowsNativeHandle;
-  info: NativeInfo;
+  info: WindowsPathNativeInfo;
 }
 
 type DirectoryChainResult<T> = { found: true; value: T } | { found: false };
@@ -99,58 +95,6 @@ function rollbackThenThrow(primary: unknown, cleanups: readonly (() => void)[]):
   throw primary;
 }
 
-function queryInfo(
-  binding: WindowsPathNativeBindings,
-  handle: WindowsNativeHandle,
-  expected: WindowsAuthorityPathKind,
-): NativeInfo {
-  const attributes = Buffer.alloc(WINDOWS_PATH_AUTHORITY.ATTRIBUTE_INFO_BYTES);
-  checked(
-    binding,
-    "GetFileInformationByHandleEx(AttributeTagInfo)",
-    binding.fileInfo(
-      handle,
-      WINDOWS_PATH_AUTHORITY.ATTRIBUTE_TAG_CLASS,
-      attributes,
-      attributes.length,
-    ),
-  );
-  const flags = attributes.readUInt32LE(0);
-  if ((flags & WINDOWS_PATH_AUTHORITY.FILE_ATTRIBUTE_REPARSE_POINT) !== 0)
-    durabilityError("unsafe_path", "Windows authority reparse point rejected");
-  const standard = Buffer.alloc(WINDOWS_PATH_AUTHORITY.STANDARD_INFO_BYTES);
-  checked(
-    binding,
-    "GetFileInformationByHandleEx(FileStandardInfo)",
-    binding.fileInfo(handle, WINDOWS_PATH_AUTHORITY.STANDARD_INFO_CLASS, standard, standard.length),
-  );
-  const directory =
-    (flags & WINDOWS_PATH_AUTHORITY.FILE_ATTRIBUTE_DIRECTORY) !== 0 &&
-    standard.readUInt8(WINDOWS_PATH_AUTHORITY.STANDARD_DIRECTORY_OFFSET) !== 0;
-  if (directory !== (expected === WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY))
-    durabilityError("unsafe_path", "Windows authority path type changed");
-  const links = standard.readUInt32LE(WINDOWS_PATH_AUTHORITY.STANDARD_LINKS_OFFSET);
-  if (
-    links < 1 ||
-    (!directory && links !== 1) ||
-    standard.readUInt8(WINDOWS_PATH_AUTHORITY.STANDARD_DELETE_PENDING_OFFSET) !== 0
-  )
-    durabilityError("unsafe_path", "unsafe Windows authority link state");
-  const raw = Buffer.alloc(WINDOWS_PATH_AUTHORITY.FILE_ID_INFO_BYTES);
-  checked(
-    binding,
-    "GetFileInformationByHandleEx(FileIdInfo)",
-    binding.fileInfo(handle, WINDOWS_PATH_AUTHORITY.FILE_ID_INFO_CLASS, raw, raw.length),
-  );
-  if (raw.subarray(8).every((byte) => byte === 0))
-    durabilityError("unsafe_path", "Windows authority identity is unavailable");
-  return {
-    raw,
-    value: raw.toString("hex"),
-    size: standard.readBigInt64LE(WINDOWS_PATH_AUTHORITY.STANDARD_SIZE_OFFSET),
-  };
-}
-
 function flags(kind: WindowsAuthorityPathKind, writeThrough = false): number {
   return (
     (WINDOWS_PATH_AUTHORITY.FILE_FLAG_OPEN_REPARSE_POINT |
@@ -168,16 +112,25 @@ export function createNativeWindowsPathAuthority(
 ): WindowsPathAuthority {
   const close = (handle: WindowsNativeHandle) =>
     checked(binding, "CloseHandle", binding.closeHandle(handle));
+  // `mayRepair` asks for WRITE_DAC as well as READ_CONTROL: adopting a directory that already
+  // exists writes the descriptor through the same handle the verdict is read from, and READ_CONTROL
+  // alone left SetSecurityInfo answering error 5 on a directory this process owns. `verify` is
+  // separate because the walk adopts before it judges — a verdict on the un-migrated descriptor
+  // is the refusal the adoption exists to answer.
   const open = (
     path: string,
     kind: WindowsAuthorityPathKind,
-    verifyPrivate: boolean,
+    verify: boolean,
+    mayRepair = false,
   ): OpenedPath | null => {
     const access =
       kind === WINDOWS_AUTHORITY_PATH_KIND.FILE
         ? WINDOWS_PATH_AUTHORITY.GENERIC_READ >>> 0
         : (WINDOWS_PATH_AUTHORITY.FILE_READ_ATTRIBUTES |
-            (verifyPrivate ? WINDOWS_PATH_AUTHORITY.READ_CONTROL : 0)) >>>
+            (verify || mayRepair
+              ? WINDOWS_PATH_AUTHORITY.READ_CONTROL |
+                (mayRepair ? WINDOWS_PATH_AUTHORITY.WRITE_DAC : 0)
+              : 0)) >>>
           0;
     const handle = binding.createFile(
       widePath(path),
@@ -200,8 +153,8 @@ export function createNativeWindowsPathAuthority(
       throw nativeError("CreateFileW(authority)", code);
     }
     try {
-      const info = queryInfo(binding, handle, kind);
-      if (verifyPrivate) privacy.verifyHandle(handle, kind);
+      const info = queryInfo(binding, handle, kind, checked);
+      if (verify) privacy.verifyHandle(handle, kind);
       return { handle, info };
     } catch (error) {
       return rollbackThenThrow(error, [() => close(handle)]);
@@ -211,7 +164,7 @@ export function createNativeWindowsPathAuthority(
     path: string,
     verifyFinal: boolean,
     expectedIdentity: string | null,
-    operation: (identity: NativeInfo) => T,
+    operation: (identity: WindowsPathNativeInfo) => T,
   ): DirectoryChainResult<T> => {
     const prefixes = directoryPrefixes(path);
     const held: OpenedPath[] = [];
@@ -242,7 +195,12 @@ export function createNativeWindowsPathAuthority(
         durabilityError("unsafe_path", `storage directory changed: ${path}`);
       result = operation(final.info);
       for (const opened of held) {
-        const after = queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+        const after = queryInfo(
+          binding,
+          opened.handle,
+          WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY,
+          checked,
+        );
         if (!after.raw.equals(opened.info.raw))
           durabilityError("unsafe_path", "Windows authority ancestor identity changed");
       }
@@ -251,7 +209,8 @@ export function createNativeWindowsPathAuthority(
         for (const [index, prefix] of prefixes.entries()) {
           const opened = open(prefix, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, false);
           const fresh =
-            opened && queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+            opened &&
+            queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, checked);
           if (!fresh || !fresh.raw.equals((held[index] as OpenedPath).info.raw))
             durabilityError("unsafe_path", `Windows authority path changed: ${prefix}`);
           reopened.push(opened as OpenedPath);
@@ -294,7 +253,7 @@ export function createNativeWindowsPathAuthority(
         if ((count[0] ?? 0) < 1) durabilityError("corrupt", "short Windows authority read");
         offset += count[0] ?? 0;
       }
-      const after = queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+      const after = queryInfo(binding, opened.handle, WINDOWS_AUTHORITY_PATH_KIND.FILE, checked);
       if (!after.raw.equals(opened.info.raw) || after.size !== opened.info.size)
         durabilityError("unsafe_path", "Windows authority changed during read");
       privacy.verifyHandle(opened.handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
@@ -313,6 +272,30 @@ export function createNativeWindowsPathAuthority(
     },
     createPrivateDirectory(path) {
       requireParent(path, () => {
+        // A directory that already exists is not created, it is adopted. CreateDirectoryW would
+        // answer EEXIST and leave the inherited DACL in place, which is exactly what verifyHandle
+        // refuses; opening with the repair right and no verdict is what lets the descriptor be
+        // migrated first and judged after.
+        const existed = open(path, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, false, true);
+        if (existed) {
+          withCleanup(() => {
+            const after = queryInfo(
+              binding,
+              existed.handle,
+              WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY,
+              checked,
+            );
+            if (!after.raw.equals(existed.info.raw))
+              durabilityError("unsafe_path", "adopted Windows authority directory changed");
+            try {
+              privacy.verifyHandle(existed.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+            } catch {
+              privacy.migrateHandle(existed.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+              privacy.verifyHandle(existed.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+            }
+          }, [() => close(existed.handle)]);
+          return;
+        }
         privacy.withCreationSecurity(WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY, (security) => {
           checked(binding, "CreateDirectoryW", binding.createDirectory(widePath(path), security));
         });
@@ -320,7 +303,12 @@ export function createNativeWindowsPathAuthority(
         if (!created)
           durabilityError("unsafe_path", "created Windows authority directory vanished");
         withCleanup(() => {
-          const after = queryInfo(binding, created.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
+          const after = queryInfo(
+            binding,
+            created.handle,
+            WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY,
+            checked,
+          );
           if (!after.raw.equals(created.info.raw))
             durabilityError("unsafe_path", "created Windows authority directory changed");
           privacy.verifyHandle(created.handle, WINDOWS_AUTHORITY_PATH_KIND.DIRECTORY);
@@ -351,7 +339,7 @@ export function createNativeWindowsPathAuthority(
             throw nativeError("CreateFileW(create authority)", binding.lastError());
           try {
             privacy.verifyHandle(handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
-            const created = queryInfo(binding, handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+            const created = queryInfo(binding, handle, WINDOWS_AUTHORITY_PATH_KIND.FILE, checked);
             for (let offset = 0; offset < bytes.length; ) {
               const count = [0];
               checked(
@@ -370,7 +358,7 @@ export function createNativeWindowsPathAuthority(
               offset += count[0] ?? 0;
             }
             checked(binding, "FlushFileBuffers", binding.flushFile(handle));
-            const after = queryInfo(binding, handle, WINDOWS_AUTHORITY_PATH_KIND.FILE);
+            const after = queryInfo(binding, handle, WINDOWS_AUTHORITY_PATH_KIND.FILE, checked);
             if (!after.raw.equals(created.raw) || after.size !== BigInt(bytes.length))
               durabilityError("corrupt", "Windows authority durable write changed");
           } catch (primary) {
