@@ -680,6 +680,32 @@ describe("Windows owned-process transactional backend", () => {
     );
   });
 
+  test("reads absence as an answer and keeps every other lstat failure fatal", () => {
+    const root = temporaryRoot();
+    const pathAuthority = createPortableWindowsPathAuthority(
+      nodeFs,
+      () => {},
+      () => {},
+    );
+    // The walk asks about components before it creates them, so a missing name has to answer
+    // "absent" instead of raising: ENOENT is the verdict that tells the caller to mint it.
+    expect(pathAuthority.directoryIdentity(join(root, "missing"), false)).toBeNull();
+
+    // Any other lstat failure stays fatal. A denied read is not an absent name, and treating it as
+    // one would let the walk mint a component over a path it was never allowed to inspect.
+    const denied = createPortableWindowsPathAuthority(
+      {
+        ...nodeFs,
+        lstatSync: () => {
+          throw Object.assign(new Error("access denied"), { code: "EPERM" });
+        },
+      },
+      () => {},
+      () => {},
+    );
+    expect(() => denied.directoryIdentity(join(root, "denied"), false)).toThrow("access denied");
+  });
+
   test("discards unpublished owner stages and recovers proved-dead release tombs", () => {
     const staged = harness();
     const abandoned = staged.backend.acquire("staged-owner");
