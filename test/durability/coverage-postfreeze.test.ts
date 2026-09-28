@@ -825,9 +825,10 @@ test("open directory creation on win32 refuses a swapped leaf and leaves the sub
       }
     } else {
       // No Win32 security APIs on this host, so the leaf repair cannot be performed at all:
-      // creation fails closed and takes the directory it created back out.
+      // creation fails closed and takes the directory it created back out. The walk names the
+      // directory it could not secure — a Win32 ACL write, so never a POSIX syscall name.
       expect(() => openPinnedDescendant(base, join(root, "unrepairable"), true)).toThrow(
-        /fchmodat/,
+        /secure private directory/,
       );
       expect(fs.existsSync(join(root, "unrepairable"))).toBeFalse();
     }

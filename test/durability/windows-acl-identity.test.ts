@@ -304,7 +304,9 @@ describe("windows acl verdict identity", () => {
         }
         return realOpenat(directoryFd, name, flags, modeType, mode);
       };
-      expect(() => openPinnedDescendant(base, leaf, true)).toThrow(/fchmodat/);
+      // The walk fails closed, naming the directory it could not secure — not the POSIX syscall
+      // name this used to report, which said nothing about what failed on Windows.
+      expect(() => openPinnedDescendant(base, leaf, true)).toThrow(/secure private directory/);
       expect(windowsVerifyPathAcl(elsewhere, DIRECTORY)).toBe(false);
       expect(windowsHasNoForeignWrite(elsewhere, DIRECTORY)).toBe(true);
       expect(fs.existsSync(replaced)).toBe(true);

@@ -83,6 +83,15 @@ export interface WindowsAclOpsOptions {
    * object the caller measured is refused rather than performed.
    */
   identity?: WindowsFileIdentity;
+  /**
+   * Raise a failure to act instead of answering it as the boolean "no".
+   *
+   * Both mean the same to a yes/no caller and nothing is written either way, so the default keeps
+   * the predicate shape. A caller that has to say *why* it could not secure a path — the directory
+   * walk, which takes a half-made private directory back out and reports the reason — asks for the
+   * failure itself, with its Win32 cause attached.
+   */
+  reportFailure?: boolean;
 }
 
 // READ_CONTROL answers what the DACL says; a repair additionally needs WRITE_DAC and WRITE_OWNER,
@@ -128,7 +137,16 @@ function openForAcl(
     flags,
     null,
   );
-  if (handle === binding.invalidHandle) return null;
+  // A refused open is not an answer, so it is not the boolean "no": only the Win32 code separates
+  // an access-denied (WRITE_OWNER is not held here) from a file-not-found (the path shape is
+  // wrong), and both used to reach the caller as an undiagnosable `false` — the whole of the
+  // Windows `vf init` crash. Callers that want the yes/no meaning still get it: their own catch
+  // is what turns this into false, and nothing is written either way.
+  if (handle === binding.invalidHandle)
+    durabilityError(
+      "unsafe_path",
+      `CreateFileW ${path} failed with Windows error ${binding.lastError()}`,
+    );
   if (identity === undefined || identityMatches(binding, handle, identity)) return handle;
   // The path does not hold the object the caller stat'ed. Hand back no handle at all: a substitute
   // must not get a verdict attached to it, and must not be repaired in the caller's name either.
@@ -287,7 +305,10 @@ function ensureAcl(
       verdict(context, handle);
     }
     return true;
-  } catch {
+  } catch (error) {
+    // A caller that asked for the failure gets it, cause and all; the predicate callers keep the
+    // "no" they branch on, and neither path has written anything.
+    if (options.reportFailure) throw error;
     return false;
   } finally {
     if (handle !== null) closeQuietly(context.binding, handle);

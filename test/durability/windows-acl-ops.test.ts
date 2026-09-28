@@ -21,6 +21,7 @@ import {
 
 const INVALID_HANDLE = 18_446_744_073_709_551_615n;
 const HANDLE = 42n;
+const WINDOWS_ERROR_ACCESS_DENIED = 5;
 
 const SYSTEM_SID = Buffer.from([0x01, 0x01, 0, 0, 0, 0, 0, 5, 0x12, 0, 0, 0]);
 const ADMINS_SID = Buffer.from([0x01, 0x02, 0, 0, 0, 0, 0, 5, 0x20, 0, 0, 0, 0x20, 0x02, 0, 0]);
@@ -54,6 +55,8 @@ function fakeBinding(overrides: Partial<Record<string, unknown>> = {}) {
   const calls = { closeHandle: 0, paths: [] as string[], access: [] as number[] };
   const binding = {
     invalidHandle: INVALID_HANDLE,
+    // Every refused open on this volume is an access-denied, which is what the diagnostic reads.
+    lastError: () => WINDOWS_ERROR_ACCESS_DENIED,
     createFile: (path: Buffer, access: number) => {
       calls.paths.push(path.toString("utf16le"));
       calls.access.push(access);
