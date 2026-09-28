@@ -363,6 +363,29 @@ describe("native Windows path authority", () => {
     expect(migrations).toHaveLength(0);
   });
 
+  test("migrates an adopted directory whose inherited DACL the verifier refuses", () => {
+    const fixture = nativeFixture();
+    const migrations: string[] = [];
+    const verified: bigint[] = [];
+    let refusals = 1;
+    const privacy: WindowsPrivateAuthority = {
+      ...fixture.privacy,
+      verifyHandle: (handle) => {
+        verified.push(handle);
+        if (refusals-- > 0) throw new Error("inherited DACL refused");
+      },
+      migrateHandle: () => migrations.push("migrate"),
+    };
+    const authority = createNativeWindowsPathAuthority(fixture.binding, privacy);
+    fixture.addDirectory("C:\\inherited");
+    // Adoption exists for exactly this shape: a directory an earlier release or mkdtemp made, whose
+    // descriptor is safe to rewrite. The first verdict refuses, the repair is applied, and the same
+    // descriptor is judged again — the migration is never reported as verified.
+    expect(() => authority.createPrivateDirectory("C:\\inherited")).not.toThrow();
+    expect(migrations).toHaveLength(1);
+    expect(verified).toHaveLength(2);
+  });
+
   test("distinguishes colliding Number projections with the full ReFS FileIdInfo", () => {
     const fixture = nativeFixture();
     fixture.authority.writePrivateFile("C:\\authority", Buffer.from("x"), 10);
