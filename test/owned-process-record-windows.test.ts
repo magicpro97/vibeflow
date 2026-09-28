@@ -226,6 +226,36 @@ describe("Windows owned-process transactional backend", () => {
     expect(touched).not.toContain(parent);
   });
 
+  test("retries the leaf when another creator wins the race", () => {
+    // createPrivateDirectory mints or adopts, so an EEXIST here means another creator got there
+    // between the existence check and the call: the name now exists and owes the same adoption the
+    // first attempt never got to perform. Skipping it is how a raced directory kept its inherited
+    // DACL, and that is the defect the adopting walk exists to close.
+    const parent = temporaryRoot();
+    const root = join(parent, "raced");
+    const platform = createWindowsRecordRuntime({}).pathAuthority;
+    let attempts = 0;
+    const { backend } = harness({
+      root,
+      runtime: {
+        pathAuthority: {
+          ...platform,
+          createPrivateDirectory: (path) => {
+            // The loser of the race sees the directory appear under it and gets 183, the way
+            // CreateDirectoryW answers once the name is taken.
+            if (path === root && attempts++ === 0) {
+              platform.createPrivateDirectory(path);
+              throw Object.assign(new Error("Windows error 183"), { code: "EEXIST" });
+            }
+            platform.createPrivateDirectory(path);
+          },
+        },
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(backend.root).toBe(root);
+  });
+
   test("creates, lists, reads, and replaces records under a kernel lock", () => {
     const { backend, kernel, renames } = harness();
     const first = Buffer.from("first");
