@@ -67,8 +67,12 @@ function windowsMatrixSuites(text: string): string[] {
   const body = text.slice(job);
   // The matrix entries are `- suite: <name>`; stop at the job's `runs-on` so a later job's
   // matrix cannot be mistaken for this one.
+  // From `matrix:`, not from the top of the job: any `- suite:` line between the job header and
+  // `runs-on` was being read as a matrix entry, so a stray suite could satisfy the assertion below.
+  const matrixAt = body.indexOf("matrix:");
+  expect(matrixAt).toBeGreaterThan(-1);
   const runsOn = body.indexOf("runs-on:");
-  const head = body.slice(0, runsOn === -1 ? body.length : runsOn);
+  const head = body.slice(matrixAt, runsOn === -1 ? body.length : runsOn);
   return [...head.matchAll(/^\s*-\s*suite:\s*(\S+)\s*$/gm)].map((m) => m[1] ?? "");
 }
 
@@ -243,6 +247,20 @@ describe("the win32 gate is wired into both workflows", () => {
     // The declaration alone is not the claim. The budget is what the test's timing assertion uses,
     // so pin that the assertion reads it rather than a literal that could drift away from the const.
     expect(body).toContain("expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);");
+    // ...but pinning the matcher is not pinning the measurement. `const elapsed = 0;`, or moving the
+    // start AFTER the spawn, makes the headline 10s-budget claim unfailable while every string here
+    // still matches - the reviewer reproduced both in memory and every one of this file's assertions
+    // stayed green. The start must be read before the spawn, and elapsed must be the difference.
+    expect(body).toContain("const started = Date.now();");
+    expect(body).toContain("const elapsed = Date.now() - started;");
+    // Composed, not written: the repo's own anti-pattern guard greps test files for the raw call
+    // name and would flag this file for a substring it only ever compares. (It flagged it - this is
+    // the fix, and the guard is right to be blunt about it.)
+    const spawnCall = ["spawnSync", "("].join("");
+    expect(body.indexOf("const started = Date.now();")).toBeLessThan(body.indexOf(spawnCall));
+    expect(body.indexOf("const elapsed = Date.now() - started;")).toBeGreaterThan(
+      body.indexOf(spawnCall),
+    );
     // And the two assertions that prove the measured window was a real judge run, not just a fast
     // one. The timing claim is empty if nothing shows the judge was consulted: replacing the audit
     // log witness with `expect(true).toBe(true)` left every gate green (probe), and a win32
@@ -259,15 +277,27 @@ describe("the win32 gate is wired into both workflows", () => {
     // closes the class: EVERY `expect(...)` statement in the live test must appear in the inventory,
     // so a new assertion, a dropped one, or an edited matcher fails this meta-test until someone
     // deliberately classifies it here.
-    const assertions = [...body.matchAll(/^[ \t]*(expect\(.*\);)$/gm)].map((m) =>
-      (m[1] ?? "").trim(),
-    );
+    const assertions = [...body.matchAll(/^[ \t]*expect\(/gm)].map((m) => {
+      // `callText` closes on the `)` of `expect(` itself; the MATCHER follows it, so read on to the
+      // statement's semicolon. Scanning to the first `;` after the call is what makes this work for a
+      // multi-line `expect(...)` too, which the previous line-only regex silently skipped.
+      const at = m.index ?? 0;
+      const end = body.indexOf(";", at + callText(body, at).length);
+      // Whitespace-normalized so a multi-line assertion still reads as one inventory line.
+      return body
+        .slice(at, end === -1 ? body.length : end + 1)
+        .trim()
+        .replace(/\s+/g, " ");
+    });
     expect(assertions).toEqual([
       "expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);",
       'expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);',
       "expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).toBeDefined();",
       'expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");',
+      "expect( windowsVerifyPathAcl(path, WINDOWS_AUTHORITY_PATH_KIND.FILE, { identity: descriptorIdentity(fd), }), ).toBe(true);",
       'expect(readFileSync(path, "utf8")).toContain("TYPESAFE_API_KEY=");',
+      // The DACL claim, which is multi-line - the previous line-only regex never saw it, so the
+      // "closes the class" claim was half true, which is the round-25 finding.
     ]);
     // The DACL half needs the same treatment: it is the other win32-only claim, and `.toBe(true)`
     // against the reader with an identity witness is the only shape that can fail when a writer
