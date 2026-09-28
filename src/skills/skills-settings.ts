@@ -49,9 +49,13 @@ export function mergeSkillsConfig(
   next: { skills?: SkillsConfig },
   current: { skills?: SkillsConfig },
 ): void {
+  // A malformed block (`skills: null`, an array, a string) coerces to `undefined`. Skipping the
+  // assignment here DELETED the stored block, because `merged` is built field by field and never
+  // copies `current` first - so the key simply went missing. A block that cannot be read is left
+  // alone now; only a payload that omits `skills` entirely keeps today's behaviour (also a keep).
   const cfg =
-    "skills" in next
+    ("skills" in next
       ? coerceSkillsConfig(next.skills, current.skills ?? DEFAULT_SKILLS_CONFIG)
-      : current.skills;
+      : undefined) ?? current.skills;
   if (cfg) merged.skills = cfg;
 }

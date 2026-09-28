@@ -508,7 +508,20 @@ describe("settings.skills (#687)", () => {
     }
   });
 
-  test("a partial skills write preserves unmentioned fields via coerce", () => {
+  test("a malformed skills block does not delete the stored one", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { skills: { mirrorMode: "full" } as SkillsConfig }, { now: fixedNow });
+      writeSettings(dir, { skills: null } as unknown as Parameters<typeof writeSettings>[1], {
+        now: fixedNow,
+      });
+      expect(readSettings(dir).skills?.mirrorMode).toBe("full");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial project-classification write preserves unmentioned fields via coerce", () => {
     const dir = tmpRepo();
     try {
       writeSettings(

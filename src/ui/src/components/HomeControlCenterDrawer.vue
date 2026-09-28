@@ -202,6 +202,9 @@ async function testConnection(): Promise<void> {
 
 // Owns ONLY the fields it edits: the write re-coerces a partial block onto the STORED block
 // (216a04f), so echoing the loaded snapshot merely reverted changes made elsewhere.
+/** Save System One. A refusal lands in `typesafeError`, not the component-wide `error`, which
+ *  renders in the Harness section ~250 lines above this button. Stale probe cleared for the same
+ *  reason. */
 async function saveTypesafe(): Promise<void> {
   validateThresholds();
   if (thresholdError.value) return;
@@ -233,7 +236,8 @@ async function saveTypesafe(): Promise<void> {
     message.value = "System One settings saved.";
     await loadTypesafe();
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "System One save failed";
+    typesafeError.value = cause instanceof Error ? cause.message : "System One save failed";
+    typesafeProbe.value = "";
   } finally {
     saving.value = false;
   }

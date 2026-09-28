@@ -130,9 +130,11 @@ export function mergeCuratorSettings(
   next: { curator?: CuratorSettings },
   current: { curator?: CuratorSettings },
 ): void {
+  // A malformed block coerces to `undefined`, and skipping the assignment deleted the stored block
+  // because `merged` is assembled field by field.
   const curatorCfg =
-    "curator" in next
+    ("curator" in next
       ? coerceCuratorSettings(next.curator, current.curator ?? DEFAULT_CURATOR_SETTINGS)
-      : current.curator;
+      : undefined) ?? current.curator;
   if (curatorCfg) merged.curator = curatorCfg;
 }

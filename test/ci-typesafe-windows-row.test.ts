@@ -73,6 +73,16 @@ function windowsMatrixSuites(text: string): string[] {
   expect(matrixAt).toBeGreaterThan(-1);
   const runsOn = body.indexOf("runs-on:");
   const head = body.slice(matrixAt, runsOn === -1 ? body.length : runsOn);
+  // Closed inventory of the matrix's own lines: each has to be a `- suite:` entry. A flow-style or
+  // block-style `exclude:`/`include:` under the matrix adds a line that is not one, so it fails -
+  // and both change which rows actually run (an `exclude: [{suite: X}]` removes the row without
+  // touching the list the assertion below reads).
+  const odd = head
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#") && l !== "matrix:" && l !== "include:")
+    .filter((l) => !/^-\s*suite:\s*\S+$/.test(l));
+  expect(odd).toEqual([]);
   return [...head.matchAll(/^\s*-\s*suite:\s*(\S+)\s*$/gm)].map((m) => m[1] ?? "");
 }
 

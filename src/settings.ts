@@ -346,7 +346,9 @@ export function writeSettings(
   const servers = next.lspServers ?? current.lspServers;
   if (servers?.length) merged.lspServers = [...servers];
   // #549: eval is replace-on-write like envPolicy — keep prior block when next omits it.
-  const evalCfg = "eval" in next ? coerceEval(next.eval) : current.eval;
+  // A malformed block coerces to `undefined`; skipping the assignment deleted the stored one,
+  // because `merged` is assembled field by field and never starts from `current`.
+  const evalCfg = ("eval" in next ? coerceEval(next.eval) : undefined) ?? current.eval;
   if (evalCfg) merged.eval = evalCfg;
   // #687: skills is replace-on-write — coerce the handed block over defaults.
   mergeSkillsConfig(merged, next, current);
