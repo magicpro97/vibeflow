@@ -101,7 +101,18 @@ test("thresholds come from settingsForm.typesafe, never from literals in the com
   // `undefined` and silently refilled from the defaults.
   expect(drawer).toContain("typesafeView.model");
   expect(drawer).toContain("const view = typesafeView.value");
-  expect(drawer).toContain("...view.settings");
+  // The panel sends ONLY the fields it owns. It used to spread the 17-field `view.settings` snapshot
+  // because a partial block was re-coerced onto the DEFAULTS; commit 216a04f gave the coercion a
+  // `base` and the merge passes the stored block, so the spread became purely destructive - open the
+  // panel, change `model` from the CLI, tick a box here, save, and the CLI change is reverted.
+  // Scoped to the PAYLOAD, not the component: the form seeding a local from the view is fine, and a
+  // whole-component check would either pass over the real defect or fail on legitimately reading it.
+  const save = drawer.slice(drawer.indexOf("async function saveTypesafe"));
+  const payload = save.slice(
+    save.indexOf("api.settings.set("),
+    save.indexOf("});", save.indexOf("api.settings.set(")),
+  );
+  expect(payload).not.toContain("...view.settings");
   // The browser must not import the node-only settings module into the bundle.
   expect(drawer).not.toContain('from "../../../typesafe-settings.js"');
   expect(drawer).toContain("validateThresholds");

@@ -200,6 +200,8 @@ async function testConnection(): Promise<void> {
   }
 }
 
+// Owns ONLY the fields it edits: the write re-coerces a partial block onto the STORED block
+// (216a04f), so echoing the loaded snapshot merely reverted changes made elsewhere.
 async function saveTypesafe(): Promise<void> {
   validateThresholds();
   if (thresholdError.value) return;
@@ -223,7 +225,6 @@ async function saveTypesafe(): Promise<void> {
       // agree with each other. Server-side is the only place the comparison means anything.
       expectRepo: view.repo,
       typesafe: {
-        ...view.settings,
         ...settingsForm.typesafe,
         callSites: { ...settingsForm.typesafe.callSites },
       },

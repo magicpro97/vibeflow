@@ -178,9 +178,9 @@ export interface TypesafeSettingsView {
   thresholds: { run: number; accept: number };
   callSites: TypesafeCallSites;
   lastCall?: { at: string; caller: string; status?: number; ms: number };
-  /** The effective, coerced block. Round-trip THIS on save: the write path
-   *  re-coerces a partial block onto the DEFAULTS, so echoing only the edited
-   *  fields would silently reset model, timeoutMs and the breaker tuning. */
+  /** The effective, coerced block, for DISPLAY. Do not round-trip it on save: the write path
+   *  re-coerces a partial block onto the STORED block, so unsent fields come from disk and echoing
+   *  this snapshot would revert anything changed elsewhere (e.g. `vf config typesafe model`). */
   settings: TypesafeSettings;
 }
 

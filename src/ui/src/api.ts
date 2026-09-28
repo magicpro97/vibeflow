@@ -95,7 +95,14 @@ export const api = {
         (r) => r.settings,
       ),
     set: (
-      s: Partial<VibeSettings> & {
+      // `Omit` because `Partial<VibeSettings>` is shallow: intersecting it with a partial `typesafe`
+      // would produce `TypesafeSettings & Partial<TypesafeSettings>`, i.e. a full block again. The
+      // WIRE accepts a partial one - the write path re-coerces it onto the STORED block
+      // (src/typesafe-settings.ts:333) - and typing it as a full block is what invited callers to
+      // echo a snapshot, reverting anything changed elsewhere.
+      s: Omit<Partial<VibeSettings>, "typesafe"> & {
+        /** The fields this caller edits; the rest are preserved from disk. */
+        typesafe?: Partial<import("./types-settings.js").TypesafeSettings>;
         /**
          * The repository these settings were READ from. The write lands in whichever repo is
          * active server-side, which another client can move between this panel's load and its

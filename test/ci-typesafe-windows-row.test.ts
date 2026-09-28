@@ -93,7 +93,16 @@ function jobBlock(text: string, name: string): string {
 describe("the win32 gate is wired into both workflows", () => {
   test("ci.yml lists the typesafe-hook row and runs the live test on it", () => {
     const suites = windowsMatrixSuites(ci);
-    expect(suites).toContain("typesafe-hook");
+    // WHITELIST, not membership. `toContain` was the only pin standing between a green row and the
+    // win32 row being deleted, and it also let the collector's window be wrong in either direction:
+    // any `- suite:` line between `matrix:` and `runs-on:` was read as an axis entry. Requiring the
+    // exact set means removing the row, renaming it, or adding an unexamined one fails here.
+    expect(suites).toEqual([
+      "owned-process",
+      "package-smoke",
+      "home-ui-bootstrap",
+      "typesafe-hook",
+    ]);
     // Scoped to the JOB, not the file. As whole-file substrings all of these survived moving the
     // step into any other job - the matrix row is unchanged, the strings still occur, and the
     // count still matches - while `matrix.suite` is null there, so the step skips and the Windows
