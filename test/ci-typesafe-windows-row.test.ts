@@ -234,8 +234,12 @@ describe("the win32 gate is wired into both workflows", () => {
     // Unlike the ci.yml row this step has no matrix, so it is unconditional: an `if:` appearing at
     // this indent is the release gate being switched off, and the run line would still match.
     expect(releaseStep).not.toContain("\n        if:");
-    expect(jobBlock(release, "release-prerequisites")).toContain(
-      'if ($env:WINDOWS_RESULT -ne "success")',
+    // Anchored to BOTH ends. As a prefix this was satisfied by the `if (...)` alone, so replacing the
+    // body with `{ }` - or burying the `throw` behind `if ($false)` - kept it green while
+    // `release-prerequisites` printed "passed" over a FAILED windows job and `publish` shipped npm
+    // with zero win32 evidence. The pin is the statement, terminator included.
+    expect(jobBlock(release, "release-prerequisites")).toMatch(
+      /^ {10}if \(\$env:WINDOWS_RESULT -ne "success"\) \{ throw "windows result: \$env:WINDOWS_RESULT" \}$/m,
     );
     // The aggregate the release decision reads is the job result, so the job must exist.
     expect(commentFree(release)).toContain("WINDOWS_RESULT");
@@ -286,8 +290,11 @@ describe("the win32 gate is wired into both workflows", () => {
     // `=== "1"` to `=== "0"`: the guard then never fires, the "loudly" half of the contract is gone,
     // and every assertion in this file - which reads text, not behaviour - stays green.
     expect(body).toContain('const LIVE_WINDOWS_ENV = "VF_REQUIRE_LIVE_WINDOWS";');
-    expect(body).toContain(
-      'process.env[LIVE_WINDOWS_ENV] === "1" && process.platform !== RUNTIME_PLATFORM.WINDOWS',
+    // The WHOLE line, anchored. As a substring it survived `false && ` being prefixed to the
+    // condition: the guard then never fires, both registrations skip, the row reports success, and
+    // `WINDOWS_RESULT` reads success - the "loudly" half of the contract, gone.
+    expect(body).toMatch(
+      /^if \(process\.env\[LIVE_WINDOWS_ENV\] === "1" && process\.platform !== RUNTIME_PLATFORM\.WINDOWS\) \{$/m,
     );
     // The declaration alone is not the claim. The budget is what the test's timing assertion uses,
     // so pin that the assertion reads it rather than a literal that could drift away from the const.
