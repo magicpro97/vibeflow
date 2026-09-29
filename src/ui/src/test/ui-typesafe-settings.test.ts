@@ -286,3 +286,14 @@ test("a stale refusal does not outlive a successful reload", () => {
   expect(head).toContain('typesafeError.value = "";');
   expect(drawer).toContain('typesafeProbe.value = "";\n    typesafeError.value = "";');
 });
+
+test("the cross-repo stamp is taken from the server response, not the local path", () => {
+  // The guard compares `typesafeRepo` against the current path, so it is worth no more than where
+  // `typesafeRepo` came from: assigning it the local `repoPath` would make the comparison always
+  // agree and every string-level assertion stay green.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  expect(drawer).toContain("typesafeRepo.value = typesafeView.value.repo;");
+});

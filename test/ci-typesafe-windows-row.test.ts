@@ -343,7 +343,13 @@ describe("the win32 gate is wired into both workflows", () => {
         .filter(
           (l) => l.length > 0 && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"),
         );
-    // 46 and 31 today. Changing a body means deliberately changing these numbers.
+    // 114 for the WHOLE file, then 46 and 31 for the two callback bodies. The whole-file count is
+    // the one that covers module scope: the per-body numbers only see text after the first
+    // `liveWindowsTest(`, so an early exit planted before the registrations - a platform guard at
+    // module scope, say - changed nothing they measured. The comment here previously claimed the
+    // pin "closes the class"; it did not, and a round-36 review found the exact line that escaped.
+    // Changing any of these numbers means deliberately changing the live test.
+    expect(statementLines(body).length).toBe(114);
     expect(chunks.map(statementLines).map((l) => l.length)).toEqual([46, 31]);
 
     const assertions = [...body.matchAll(/^[ \t]*expect\(/gm)].map((m) => {
