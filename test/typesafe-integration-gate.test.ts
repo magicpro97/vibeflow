@@ -53,9 +53,15 @@ async function runHook(
   options: {
     command?: string;
     typesafe?: TypesafeSettings | undefined;
+    /** Use the CALLER's directory as the repo root. A test that plants something the hook must
+     *  contend with (a held lock, a fixture the logbus writes under) has to run the hook in the
+     *  directory it planted it in - otherwise the hook works in a fresh temp repo, the planted
+     *  artifact is never touched, and the assertion passes without exercising the path it names. */
+    root?: string;
   } & RiskJudgeInject = {},
 ): Promise<{ exitCode: number; stdout: string }> {
-  const base = mkdtempSync(join(tmpdir(), "vf-ts-gate-"));
+  const owns = options.root === undefined;
+  const base = options.root ?? mkdtempSync(join(tmpdir(), "vf-ts-gate-"));
   const orig = process.cwd();
   process.chdir(base);
   const fakeStdin = {
@@ -87,7 +93,8 @@ async function runHook(
   } finally {
     console.log = origLog;
     process.chdir(orig);
-    rmSync(base, { recursive: true, force: true });
+    // A caller-owned root outlives this call: the test that passed it cleans it up.
+    if (owns) rmSync(base, { recursive: true, force: true });
   }
 }
 
@@ -185,7 +192,13 @@ describe("System One hook gate — the audit leg cannot block the tool call", ()
         /* already locked by us is fine for this test's purpose */
       }
       const t0 = Date.now();
-      const r = await runHook({ command: "rm -rf /tmp/x", typesafe: enabledSettings() });
+      // `root: base` is the point: the hook must run in the directory holding the lock above, or it
+      // works in a fresh temp repo where nothing is locked and the budget assertion is vacuous.
+      const r = await runHook({
+        command: "rm -rf /tmp/x",
+        typesafe: enabledSettings(),
+        root: base,
+      });
       expect(Date.now() - t0).toBeLessThan(2_000);
       // The deterministic verdict still lands; only the audit line is dropped.
       expect(decisionOf(r.stdout)).toBe("deny");
