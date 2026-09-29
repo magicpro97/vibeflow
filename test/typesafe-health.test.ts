@@ -1172,3 +1172,37 @@ describe("the probe charges its own budget bucket", () => {
     expect(results).toEqual([1, 1, null, null]);
   });
 });
+
+describe("writeBudgetMs bounds whether a write STARTS", () => {
+  test("a leg that already spent its budget writes nothing", async () => {
+    const written: string[] = [];
+    const base = 1_000;
+    const inst = { userRoot: root() };
+    await writeHealth(transition(readHealth(inst), FAILURE_CLASS.BUDGET, T0, undefined, 429), {
+      ...inst,
+      writeFile: (p: string) => {
+        written.push(p);
+      },
+      writeBudgetMs: 500,
+      startedAt: base,
+      now: () => base + 5_000,
+    } as never);
+    // A synchronous write cannot be preempted, so the budget's only real meaning is "do not start
+    // one". Reading the clock twice in a row made it vacuous: the difference was the cost of reading
+    // a clock, so this record was written five seconds past a 500ms budget.
+    expect(written).toEqual([]);
+  });
+
+  test("with no start instant the budget has nothing to measure, and the write happens", async () => {
+    const written: string[] = [];
+    const inst = { userRoot: root() };
+    await writeHealth(transition(readHealth(inst), FAILURE_CLASS.BUDGET, T0, undefined, 429), {
+      ...inst,
+      writeFile: (p: string) => {
+        written.push(p);
+      },
+      writeBudgetMs: 500,
+    } as never);
+    expect(written.length).toBe(1);
+  });
+});

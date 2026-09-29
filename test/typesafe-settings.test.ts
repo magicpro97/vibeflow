@@ -10,6 +10,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -566,5 +567,49 @@ describe("a partial System One write updates only what it names", () => {
     mergeTypesafeSettings(merged, { typesafe: { enabled: true } } as never, {});
     expect(merged.typesafe?.enabled).toBe(true);
     expect(merged.typesafe?.acceptAtConfidence).toBe(DEFAULT_TYPESAFE_SETTINGS.acceptAtConfidence);
+  });
+});
+
+describe("the key file boundary", () => {
+  test("a symlinked typesafe.env is refused, not read as the bearer key", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-typesafe-symlink-"));
+    try {
+      // `userRoot` IS the per-user directory (see `userVibeflowDir`), so the key path is
+      // `<root>/typesafe.env` - not `<root>/.vibeflow/...`.
+      const dir = root;
+      const elsewhere = join(root, "elsewhere.env");
+      writeFileSync(elsewhere, "TYPESAFE_API_KEY=content-of-another-file\n", { mode: 0o600 });
+      try {
+        symlinkSync(elsewhere, join(dir, "typesafe.env"));
+      } catch {
+        return; // a platform without symlink permission cannot express the attack
+      }
+      // `existsSync` follows the link, so the file exists and is readable - which is exactly why the
+      // resolver has to refuse a leaf that is not a regular file. Any file's content would otherwise
+      // become the bearer key sent to the endpoint.
+      expect(existsSync(join(dir, "typesafe.env"))).toBe(true);
+      expect(resolveTypesafeKey({ userRoot: root, env: {} })).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a failure after the key is staged does not leave it on disk", () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-typesafe-stage-"));
+    try {
+      expect(() =>
+        writeTypesafeEnv("sk-live-value", {
+          userRoot: root,
+          fsync: () => {
+            throw new Error("fsync failed");
+          },
+        }),
+      ).toThrow("fsync failed");
+      // The staged file holds the literal key and no reader ever looks at that name.
+      const leftovers = readdirSync(root).filter((f) => f.includes("typesafe.env"));
+      expect(leftovers).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -49,6 +49,7 @@ import type { ResolvedHookPolicy } from "../hooks/templates.js";
 import { installLogbus, outBusOnly } from "../logbus.js";
 import type { VibeSettings } from "../settings.js";
 import { type HealthIo, outcomeProbe, tuningFor, withTypesafeGuard } from "../typesafe-health.js";
+import { userVibeflowDir } from "../typesafe-key-file.js";
 import {
   HOOK_BUS_LOCK_RETRIES_MAX,
   HOOK_HEALTH_WRITE_BUDGET_MS,
@@ -110,7 +111,11 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
   // systemOne fall back to the session-wide settings.timeoutMs.
   const hookTimeoutMs = bounded !== undefined && Number.isFinite(bounded) ? bounded : undefined;
   const healthIo: HealthIo = {
-    userRoot: inject.userRoot ?? homedir(),
+    // The shared per-user root, NOT `$HOME`: the bare home dir made the hook look for
+    // `~/typesafe.env` and write `~/typesafe-health.json`, so it missed keys that `vf config
+    // typesafe key` had written and dropped a file in the home directory. One authority
+    // (`userVibeflowDir`) so the `VF_USER_VIBEFLOW_ROOT` override and the default agree on both sides.
+    userRoot: inject.userRoot ?? userVibeflowDir(),
     lockWaitMs: 0,
     writeBudgetMs: HOOK_HEALTH_WRITE_BUDGET_MS,
     ...(inject.lock ? { lock: inject.lock } : {}),

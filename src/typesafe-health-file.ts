@@ -75,7 +75,12 @@ export interface HealthFileIo {
   lock?: (p: string, fn: () => void | Promise<void>) => Promise<void>;
 }
 /** `HealthFileIo` plus the clock seam the write budget reads. */
-export type HealthFileClockIo = HealthFileIo & { now?: () => number };
+export type HealthFileClockIo = HealthFileIo & {
+  now?: () => number;
+  /** The instant this leg began, so `writeBudgetMs` can bound whether a write STARTS. Without it the
+   *  budget has nothing to measure against. */
+  startedAt?: number;
+};
 
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const optional = (v: unknown, guard: (x: unknown) => boolean): boolean =>
@@ -163,8 +168,13 @@ export function readHealthFile<T>(io: HealthFileClockIo, codec: HealthCodec<T>):
  *  already out of budget. */
 function writeUnlocked<T>(io: HealthFileClockIo, codec: HealthCodec<T>, value: T): void {
   const clock = io.now ?? Date.now;
-  const startedAt = clock();
-  if (io.writeBudgetMs !== undefined && clock() - startedAt > io.writeBudgetMs) return;
+  // A synchronous write cannot be preempted, so the only bound available is whether we START one:
+  // `startedAt` is when the caller's health leg began, and a leg that has already spent its budget
+  // writes nothing. Reading the clock twice HERE made the comparison vacuous - the two reads were
+  // adjacent, so the difference was the cost of reading a clock, and `writeFileSafe` could still
+  // block for as long as it liked.
+  const since = io.startedAt ?? clock();
+  if (io.writeBudgetMs !== undefined && clock() - since > io.writeBudgetMs) return;
   const path = healthPath(io.userRoot);
   const payload = codec.encode(value);
   if (io.writeFile) io.writeFile(path, payload);

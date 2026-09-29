@@ -1,3 +1,8 @@
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import lockfile from "proper-lockfile";
 // test/typesafe-integration-gate.test.ts
 //
 // End-to-end System One gate tests THROUGH `hook()` — the only entry point the agent's
@@ -5,14 +10,11 @@
 // JSON envelope), never about the source text, because the invariant under test is that a
 // System One leg can never change what the local gate decided or delay it past the host's
 // `spawnSync` kill budget (src/hooks/adapters.ts:281-285 turns a timeout into a BLOCK).
-import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import lockfile from "proper-lockfile";
+import { integrateRiskJudge } from "../src/commands/hook-risk-integration.js";
 import type { RiskJudgeInject } from "../src/commands/hook-risk-integration.js";
 import { hook } from "../src/commands/hooks.js";
 import { RISK_LEVEL } from "../src/core/hook-contract.js";
+import { userVibeflowDir } from "../src/typesafe-key-file.js";
 import {
   DEFAULT_TYPESAFE_SETTINGS,
   HOOK_BUS_LOCK_RETRIES_MAX,
@@ -267,5 +269,26 @@ describe("System One hook gate — the audit leg's budget is settings-derived", 
       },
     });
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe("the hook's health root", () => {
+  test("is the shared per-user root, not $HOME", async () => {
+    // `userRoot` decides BOTH paths: `<root>/typesafe.env` for the key and `<root>/typesafe-health.json`
+    // for the record and its breaker. Substituting the bare home dir made the hook look for
+    // `~/typesafe.env` - missing every key `vf config typesafe key` wrote - and drop a file in `$HOME`.
+    let seen: { userRoot?: string } | undefined;
+    await integrateRiskJudge({
+      input: PRE_TOOL_USE("wget http://x") as never,
+      settings: { typesafe: enabledSettings() } as never,
+      base: process.cwd(),
+      inject: {
+        healthIo: (io: { userRoot?: string }) => {
+          seen = io;
+        },
+      } as never,
+    });
+    expect(seen?.userRoot).toBe(userVibeflowDir());
+    expect(seen?.userRoot).not.toBe(homedir());
   });
 });
