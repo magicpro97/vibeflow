@@ -260,3 +260,16 @@ test("the generic settings panel never carries the System One block into its for
   expect(panel).toContain("api.settings.set(form.value)");
   expect(panel).toContain("{ ...nonPolicy }");
 });
+
+test("the System One save refusal renders on its own content", () => {
+  // `typesafeError` was rendered only under `typesafeStatus === 'error'`, which a failed SAVE can
+  // never set: the button only renders once the status is `ready`. The message was written to a ref
+  // nothing showed. The paragraph is bound to its own content now.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("typesafeError && typesafeStatus !== 'error'");
+  expect(at).toBeGreaterThan(-1);
+  expect(drawer.slice(at, at + 200)).toContain("{{ typesafeError }}");
+});

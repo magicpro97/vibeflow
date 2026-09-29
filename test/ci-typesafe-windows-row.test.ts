@@ -124,7 +124,15 @@ describe("the win32 gate is wired into both workflows", () => {
     // Anchoring the gate to end-of-line matters on its own: `toContain("if: matrix.suite ==
     // 'typesafe-hook'")` is a prefix with no terminator, so appending `&& matrix.suite ==
     // 'package-smoke'` kept it matching while the step could never run.
-    expect(windowsJob).toContain(
+    // A YAML COMMENT satisfies `toContain`: `if: false` on the step plus the real gate commented out
+    // one line below left this green, and the `stepLines`/`stepKeys` counters never read the step's
+    // `if:` VALUE. Comment-free text closes it - the same filter those counters already apply.
+    const commentFree = (text: string): string =>
+      text
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("#"))
+        .join("\n");
+    expect(commentFree(windowsJob)).toContain(
       "if: matrix.suite == 'typesafe-hook'\n        run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
     // The live test needs the built artifact and node on PATH, and both must be gated on the same
