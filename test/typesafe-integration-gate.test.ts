@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
@@ -182,15 +182,19 @@ describe("System One hook gate — the audit leg cannot block the tool call", ()
     const base = mkdtempSync(join(tmpdir(), "vf-ts-bus-"));
     const orig = process.cwd();
     process.chdir(base);
+    // Declared OUTSIDE the `try`: a `const` inside `try {}` is not visible in `finally {}` - the two
+    // are sibling blocks, not nested - and the lock is released there.
+    let releaseHeldLock: (() => Promise<void>) | undefined;
     try {
       const logs = join(base, CTX_DIR, "logs");
       mkdirSync(logs, { recursive: true });
       // Occupy the lock the way a concurrent hook process would.
-      try {
-        await lockfile.lock(join(logs, "current.log"), { retries: 0 });
-      } catch {
-        /* already locked by us is fine for this test's purpose */
-      }
+      //
+      // `proper-lockfile` realpaths its target, so locking a file that does not exist throws ENOENT,
+      // and the `catch {}` that used to be here swallowed exactly that - so nothing was ever locked
+      // while this case went on to assert a budget against a run with nothing to contend.
+      writeFileSync(join(logs, "current.log"), "");
+      releaseHeldLock = await lockfile.lock(join(logs, "current.log"), { retries: 0 });
       const t0 = Date.now();
       // `root: base` is the point: the hook must run in the directory holding the lock above, or it
       // works in a fresh temp repo where nothing is locked and the budget assertion is vacuous.
@@ -204,6 +208,18 @@ describe("System One hook gate — the audit leg cannot block the tool call", ()
       expect(decisionOf(r.stdout)).toBe("deny");
     } finally {
       process.chdir(orig);
+      // The lock MUST be released: `proper-lockfile` keeps a refresh timer, and this run's hook goes
+      // through the logbus's own ENOENT recovery (`recoverAndRelock`, issue #145), which recreates the
+      // log dir and REPLACES the lock. A retained lock whose file the run took over resurfaces later
+      // as an ENOENT `stat` on `current.log.lock` - from a timer, after the case has passed, which is
+      // how it reached a whole-suite run as a failure while this file alone stayed green.
+      if (releaseHeldLock) {
+        try {
+          await releaseHeldLock();
+        } catch {
+          /* the run under test already replaced it */
+        }
+      }
       rmSync(base, { recursive: true, force: true });
     }
   });
