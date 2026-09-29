@@ -296,6 +296,30 @@ describe("the win32 gate is wired into both workflows", () => {
     // closes the class: EVERY `expect(...)` statement in the live test must appear in the inventory,
     // so a new assertion, a dropped one, or an edited matcher fails this meta-test until someone
     // deliberately classifies it here.
+    // The inventory below pins the assertions as TEXT, and text is not execution: a `return;` as a
+    // callback body's first statement, or an `if (false) { ... }` around the block, leaves every
+    // string in place and runs none of them - with coverage src-scoped and the ubuntu jobs skipping
+    // both live tests, nothing else in the gate would notice. So the callback bodies are held to a
+    // WHITELIST of statement shapes rather than a blacklist of exit keywords: a blacklist always
+    // loses to the next spelling, and the loop has already paid for that lesson four times. Any
+    // statement line whose opening token is not in this vocabulary fails here.
+    // Text is not execution: a `return;` as a callback's first statement - or an `if (false) { }
+    // around the block - leaves every string below intact and runs none of them, and nothing else in
+    // the gate would notice (coverage is src-scoped, the ubuntu jobs skip both live tests). Counting
+    // the bodies' own statement lines closes it without listing the shapes that are allowed: an
+    // early exit, a wrapper, or any other line added to a body changes the count and fails here.
+    const chunks = body.split("liveWindowsTest(").slice(1);
+    expect(chunks.length).toBe(2);
+    const statementLines = (chunk: string): string[] =>
+      chunk
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(
+          (l) => l.length > 0 && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"),
+        );
+    // 46 and 31 today. Changing a body means deliberately changing these numbers.
+    expect(chunks.map(statementLines).map((l) => l.length)).toEqual([46, 31]);
+
     const assertions = [...body.matchAll(/^[ \t]*expect\(/gm)].map((m) => {
       // `callText` closes on the `)` of `expect(` itself; the MATCHER follows it, so read on to the
       // statement's semicolon. Scanning to the first `;` after the call is what makes this work for a
