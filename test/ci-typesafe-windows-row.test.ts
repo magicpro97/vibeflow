@@ -97,7 +97,22 @@ function jobBlock(text: string, name: string): string {
   expect(start).toBeGreaterThan(-1);
   const rest = text.slice(start + 1);
   const next = /\n {2}[a-z][\w-]*:\s*$/m.exec(rest.slice(1));
-  return next ? rest.slice(0, next.index + 1) : rest;
+  return commentFree(next ? rest.slice(0, next.index + 1) : rest);
+}
+
+/**
+ * A YAML comment satisfies `toContain` on the source.
+ *
+ * `if: false` on a step with the real gate commented out one line below kept this file's assertions
+ * green while the row ran nothing, and the same holds for `VF_REQUIRE_LIVE_WINDOWS: "1"` - commenting
+ * it out removed the loud-fail guard that makes a misconfigured runner fail instead of skip to green.
+ * Every pin that reads a JOB as text goes through here, `jobBlock` included.
+ */
+function commentFree(text: string): string {
+  return text
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("#"))
+    .join("\n");
 }
 
 describe("the win32 gate is wired into both workflows", () => {
@@ -127,11 +142,6 @@ describe("the win32 gate is wired into both workflows", () => {
     // A YAML COMMENT satisfies `toContain`: `if: false` on the step plus the real gate commented out
     // one line below left this green, and the `stepLines`/`stepKeys` counters never read the step's
     // `if:` VALUE. Comment-free text closes it - the same filter those counters already apply.
-    const commentFree = (text: string): string =>
-      text
-        .split("\n")
-        .filter((l) => !l.trim().startsWith("#"))
-        .join("\n");
     expect(commentFree(windowsJob)).toContain(
       "if: matrix.suite == 'typesafe-hook'\n        run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts",
     );
@@ -181,7 +191,15 @@ describe("the win32 gate is wired into both workflows", () => {
     // success. The job is unconditional by design, so any job-level `if:` is the gate being shut.
     expect(jobBlock(ci, "windows")).not.toMatch(/^ {4}if:/m);
     // The aggregate the release gate reads must still exist, or a green row decides nothing.
-    expect(ci).toContain("WINDOWS_RESULT: ${{ needs.windows.result }}");
+    expect(commentFree(ci)).toContain("WINDOWS_RESULT: ${{ needs.windows.result }}");
+    // The mapping is not the gate: `release-please` is gated by the list the script CHECKS, so a
+    // `WINDOWS_RESULT` deleted from `names=[...]` (ci.yml:314) left every assertion green while the
+    // release job was gated without the windows result - the "green gate, zero win32 evidence"
+    // outcome this file exists to prevent. release.yml's half of the same guard was already pinned;
+    // this closes the asymmetry.
+    const namesAt = ci.indexOf("const names=[");
+    expect(namesAt).toBeGreaterThan(-1);
+    expect(commentFree(ci.slice(namesAt, ci.indexOf("];", namesAt)))).toContain("'WINDOWS_RESULT'");
   });
 
   test("release.yml runs the same live test, and runs it inside the Windows job", () => {
@@ -220,7 +238,7 @@ describe("the win32 gate is wired into both workflows", () => {
       'if ($env:WINDOWS_RESULT -ne "success")',
     );
     // The aggregate the release decision reads is the job result, so the job must exist.
-    expect(release).toContain("WINDOWS_RESULT");
+    expect(commentFree(release)).toContain("WINDOWS_RESULT");
     // The row is only loud because the JOB runs on Windows and hands the live test its arming env.
     // Move either to another job and the platform selector becomes `test.skip`, the module-scope
     // guard has no env to fire on, and the whole thing reports success with 2 skips while both
