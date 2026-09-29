@@ -6,7 +6,12 @@
 
 import { ENGINES, type Engine, type WorkUnit } from "../core/types.js";
 import { outBusOnly } from "../logbus.js";
-import { type EngineReadiness, preflightAll, readyEngines } from "../preflight.js";
+import {
+  type EngineReadiness,
+  preflightAll,
+  preflightAllAsync,
+  readyEngines,
+} from "../preflight.js";
 import { outcomeProbe, tuningFor, withTypesafeGuard } from "../typesafe-health.js";
 import type { TypesafeSettings } from "../typesafe-settings.js";
 // TYPE-ONLY: erased at compile time, so it evaluates nothing. The HTTP client module is
@@ -104,6 +109,16 @@ export async function routeUnits(
 
 /** orchestrate's entry point: the enabled/planner gates plus the ready-set probe, so the
  *  cap-bound `orchestrate.ts` stays a single delegation. */
+/**
+ * The production preflight for dispatch routing: the ASYNC probe.
+ *
+ * A synchronous probe cannot durably own a spawned process, so `checkEngine` answers
+ * `probe-failed` for every engine that needs one (`src/preflight.ts:169-173`). Used as the routing
+ * default it meant no live-probe engine was ever ready outside tests, and the planner routing this
+ * module exists for never happened in a real `vf orchestrate`.
+ */
+export const defaultPreflight: PreflightFn = (engines) => preflightAllAsync(engines);
+
 export async function routeForDispatch(
   units: WorkUnit[],
   settings: TypesafeSettings | undefined,

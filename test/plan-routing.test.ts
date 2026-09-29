@@ -3,9 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeReviewer } from "../src/commands/dispatch-reviewer.js";
-import { routeForDispatch, routeUnits } from "../src/commands/orchestrate-routing.js";
-import type { WorkUnit } from "../src/core.js";
-import type { EngineReadiness } from "../src/preflight.js";
+import {
+  defaultPreflight,
+  routeForDispatch,
+  routeUnits,
+} from "../src/commands/orchestrate-routing.js";
+import { ENGINES, type WorkUnit } from "../src/core.js";
+import { type EngineReadiness, preflightAll } from "../src/preflight.js";
 import { resetCallBudget } from "../src/typesafe-health.js";
 import { DEFAULT_TYPESAFE_SETTINGS, type TypesafeSettings } from "../src/typesafe-settings.js";
 
@@ -250,5 +254,31 @@ describe("reviewer implementer resolution", () => {
   test("with no inject implementer at all the seam resolves to undefined", () => {
     const mk = makeReviewer("cli", 0.8);
     expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("codex");
+  });
+});
+
+describe("the dispatch-routing preflight default", () => {
+  test("is not the synchronous probe, which answers probe-failed for a live-probe engine", () => {
+    // `checkEngine` cannot durably own a spawned process, so it stamps
+    // `probe-failed: "<engine>: live probe requires async owned execution"` (src/preflight.ts:169-173).
+    // This assertion pins the REASON the routing default cannot be it - and stays cheap: the sync
+    // probe spawns nothing, so it is deterministic, unlike asserting on real async probe results.
+    // `skipCache` is what keeps this honest: the probe cache is shared across the suite, so a
+    // cached "ready" from an earlier file made this assertion fail in a full run while it passed
+    // when this file ran alone - the assertion read the cache, not the synchronous probe.
+    const sync = preflightAll([...ENGINES], { skipCache: true }) as { detail?: string }[];
+    expect(
+      sync.some((x) => String(x.detail ?? "").includes("requires async owned execution")),
+    ).toBe(true);
+  });
+
+  test("and the routing default answers with a promise, even for no engines", async () => {
+    // Identity cannot express this: wrapping the sync probe in an arrow makes a new function, so
+    // `not.toBe(preflightAll)` stayed green when the regression was reintroduced (probe E1). An empty
+    // engine list keeps this cheap - the async probe resolves immediately and spawns nothing, while the
+    // sync one returns a plain array.
+    const r = defaultPreflight([]);
+    expect(typeof (r as unknown as { then?: unknown }).then).toBe("function");
+    await r;
   });
 });

@@ -246,11 +246,11 @@ export async function orchestrate(
     },
   };
 
-  // Task 7: per-unit engine routing — policy (planner gates, ready-set probe, fail-open
-  // no-op) lives in orchestrate-routing.ts, so a disabled run costs one line and no probe.
-  // DYNAMIC (issue #80): a static sibling edge would be an ESM cycle.
-  const { routeForDispatch } = await import("./orchestrate-routing.js");
-  const units = await routeForDispatch(pending, settings.typesafe, { preflight: inject.preflight });
+  // Task 7 routing policy lives in orchestrate-routing.ts (DYNAMIC import, issue #80 + ASYNC probe).
+  const { defaultPreflight, routeForDispatch } = await import("./orchestrate-routing.js");
+  const units = await routeForDispatch(pending, settings.typesafe, {
+    preflight: inject.preflight ?? defaultPreflight,
+  });
 
   // Scope-conflict gate: refuse to dispatch overlapping scopes in parallel — serialize them.
   const conflicts = findScopeConflicts(units);
