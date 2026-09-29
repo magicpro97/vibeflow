@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const root = process.cwd();
+// Anchored to THIS file, not the process: sibling suites legitimately `chdir` into temp repos, and a
+// `process.cwd()` root read while one of them was mid-`chdir` resolves the docs inside that temp
+// directory - either failing, or passing against a fixture that is not the repository.
+const root = join(import.meta.dir, "..");
 const DOC = "docs/TYPESAFE.md";
 const MIRROR = join("landing", "src", "content", "wiki", "TYPESAFE.md");
 const normalize = (t: string) => t.replace(/\r\n/g, "\n");
