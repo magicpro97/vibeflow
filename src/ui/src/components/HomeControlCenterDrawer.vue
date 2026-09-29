@@ -163,6 +163,7 @@ function validateThresholds(): void {
 
 async function loadTypesafe(): Promise<void> {
   typesafeStatus.value = "loading";
+  typesafeError.value = "";
   try {
     typesafeView.value = await api.typesafe.view();
     settingsForm.typesafe = {
@@ -203,10 +204,8 @@ async function testConnection(): Promise<void> {
 
 // Owns ONLY the fields it edits: the write re-coerces a partial block onto the STORED block
 // (216a04f), so echoing the loaded snapshot merely reverted changes made elsewhere.
-/** Save System One. A refusal lands in `typesafeError`, not the component-wide `error`, whose only
- *  render site is the Harness section ~250 lines above this button; the paragraph below is bound to
- *  its own content, because `typesafeStatus === 'error'` is a state a failed SAVE cannot produce.
- *  Stale probe cleared for the same reason. */
+/** Save System One. A refusal lands in `typesafeError`, whose paragraph renders on its own content: the
+ *  component-wide `error` sits ~250 lines above this button, and a failed save cannot set the status. */
 async function saveTypesafe(): Promise<void> {
   validateThresholds();
   if (thresholdError.value) return;
@@ -235,6 +234,7 @@ async function saveTypesafe(): Promise<void> {
       },
     });
     typesafeProbe.value = "";
+    typesafeError.value = "";
     message.value = "System One settings saved.";
     await loadTypesafe();
   } catch (cause) {

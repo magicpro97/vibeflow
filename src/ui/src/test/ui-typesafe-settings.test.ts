@@ -273,3 +273,16 @@ test("the System One save refusal renders on its own content", () => {
   expect(at).toBeGreaterThan(-1);
   expect(drawer.slice(at, at + 200)).toContain("{{ typesafeError }}");
 });
+
+test("a stale refusal does not outlive a successful reload", () => {
+  // `typesafeError` is bound to its own content, so any path that loads rows successfully has to
+  // clear it - otherwise a 409 from a moved repository stays on screen above correct rows.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function loadTypesafe");
+  const head = drawer.slice(at, at + 400);
+  expect(head).toContain('typesafeError.value = "";');
+  expect(drawer).toContain('typesafeProbe.value = "";\n    typesafeError.value = "";');
+});
