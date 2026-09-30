@@ -1,6 +1,6 @@
 ---
 title: TypeSafe System One (Jev) judge
-description: The optional System One judge: what it decides, the fail-open contract, the four call sites, and every setting.
+description: "The optional System One judge: what it decides, the fail-open contract, the four call sites, and every setting."
 category: explanation
 last_updated: 2026-09-23
 ---
