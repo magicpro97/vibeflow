@@ -58,19 +58,21 @@ function nodeExecPathOrThrow(): string {
 }
 
 /**
- * Parse the hook's own bytes, with the bytes in the failure.
+ * Read the decision out of the hook's stdout the way its OWN consumer does.
  *
- * The first real win32 run threw a bare `SyntaxError: JSON Parse error` from this line, which says
- * nothing about WHAT the runtime printed - so diagnosing it costs a full CI round. An empty stdout stays
- * "no decision" (`{}`), as the previous `|| "{}"` did; anything else that is not JSON reports itself.
+ * `src/hooks/adapters.ts` documents the shape: the runner prints the JSON envelope on the FIRST line and
+ * a free-form "[hook] ..." log on the second, and the adapter parses only the first line so the trailing
+ * log cannot poison the parse. This case used to `JSON.parse` the whole stdout and therefore asserted a
+ * contract the product does not have - which only a real win32 run could reveal, because the case is
+ * gated to that platform. Empty stdout still means "no decision".
  */
 function parseHookStdout(raw: string): unknown {
-  const text = raw.trim();
+  const text = (raw.split("\n", 1)[0] ?? "").trim();
   if (text === "") return {};
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`hook stdout is not JSON: ${JSON.stringify(raw.slice(0, 400))}`);
+    throw new Error(`hook stdout first line is not JSON: ${JSON.stringify(text.slice(0, 400))}`);
   }
 }
 
