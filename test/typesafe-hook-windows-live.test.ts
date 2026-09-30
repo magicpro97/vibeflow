@@ -147,7 +147,12 @@ describe("live Windows typesafe hook path", () => {
         env: home,
         input: "not-a-real-key\n",
       });
-      const path = join(root, ".vibeflow", "typesafe.env");
+      // The key sits under the USER root, and `VF_USER_VIBEFLOW_ROOT` IS that root (it is
+      // `~/.vibeflow`, not its parent) - so the file is beside `root`, not under the repo's
+      // `.vibeflow` that holds SETTINGS.json. Deriving it here instead of asking the product made this
+      // case look one directory too deep; it survived review and every local gate because it only ever
+      // runs on a real win32 runtime.
+      const path = join(root, "typesafe.env");
       // Only the DACL answers the question on this platform, so the assertion goes through the
       // same authority the writer used - but the VERIFY leg of it, not the ensure leg.
       // `hasPrivateMode` routes to `windowsEnsurePrivateAcl`, which is repair-then-recheck: it
