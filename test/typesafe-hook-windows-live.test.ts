@@ -57,6 +57,23 @@ function nodeExecPathOrThrow(): string {
   return nodeExecPath;
 }
 
+/**
+ * Parse the hook's own bytes, with the bytes in the failure.
+ *
+ * The first real win32 run threw a bare `SyntaxError: JSON Parse error` from this line, which says
+ * nothing about WHAT the runtime printed - so diagnosing it costs a full CI round. An empty stdout stays
+ * "no decision" (`{}`), as the previous `|| "{}"` did; anything else that is not JSON reports itself.
+ */
+function parseHookStdout(raw: string): unknown {
+  const text = raw.trim();
+  if (text === "") return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`hook stdout is not JSON: ${JSON.stringify(raw.slice(0, 400))}`);
+  }
+}
+
 describe("live Windows typesafe hook path", () => {
   liveWindowsTest(
     "an enabled judge stays inside the spawn budget on a real win32 runtime",
@@ -114,7 +131,7 @@ describe("live Windows typesafe hook path", () => {
         // The verdict itself. A well-formed payload is answered in the host's native shape, so
         // `permissionDecision` is where the decision lives; reading only the flat `decision` field
         // would compare `undefined` against "block" and pass without checking anything.
-        const out = JSON.parse(run.stdout.toString() || "{}") as {
+        const out = parseHookStdout(run.stdout.toString()) as {
           hookSpecificOutput?: { permissionDecision?: string };
           decision?: string;
         };
