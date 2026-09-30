@@ -42,8 +42,8 @@
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
         <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
         <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — key missing: set the environment variable or run <code>vf config typesafe key</code>.</p>
+        <p v-else-if="typesafeView?.state === 'open'" class="home-control-warning" role="alert">Circuit open — judge calls are paused until {{ typesafeView?.cooldownUntil ?? "the cooldown ends" }}.</p>
         <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p>
-                <p v-else-if="typesafeView?.state === 'open'" class="home-control-warning" role="alert">Circuit open — judge calls are paused until {{ typesafeView?.cooldownUntil ?? "the cooldown ends" }}.</p>
 
         <dl v-if="typesafeView" class="home-control-list">
           <div><dt>enabled</dt><dd>{{ typesafeView.enabled ? "on" : "off" }}</dd></div>

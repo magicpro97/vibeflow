@@ -89,7 +89,17 @@ test("configured and state are separate rows, and an open breaker warns with its
   // rows themselves are what the name claims, so pin the row markup.
   expect(drawer).toContain("<dt>configured</dt><dd>{{ typesafeView.configured");
   expect(drawer).toContain("<dt>state</dt><dd");
-  expect(drawer).toContain('role="alert">Circuit open');
+  // Whole lines, and the banner's PLACE in the chain. A substring match on the markup survived the
+  // defect: it was a `v-else-if` chained to the independent `typesafeError` line instead of the status
+  // chain, so any failed save (the 409 "the active repository changed", HomeControlCenterDrawer.vue:241)
+  // hid the reason the judge was paused, at the moment the operator needed it.
+  const markup = drawer.split("\n").map((l) => l.trim());
+  const configuredAt = markup.findIndex((l) =>
+    l.startsWith('<p v-else-if="typesafeView && !typesafeView.configured"'),
+  );
+  const circuitAt = markup.findIndex((l) => l.includes("Circuit open"));
+  expect(circuitAt).toBe(configuredAt + 1);
+  expect(markup[circuitAt]).toStartWith("<p v-else-if=\"typesafeView?.state === 'open'\"");
   expect(drawer).toContain("cooldownUntil");
 });
 
