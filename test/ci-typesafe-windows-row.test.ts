@@ -381,6 +381,20 @@ describe("the win32 gate is wired into both workflows", () => {
       // The DACL claim, which is multi-line - the previous line-only regex never saw it, so the
       // "closes the class" claim was half true, which is the round-25 finding.
     ]);
+    // Provenance of `out`, which the two verdict assertions above consume. Pinning their TEXT while
+    // leaving the binding free made the win32 fail-open claim unfailable: replacing the right-hand side
+    // with a literal keeps every string below byte-identical, so on windows-latest `not.toBe("block")`
+    // compares a constant, a regression where the shipped artifact answers `block` passes the row,
+    // `WINDOWS_RESULT` reads success and the release proceeds. Whole line, whitespace-normalized, exactly
+    // one of them: that also refuses the two escapes a substring pin admits - a `||` fallback that
+    // swallows an empty stdout (a CLI crash going green) and a `run.stderr` swap.
+    expect(
+      body
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith("const out =")),
+    ).toEqual(['const out = JSON.parse(run.stdout.toString() || "{}") as {']);
+
     // The DACL half needs the same treatment: it is the other win32-only claim, and `.toBe(true)`
     // against the reader with an identity witness is the only shape that can fail when a writer
     // stops enforcing owner-only. A loosened matcher here would leave the row green over it.
