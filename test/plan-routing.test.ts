@@ -266,7 +266,15 @@ describe("the dispatch-routing preflight default", () => {
     // `skipCache` is what keeps this honest: the probe cache is shared across the suite, so a
     // cached "ready" from an earlier file made this assertion fail in a full run while it passed
     // when this file ran alone - the assertion read the cache, not the synchronous probe.
-    const sync = preflightAll([...ENGINES], { skipCache: true }) as { detail?: string }[];
+    // `has: () => true` is what makes this machine-independent. Without it the sync probe answers
+    // "no-binary" (the install hint) whenever the engines are not installed, and the detail this
+    // assertion looks for only appears once the binary EXISTS - so the case passed on a developer
+    // machine that had them and failed on CI, which has none. Probed by running this file under
+    // `env -i PATH=/usr/bin:/bin`: the failure reproduces locally, and this seam removes it.
+    const sync = preflightAll([...ENGINES], {
+      skipCache: true,
+      has: () => true,
+    }) as { detail?: string }[];
     expect(
       sync.some((x) => String(x.detail ?? "").includes("requires async owned execution")),
     ).toBe(true);
