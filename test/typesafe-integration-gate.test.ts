@@ -174,7 +174,13 @@ describe("System One hook gate — the route is live and raise-only", () => {
 });
 
 describe("System One hook gate — the audit leg cannot block the tool call", () => {
-  test("a held BUS lock cannot delay the tool gate (lockRetries: 0 drops the audit event)", async () => {
+  // NOT a contention test, and the name no longer claims one. A lock IS planted and taken below, but
+  // no assertion can yet tell a contended run from a free one: releasing the held lock does not fail
+  // (so the run does not replace it), and zero bytes reach stderr across this file, so the logbus's
+  // `dropped event` report - the observable a contended run would produce - is unreachable here. What
+  // this case DOES assert is the regression it can see: the tool gate returns its verdict quickly
+  // whatever the audit leg does. Testing real contention needs a command whose audit leg actually runs.
+  test("the tool gate returns quickly while a bus lock is planted", async () => {
     // `Logbus.write` is not fire-and-forget in wall-clock terms: it queues onto
     // `this.chain` and `writeLocked` awaits `acquireLock()` with up to 100 x 50 ms of
     // retries, and the CLI sets `process.exitCode` instead of exiting, so those pending
