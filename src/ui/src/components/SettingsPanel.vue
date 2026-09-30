@@ -199,7 +199,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
-import type { PolicyPreview, VibeSettings } from "../types.js";
+import type { VibeSettings } from "../types-settings.js";
+import type { PolicyPreview } from "../types.js";
 import CuratorSettings from "./CuratorSettings.vue";
 import EnvScrubEditor from "./EnvScrubEditor.vue";
 import InfoTip from "./InfoTip.vue";
@@ -256,9 +257,19 @@ onMounted(async () => {
   dialogEl.value?.focus();
   try {
     const settings = await api.settings.get();
-    // Deep clone so edits don't mutate the API-cached object
-    form.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
-    original.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
+    // Deep clone so edits don't mutate the API-cached object.
+    // This panel has no System One UI, so that block is not carried into the form at all. It used
+    // to ride along on BOTH save paths - the direct one and the policy-preview one - because the
+    // form is a snapshot of the WHOLE settings and `mergeTypesafeSettings` is replace-on-write on
+    // mere key presence, so saving anything at all rewrote the judge from a stale copy. Dropping it
+    // here covers both branches at once instead of one guard per branch, and keeps the dirty check
+    // honest: neither side carries it.
+    const { typesafe: unmanagedTypesafe, ...managed } = JSON.parse(
+      JSON.stringify(settings),
+    ) as VibeSettings;
+    void unmanagedTypesafe;
+    form.value = managed as VibeSettings;
+    original.value = JSON.parse(JSON.stringify(managed)) as VibeSettings;
     // Coerce envPolicy → {} on BOTH so EnvScrubEditor's v-model binds an object
     // AND the dirty-check baseline matches (else isDirty is true on open).
     if (form.value && !form.value.envPolicy) form.value.envPolicy = {};

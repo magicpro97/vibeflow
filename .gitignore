@@ -53,3 +53,6 @@ coverage/
 # Local Orca worktree tooling (per-developer, not project config)
 .worktreeinclude
 orca.yaml
+
+# Local worktrees (never commit worktree contents)
+.worktrees/

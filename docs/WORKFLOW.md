@@ -16,6 +16,7 @@ last_updated: 2026-08-27
 - [Owned CLI Lifecycle](#owned-cli-lifecycle)
 - [Output Report](#output-report)
 - [Methodology checkpoints → hard gates](#methodology-checkpoints--hard-gates)
+- [Optional System One judge](#optional-system-one-judge)
 
 ## End-to-end flow
 
@@ -173,6 +174,21 @@ paths rather than silently pretending one skill is a hard gate.
 This is an intentional behavior break: current-HEAD review evidence and a passing test gate for every
 done unit are required by default. Fix the evidence or unit gate; do not bypass the methodology with
 free-text evidence.
+
+---
+
+## Optional System One judge
+
+Between a unit's local gate and the engine, `vf orchestrate` may consult an **optional**
+TypeSafe System One (Jev) judge for two decisions: which ready engine should implement the
+unit, and whether the change is worth sending to the engine reviewer at all. It is off by
+default (`vf config typesafe on` to enable), it is fail-open, and it is never
+authoritative: the engine reviewer and `vf verify`'s `VIBEFLOW_AI` bridge remain
+authoritative on a passing answer. See [TYPESAFE.md](./TYPESAFE.md).
+
+A tripped breaker is **file-backed** at `~/.vibeflow/typesafe-health.json`, because
+`vf hook` is a fresh process per tool call and an in-memory breaker would never trip. When
+it is `open` no HTTP is made at all and the workflow behaves exactly as it does today.
 
 ---
 

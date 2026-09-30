@@ -7,6 +7,8 @@ import {
 } from "../../core/ui-cli-contract.js";
 import { type LogEvent, decodeLogEvent } from "../../logbus/types.js";
 import { readUiPageToken } from "./browser-ui-token.js";
+import type { VibeSettings } from "./types-settings.js";
+import type { TypesafeSettingsView, TypesafeTestResult } from "./types-settings.js";
 import type {
   DashboardSelection,
   DomainImpact,
@@ -15,7 +17,6 @@ import type {
   RegistryViewEntry,
   SafeSkill,
   TimelineEntry,
-  VibeSettings,
   WorkflowDashboardItem,
   WorkflowState,
 } from "./types.js";
@@ -93,7 +94,25 @@ export const api = {
       req<{ settings: VibeSettings }>("GET", "/api/settings", undefined, signal).then(
         (r) => r.settings,
       ),
-    set: (s: Partial<VibeSettings>, signal?: AbortSignal) =>
+    set: (
+      // `Omit` because `Partial<VibeSettings>` is shallow: intersecting it with a partial `typesafe`
+      // would produce `TypesafeSettings & Partial<TypesafeSettings>`, i.e. a full block again. The
+      // WIRE accepts a partial one - the write path re-coerces it onto the STORED block
+      // (src/typesafe-settings.ts:333) - and typing it as a full block is what invited callers to
+      // echo a snapshot, reverting anything changed elsewhere.
+      s: Omit<Partial<VibeSettings>, "typesafe"> & {
+        /** The fields this caller edits; the rest are preserved from disk. */
+        typesafe?: Partial<import("./types-settings.js").TypesafeSettings>;
+        /**
+         * The repository these settings were READ from. The write lands in whichever repo is
+         * active server-side, which another client can move between this panel's load and its
+         * save; the server refuses with 409 when the two disagree. Optional so the other panels,
+         * which post the same block, keep working — this section always sends it.
+         */
+        expectRepo?: string;
+      },
+      signal?: AbortSignal,
+    ) =>
       req<{ settings: VibeSettings }>("POST", "/api/settings", s, signal).then((r) => r.settings),
     previewPolicy: (s: Pick<VibeSettings, "envPolicy" | "hooks">) =>
       req<import("./types.js").PolicyPreview>("POST", "/api/settings/preview", s),
@@ -106,6 +125,15 @@ export const api = {
   },
   detect: (repoPath: string) =>
     req<import("./types.js").RepoDetection>("POST", "/api/detect", { path: repoPath }),
+  // System One (Jev) judge — the key never reaches the browser: the view reports
+  // `keySource` and the probe runs server-side, so a compromised tab cannot exfiltrate it.
+  typesafe: {
+    view: () => req<TypesafeSettingsView>("GET", "/api/typesafe"),
+    // The repository the view was read from, compared server-side: the probe reads the process-global
+    // active repo, and the drawer's client-side guard cannot see another client moving it.
+    test: (expectRepo: string) =>
+      req<TypesafeTestResult>("POST", "/api/typesafe/test", { expectRepo }),
+  },
   skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
   // #689: recent curator findings (severity-badged, sanitized).
   curator: () =>

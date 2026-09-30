@@ -49,10 +49,13 @@ const bounded = (value: unknown, maximum: number): string | null => {
 };
 
 /** Coerce a stored block over the defaults; absent or garbage yields the defaults. */
-export function coerceProjectClassificationSettings(raw: unknown): ProjectClassificationSettings {
+export function coerceProjectClassificationSettings(
+  raw: unknown,
+  base: ProjectClassificationSettings = DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+): ProjectClassificationSettings {
   const out: ProjectClassificationSettings = {
-    enabled: DEFAULT_PROJECT_CLASSIFICATION_SETTINGS.enabled,
-    engine: { ...DEFAULT_PROJECT_CLASSIFICATION_ENGINE },
+    enabled: base.enabled,
+    engine: { ...base.engine },
   };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   const obj = raw as { enabled?: unknown; engine?: unknown };
@@ -79,7 +82,9 @@ export function mergeProjectClassificationSettings(
   next: { projectClassification?: ProjectClassificationSettings },
   current: ProjectClassificationSettings,
 ): ProjectClassificationSettings {
-  return coerceProjectClassificationSettings(next.projectClassification ?? current);
+  // `current` is the base, so a partial `next` leaves the fields it does not name alone instead of
+  // resetting them to the defaults - the same defect the curator and skills blocks had.
+  return coerceProjectClassificationSettings(next.projectClassification ?? current, current);
 }
 
 /**

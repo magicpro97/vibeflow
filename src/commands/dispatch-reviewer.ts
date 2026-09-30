@@ -6,14 +6,24 @@
 // surface (commands.ts, _shared.js, tests) keeps importing it unchanged.
 
 import { ENGINES } from "../core/types.js";
+import type { WorkUnit } from "../core/types.js";
 import { GATE_STATE, PRE_REVIEW_WORK_UNIT_GATES } from "../core/workflow-contract.js";
 import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
+import type { UnitOutcome } from "../orchestrator/run.js";
 import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
+import { readSettings } from "../settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS } from "../typesafe-settings.js";
 import { out } from "./_shared.js";
 import type { Engine, Reviewer } from "./_shared.js";
 import { type DiffReader, analyzeDiff, defaultDiffReader } from "./dispatch-diff.js";
 import { getUnitDiff, runLLMReview } from "./dispatch-reviewer-llm.js";
+
+/** The reviewer plus its per-unit implementer seam: the ADR-001 cross-review pick depends on
+ *  it, so it is exposed (and asserted) rather than buried in a closure. */
+export type RoutedReviewer = Reviewer & {
+  __implementerFor: (unit: WorkUnit) => Engine | undefined;
+};
 
 /**
  * Independent reviewer. Signature: `(unit, outcome) → { pass, reason }` — the first arg is the
@@ -38,15 +48,31 @@ export function makeReviewer(
     /** #522: command runner for acceptance-criteria verification. Defaults to defaultRun. */
     runCmd?: GateRunner;
   },
-): Reviewer {
+): RoutedReviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
   const cwd = inject?.cwd ?? process.cwd();
+  // Task 4: the settings load the System One seam reads. Read ONCE per makeReviewer (not per
+  // reviewed unit) so a run's judge configuration cannot change mid-run under it.
+  const settings = readSettings(cwd);
   // ADR-001: auto-wire llmFn only when VF_LLM_REVIEW=1 (opt-in) to avoid smoke/test interference.
   const llmReviewFn = inject?.llmReviewFn;
   const autoLlmReview =
     Boolean(inject?.goal) && process.env.VF_LLM_REVIEW === "1" && Boolean(process.env.VIBEFLOW_AI);
 
-  return async (unit, outcome) => {
+  // Task 7: per-unit routing means the run-global `implementer` pin is no longer the whole
+  // story. `reviewerEngine: "global"` (opt-out) keeps it; the default follows the unit and
+  // only falls back to the run-global engine when the judge routed nothing — so a fail-open
+  // planner stays byte-for-byte today's behaviour. ADR-001's cross-review invariant is
+  // preserved either way: `resolveReviewerEngine` still avoids whatever this resolves to.
+  const implementerFor = (u: WorkUnit): Engine | undefined =>
+    settings.typesafe?.reviewerEngine === "global"
+      ? inject?.implementer
+      : (u.engine ?? inject?.implementer);
+
+  const review = async (
+    unit: WorkUnit,
+    outcome: UnitOutcome,
+  ): Promise<{ pass: boolean; reason: string; score?: number }> => {
     if (mode === DISPATCH_MODE.DRY) {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
@@ -102,10 +128,17 @@ export function makeReviewer(
         diff: llmDiff,
         ...(llmReviewFn ? { llmFn: llmReviewFn } : {}),
         cwd,
+        // Task 4: the System One judge seam. `runLLMReview` re-checks `enabled` and
+        // `callSites.reviewer` before it resolves anything, so forwarding the settings here
+        // costs a disabled run nothing — no HTTP, and no touch of the per-user health root.
+        typesafe: { settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS, env: process.env },
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
-        ...(inject?.implementer
-          ? { implementer: inject.implementer, available: [...ENGINES] }
+        // Task 7: the implementer is the UNIT's engine when the planner routed one (or the
+        // run-global engine under `reviewerEngine: "global"`), so cross-review still lands on
+        // a different tool than the one that actually wrote the change.
+        ...(implementerFor(unit)
+          ? { implementer: implementerFor(unit), available: [...ENGINES] }
           : {}),
       });
       // Surface the same-tool warning to the audit trail — the Reviewer boundary
@@ -119,4 +152,6 @@ export function makeReviewer(
     }
     return localResult;
   };
+
+  return Object.assign(review, { __implementerFor: implementerFor });
 }

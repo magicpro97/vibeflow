@@ -134,6 +134,24 @@ export function stringifyEvent(ev: LogEvent): string {
   return JSON.stringify(ev);
 }
 
+/** The cross-process write lock's retry policy. OMITTED ⇒ the repo default, byte-identically
+ *  to the pre-`lockRetries` literal, so an existing caller sees no behavior change; the
+ *  `vf hook` audit leg passes an explicit `0` to fail fast under contention (its budget lives
+ *  in the System One hook seam, not here). */
+export function lockRetryPolicy(retries?: number): {
+  retries: number;
+  factor: number;
+  minTimeout: number;
+  maxTimeout: number;
+} {
+  return {
+    retries: retries ?? Math.ceil(DEFAULTS.lockTimeoutMs / DEFAULTS.lockRetryMs),
+    factor: 1,
+    minTimeout: DEFAULTS.lockRetryMs,
+    maxTimeout: DEFAULTS.lockRetryMs,
+  };
+}
+
 export function nowEpoch(): number {
   return Date.now();
 }

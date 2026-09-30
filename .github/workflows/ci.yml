@@ -83,6 +83,11 @@ jobs:
           # conversation bootstrap there; only `owned-process` and `package-smoke` ran, and both
           # stop at `--version`/`vf init`. This row runs the entry point itself.
           - suite: home-ui-bootstrap
+          # The TypeSafe hook path's two riskiest claims only hold on a real win32 runtime: the
+          # adapter's 10s spawn budget (a slow fail-open judge becomes decision "block") and the
+          # owner-only key file DACL (mode bits report 0o666 for every win32 file). Off Windows
+          # that suite is all skips, which is evidence of nothing.
+          - suite: typesafe-hook
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -96,7 +101,7 @@ jobs:
         with:
           bun-version: 1.4.0
       - uses: actions/setup-node@v4
-        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap'
+        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap' || matrix.suite == 'typesafe-hook'
         with:
           node-version: 20
       - run: bun ci
@@ -116,11 +121,16 @@ jobs:
         if: matrix.suite == 'owned-process'
         run: bun test --timeout 30000 test/dispatch-windows-bridge-command.test.ts
       - name: Build shipped artifact
-        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap'
+        if: matrix.suite == 'package-smoke' || matrix.suite == 'home-ui-bootstrap' || matrix.suite == 'typesafe-hook'
         run: bun run build
       - name: Conversation bootstrap through the shipped CLI (real vf ui on Windows)
         if: matrix.suite == 'home-ui-bootstrap'
         run: bun test --timeout 30000 test/windows-conversation-bootstrap-live.test.ts
+      - name: Live Windows typesafe hook budget
+        # Runs the SHIPPED artifact (dist/cli.js under Node) because the budget and the key-file
+        # DACL only exist on a real win32 runtime.
+        if: matrix.suite == 'typesafe-hook'
+        run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts
       - name: Smoke test built CLI through Node
         if: matrix.suite == 'package-smoke'
         run: node dist/cli.js --version

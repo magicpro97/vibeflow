@@ -41,9 +41,18 @@ assert(
     panel,
   ),
 );
+// The claim is that the direct save sits in the branch that does NOT go through the policy
+// preview. Anchor on the call and walk back to the nearest `} else {`: the first `} else {` in the
+// file belongs to an outer conditional and encloses the preview call too, so a forward search
+// silently included it. No counts, no offsets.
+const directAt = panel.indexOf("await api.settings.set(");
+const branchAt = panel.lastIndexOf("} else {", directAt);
 assert(
   "non-sensitive save keeps direct settings.set path",
-  /else \{\s*const savedSettings = await api\.settings\.set\(form\.value\)/.test(panel),
+  directAt > -1 &&
+    branchAt > -1 &&
+    branchAt < directAt &&
+    !panel.slice(branchAt, directAt).includes("previewPolicy("),
 );
 assert(
   "applyPolicy calls api.settings.applyPolicy with preview id + confirmation",

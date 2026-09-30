@@ -5,12 +5,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
+import type { VibeSettings } from "../src/ui/src/types-settings.js";
 // Import the types module to verify it parses without errors.
 // The import itself is the smoke test.
 import type {
   GateState,
   LogEvent,
-  VibeSettings,
+  ProjectEntry,
   WorkUnit,
   WorkflowState,
 } from "../src/ui/src/types.js";
@@ -216,8 +217,6 @@ describe("setStage guard: no forward jump to unreachable stage", () => {
 });
 
 // ProjectList badge helpers — inlined from ProjectList.vue (pure functions, no DOM)
-import type { ProjectEntry } from "../src/ui/src/types.js";
-
 function projectStatus(p: ProjectEntry): "done" | "partial" | "empty" | "stale" {
   if (p.totals.units === 0) return "empty";
   if (p.totals.done === p.totals.units) return "done";

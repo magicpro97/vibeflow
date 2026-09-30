@@ -3,11 +3,10 @@
 import type { Engine } from "../../core/agent-contract.js";
 import type * as HookContract from "../../core/hook-contract.js";
 import type * as LogContract from "../../core/log-contract.js";
-import type { SKILL_MCP_TRANSPORT } from "../../core/skill-contract.js";
 import type * as SkillContract from "../../core/skill-contract.js";
 import type * as WorkflowContract from "../../core/workflow-contract.js";
 import type { LogEvent as SharedLogEvent } from "../../logbus/types.js";
-import type { ProjectClassificationPatch } from "./project-settings-form.js";
+import type { CuratorSeverity } from "./types-settings.js";
 
 export type { Engine } from "../../core/agent-contract.js";
 export type SkillStatus = SkillContract.SkillStatus;
@@ -97,8 +96,6 @@ export interface DashboardSelection {
   unit?: string;
 }
 
-export type ToolTier = "codegraph" | "lsp" | "native";
-
 export interface ProjectEntry {
   path: string;
   name: string;
@@ -107,35 +104,7 @@ export interface ProjectEntry {
   totals: { units: number; done: number; tokens: number; cost_usd: number };
 }
 
-export type HookTemplateId =
-  | "block-destructive"
-  | "flag-installs"
-  | "protect-secrets"
-  | "protect-config"
-  | "workspace-guard";
-
-export interface HookConfig {
-  templates: HookTemplateId[];
-  custom: { match: string; risk: string; reason?: string }[];
-}
-
-export interface FailureProtection {
-  timeoutSeconds: number;
-  autoWip: boolean;
-  rollbackOnFail: boolean;
-  requireGit: boolean;
-}
-
-export type CuratorSeverity = "low" | "medium" | "high";
-
 export type FindingType = "stale-anchor" | "duplicate-owner" | "unpinned-registry";
-
-export interface CuratorSettings {
-  enabled: boolean;
-  observeMode: boolean;
-  schedule: string;
-  severityThreshold: CuratorSeverity;
-}
 
 export interface CuratorFindingView {
   id: string;
@@ -185,28 +154,6 @@ export interface RepoDetection {
   engines: Record<Engine, boolean>;
   clis: Record<Engine, boolean>;
 }
-export type UserMcpServerView = {
-  transport?: (typeof SKILL_MCP_TRANSPORT)[keyof typeof SKILL_MCP_TRANSPORT];
-  command?: string;
-  url?: string;
-};
-export interface VibeSettings {
-  enabledEngines?: Engine[];
-  tools: { codegraph: boolean; lsp: boolean };
-  toolPriority: ToolTier[];
-  lspServers?: string[];
-  failureProtection: FailureProtection;
-  memory: boolean;
-  notifications?: boolean;
-  hooks?: HookConfig;
-  envPolicy?: { deny?: string[]; allow?: string[] };
-  /** #548: user-declared MCP servers surfaced in the control center. */
-  mcpServers?: Record<string, UserMcpServerView>;
-  curator?: CuratorSettings;
-  projectClassification?: ProjectClassificationPatch["projectClassification"];
-  updatedAt?: string;
-}
-
 export interface HookLogPayload {
   decision: HookContract.AuditedHookDecision;
   risk: HookContract.RiskLevel;

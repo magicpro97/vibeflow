@@ -79,6 +79,29 @@ export function out(channel: Channel, ...rawParts: unknown[]): void {
   emitToConsole(channel, level, text);
 }
 
+// out() tees to the console for every channel except VIBE_FLOW unless VF_QUIET=1
+// (see `out` above), so a per-call audit record sent through it would print. outBusOnly
+// is the durable-only twin: the bus, or nothing.
+export function outBusOnly(channel: Channel, ...rawParts: unknown[]): void {
+  const bus = getLogbus();
+  if (!bus) return; // no bus → drop the record; NEVER emitToConsole here
+  const { level, unit, meta, parts } = extractOptsAndParts(rawParts);
+  const text = parts.length === 0 ? "" : joinParts(parts);
+  try {
+    bus.write({
+      runId: (bus as unknown as { runId: string }).runId,
+      channel,
+      level,
+      unit,
+      meta,
+      text,
+    });
+  } catch {
+    /* swallowed — an audit line must never break a run, and must never fall back to
+     * console (out() writes to stderr on that path; this sink deliberately does not). */
+  }
+}
+
 function emitToConsole(channel: Channel, level: LogLevel, text: string): void {
   const toStderr =
     level === LOG_LEVEL.WARN || level === LOG_LEVEL.ERROR || level === LOG_LEVEL.DEBUG;

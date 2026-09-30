@@ -78,6 +78,13 @@ test("landing does not widen user-message queue or edit authority", () => {
   }
 });
 
+test("landing surfaces the optional System One judge with the fail-open contract", () => {
+  const page = read("src/pages/index.astro");
+  for (const snippet of ['id="judge-h"', "System One", "optional", "fail-open"]) {
+    assert.equal(page.includes(snippet), true, `landing index is missing ${snippet}`);
+  }
+});
+
 test("work-unit pre-flight heading remains outside fenced examples", () => {
   const content = readFileSync(
     resolve(repositoryRoot, "docs", "WORK_UNIT_ORCHESTRATION.md"),

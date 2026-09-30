@@ -840,7 +840,9 @@ describe("units ingest RED contract", () => {
       expect(await ingest(dir, e)).toBe(0);
       commit(dir, "repair");
       const s = state(dir);
-      const sentinel: Required<Omit<WorkUnit, "evidence" | "evidence_at">> = {
+      // `engine` is a per-dispatch routing decision (Task 7), not a ledger field the ingest
+      // repair path preserves, so it is excluded from the frozen sentinel.
+      const sentinel: Required<Omit<WorkUnit, "evidence" | "evidence_at" | "engine">> = {
         name: "unit",
         status: "done",
         confidence: 0.9,

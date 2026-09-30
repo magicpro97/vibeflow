@@ -135,7 +135,10 @@ describe("final command and compatibility coverage", () => {
             gates: { build: "pass", lint: "pass", test: "pass" },
           };
         },
-        makeReviewer: () => async () => ({ pass: true, reason: "covered" }),
+        makeReviewer: () =>
+          Object.assign(async () => ({ pass: true, reason: "covered" }), {
+            __implementerFor: () => undefined,
+          }),
       },
     );
 

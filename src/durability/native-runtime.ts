@@ -57,6 +57,9 @@ export interface NativeBindings {
 export const IS_BUN =
   typeof (process.versions as Record<string, string | undefined>).bun === "string";
 export const O_CLOEXEC = process.platform === RUNTIME_PLATFORM.DARWIN ? 0x01000000 : 0o2000000;
+/** The platform this process really runs on, captured at import. Tests override
+ *  `process.platform`, so a live read can report a platform the bindings were not loaded for. */
+const HOST_PLATFORM = process.platform;
 const RUNTIME_REQUIRE = createRequire(import.meta.url);
 
 let bindings: NativeBindings | null = null;
@@ -238,6 +241,13 @@ export function initializeNativeRuntime(input: {
         bindings: null,
         unavailableReason: `native durability is unsupported on ${input.platform}`,
       };
+    // `errnoTable` and `errnoReader` are module-wide, and the Windows branch above REPLACES the
+    // table with Win32-normalised values. A later initialisation for a POSIX platform would then
+    // leave the process classifying host errnos against Win32 numbers, so re-establish the host
+    // table when initialising for the real host. Guarded on HOST_PLATFORM, which makes this
+    // unreachable on Windows - this branch only runs for darwin/linux while HOST_PLATFORM is
+    // win32 there - so the Windows table stays authoritative and untouched.
+    if (input.platform === HOST_PLATFORM) errnoTable = osConstants.errno;
     return {
       bindings: input.isBun ? loadBunBindings() : loadNodeBindings(),
       unavailableReason: "native durability is not initialized",

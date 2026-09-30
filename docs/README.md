@@ -44,6 +44,7 @@ Claude, Codex, and OpenCode support exact by-id native resume; OpenCode uses `op
 ## 💡 Explanation — hiểu khái niệm
 
 - [Architecture](./ARCHITECTURE.md) — High-level architecture: AI-first Home, structured turn delivery, owned CLI execution, and typed capability fabric.
+- [TypeSafe System One (Jev) judge](./TYPESAFE.md) — Optional decision judge: the four call sites, the fail-open contract, the file-backed breaker, every setting, and exactly what leaves the machine.
 - [Security Model](./SECURITY_MODEL.md) — Safety posture, capability trust boundaries, private turn context, owned-process proof, secrets handling, and audit log.
 - [Agent Orchestration Policy](./AGENT_ORCHESTRATION_POLICY.md) — Confidence thresholds, debate rules, anti-hallucination, and verification policy.
 - [Work-Unit Orchestration](./WORK_UNIT_ORCHESTRATION.md) — How tasks are decomposed into scoped, file-backed work units with quality gates.

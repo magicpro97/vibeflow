@@ -3,8 +3,17 @@ import { ctxPathIn, cwd, writeFileSafe } from "./core.js";
 import { ENGINES, type Engine } from "./core/types.js";
 import { type HookConfig, coerceHookConfig } from "./hooks/templates.js";
 import * as projectClassification from "./project-classification-settings.js";
+import {
+  DEFAULT_SKILLS_CONFIG,
+  type SkillsConfig,
+  coerceSkillsConfig,
+  mergeSkillsConfig,
+} from "./skills/skills-settings.js";
+export type { SkillsConfig } from "./skills/skills-settings.js";
+import { type MemoryMode, coerceMemory } from "./settings-memory.js";
 import * as curator from "./skills/curator-settings.js";
 import type { UserMcpServer } from "./tools/index.js";
+import * as typesafeSettings from "./typesafe-settings.js";
 
 export type { UserMcpServer };
 
@@ -13,17 +22,6 @@ export type ToolTier = "codegraph" | "lsp" | "native";
 
 /** All valid tiers, in the canonical default order (highest preference first). */
 const TIERS: ToolTier[] = ["codegraph", "lsp", "native"];
-
-/** Memory recall mode. false = off (default). "builtin" = bun:sqlite FTS5.
- *  "claude-mem" = opt-in external claude-mem CLI. Legacy boolean true → "builtin". */
-export type MemoryMode = false | "builtin" | "claude-mem";
-
-/** Coerce stored memory field to MemoryMode. Legacy boolean true→"builtin". */
-export function coerceMemory(v: unknown): MemoryMode {
-  if (v === true) return "builtin";
-  if (v === "builtin" || v === "claude-mem") return v;
-  return false;
-}
 
 /**
  * Source-protection policy for real (cli) dispatch. All conservative by default so an
@@ -76,18 +74,9 @@ export interface VibeSettings {
   /** Project classification policy: the auto-classify switch + the classifier engine. */
   projectClassification?: projectClassification.ProjectClassificationSettings;
   curator?: curator.CuratorSettings;
+  typesafe?: typesafeSettings.TypesafeSettings;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
-}
-
-/** #687: skills resolution and mirroring policy. */
-export interface SkillsConfig {
-  /** When true, auto-resolve draft skills on init/sync. Default: true. */
-  autoResolve: boolean;
-  /** Mirror mode: "pointer" (symlink into each engine skill dir) or "full" (copy). Default: "pointer". */
-  mirrorMode: "pointer" | "full";
-  /** Target engines to mirror skills into. Default: all ENGINES. */
-  targetEngines: Engine[];
 }
 
 /** Default dispatch timeout (seconds) — long enough for a real engine run, short enough to unstick. */
@@ -99,13 +88,6 @@ export const DEFAULT_FAILURE_PROTECTION: FailureProtection = {
   autoWip: false,
   rollbackOnFail: false,
   requireGit: false,
-};
-
-/** Default baseline. `readSettings` always returns a fresh copy, never this object. */
-export const DEFAULT_SKILLS_CONFIG: SkillsConfig = {
-  autoResolve: true,
-  mirrorMode: "pointer",
-  targetEngines: [...ENGINES],
 };
 
 export const DEFAULT_SETTINGS: VibeSettings = {
@@ -241,22 +223,6 @@ function coerceEval(raw: unknown): { minPassRate?: number; minSamples?: number }
   return out.minPassRate === undefined && out.minSamples === undefined ? undefined : out;
 }
 
-/** Validate skills resolution and mirroring policy. */
-function coerceSkillsConfig(raw: unknown): SkillsConfig | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const obj = raw as Record<string, unknown>;
-  const out: SkillsConfig = { ...DEFAULT_SKILLS_CONFIG };
-  if (typeof obj.autoResolve === "boolean") out.autoResolve = obj.autoResolve;
-  if (obj.mirrorMode === "pointer" || obj.mirrorMode === "full") out.mirrorMode = obj.mirrorMode;
-  if (Array.isArray(obj.targetEngines)) {
-    const wanted = obj.targetEngines.filter(
-      (e): e is Engine => typeof e === "string" && (ENGINES as readonly string[]).includes(e),
-    );
-    if (wanted.length > 0) out.targetEngines = wanted;
-  }
-  return out;
-}
-
 /** Keep only valid engine names; empty/garbage input -> {} so defaults stay untouched. */
 function coerceEnabledEngines(raw: unknown): Pick<VibeSettings, "enabledEngines"> {
   if (!Array.isArray(raw)) return {};
@@ -322,6 +288,7 @@ function coerce(raw: unknown): VibeSettings {
   if (sk) out.skills = sk;
   projectClassification.applyProjectClassificationSettings(out, obj.projectClassification);
   curator.applyCuratorSettings(out, obj.curator);
+  typesafeSettings.applyTypesafeSettings(out, obj.typesafe);
   return out;
 }
 
@@ -338,10 +305,16 @@ export function readSettings(base?: string): VibeSettings {
 /** Read-modify-write: merge `next` over current settings, stamp `updatedAt`, persist, return it. */
 export function writeSettings(
   base: string,
-  next: Partial<VibeSettings>,
+  next: Partial<VibeSettings> & {
+    /** The repo this write is FOR, as the caller understood it. Required with `next.typesafe` —
+     *  see `assertTypesafeWriteAllowed`, which this function asserts. Compared, never stored. */
+    expectRepo?: string;
+  },
   opts?: { now?: () => string },
 ): VibeSettings {
   const now = opts?.now ?? (() => new Date().toISOString());
+  // Refused before anything is read or written, so a rejected write leaves the file untouched.
+  typesafeSettings.assertTypesafeWriteAllowed(base, next);
   const current = readSettings(base);
   const merged: VibeSettings = {
     ...coerceEnabledEngines(next.enabledEngines ?? current.enabledEngines),
@@ -373,17 +346,19 @@ export function writeSettings(
   const servers = next.lspServers ?? current.lspServers;
   if (servers?.length) merged.lspServers = [...servers];
   // #549: eval is replace-on-write like envPolicy — keep prior block when next omits it.
-  const evalCfg = "eval" in next ? coerceEval(next.eval) : current.eval;
+  // A malformed block coerces to `undefined`; skipping the assignment deleted the stored one,
+  // because `merged` is assembled field by field and never starts from `current`.
+  const evalCfg = ("eval" in next ? coerceEval(next.eval) : undefined) ?? current.eval;
   if (evalCfg) merged.eval = evalCfg;
   // #687: skills is replace-on-write — coerce the handed block over defaults.
-  const skillsCfg = "skills" in next ? coerceSkillsConfig(next.skills) : current.skills;
-  if (skillsCfg) merged.skills = skillsCfg;
+  mergeSkillsConfig(merged, next, current);
   // Replace-on-write like skills: the panel hands a complete block, so a partial one is kept.
   merged.projectClassification = projectClassification.mergeProjectClassificationSettings(
     next,
     current.projectClassification ?? projectClassification.DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
   );
   curator.mergeCuratorSettings(merged, next, current);
+  typesafeSettings.mergeTypesafeSettings(merged, next, current);
   writeFileSafe(settingsPath(base), JSON.stringify(merged, null, 2));
   return merged;
 }

@@ -2,6 +2,7 @@
  * Compatibility export for the dependency-free authority in agent-contract.ts.
  * Browser-safe wire DTOs import that focused module directly.
  */
+import type { Engine } from "./agent-contract.js";
 import type { HookDecision, HookEvent, RiskLevel } from "./hook-contract.js";
 import type {
   SkillDomainRole,
@@ -118,6 +119,10 @@ export interface WorkUnit {
   goal_score?: number;
   resources: { agents: number; tokens: number; cost_usd: number; wall_seconds: number };
   evidence?: string[];
+  /** Per-unit engine choice. Assigned ONLY by a successful System One planner answer
+   *  (`routeUnits`), and only from the preflight ready set. Absent ⇒ dispatch keeps the
+   *  run-global `resolveEngine(flags)` — a judge failure is a NO-OP, never a default pick. */
+  engine?: Engine;
   /** #612: names of units this unit depends on (carried from the planner's UnitProposal). */
   depends_on?: string[];
   /** #612: summaries handed off from completed upstream units. Read-only — filled by the

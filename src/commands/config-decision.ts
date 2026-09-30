@@ -22,12 +22,19 @@ function printMemory(base: string): void {
 const VALID_MODES = ["on", "off", "builtin", "claude-mem"] as const;
 type MemoryArg = (typeof VALID_MODES)[number];
 
-export function config(
+export async function config(
   key: string | undefined,
   rest: string[],
   base: string = cwd(),
   flags: Record<string, string | boolean> = {},
-): number {
+): Promise<number> {
+  if (key === "typesafe") {
+    // Sibling commands MUST be reached by dynamic import: a static `./` edge here would join the
+    // two command modules into one ESM cycle (issue #80, "no sibling imports" rule). `_shared` is
+    // the only static sibling allowed, and it carries no command entry points.
+    const { configTypesafe } = await import("./config-typesafe.js");
+    return await configTypesafe(rest, base, flags);
+  }
   if (key === "memory") return configMemory(rest, base);
   if (key === "env-policy") return configEnvPolicy(rest, base);
   if (key === "mcp") return configMcp(rest, base, flags);

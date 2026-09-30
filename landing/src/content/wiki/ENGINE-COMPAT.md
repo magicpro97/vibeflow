@@ -218,4 +218,5 @@ claim that the rest of the durability layer has native Windows semantics.
 
 - **Hooks:** `src/commands/hooks.ts` — engine invocation is wrapped by dispatch, but permission/stall behavior depends on the engine's flags.
 - **Skills / rules:** `.agents/skills/vf/` — the vf skill documents engine usage for the agent surface; keep it in sync with the flags here.
+- **System One judge (optional, off by default):** `src/typesafe.ts` posts to the third-party endpoint `https://api.typesafe.ai/v1/systemone`. A vendor-side request or response shape change is a **response** contract, so re-verify `parseSystemOneResponse` (envelope shape, finite in-range numbers, unknown answer ids dropped) whenever the model id behind `settings.typesafe.model` is bumped, the same way an engine CLI bump requires re-verifying its parser. See [TYPESAFE.md](./TYPESAFE.md).
 - **Schema:** `DispatchMarker` (`src/orchestrator/marker.ts`) — `engineSessionId` is the persisted contract for resume.

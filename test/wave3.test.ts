@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { WorkUnit, WorkflowState } from "../src/core.js";
 import { debate, investigate, thresholdFor } from "../src/orchestrator/investigate.js";
 import { planWorkUnits, scheduleWaves } from "../src/orchestrator/plan.js";
@@ -243,5 +246,34 @@ describe("parallel runner + goal-eval", () => {
     const v = goalEval(stateFor(secBelow));
     expect(v.reasons.join(" ")).toContain("0.95");
     expect(v.reasons.join(" ")).not.toContain("1.0");
+  });
+});
+
+describe("per-unit engine routing (dispatcher honours unit.engine)", () => {
+  test("a routed unit is dispatched with ITS engine; an unrouted one keeps the run-global", async () => {
+    const { makeDispatcher } = await import("../src/commands/dispatch-runtime.js");
+    const { CTX_DIR: DIR } = await import("../src/core.js");
+    const dirs: string[] = [];
+    const promptFor = async (name: string, engine?: "claude" | "codex") => {
+      const base = mkdtempSync(join(tmpdir(), "vf-wave3-engine-"));
+      dirs.push(base);
+      const dispatcher = makeDispatcher(
+        "claude",
+        { goal: "g" } as never,
+        base,
+        "dry",
+        "simple-code",
+      );
+      await dispatcher({ ...unit(name, ["src/a/"]), ...(engine ? { engine } : {}) });
+      return readFileSync(join(base, DIR, "workunits", name, "CONTEXT.md"), "utf8");
+    };
+    try {
+      // Unrouted: the run-global engine, byte-for-byte as before.
+      expect(await promptFor("u1")).toContain("# VibeFlow dispatch → claude");
+      // Routed: the planner's pick wins for this unit only.
+      expect(await promptFor("u2", "codex")).toContain("# VibeFlow dispatch → codex");
+    } finally {
+      for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    }
   });
 });
