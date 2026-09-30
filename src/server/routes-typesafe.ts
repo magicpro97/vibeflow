@@ -138,6 +138,8 @@ export function handleTypesafeReadRoute(
 }
 
 export interface TypesafeTestInject extends TypesafeViewInject {
+  /** The repository the caller read its view from; compared against the live active repo. */
+  expectRepo: string;
   repo: string;
   now?: () => number;
   judge?: typeof judgeAssessment;
@@ -155,6 +157,17 @@ const describeFailure = (failure: FailureClass | undefined): string =>
  * graph of anything a disabled run loads.
  */
 export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promise<Response> {
+  // Parity with the save path (routes-settings.ts). The probe reads the process-global active repo here,
+  // so a drawer opened on repo A in one tab can bill a call and print a readout for whatever repo
+  // another client has since made active - the drawer's own client-side guard compares two of ITS
+  // mirrors and, as its comment concedes, cannot see that move. The caller names the repository it was
+  // read from, and the server compares. Required, like the save path: an unnamed probe is the hole.
+  if (inject.expectRepo !== inject.repo) {
+    return Response.json(
+      { ok: false, error: "the active repository changed; reload before testing" },
+      { status: 409 },
+    );
+  }
   const settings = inject.settings ?? readSettings(inject.repo);
   const resolved = settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS;
   if (!isTypesafeEnabled(settings)) {

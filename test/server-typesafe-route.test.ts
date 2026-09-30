@@ -180,6 +180,7 @@ describe("handleTypesafeTestRoute", () => {
   test("refuses while the judge is disabled, without opening a socket", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      expectRepo: REPO,
       userRoot: root,
       settings: { ...BASE, typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: false } },
       env: { TYPESAFE_API_KEY: KEY },
@@ -196,6 +197,7 @@ describe("handleTypesafeTestRoute", () => {
   test("names the missing key instead of probing", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      expectRepo: REPO,
       userRoot: root,
       settings: settings(),
       env: {},
@@ -217,6 +219,7 @@ describe("handleTypesafeTestRoute", () => {
     let reached = 0;
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      expectRepo: REPO,
       userRoot: root,
       settings: {
         ...BASE,
@@ -240,6 +243,7 @@ describe("handleTypesafeTestRoute", () => {
     let clock = 1_000;
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      expectRepo: REPO,
       userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
@@ -266,6 +270,7 @@ describe("handleTypesafeTestRoute", () => {
   test("omits the confidence the API did not return", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      expectRepo: REPO,
       userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
@@ -283,6 +288,7 @@ describe("handleTypesafeTestRoute", () => {
   test("reports a classified failure with its status", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      expectRepo: REPO,
       userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
@@ -304,6 +310,7 @@ describe("handleTypesafeTestRoute", () => {
   test("distinguishes a silent no-verdict from a classified failure", async () => {
     const res = await handleTypesafeTestRoute({
       repo: REPO,
+      expectRepo: REPO,
       userRoot: root,
       settings: settings(),
       env: { TYPESAFE_API_KEY: KEY },
@@ -319,7 +326,7 @@ describe("handleTypesafeTestRoute", () => {
   });
 
   test("reads its own settings when the caller injects none", async () => {
-    const res = await handleTypesafeTestRoute({ repo: REPO, env: {} });
+    const res = await handleTypesafeTestRoute({ repo: REPO, expectRepo: REPO, env: {} });
     expect(((await res.json()) as { ok: boolean }).ok).toBe(false);
   });
 });
@@ -366,10 +373,13 @@ describe("POST /api/typesafe/test is on the server's write surface", () => {
       // With the token it must reach the probe and answer JSON. Before the allowlist entry it
       // fell through to `new Response("not found", { status: 404 })`, which made the control
       // centre's "Test connection" button fail on every install.
+      // The client names the repository its view was read from, and the server compares it against the
+      // live active repo (parity with the save path). An unnamed probe is refused, so this also pins
+      // that the probe route reads the field.
       const guarded = await fetch(`${server.url}/api/typesafe/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json", [UI_LAN_TOKEN_HEADER]: token },
-        body: "{}",
+        body: JSON.stringify({ expectRepo: REPO }),
       });
       expect(guarded.status).toBe(200);
       expect(guarded.headers.get("content-type")).toContain("application/json");
@@ -385,4 +395,36 @@ describe("POST /api/typesafe/test is on the server's write surface", () => {
 
 afterAll(() => {
   rmSync(REPO, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 });
+});
+
+describe("the probe names the repository it was read from", () => {
+  test("a stale repo is refused, and the judge is never called", async () => {
+    // The probe resolves the process-global active repo server-side, so with no comparison a drawer
+    // opened on repo A bills a call against whatever repo another client has since made active and
+    // prints the result under rows describing A. The drawer's own guard compares two of ITS mirrors,
+    // so it stays open - the server has to compare, as the save path does.
+    let calls = 0;
+    const res = await handleTypesafeTestRoute({
+      repo: REPO,
+      expectRepo: `${REPO}-other`,
+      userRoot: mkdtempSync(join(tmpdir(), "typesafe-probe-")),
+      env: { TYPESAFE_API_KEY: "sk-test" },
+      judge: async () => {
+        calls += 1;
+        return { verdict: "allow", reason: "", risk: "low", goalCoverage: "full" } as never;
+      },
+    } as never);
+    expect(res.status).toBe(409);
+    expect(calls).toBe(0);
+    expect(((await res.json()) as { error: string }).error).toContain("reload before testing");
+  });
+
+  test("an unnamed probe is refused too, so the field cannot be omitted into the hole", async () => {
+    const res = await handleTypesafeTestRoute({
+      repo: REPO,
+      userRoot: mkdtempSync(join(tmpdir(), "typesafe-probe-")),
+      env: {},
+    } as never);
+    expect(res.status).toBe(409);
+  });
 });

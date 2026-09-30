@@ -305,7 +305,10 @@ export async function handleMutationRoute(
   // never holds the key. Resolved through this dispatcher (not only the module's
   // own entry point) so the route itself is covered.
   if (path === "/api/typesafe/test") {
-    return await handleTypesafeTestRoute({ repo: ctx.getActiveRepo() });
+    return await handleTypesafeTestRoute({
+      repo: ctx.getActiveRepo(),
+      expectRepo: typeof payload.expectRepo === "string" ? payload.expectRepo : "",
+    });
   }
   if (path === UI_HOOK_ROUTE.APPROVE) {
     const id = typeof payload.id === "string" ? payload.id : "";

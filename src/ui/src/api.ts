@@ -129,7 +129,10 @@ export const api = {
   // `keySource` and the probe runs server-side, so a compromised tab cannot exfiltrate it.
   typesafe: {
     view: () => req<TypesafeSettingsView>("GET", "/api/typesafe"),
-    test: () => req<TypesafeTestResult>("POST", "/api/typesafe/test", {}),
+    // The repository the view was read from, compared server-side: the probe reads the process-global
+    // active repo, and the drawer's client-side guard cannot see another client moving it.
+    test: (expectRepo: string) =>
+      req<TypesafeTestResult>("POST", "/api/typesafe/test", { expectRepo }),
   },
   skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
   // #689: recent curator findings (severity-badged, sanitized).

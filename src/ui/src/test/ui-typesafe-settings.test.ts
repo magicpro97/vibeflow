@@ -73,8 +73,16 @@ test("the drawer never renders a secret: no key value, only a source label", () 
 });
 
 test("every call site is individually toggleable", () => {
+  // Each site needs its OWN input bound to its OWN key. The previous version asserted only that the
+  // string `typesafe-callsite-<site>` appears somewhere in the drawer, which another assertion in this
+  // file already implies - so dropping a site's toggle, or pointing two sites at one key, left it green.
+  // Pin the binding: the input whose id names the site must bind that site's own callSites key.
+  const markup = drawer.split("\n").map((l) => l.trim());
   for (const site of TYPESAFE_CALL_SITE_NAMES) {
-    expect(drawer).toContain(`typesafe-callsite-${site}`);
+    const at = markup.findIndex((l) => l.startsWith(`<label for="typesafe-callsite-${site}"`));
+    expect(at).toBeGreaterThan(-1);
+    expect(markup[at]).toContain(`id="typesafe-callsite-${site}"`);
+    expect(markup[at]).toContain(`settingsForm.typesafe.callSites.${site}`);
   }
 });
 

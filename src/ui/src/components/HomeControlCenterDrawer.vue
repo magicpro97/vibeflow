@@ -191,7 +191,7 @@ async function testConnection(): Promise<void> {
   if (typesafeTesting.value) return;
   typesafeTesting.value = true;
   try {
-    const result = await api.typesafe.test();
+    const result = await api.typesafe.test(typesafeView.value?.repo ?? "");
     typesafeProbe.value = result.ok
       ? `System One responded: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
       : `System One connection failed — ${result.error ?? "no verdict"}`;
