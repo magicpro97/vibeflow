@@ -68,6 +68,9 @@ export interface TypesafeHealth {
  *  caller with no spawn budget (the CLI) omits both and keeps the repo policy. */
 export interface HealthFileIo {
   userRoot?: string;
+  /** The record's file name under the root. Defaults to the enforcement record; the operator probe
+   *  passes its own, so a probe can never open the circuit the hook/verify/review calls depend on. */
+  healthFile?: string;
   lockWaitMs?: number;
   writeBudgetMs?: number;
   readFile?: (p: string) => string;
@@ -144,16 +147,19 @@ export interface HealthCodec<T> {
 
 /** `~/.vibeflow/typesafe-health.json` — the per-user root `vf init` uses, never the repo and
  *  never a git-tracked path. An injected `userRoot` IS that directory. */
-export function healthPath(userRoot?: string): string {
+/** The enforcement record: the one every hook/verify/review call reads. */
+export const ENFORCEMENT_HEALTH_FILE = "typesafe-health.json";
+
+export function healthPath(userRoot?: string, healthFile = ENFORCEMENT_HEALTH_FILE): string {
   const dir = userRoot ?? process.env.VF_USER_VIBEFLOW_ROOT ?? join(homedir(), ".vibeflow");
-  return join(dir, "typesafe-health.json");
+  return join(dir, healthFile);
 }
 
 /** Fail-open read: absent, garbage, hostile or unreadable all fall back to the codec's
  *  default. Never throws. `lstat` (not `stat`) so a symlink planted at the path is rejected
  *  rather than followed out of `~/.vibeflow`. */
 export function readHealthFile<T>(io: HealthFileClockIo, codec: HealthCodec<T>): T {
-  const path = healthPath(io.userRoot);
+  const path = healthPath(io.userRoot, io.healthFile);
   try {
     if (io.readFile) return codec.decode(io.readFile(path));
     if (!lstatSync(path).isFile()) return codec.decode(undefined);
@@ -175,7 +181,7 @@ function writeUnlocked<T>(io: HealthFileClockIo, codec: HealthCodec<T>, value: T
   // block for as long as it liked.
   const since = io.startedAt ?? clock();
   if (io.writeBudgetMs !== undefined && clock() - since > io.writeBudgetMs) return;
-  const path = healthPath(io.userRoot);
+  const path = healthPath(io.userRoot, io.healthFile);
   const payload = codec.encode(value);
   if (io.writeFile) io.writeFile(path, payload);
   else writeFileSafe(path, payload);
@@ -184,7 +190,7 @@ function writeUnlocked<T>(io: HealthFileClockIo, codec: HealthCodec<T>, value: T
 /** Best-effort lock: the repo's stale/retry policy, or the seam's `lockWaitMs` budget. Every
  *  failure (acquire, work, release) is swallowed. */
 async function withLock(io: HealthFileClockIo, fn: () => void | Promise<void>): Promise<void> {
-  const path = healthPath(io.userRoot);
+  const path = healthPath(io.userRoot, io.healthFile);
   const budgetMs = io.lockWaitMs ?? DEFAULTS.lockTimeoutMs;
   if (io.lock) {
     try {
@@ -250,3 +256,36 @@ export async function updateHealthFile<T, R>(
   });
   return taken ? out : undefined;
 }
+
+/** Which counter a call charges. Frozen runtime authority, the repo's convention for a closed
+ *  vocabulary: the two buckets are NOT interchangeable, and the Spy/typesafe-ui panel writes one
+ *  of them, so a bare string that drifts would silently re-merge them. */
+export const TYPESAFE_BUDGET_BUCKET = Object.freeze({
+  /** Hook, verify, review: the calls whose refusal is the judge losing its veto. */
+  ENFORCEMENT: "enforcement",
+  /** The operator-triggered "test connection" probe. */
+  PROBE: "probe",
+} as const);
+export type TypesafeBudgetBucket =
+  (typeof TYPESAFE_BUDGET_BUCKET)[keyof typeof TYPESAFE_BUDGET_BUCKET];
+
+/**
+ * Bucket -> record file, so the two buckets cannot share a breaker.
+ *
+ * They already had separate in-process counters; the RECORD was still shared, which meant two failed
+ * probe requests (an invalid key answering `auth`, say) could open the circuit that the
+ * hook/verify/review calls then refuse against for the whole cooldown. A caller holding only a page
+ * token could therefore disable enforcement without spending a unit of the budget the counter split
+ * was protecting.
+ */
+export const HEALTH_FILE_BY_BUCKET = Object.freeze({
+  [TYPESAFE_BUDGET_BUCKET.ENFORCEMENT]: ENFORCEMENT_HEALTH_FILE,
+  [TYPESAFE_BUDGET_BUCKET.PROBE]: "typesafe-health.probe.json",
+} as const);
+
+/** The operator probe's own record - what `vf config typesafe status` shows as a separate section. */
+export const PROBE_HEALTH_FILE = HEALTH_FILE_BY_BUCKET[TYPESAFE_BUDGET_BUCKET.PROBE];
+
+/** Guard-internal: which record a bucket's reads and writes go to. */
+export const fileForBucket = (bucket: TypesafeBudgetBucket | undefined): string =>
+  HEALTH_FILE_BY_BUCKET[bucket ?? TYPESAFE_BUDGET_BUCKET.ENFORCEMENT];

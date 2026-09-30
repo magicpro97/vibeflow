@@ -23,6 +23,18 @@
 // This module imports NEITHER src/typesafe.ts NOR src/typesafe-settings.ts (the dependency runs
 // one way), so it stays testable in isolation and the disabled path never loads the HTTP client.
 import { LOG_CHANNEL, LOG_LEVEL, type LogChannel } from "./core/log-contract.js";
+export {
+  PROBE_HEALTH_FILE,
+  TYPESAFE_BUDGET_BUCKET,
+  type TypesafeBudgetBucket,
+  fileForBucket,
+} from "./typesafe-health-file.js";
+
+import {
+  TYPESAFE_BUDGET_BUCKET,
+  type TypesafeBudgetBucket,
+  fileForBucket,
+} from "./typesafe-health-file.js";
 import {
   FAILURE_CLASS,
   type FailureClass,
@@ -238,18 +250,6 @@ export function allowCall(
   return { allow: true, next: h };
 }
 
-/** Which counter a call charges. Frozen runtime authority, the repo's convention for a closed
- *  vocabulary: the two buckets are NOT interchangeable, and the Spy/typesafe-ui panel writes one
- *  of them, so a bare string that drifts would silently re-merge them. */
-export const TYPESAFE_BUDGET_BUCKET = Object.freeze({
-  /** Hook, verify, review: the calls whose refusal is the judge losing its veto. */
-  ENFORCEMENT: "enforcement",
-  /** The operator-triggered "test connection" probe. */
-  PROBE: "probe",
-} as const);
-export type TypesafeBudgetBucket =
-  (typeof TYPESAFE_BUDGET_BUCKET)[keyof typeof TYPESAFE_BUDGET_BUCKET];
-
 /** The per-RUN call budget's storage. Module scope is the point: `vf hook` is a fresh process
  *  per tool call, while the orchestrator's reviewer/goalCoverage/planner calls share one.
  *
@@ -357,6 +357,9 @@ export async function withTypesafeGuard<T>(
   inject: GuardIo = {},
 ): Promise<T | null> {
   const now = (inject.now ?? Date.now)();
+  // Every read and write below goes through this, not `inject`, so the probe's outcome lands in its own
+  // record and can never transition the enforcement circuit.
+  const io: GuardIo = { ...inject, healthFile: fileForBucket(inject.bucket) };
   const maxCalls = inject.tuning?.maxCalls ?? BREAKER_DEFAULTS.maxCalls;
   const probe = inject.bucket === TYPESAFE_BUDGET_BUCKET.PROBE;
   const used = probe ? probeCallsThisRun : callsThisRun;
@@ -366,7 +369,7 @@ export async function withTypesafeGuard<T>(
   const allow = await mutateHealth((h) => {
     const r = allowCall(h, now);
     return { next: r.next, result: r.allow };
-  }, inject);
+  }, io);
   // `undefined` (the lock was lost) is treated as ALLOW: a breaker that cannot be read must
   // not block a run, and a dropped record can only lose an increment.
   if (allow === false) return null;
@@ -374,7 +377,7 @@ export async function withTypesafeGuard<T>(
     const value = await fn();
     const signal = inject.outcome?.();
     const cls = signal?.cls ?? FAILURE_CLASS.NONE;
-    await record(caller, cls, signal?.status, now, inject);
+    await record(caller, cls, signal?.status, now, io);
     // `disabled` and `unconfigured` are REFUSALS, not answers: the call site that reported one
     // had no key or no permission, so whatever `fn` returned is not a verdict the seam may act
     // on. The record is still written (so `status` tells the truth) and the caller still gets the
@@ -382,13 +385,7 @@ export async function withTypesafeGuard<T>(
     if (cls === FAILURE_CLASS.DISABLED || cls === FAILURE_CLASS.UNCONFIGURED) return null;
     return value;
   } catch (err) {
-    await record(
-      caller,
-      classifyThrown(err, inject.signal?.aborted ?? false),
-      undefined,
-      now,
-      inject,
-    );
+    await record(caller, classifyThrown(err, inject.signal?.aborted ?? false), undefined, now, io);
     return null;
   }
 }

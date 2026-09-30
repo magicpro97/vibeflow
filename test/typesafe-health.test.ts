@@ -1206,3 +1206,35 @@ describe("writeBudgetMs bounds whether a write STARTS", () => {
     expect(written.length).toBe(1);
   });
 });
+
+describe("a probe cannot open the enforcement circuit", () => {
+  test("an invalid key on the probe leg leaves the enforcement breaker closed", async () => {
+    resetCallBudget();
+    const root = mkdtempSync(join(tmpdir(), "typesafe-bucket-"));
+    // The two buckets already had separate COUNTERS. The record was still shared, so a probe could
+    // burn the enforcement breaker's fail streak instead - and then every hook/verify/review call
+    // refuses for a whole cooldown, which is a page token holder disabling enforcement for free.
+    const tuning = { ...BREAKER_DEFAULTS, failStreakLimit: 2 };
+    const boom = async () => {
+      throw new Error("invalid key");
+    };
+    const probeIo = {
+      userRoot: root,
+      out: outBusOnly,
+      tuning,
+      bucket: TYPESAFE_BUDGET_BUCKET.PROBE,
+      outcome: () => ({ cls: FAILURE_CLASS.AUTH }),
+    };
+    for (let i = 0; i < 4; i++) await withTypesafeGuard("probe", boom, probeIo);
+    // The probe's own record did absorb them: its leg refuses now.
+    expect(await withTypesafeGuard("probe", async () => 7, probeIo)).toBeNull();
+    // And enforcement never saw a single one of those failures.
+    expect(
+      await withTypesafeGuard("reviewer", async () => 1, {
+        userRoot: root,
+        out: outBusOnly,
+        tuning,
+      }),
+    ).toBe(1);
+  });
+});

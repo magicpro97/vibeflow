@@ -20,6 +20,7 @@ import { Writable } from "node:stream";
 import { out } from "../logbus.js";
 import { type VibeSettings, readSettings, writeSettings } from "../settings.js";
 import {
+  PROBE_HEALTH_FILE,
   TYPESAFE_STATE,
   idleHealth,
   readHealth,
@@ -148,6 +149,15 @@ const thresholdsLine = (s: TypesafeSettings): string =>
 const sitesLine = (s: TypesafeSettings): string =>
   `call sites: ${TYPESAFE_CALL_SITE_NAMES.map((n) => `${n}=${s.callSites[n] ? "on" : "off"}`).join(" ")}`;
 
+/** The probe's own report. Separate from `lastCallLine` on purpose: the two buckets have separate
+ *  budgets and separate breakers, so reporting one record's call under the other's label would
+ *  attribute a refusal to the wrong circuit. */
+const probeLine = (health: ReturnType<typeof readHealth>): string => {
+  const call = health.last_call;
+  if (!call) return "last probe: never";
+  return `last probe: ${call.at} caller=${call.caller} status=${call.status ?? "none"} ms=${call.ms}`;
+};
+
 const lastCallLine = (health: ReturnType<typeof readHealth>): string => {
   const call = health.last_call;
   if (!call) return "last call: never";
@@ -189,6 +199,11 @@ export async function configTypesafe(
     );
     print(sitesLine(current));
     print(lastCallLine(health));
+    // Operator probes have their own record (PROBE_HEALTH_FILE), so they cannot transition the
+    // enforcement breaker - and they get their own section here for the same reason.
+    const probeHealth = readHealth({ userRoot: deps.userRoot, healthFile: PROBE_HEALTH_FILE });
+    print(`probe breaker: ${breakerState(current, deps, probeHealth)}`);
+    print(probeLine(probeHealth));
     print(`health file: ${healthPath} (${fileStamp(healthPath, deps)})`);
     print(`key file: ${envPath} (${existsSync(envPath) ? "present 0600" : "absent"})`);
     print(`remove both: rm -f ${healthPath} ${envPath}`);
