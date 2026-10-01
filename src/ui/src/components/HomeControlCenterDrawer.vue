@@ -130,19 +130,13 @@ const typesafeError = ref("");
 const typesafeProbe = ref("");
 const typesafeTesting = ref(false);
 const thresholdError = ref("");
-/** Repo whose System One view the rows currently describe. */
+// Repo the rows describe.
 const typesafeRepo = ref("");
-/** Monotonic load generation; only the latest response is applied (see `loadTypesafe`). */
+// Load generation; only the latest response is applied (see `loadTypesafe`).
 let typesafeLoadSeq = 0;
 let typesafeProbeRepo = ""; // repo the current verdict describes; survives a re-open, not a repo change
 
-/**
- * The form is seeded from the load, so it must never post before that load succeeded — and never
- * while the rows describe a repo the server is no longer going to write to. The Repository field's
- * `@blur` calls `POST /api/detect` (moving the server's active repo) the moment focus leaves, and
- * `POST /api/settings` writes to whichever repo is active when it lands; blocking the button while
- * the two disagree is what closes that cross-repo window.
- */
+// Never post before the seed load succeeded, nor while the rows describe a repo the server will no longer write to (the Repository `@blur` moves the active repo).
 function typesafeSaveBlocked(): boolean {
   return typesafeSaveDisabled({
     saving: saving.value,
@@ -186,9 +180,14 @@ async function loadTypesafe(): Promise<void> {
     typesafeStatus.value = "error";
     typesafeProbe.value = ""; // else it renders below the "connection failed" line
     typesafeProbeRepo = "";
-    typesafeRepo.value = ""; // else an in-flight probe for the PREVIOUS repo still matches it
+    // `typesafeRepo` is NOT blanked: `typesafeNeedsReload("")` is always false, so blanking it disabled `detect()`'s reload and pinned this error until a re-open.
     typesafeError.value = cause instanceof Error ? cause.message : "unreachable";
   }
+}
+
+// The rows still describe `repo` and are ready for it: keyed on status, since the failure arm leaves `typesafeRepo` populated so `detect()` can still reload.
+function rowsDescribe(repo: string): boolean {
+  return typesafeStatus.value === "ready" && typesafeRepo.value === repo;
 }
 
 async function testConnection(): Promise<void> {
@@ -198,12 +197,12 @@ async function testConnection(): Promise<void> {
   typesafeTesting.value = true;
   try {
     const result = await api.typesafe.test(probed);
-    if (typesafeRepo.value !== probed) return; // superseded: not this repo's verdict
+    if (!rowsDescribe(probed)) return; // superseded: not this repo's verdict
     typesafeProbe.value = result.ok
       ? `System One responded for ${probed}: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
       : `System One connection failed for ${probed} — ${result.error ?? "no verdict"}`;
   } catch (cause) {
-    if (typesafeRepo.value !== probed) return; // superseded
+    if (!rowsDescribe(probed)) return; // superseded
     typesafeProbe.value = `System One connection failed for ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
   } finally {
     typesafeTesting.value = false;
@@ -230,8 +229,8 @@ async function saveTypesafe(): Promise<void> {
     typesafeProbeRepo = "";
     typesafeError.value = "";
     await loadTypesafe(); // this section's OWN surface, not the shared `message` up top
-    // Only when the reload LANDED, or it renders below that error against blanked rows.
-    if (typesafeRepo.value === view.repo) {
+    // Only when the reload LANDED: its failure arm blanks the verdict and sets `typesafeError`, so the confirmation would render below that error.
+    if (rowsDescribe(view.repo)) {
       typesafeProbe.value = "System One settings saved.";
       typesafeProbeRepo = view.repo;
     }

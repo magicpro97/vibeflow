@@ -355,22 +355,26 @@ test("an in-flight probe is visible to the wipe, and a superseded verdict is dis
   expect(awaitAt).toBeGreaterThan(-1);
   expect(stampAt).toBeGreaterThan(awaitAt); // stamped with the TEXT, past the await
   // Both resolution arms discard a superseded verdict: exactly one guard each, before the write.
-  expect(body.indexOf("if (typesafeRepo.value !== probed) return;")).toBeGreaterThan(-1);
+  const guard = "if (!rowsDescribe(probed)) return;";
+  expect(body.indexOf(guard)).toBeGreaterThan(-1);
   const writeAt = body.indexOf("typesafeProbe.value = result.ok");
-  expect(body.indexOf("if (typesafeRepo.value !== probed) return;")).toBeLessThan(writeAt);
-  expect(body.lastIndexOf("if (typesafeRepo.value !== probed) return;")).toBeGreaterThan(writeAt);
+  expect(body.indexOf(guard)).toBeLessThan(writeAt);
+  expect(body.lastIndexOf(guard)).toBeGreaterThan(writeAt);
   // The stamp must not be written before the call (that named the PENDING probe), nor on either
   // superseded path: the only stamp sits after the LAST guard, so a discarded verdict never
   // advances it.
   expect(body.slice(0, awaitAt)).not.toContain("typesafeProbeRepo =");
-  expect(body.indexOf("typesafeProbeRepo = probed;")).toBeGreaterThan(
-    body.lastIndexOf("if (typesafeRepo.value !== probed) return;"),
-  );
-  // The failure arm blanks the repo, or an in-flight probe for the old one still matches it.
+  expect(body.indexOf("typesafeProbeRepo = probed;")).toBeGreaterThan(body.lastIndexOf(guard));
+  // The failure arm must NOT blank the repo: `typesafeNeedsReload("")` is always false, so blanking
+  // it disabled `detect()`'s reload and pinned the section on the error until a re-open. The gate
+  // reads `typesafeStatus` instead, which is why the helper is used rather than a value comparison.
   const loadAt = drawer.indexOf("async function loadTypesafe");
   const loadBody = drawer.slice(loadAt, drawer.indexOf("\nasync ", loadAt + 1));
   const catchAt = loadBody.indexOf("} catch (");
-  expect(loadBody.slice(catchAt)).toContain('typesafeRepo.value = "";');
+  expect(loadBody.slice(catchAt)).not.toContain('typesafeRepo.value = "";');
+  expect(drawer).toContain(
+    'return typesafeStatus.value === "ready" && typesafeRepo.value === repo;',
+  );
 });
 
 test("a failed load clears the verdict, and the api union still forbids the bare key", () => {
@@ -386,8 +390,8 @@ test("a failed load clears the verdict, and the api union still forbids the bare
   expect(body).toContain('typesafeProbe.value = "";');
   expect(body).toContain('typesafeProbeRepo = "";');
   // `typesafe?: never` on the non-writing arm is ENFORCEMENT, not decoration: probe-verified that
-  // `{ memory: true, typesafe: {...} }` fails `tsc --strict` with it (TS2322 assigned, TS2345 as a
-  // call argument) and compiles without it.
+  // `{ memory: true, typesafe: {...} }` fails `tsc --strict` with it (TS2345, naming only arm 1's
+  // missing `expectRepo`) and compiles without it.
   const apiSrc = readFileSync(new URL("../api.ts", import.meta.url), "utf8");
   expect(apiSrc).toContain("| { typesafe?: never; expectRepo?: string }");
 });
@@ -404,7 +408,7 @@ test("the save confirmation only lands when the reload that follows it succeeded
   const at = drawer.indexOf("async function saveTypesafe");
   const nextFn = drawer.indexOf("\nfunction ", at + 1);
   const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
-  const gate = body.indexOf("if (typesafeRepo.value === view.repo)");
+  const gate = body.indexOf("if (rowsDescribe(view.repo))");
   const confirm = body.indexOf('typesafeProbe.value = "System One settings saved.";');
   expect(gate).toBeGreaterThan(-1);
   expect(confirm).toBeGreaterThan(gate); // the confirmation sits inside the landing check
