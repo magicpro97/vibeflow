@@ -176,8 +176,8 @@ async function loadTypesafe(): Promise<void> {
       callSites: { ...view.callSites },
     };
     validateThresholds();
-    // Dropped when the rows land on a DIFFERENT repo: compared against the incoming `view.repo`,
-    // since before the await it held the PREVIOUS one (equal by construction, so A's survived B's).
+    // Dropped when the rows land on a DIFFERENT repo, vs the INCOMING `view.repo`: the previous one
+    // is equal by construction (so A's verdict survived B's rows). A plain re-open keeps it.
     if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) typesafeProbe.value = "";
     typesafeRepo.value = view.repo; // from the RESPONSE: `repoPath` is live text and would lie
     typesafeStatus.value = "ready";
@@ -185,6 +185,8 @@ async function loadTypesafe(): Promise<void> {
     if (seq !== typesafeLoadSeq) return;
     typesafeView.value = null;
     typesafeStatus.value = "error";
+    typesafeProbe.value = ""; // renders regardless of status: would sit above "connection failed"
+    typesafeProbeRepo = "";
     typesafeError.value = cause instanceof Error ? cause.message : "unreachable";
   }
 }
@@ -194,15 +196,17 @@ async function testConnection(): Promise<void> {
   const probed = typesafeView.value?.repo ?? ""; // also null in the error state: "responded for :"
   if (probed === "") return;
   typesafeTesting.value = true;
+  typesafeProbeRepo = probed; // BEFORE the await: a concurrent load for another repo must see it
   try {
     const result = await api.typesafe.test(probed);
+    if (typesafeRepo.value !== probed) return; // superseded: not this repo's verdict
     typesafeProbe.value = result.ok
       ? `System One responded for ${probed}: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
       : `System One connection failed for ${probed} — ${result.error ?? "no verdict"}`;
   } catch (cause) {
+    if (typesafeRepo.value !== probed) return; // superseded
     typesafeProbe.value = `System One connection failed for ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
   } finally {
-    typesafeProbeRepo = probed; // names its repo on screen; the stamp keeps the wipe honest
     typesafeTesting.value = false;
   }
 }
@@ -217,11 +221,9 @@ async function saveTypesafe(): Promise<void> {
   if (!view) return;
   saving.value = true;
   try {
-    // Overlay only edited fields and DISCARD the response: `applySettings` would overwrite
-    // memory/tools/engines, while `loadTypesafe` refreshes exactly these rows.
     await api.settings.set({
-      // The write lands in the server's process-global active repo, and another client can move
-      // it between this panel's load and save — which no client-side guard can see.
+      // DISCARD the response (`applySettings` would overwrite memory/tools); the write lands in the
+      // server's PROCESS-GLOBAL active repo, which another client can move unseen.
       expectRepo: view.repo,
       typesafe: {
         ...settingsForm.typesafe,
@@ -277,9 +279,7 @@ async function detect(): Promise<void> {
   } finally {
     detecting.value = false;
   }
-  // AFTER the flag is released: a blur during this read returns at the re-entrancy guard, so
-  // `api/detect` is never sent for the typed path.
-  if (reloadNeeded) await loadTypesafe();
+  if (reloadNeeded) await loadTypesafe(); // AFTER the flag: a blur here hits the re-entrancy guard
 }
 
 async function initialize(withAi: boolean): Promise<void> {

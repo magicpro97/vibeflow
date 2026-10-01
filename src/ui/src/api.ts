@@ -106,10 +106,12 @@ export const api = {
       // (src/typesafe-settings.ts:333) - and typing it as a full block is what invited callers to
       // echo a snapshot, reverting anything changed elsewhere.
       //
-      // The second arm omits the key rather than declaring it `never`-optional: this repo does not
-      // enable `exactOptionalPropertyTypes`, so `typesafe?: never` would accept `undefined` just the
-      // same and the choice is INTENT, not enforcement. The real refusal is on the merge side
-      // (src/typesafe-settings.ts), which treats a present-but-undefined key as "no block".
+      // The second arm forbids the key outright. Verified by probe (`{ memory: true, typesafe:
+      // {...} }`): with `typesafe?: never` here it fails `tsc --strict` (TS2322, arm 1 wants
+      // `expectRepo` and this arm forbids `typesafe`); with the key merely omitted it compiles
+      // clean, because the other settings keys keep the object from matching arm 1 and excess
+      // property checking does not fire across a union. So `never` is the enforcement, not a
+      // formality, and the merge-side check is a second line rather than the only one.
       s: Omit<Partial<VibeSettings>, "typesafe"> &
         (
           | {
@@ -122,7 +124,7 @@ export const api = {
                */
               expectRepo: string;
             }
-          | { expectRepo?: string }
+          | { typesafe?: never; expectRepo?: string }
         ),
       signal?: AbortSignal,
     ) =>

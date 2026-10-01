@@ -335,6 +335,47 @@ test("a stale verdict does not outlive a successful reload", () => {
   expect(clearAt).toBeGreaterThan(awaitAt);
 });
 
+test("an in-flight probe is visible to the wipe, and a superseded verdict is discarded", () => {
+  // Two races around `testConnection`, both reproduced by reading the code as written:
+  //   1. the stamp was written in the `finally`, i.e. after the await. A `loadTypesafe` for another
+  //      repo landing mid-probe saw `typesafeProbeRepo === ""`, skipped the wipe, and the probe then
+  //      painted A's verdict beside B's rows. `detect()` on the Repository blur drives that load and
+  //      is independent of `typesafeTesting`, so this is reachable.
+  //   2. nothing checked, on resolution, that the rows still describe the repo that was probed.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function testConnection");
+  const nextFn = drawer.indexOf("\nasync function", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  const stampAt = body.indexOf("typesafeProbeRepo = probed;");
+  const awaitAt = body.indexOf("await api.typesafe.test(probed)");
+  expect(stampAt).toBeGreaterThan(-1);
+  expect(awaitAt).toBeGreaterThan(-1);
+  expect(stampAt).toBeLessThan(awaitAt); // stamped BEFORE the call, or the wipe cannot see it
+  expect(body).not.toContain("finally {\n    typesafeProbeRepo"); // no post-await stamp
+  expect(body.match(/if \(typesafeRepo\.value !== probed\) return;/g)?.length).toBe(2); // both arms
+});
+
+test("a failed load clears the verdict, and the api union still forbids the bare key", () => {
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function loadTypesafe");
+  const nextFn = drawer.indexOf("\nasync function", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  // The verdict renders regardless of `typesafeStatus`, so without these two lines a failed load
+  // for repo B leaves "responded for A" directly above "connection failed".
+  expect(body).toContain('typesafeProbe.value = "";');
+  expect(body).toContain('typesafeProbeRepo = "";');
+  // `typesafe?: never` on the non-writing arm is ENFORCEMENT, not decoration: probe-verified that
+  // `{ memory: true, typesafe: {...} }` fails `tsc --strict` with it and compiles without it.
+  const apiSrc = readFileSync(new URL("../api.ts", import.meta.url), "utf8");
+  expect(apiSrc).toContain("| { typesafe?: never; expectRepo?: string }");
+});
+
 test("only the latest load wins: the response is applied behind a generation token", () => {
   // Two loads are already in flight on first open (`load()` and the `detect()`-triggered reload),
   // and a repo change during either issues another. Without a token the slower response wins and
