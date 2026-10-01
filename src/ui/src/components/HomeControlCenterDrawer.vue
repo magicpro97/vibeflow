@@ -184,7 +184,7 @@ async function loadTypesafe(): Promise<void> {
     if (seq !== typesafeLoadSeq) return;
     typesafeView.value = null;
     typesafeStatus.value = "error";
-    typesafeProbe.value = ""; // else it sits above "connection failed"
+    typesafeProbe.value = ""; // else it renders below the "connection failed" line
     typesafeProbeRepo = "";
     typesafeRepo.value = ""; // else an in-flight probe for the PREVIOUS repo still matches it
     typesafeError.value = cause instanceof Error ? cause.message : "unreachable";

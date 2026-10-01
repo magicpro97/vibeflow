@@ -354,7 +354,11 @@ test("an in-flight probe is visible to the wipe, and a superseded verdict is dis
   const awaitAt = body.indexOf("await api.typesafe.test(probed)");
   expect(awaitAt).toBeGreaterThan(-1);
   expect(stampAt).toBeGreaterThan(awaitAt); // stamped with the TEXT, past the await
-  expect(body.match(/if \(typesafeRepo\.value !== probed\) return;/g)?.length).toBe(2); // both arms
+  // Both resolution arms discard a superseded verdict: exactly one guard each, before the write.
+  expect(body.indexOf("if (typesafeRepo.value !== probed) return;")).toBeGreaterThan(-1);
+  const writeAt = body.indexOf("typesafeProbe.value = result.ok");
+  expect(body.indexOf("if (typesafeRepo.value !== probed) return;")).toBeLessThan(writeAt);
+  expect(body.lastIndexOf("if (typesafeRepo.value !== probed) return;")).toBeGreaterThan(writeAt);
   // The stamp must not be written before the call: that named the PENDING probe, not the verdict.
   expect(body.slice(0, awaitAt)).not.toContain("typesafeProbeRepo =");
   // The failure arm blanks the repo, or an in-flight probe for the old one still matches it.
