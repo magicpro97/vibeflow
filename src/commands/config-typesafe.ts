@@ -114,18 +114,6 @@ const mtimeStamp = (path: string): string => {
   }
 };
 
-/** Overwrite the breaker with a fresh `idle` record. `bucket` decides WHICH record: the CLI probe
- *  resets its own, so a passing probe cannot clear the enforcement breaker the hook/verify/review
- *  seams depend on - that cross-bucket write is exactly what the separate record files exist to
- *  prevent. Only `key` (the documented key-rotation recovery path) resets enforcement.
- *
- *  The probe bucket KEEPS its `last_call`/`calls` audit: dropping them made `status` print
- *  `last probe: never` for a probe that had just run, which is the same class of lie as reporting
- *  a world-readable key as protected. */
-/** Reset BOTH records. `reset` and `key` are the documented operator recovery paths, and a tripped
- *  PROBE breaker is otherwise unrecoverable: the probe is refused before it can prove itself, so
- *  only the 15-minute cooldown or a manual `rm` clears it. `resetBreaker` on a bucket stays the
- *  internal single-record primitive. */
 async function resetAllBreakers(
   settings: TypesafeSettings,
   deps: ConfigTypesafeDeps,
@@ -134,6 +122,18 @@ async function resetAllBreakers(
   await resetBreaker(settings, deps, TYPESAFE_BUDGET_BUCKET.PROBE);
 }
 
+/** Overwrite ONE breaker with a fresh `idle` record. `bucket` decides WHICH record: the CLI probe
+ *  resets its own, so a passing probe cannot clear the enforcement breaker the hook/verify/review
+ *  seams depend on - that cross-bucket write is exactly what the separate record files exist to
+ *  prevent.
+ *
+ *  The probe bucket KEEPS its `last_call`/`calls` audit: dropping them made `status` print
+ *  `last probe: never` for a probe that had just run, which is the same class of lie as reporting
+ *  a world-readable key as protected.
+ *
+ *  The operator paths (`reset`, `key`) clear BOTH records through `resetAllBreakers` below: a
+ *  tripped PROBE breaker is otherwise unrecoverable, since the probe is refused before it can prove
+ *  itself. This function stays the internal single-record primitive. */
 async function resetBreaker(
   settings: TypesafeSettings,
   deps: ConfigTypesafeDeps,

@@ -238,7 +238,11 @@ async function record(
       ms: Math.max(0, at - startedAt),
       ...(status !== undefined ? { status } : {}),
     };
-    next.calls = callsUsedThisRun();
+    // The bucket's OWN counter, not the enforcement one: a PROBE record that stored
+    // `callsUsedThisRun()` permanently reported another bucket's usage, which is the split this
+    // counter exists to enforce.
+    next.calls =
+      inject.bucket === TYPESAFE_BUDGET_BUCKET.PROBE ? probeCallsUsedThisRun() : callsUsedThisRun();
     line = transitionLine(fresh, next, cls);
     return { next, result: next.state !== fresh.state };
   }, writeIo);

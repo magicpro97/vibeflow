@@ -18,6 +18,7 @@ import {
   FAILURE_CLASS,
   FAILURE_CLASSES,
   type FailureClass,
+  PROBE_HEALTH_FILE,
   TYPESAFE_BUDGET_BUCKET,
   TYPESAFE_STATE,
   type TypesafeHealth,
@@ -1257,6 +1258,19 @@ describe("writeBudgetMs bounds whether a write STARTS", () => {
 });
 
 describe("a probe cannot open the enforcement circuit", () => {
+  test("a probe record stores the PROBE counter, never the enforcement one", async () => {
+    // `next.calls` was stamped from `callsUsedThisRun()` unconditionally, so the probe file's audit
+    // counter reported the other bucket's usage forever - contradicting the split the separate
+    // counters and separate record files exist to enforce.
+    resetCallBudget();
+    const inst = { userRoot: mkdtempSync(join(tmpdir(), "typesafe-probe-count-")) };
+    const probeIo = { ...inst, bucket: TYPESAFE_BUDGET_BUCKET.PROBE } as never;
+    await withTypesafeGuard("probe", async () => ({ ok: true }), probeIo);
+    const probe = readHealth({ ...inst, healthFile: PROBE_HEALTH_FILE });
+    expect(probe.calls).toBe(probeCallsUsedThisRun());
+    expect(probe.calls).toBe(1); // the probe's own charge, not the enforcement counter's 0
+  });
+
   test("an invalid key on the probe leg leaves the enforcement breaker closed", async () => {
     resetCallBudget();
     const root = mkdtempSync(join(tmpdir(), "typesafe-bucket-"));
