@@ -1234,6 +1234,26 @@ describe("writeBudgetMs bounds whether a write STARTS", () => {
     } as never);
     expect(written.length).toBe(1);
   });
+
+  test("the banked budget charges the WRITE leg, never the judge round-trip", async () => {
+    // The hook reserves 500 ms for its health write against a 1500 ms judge budget, so a guard that
+    // stamped `startedAt` at ENTRY charged every real judge call to the write reservation and
+    // dropped the record — silently, since `writeHealth` swallows every failure. The file-backed
+    // breaker is the ONLY ceiling `vf hook` has (`callsThisRun` restarts per process), so the
+    // regression made it inert on the one seam it exists to bound. Revert-probe: stamp the guard's
+    // entry instant onto `record()` and this fails with `last_call` absent.
+    const inst = { userRoot: root() };
+    const base = 1_000_000;
+    const io = {
+      ...inst,
+      writeBudgetMs: 500,
+      now: () => base + 700, // a 700 ms judge call: past the write reservation
+    } as never;
+    const out = await withTypesafeGuard("risk", async () => ({ ok: true }), io);
+    expect(out).toEqual({ ok: true });
+    // The record exists and holds the call, so the breaker still has its audit.
+    expect(readHealth(inst).last_call?.caller).toBe("risk");
+  });
 });
 
 describe("a probe cannot open the enforcement circuit", () => {

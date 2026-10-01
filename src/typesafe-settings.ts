@@ -222,8 +222,12 @@ export function mergeTypesafeSettings(
   next: { typesafe?: TypesafeSettings },
   current: { typesafe?: TypesafeSettings },
 ): void {
+  // Replace-on-write on mere key PRESENCE, EXCEPT when the present key holds an explicit
+  // `undefined`: that is not "send this block", it is a caller echoing an optional field nobody
+  // set, and treating it as a write reset the whole judge to the shipped defaults while reporting
+  // success. Deleting the key remains the documented way to leave the block alone.
   const typesafeCfg =
-    "typesafe" in next
+    "typesafe" in next && next.typesafe !== undefined
       ? coerceTypesafeSettings(next.typesafe, current.typesafe ?? DEFAULT_TYPESAFE_SETTINGS)
       : current.typesafe;
   if (typesafeCfg) merged.typesafe = typesafeCfg;

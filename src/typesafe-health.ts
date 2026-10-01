@@ -14,10 +14,12 @@
 //
 // ALLOW TABLE (`allowCall`): idle/off/unconfigured allow; open inside the cooldown refuses
 // (deadline INCLUSIVE — at exactly `cooldown_until` ONE probe is granted and the record flips to
-// half-open with `cooldown_until: undefined`); half-open always refuses, so a concurrent caller
-// during a probe short-circuits to null. BOTH refusals stamp COOLDOWN through `transition`,
-// whose COOLDOWN arm is streak-neutral, so the refusal contract and the streak ladder share one
-// authority. An `open` record with NO deadline is ambiguous and is granted a probe too.
+// half-open with `cooldown_until: undefined`); half-open refuses while a PROBE LEASE is held —
+// one probe per `cooldown_ms` measured from `opened_at`, and the next caller after the lease
+// expires is granted a probe (see the ALLOW TABLE in src/typesafe-breaker.ts, which owns the
+// implementation). BOTH refusals stamp COOLDOWN through `transition`, whose COOLDOWN arm is
+// streak-neutral, so the refusal contract and the streak ladder share one authority. An `open`
+// record with NO deadline is ambiguous and is granted a probe too.
 //
 // No `enum`: every closed vocabulary is one frozen `as const` authority with an inferred union.
 // This module imports NEITHER src/typesafe.ts NOR src/typesafe-settings.ts (the dependency runs
@@ -215,6 +217,13 @@ async function record(
 ): Promise<void> {
   const at = (inject.now ?? Date.now)();
   const tuning = inject.tuning ?? BREAKER_DEFAULTS;
+  // `writeBudgetMs` bounds whether a WRITE starts, so it must be measured from the start of THIS
+  // write leg — not from guard entry. Threading the guard's `startedAt` (which also covers the
+  // judge round-trip, up to `hookTimeoutMs`) meant every judge call slower than the hook's 500 ms
+  // reservation had its outcome silently dropped, leaving the file-backed breaker — the only
+  // ceiling `vf hook` has, since `callsThisRun` restarts per process — inert. A fresh instant here
+  // charges only the record's own disk work.
+  const writeIo: GuardIo = { ...inject, startedAt: at };
   let line: string | undefined;
   const changed = await mutateHealth((fresh) => {
     // A record that is open WITHOUT a deadline is ambiguous, so it is honoured as open: an
@@ -232,7 +241,7 @@ async function record(
     next.calls = callsUsedThisRun();
     line = transitionLine(fresh, next, cls);
     return { next, result: next.state !== fresh.state };
-  }, inject);
+  }, writeIo);
   if (inject.out === undefined || line === undefined) return;
   const announced = changed === true;
   inject.out(
@@ -256,14 +265,17 @@ export async function withTypesafeGuard<T>(
   inject: GuardIo = {},
 ): Promise<T | null> {
   const now = (inject.now ?? Date.now)();
-  // Every read and write below goes through this, not `inject`, so the probe's outcome lands in its own
-  // record and can never transition the enforcement circuit. `startedAt` is threaded HERE because
-  // this is the only place that knows when the leg began: `writeUnlocked` compares it against
-  // `writeBudgetMs`, and without it the comparison measured two adjacent clock reads (i.e. nothing)
-  // and the hook's 500 ms WRITE reservation bounded no write at all.
+  // Every read and write below goes through this, not `inject`, so the probe's outcome lands in its
+  // own record and can never transition the enforcement circuit. `startedAt` is deliberately NOT
+  // stamped here: `writeUnlocked` compares it against `writeBudgetMs` to bound whether a WRITE
+  // starts, and the guard's leg also covers the judge round-trip (`hookTimeoutMs`, 3x the hook's
+  // write reservation). `record()` stamps a fresh instant for its own write instead; the pre-fix
+  // code fell back to `clock()` adjacent to the write, so the reservation bounded nothing.
   const io: GuardIo = {
     ...inject,
     healthFile: fileForBucket(inject.bucket),
+    // Bounds the ALLOW-path write, which happens here at entry. `record()` re-stamps this for its
+    // own (post-judge) write, so the judge round-trip never charges the write reservation.
     startedAt: inject.startedAt ?? now,
   };
   const maxCalls = inject.tuning?.maxCalls ?? BREAKER_DEFAULTS.maxCalls;

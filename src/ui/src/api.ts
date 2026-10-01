@@ -105,6 +105,10 @@ export const api = {
       // again. The WIRE accepts a partial one - the write path re-coerces it onto the STORED block
       // (src/typesafe-settings.ts:333) - and typing it as a full block is what invited callers to
       // echo a snapshot, reverting anything changed elsewhere.
+      //
+      // The second arm forbids the key entirely rather than allowing `typesafe: undefined`: a
+      // PRESENT key holding `undefined` reads as a write to the merge, and this arm is what keeps
+      // such a payload out of the codebase in the first place (the merge also refuses it now).
       s: Omit<Partial<VibeSettings>, "typesafe"> &
         (
           | {
@@ -117,7 +121,7 @@ export const api = {
                */
               expectRepo: string;
             }
-          | { typesafe?: undefined; expectRepo?: string }
+          | { typesafe?: never; expectRepo?: string }
         ),
       signal?: AbortSignal,
     ) =>

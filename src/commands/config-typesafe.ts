@@ -25,6 +25,7 @@ import {
   type FailureClass,
   TYPESAFE_BUDGET_BUCKET,
   fileForBucket,
+  healthPath,
   idleHealth,
   outcomeProbe,
   readHealth,
@@ -121,6 +122,18 @@ const mtimeStamp = (path: string): string => {
  *  The probe bucket KEEPS its `last_call`/`calls` audit: dropping them made `status` print
  *  `last probe: never` for a probe that had just run, which is the same class of lie as reporting
  *  a world-readable key as protected. */
+/** Reset BOTH records. `reset` and `key` are the documented operator recovery paths, and a tripped
+ *  PROBE breaker is otherwise unrecoverable: the probe is refused before it can prove itself, so
+ *  only the 15-minute cooldown or a manual `rm` clears it. `resetBreaker` on a bucket stays the
+ *  internal single-record primitive. */
+async function resetAllBreakers(
+  settings: TypesafeSettings,
+  deps: ConfigTypesafeDeps,
+): Promise<void> {
+  await resetBreaker(settings, deps);
+  await resetBreaker(settings, deps, TYPESAFE_BUDGET_BUCKET.PROBE);
+}
+
 async function resetBreaker(
   settings: TypesafeSettings,
   deps: ConfigTypesafeDeps,
@@ -238,20 +251,22 @@ export async function configTypesafe(
       return 2;
     }
     const path = writeTypesafeEnv(value, { userRoot: deps.userRoot });
-    // A breaker that tripped on `auth` would otherwise keep refusing a freshly rotated key.
-    await resetBreaker(current, deps);
+    // A breaker that tripped on `auth` would otherwise keep refusing a freshly rotated key — both
+    // records, because the probe has its own breaker and a refusal there is not self-healing.
+    await resetAllBreakers(current, deps);
     print(`key stored: ${path} (0600)`);
     print("breaker: idle");
     return 0;
   }
 
   if (sub === "reset") {
-    await resetBreaker(current, deps);
-    const healthPath = typesafeHealthPath(deps.userRoot);
+    await resetAllBreakers(current, deps);
+    const healthFile = typesafeHealthPath(deps.userRoot);
+    const probeFile = healthPath(deps.userRoot, fileForBucket(TYPESAFE_BUDGET_BUCKET.PROBE));
     print("breaker: idle");
-    print(`health file: ${healthPath} (${mtimeStamp(healthPath)})`);
+    print(`health file: ${healthFile} (${mtimeStamp(healthFile)})`);
     print(
-      `note: reset clears the breaker, it does not delete the file — rm -f ${healthPath} ${typesafeEnvPath(deps.userRoot)}`,
+      `note: reset clears the breaker, it does not delete the file — rm -f ${healthFile} ${probeFile} ${typesafeEnvPath(deps.userRoot)}`,
     );
     return 0;
   }

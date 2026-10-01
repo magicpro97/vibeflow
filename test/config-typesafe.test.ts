@@ -18,7 +18,12 @@ import {
   promptHidden,
 } from "../src/commands/config-typesafe.js";
 import { readSettings } from "../src/settings.js";
-import { PROBE_HEALTH_FILE, healthPath, typesafeHealthPath } from "../src/typesafe-health.js";
+import {
+  PROBE_HEALTH_FILE,
+  healthPath,
+  readHealth,
+  typesafeHealthPath,
+} from "../src/typesafe-health.js";
 import {
   TYPESAFE_CALL_SITE_NAMES,
   typesafeEnvPath,
@@ -553,8 +558,12 @@ describe("vf config typesafe — reset", () => {
     expect(lines[0]).toBe("breaker: idle");
     expect(lines[1]).toBe(`health file: ${health} (${statSync(health).mtime.toISOString()})`);
     expect(lines[2]).toBe(
-      `note: reset clears the breaker, it does not delete the file — rm -f ${health} ${typesafeEnvPath(root)}`,
+      `note: reset clears the breaker, it does not delete the file — rm -f ${health} ${typesafeProbePath(root)} ${typesafeEnvPath(root)}`,
     );
+    // The probe record is cleared too: its breaker is refused before it can prove itself, so a
+    // `reset` that only rewrote the enforcement file left the probe circuit stuck for a full
+    // cooldown with no operator recovery.
+    expect(readHealth({ userRoot: root, healthFile: PROBE_HEALTH_FILE }).state).toBe("idle");
     const written = JSON.parse(readFileSync(health, "utf8"));
     expect(written.state).toBe("idle");
     expect(written.cooldown_ms).toBe(60_000);

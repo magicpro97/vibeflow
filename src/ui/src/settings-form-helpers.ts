@@ -13,6 +13,14 @@
 import type { VibeSettings } from "./types-settings.js";
 
 /**
+ * The settings the generic panel MANAGES: everything except the System One block it never edits.
+ * Typing `form`/`original` as this projection is what makes the guarantee real — a `VibeSettings`
+ * ref would let a future call site read `form.value.typesafe` (runtime `undefined`) or re-inject
+ * the block, defeating the projection the save path depends on.
+ */
+export type ManagedSettings = Omit<VibeSettings, "typesafe">;
+
+/**
  * Drop the System One block. This panel has no System One UI and `mergeTypesafeSettings` is
  * replace-on-write on mere key presence, so a form carrying a stale copy rewrites the judge when
  * ANY other setting is saved.
@@ -31,16 +39,21 @@ export function withoutTypesafe(settings: VibeSettings): Omit<VibeSettings, "typ
  * Coerce the two optional blocks the dialog edits to their shipped shape on BOTH sides of the
  * dirty check. Without it `v-model` binds `undefined`, and the baseline disagrees with the form
  * the moment either editor is touched.
+ *
+ * Generic over the input so the RETURN TYPE preserves whatever the caller passed in: called on the
+ * `withoutTypesafe` projection, it must not re-assert a `typesafe` block the object provably lacks
+ * (that would let a future call site read `form.value.typesafe!.enabled` at runtime `undefined`).
  */
-export function coerceEditableDefaults(value: VibeSettings): VibeSettings {
-  if (!value.envPolicy) value.envPolicy = {};
-  if (!value.curator) {
-    value.curator = {
+export function coerceEditableDefaults<T extends Omit<VibeSettings, "typesafe">>(value: T): T {
+  const out = value as VibeSettings;
+  if (!out.envPolicy) out.envPolicy = {};
+  if (!out.curator) {
+    out.curator = {
       enabled: false,
       observeMode: true,
       schedule: "0 9 * * 1",
       severityThreshold: "medium",
     };
   }
-  return value;
+  return out as T;
 }

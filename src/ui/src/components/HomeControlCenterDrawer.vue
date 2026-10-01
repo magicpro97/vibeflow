@@ -37,12 +37,12 @@
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
         <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus === 'loading' || typesafeSaveBlocked()" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
-        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted.</p>
+        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. Off by default: with it off every path behaves exactly as it does today.</p>
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
         <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
         <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — key missing: set the environment variable or run <code>vf config typesafe key</code>.</p>
-        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? "Circuit half-open — calls are refused while a single probe is in flight." : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
+        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — calls are refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
         <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p>
         <p v-if="typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
 
@@ -132,8 +132,10 @@ const typesafeTesting = ref(false);
 const thresholdError = ref("");
 /** Repo whose System One view the rows currently describe. */
 const typesafeRepo = ref("");
-/** Monotonic load generation; only the latest load's response is applied. See `loadTypesafe`. */
+/** Monotonic load generation; only the latest response is applied (see `loadTypesafe`). */
 let typesafeLoadSeq = 0;
+/** Repo the current `typesafeProbe` verdict describes; kept across a re-open, not across a repo change. */
+let typesafeProbeRepo = "";
 
 /**
  * The form is seeded from the load, so it must never post before that load succeeded — and never
@@ -161,13 +163,12 @@ function validateThresholds(): void {
 }
 
 async function loadTypesafe(): Promise<void> {
-  // Generation token: without it a slower response wins and the rows/stamp describe a superseded
-  // repo.
-  const seq = ++typesafeLoadSeq;
+  const seq = ++typesafeLoadSeq; // without it a slower response wins and the rows/stamp go stale
   typesafeStatus.value = "loading";
   typesafeError.value = "";
-  // Cleared with the error: a probe verdict names the repo it probed, so it must not outlive these rows.
-  typesafeProbe.value = "";
+  // Wiped only on a repo change: a full wipe dropped a passing probe on every re-open.
+  if (typesafeProbeRepo !== "" && typesafeProbeRepo !== typesafeRepo.value)
+    typesafeProbe.value = "";
   try {
     const view = await api.typesafe.view();
     if (seq !== typesafeLoadSeq) return;
@@ -179,9 +180,7 @@ async function loadTypesafe(): Promise<void> {
       callSites: { ...view.callSites },
     };
     validateThresholds();
-    // Stamped from the RESPONSE, never `repoPath.value`: the field is live text, so a stamp read
-    // after the `await` describes what the user typed.
-    typesafeRepo.value = view.repo;
+    typesafeRepo.value = view.repo; // from the RESPONSE: `repoPath` is live text, so it would lie
     typesafeStatus.value = "ready";
   } catch (cause) {
     if (seq !== typesafeLoadSeq) return;
@@ -194,14 +193,17 @@ async function loadTypesafe(): Promise<void> {
 async function testConnection(): Promise<void> {
   if (typesafeTesting.value) return;
   typesafeTesting.value = true;
+  const probed = typesafeView.value?.repo ?? "";
   try {
-    const result = await api.typesafe.test(typesafeView.value?.repo ?? "");
+    const result = await api.typesafe.test(probed);
     typesafeProbe.value = result.ok
-      ? `System One responded: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
-      : `System One connection failed — ${result.error ?? "no verdict"}`;
+      ? `System One responded for ${probed}: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
+      : `System One connection failed for ${probed} — ${result.error ?? "no verdict"}`;
   } catch (cause) {
-    typesafeProbe.value = `System One connection failed — ${cause instanceof Error ? cause.message : "unreachable"}`;
+    typesafeProbe.value = `System One connection failed for ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
   } finally {
+    // The verdict names its repo on screen, not just in this ref.
+    typesafeProbeRepo = probed;
     typesafeTesting.value = false;
   }
 }
@@ -212,8 +214,7 @@ async function testConnection(): Promise<void> {
 async function saveTypesafe(): Promise<void> {
   validateThresholds();
   if (thresholdError.value) return;
-  // Unreachable from the UI, kept so a zeros-only block cannot refill the defaults.
-  const view = typesafeView.value;
+  const view = typesafeView.value; // unreachable from the UI; a zeros-only block would refill defaults
   if (!view) return;
   saving.value = true;
   try {
@@ -230,8 +231,7 @@ async function saveTypesafe(): Promise<void> {
     });
     typesafeProbe.value = "";
     typesafeError.value = "";
-    // Reports on the section's OWN surface, not the shared `message` 224 lines up: the same
-    // in-section treatment the failure path gets.
+    // This section's OWN surface, not the shared `message` up in "Project bootstrap".
     await loadTypesafe();
     typesafeProbe.value = "System One settings saved.";
   } catch (cause) {
@@ -277,8 +277,8 @@ async function detect(): Promise<void> {
   } finally {
     detecting.value = false;
   }
-  // AFTER the flag is released: holding `detecting` across this read made a blur return at the
-  // re-entrancy guard, so `api/detect` was never sent for the typed path — Save/Test disabled.
+  // AFTER the flag is released, or a blur during this read returns at the re-entrancy guard and
+  // `api/detect` is never sent for the typed path.
   if (reloadNeeded) await loadTypesafe();
 }
 

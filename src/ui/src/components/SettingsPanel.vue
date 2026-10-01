@@ -199,7 +199,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
-import { coerceEditableDefaults, withoutTypesafe } from "../settings-form-helpers.js";
+import {
+  type ManagedSettings,
+  coerceEditableDefaults,
+  withoutTypesafe,
+} from "../settings-form-helpers.js";
 import type { VibeSettings } from "../types-settings.js";
 import type { PolicyPreview } from "../types.js";
 import CuratorSettings from "./CuratorSettings.vue";
@@ -218,14 +222,14 @@ const loading = ref(true);
 const saving = ref(false);
 const saved = ref(false);
 const err = ref<string | null>(null);
-const form = ref<VibeSettings | null>(null);
+const form = ref<ManagedSettings | null>(null);
 const policyPreview = ref<PolicyPreview | null>(null);
 const dialogEl = ref<HTMLElement | null>(null);
 const showDiscardConfirm = ref(false);
 /** #689: curator schedule validity — blocks Save when invalid. */
 const curatorValid = ref(true);
 /** Deep clone of original for dirty-checking — avoids mutating shared API cache */
-const original = ref<VibeSettings | null>(null);
+const original = ref<ManagedSettings | null>(null);
 
 const isDirty = computed(() => {
   if (!form.value || !original.value) return false;
@@ -347,7 +351,7 @@ async function save() {
 }
 
 /** Extract just the policy fields for #692 preview routing / dirty baseline. */
-function pickPolicy(s: VibeSettings | null): Partial<Pick<VibeSettings, "envPolicy" | "hooks">> {
+function pickPolicy(s: ManagedSettings | null): Partial<Pick<VibeSettings, "envPolicy" | "hooks">> {
   if (!s) return {};
   return {
     ...(s.envPolicy ? { envPolicy: s.envPolicy } : {}),
