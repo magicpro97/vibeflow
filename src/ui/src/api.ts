@@ -107,9 +107,9 @@ export const api = {
       // echo a snapshot, reverting anything changed elsewhere.
       //
       // The second arm forbids the key outright. Probe (`{ memory: true, typesafe: {...} }`): with
-      // `typesafe?: never` it fails `tsc --strict` (TS2345, whose message names only arm 1's missing
-      // `expectRepo` - this arm's `never` is never mentioned); with the key merely omitted it
-      // compiles. `never` here is what stops this arm from accepting the object anyway.
+      // `typesafe?: never` it fails `tsc --strict` - TS2322 as an assignment, TS2345 as a call
+      // argument - with a message naming only arm 1's missing `expectRepo`; this arm's `never` is
+      // never mentioned. With the key merely omitted it compiles, so `never` is the enforcement.
       s: Omit<Partial<VibeSettings>, "typesafe"> &
         (
           | {

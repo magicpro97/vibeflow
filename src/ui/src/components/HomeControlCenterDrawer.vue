@@ -130,13 +130,10 @@ const typesafeError = ref("");
 const typesafeProbe = ref("");
 const typesafeTesting = ref(false);
 const thresholdError = ref("");
-// Repo the rows describe.
 const typesafeRepo = ref("");
-// Load generation; only the latest response is applied (see `loadTypesafe`).
 let typesafeLoadSeq = 0;
 let typesafeProbeRepo = ""; // repo the current verdict describes; survives a re-open, not a repo change
 
-// Never post before the seed load succeeded, nor while the rows describe a repo the server will no longer write to (the Repository `@blur` moves the active repo).
 function typesafeSaveBlocked(): boolean {
   return typesafeSaveDisabled({
     saving: saving.value,
@@ -155,13 +152,13 @@ function validateThresholds(): void {
   thresholdError.value = typesafeThresholdError(settingsForm.typesafe);
 }
 
-async function loadTypesafe(): Promise<void> {
+async function loadTypesafe(): Promise<boolean> {
   const seq = ++typesafeLoadSeq; // without it a slower response wins and the rows go stale
   typesafeStatus.value = "loading";
   typesafeError.value = "";
   try {
     const view = await api.typesafe.view();
-    if (seq !== typesafeLoadSeq) return;
+    if (seq !== typesafeLoadSeq) return false;
     typesafeView.value = view;
     settingsForm.typesafe = {
       enabled: view.enabled,
@@ -170,22 +167,21 @@ async function loadTypesafe(): Promise<void> {
       callSites: { ...view.callSites },
     };
     validateThresholds();
-    // Dropped on a DIFFERENT repo vs the INCOMING `view.repo`; a re-open keeps it.
     if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) typesafeProbe.value = "";
     typesafeRepo.value = view.repo; // from the RESPONSE: `repoPath` is live text and would lie
     typesafeStatus.value = "ready";
+    return true;
   } catch (cause) {
-    if (seq !== typesafeLoadSeq) return;
+    if (seq !== typesafeLoadSeq) return false;
     typesafeView.value = null;
     typesafeStatus.value = "error";
     typesafeProbe.value = ""; // else it renders below the "connection failed" line
     typesafeProbeRepo = "";
-    // `typesafeRepo` is NOT blanked: `typesafeNeedsReload("")` is always false, so blanking it disabled `detect()`'s reload and pinned this error until a re-open.
     typesafeError.value = cause instanceof Error ? cause.message : "unreachable";
+    return false;
   }
 }
 
-// The rows still describe `repo` and are ready for it: keyed on status, since the failure arm leaves `typesafeRepo` populated so `detect()` can still reload.
 function rowsDescribe(repo: string): boolean {
   return typesafeStatus.value === "ready" && typesafeRepo.value === repo;
 }
@@ -218,7 +214,6 @@ async function saveTypesafe(): Promise<void> {
   saving.value = true;
   try {
     await api.settings.set({
-      // PROCESS-GLOBAL active repo (another client can move it unseen); response discarded.
       expectRepo: view.repo,
       typesafe: {
         ...settingsForm.typesafe,
@@ -228,11 +223,10 @@ async function saveTypesafe(): Promise<void> {
     typesafeProbe.value = "";
     typesafeProbeRepo = "";
     typesafeError.value = "";
-    await loadTypesafe(); // this section's OWN surface, not the shared `message` up top
-    // Only when the reload LANDED: its failure arm blanks the verdict and sets `typesafeError`, so the confirmation would render below that error.
-    if (rowsDescribe(view.repo)) {
+    const applied = await loadTypesafe(); // this section's OWN surface, not the shared `message` up top
+    if (applied) {
       typesafeProbe.value = "System One settings saved.";
-      typesafeProbeRepo = view.repo;
+      typesafeProbeRepo = typesafeRepo.value; // the rows' repo, which this load just stamped
     }
   } catch (cause) {
     typesafeError.value = cause instanceof Error ? cause.message : "System One save failed";
@@ -271,7 +265,8 @@ async function detect(): Promise<void> {
     detection.value = await api.detect(repoPath.value);
     repoPath.value = detection.value.repo;
     detected.value = true;
-    reloadNeeded = typesafeNeedsReload(typesafeRepo.value, repoPath.value);
+    reloadNeeded =
+      typesafeNeedsReload(typesafeRepo.value, repoPath.value) || typesafeStatus.value === "error";
   } catch (cause) {
     detected.value = false;
     error.value = cause instanceof Error ? cause.message : "Repository detection failed";

@@ -390,8 +390,8 @@ test("a failed load clears the verdict, and the api union still forbids the bare
   expect(body).toContain('typesafeProbe.value = "";');
   expect(body).toContain('typesafeProbeRepo = "";');
   // `typesafe?: never` on the non-writing arm is ENFORCEMENT, not decoration: probe-verified that
-  // `{ memory: true, typesafe: {...} }` fails `tsc --strict` with it (TS2345, naming only arm 1's
-  // missing `expectRepo`) and compiles without it.
+  // `{ memory: true, typesafe: {...} }` fails `tsc --strict` with it (TS2322 assigned, TS2345 as a
+  // call argument) and compiles without it.
   const apiSrc = readFileSync(new URL("../api.ts", import.meta.url), "utf8");
   expect(apiSrc).toContain("| { typesafe?: never; expectRepo?: string }");
 });
@@ -408,7 +408,7 @@ test("the save confirmation only lands when the reload that follows it succeeded
   const at = drawer.indexOf("async function saveTypesafe");
   const nextFn = drawer.indexOf("\nfunction ", at + 1);
   const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
-  const gate = body.indexOf("if (rowsDescribe(view.repo))");
+  const gate = body.indexOf("if (applied)");
   const confirm = body.indexOf('typesafeProbe.value = "System One settings saved.";');
   expect(gate).toBeGreaterThan(-1);
   expect(confirm).toBeGreaterThan(gate); // the confirmation sits inside the landing check
@@ -428,7 +428,7 @@ test("only the latest load wins: the response is applied behind a generation tok
   const nextFn = drawer.indexOf("\nasync function", at + 1);
   const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
   expect(body).toContain("const seq = ++typesafeLoadSeq;");
-  expect([...body.matchAll(/if \(seq !== typesafeLoadSeq\) return;/g)]).toHaveLength(2);
+  expect([...body.matchAll(/if \(seq !== typesafeLoadSeq\) return false;/g)]).toHaveLength(2);
   expect(body).not.toContain("typesafeView.value = await api.typesafe.view()");
   expect(drawer).toContain("let typesafeLoadSeq = 0;");
 });
