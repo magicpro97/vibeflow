@@ -336,26 +336,32 @@ test("a stale verdict does not outlive a successful reload", () => {
 });
 
 test("an in-flight probe is visible to the wipe, and a superseded verdict is discarded", () => {
-  // Two races around `testConnection`, both reproduced by reading the code as written:
-  //   1. the stamp was written in the `finally`, i.e. after the await. A `loadTypesafe` for another
-  //      repo landing mid-probe saw `typesafeProbeRepo === ""`, skipped the wipe, and the probe then
-  //      painted A's verdict beside B's rows. `detect()` on the Repository blur drives that load and
-  //      is independent of `typesafeTesting`, so this is reachable.
-  //   2. nothing checked, on resolution, that the rows still describe the repo that was probed.
+  // Three races around `testConnection`, each reproduced by reading the code as written:
+  //   1. nothing checked, on resolution, that the rows still describe the repo that was probed.
+  //   2. the stamp moved with the pending probe rather than with the TEXT, so a superseded probe
+  //      could leave `typesafeProbeRepo` naming a repo with no verdict on screen.
+  //   3. `loadTypesafe`'s failure arm left `typesafeRepo` holding the PREVIOUS repo, so an in-flight
+  //      probe for it passed the superseded check (finding 1) and painted its verdict under the
+  //      error, with an empty stamp that no later load could wipe.
   const drawer = readFileSync(
     new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
     "utf8",
   );
   const at = drawer.indexOf("async function testConnection");
-  const nextFn = drawer.indexOf("\nasync function", at + 1);
+  const nextFn = drawer.indexOf("\nasync ", at + 1);
   const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
   const stampAt = body.indexOf("typesafeProbeRepo = probed;");
   const awaitAt = body.indexOf("await api.typesafe.test(probed)");
-  expect(stampAt).toBeGreaterThan(-1);
   expect(awaitAt).toBeGreaterThan(-1);
-  expect(stampAt).toBeLessThan(awaitAt); // stamped BEFORE the call, or the wipe cannot see it
-  expect(body).not.toContain("finally {\n    typesafeProbeRepo"); // no post-await stamp
+  expect(stampAt).toBeGreaterThan(awaitAt); // stamped with the TEXT, past the await
   expect(body.match(/if \(typesafeRepo\.value !== probed\) return;/g)?.length).toBe(2); // both arms
+  // The stamp must not be written before the call: that named the PENDING probe, not the verdict.
+  expect(body.slice(0, awaitAt)).not.toContain("typesafeProbeRepo =");
+  // The failure arm blanks the repo, or an in-flight probe for the old one still matches it.
+  const loadAt = drawer.indexOf("async function loadTypesafe");
+  const loadBody = drawer.slice(loadAt, drawer.indexOf("\nasync ", loadAt + 1));
+  const catchAt = loadBody.indexOf("} catch (");
+  expect(loadBody.slice(catchAt)).toContain('typesafeRepo.value = "";');
 });
 
 test("a failed load clears the verdict, and the api union still forbids the bare key", () => {
