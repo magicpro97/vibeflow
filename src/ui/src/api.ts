@@ -95,22 +95,30 @@ export const api = {
         (r) => r.settings,
       ),
     set: (
-      // `Omit` because `Partial<VibeSettings>` is shallow: intersecting it with a partial `typesafe`
-      // would produce `TypesafeSettings & Partial<TypesafeSettings>`, i.e. a full block again. The
-      // WIRE accepts a partial one - the write path re-coerces it onto the STORED block
+      // A UNION, not two independent optionals. The server refuses a `typesafe` write with no
+      // `expectRepo` (400, `assertTypesafeWriteAllowed`), and expressing that on the client is the
+      // only thing that stops the next call site from omitting it: `{ typesafe: {…} }` alone used
+      // to type-check, and a test that string-matches THIS call site cannot hold the next one.
+      //
+      // `Omit` because `Partial<VibeSettings>` is shallow: intersecting it with a partial
+      // `typesafe` would produce `TypesafeSettings & Partial<TypesafeSettings>`, i.e. a full block
+      // again. The WIRE accepts a partial one - the write path re-coerces it onto the STORED block
       // (src/typesafe-settings.ts:333) - and typing it as a full block is what invited callers to
       // echo a snapshot, reverting anything changed elsewhere.
-      s: Omit<Partial<VibeSettings>, "typesafe"> & {
-        /** The fields this caller edits; the rest are preserved from disk. */
-        typesafe?: Partial<import("./types-settings.js").TypesafeSettings>;
-        /**
-         * The repository these settings were READ from. The write lands in whichever repo is
-         * active server-side, which another client can move between this panel's load and its
-         * save; the server refuses with 409 when the two disagree. Optional so the other panels,
-         * which post the same block, keep working — this section always sends it.
-         */
-        expectRepo?: string;
-      },
+      s: Omit<Partial<VibeSettings>, "typesafe"> &
+        (
+          | {
+              /** The fields this caller edits; the rest are preserved from disk. */
+              typesafe: Partial<import("./types-settings.js").TypesafeSettings>;
+              /**
+               * The repository these settings were READ from. The write lands in whichever repo is
+               * active server-side, which another client can move between this panel's load and its
+               * save; the server refuses with 409 when the two disagree.
+               */
+              expectRepo: string;
+            }
+          | { typesafe?: undefined; expectRepo?: string }
+        ),
       signal?: AbortSignal,
     ) =>
       req<{ settings: VibeSettings }>("POST", "/api/settings", s, signal).then((r) => r.settings),

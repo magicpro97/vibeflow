@@ -107,7 +107,12 @@ test("configured and state are separate rows, and an open breaker warns with its
   );
   const circuitAt = markup.findIndex((l) => l.includes("Circuit open"));
   expect(circuitAt).toBe(configuredAt + 1);
-  expect(markup[circuitAt]).toStartWith("<p v-else-if=\"typesafeView?.state === 'open'\"");
+  // `open` and `half-open` share the line: half-open refuses every call too (a lone probe is in
+  // flight), so a banner that only fired on `open` left the operator with a fully inert judge and
+  // no explanation. The CSS and the `state` row already anticipated both.
+  expect(markup[circuitAt]).toStartWith(
+    "<p v-else-if=\"typesafeView?.state === 'open' || typesafeView?.state === 'half-open'\"",
+  );
   expect(drawer).toContain("cooldownUntil");
 });
 
@@ -245,13 +250,15 @@ test("the save names the repository its rows describe, so the server can refuse 
   // the first `};`, which sits 136 lines further down, so the window covered load, detect,
   // initialize and loadSkills — moving `expectRepo` to any of those satisfied the test while the
   // call site no longer sent it.
+  // The window is the save function's OWN body: the previous `nexts` list also matched the
+  // `\nconst ` of a destructuring inside it, which would have truncated the call. Bounded by
+  // counting the lines up to the next top-level `async function`, and the bound is asserted so a
+  // move cannot silently widen it.
   const start = drawer.indexOf("async function saveTypesafe");
   expect(start).toBeGreaterThan(-1);
-  const nexts = ["\nasync function", "\nfunction", "\nconst "]
-    .map((marker) => drawer.indexOf(marker, start + 1))
-    .filter((at) => at !== -1);
-  const call = drawer.slice(start, nexts.length ? Math.min(...nexts) : drawer.length);
-  expect(call.split("\n").length).toBeLessThan(40);
+  const nextFn = drawer.indexOf("\nasync function", start + 1);
+  const call = drawer.slice(start, nextFn === -1 ? drawer.length : nextFn);
+  expect(call.split("\n").length).toBeLessThan(60);
   // And it has to be inside the request payload, not merely somewhere in the function.
   const payloadStart = call.indexOf("api.settings.set(");
   const payloadEnd = call.indexOf("});", payloadStart);
@@ -265,18 +272,29 @@ test("the generic settings panel never carries the System One block into its for
   // its dialog opened. The block used to ride along on BOTH of its save paths and, because
   // `mergeTypesafeSettings` is replace-on-write on mere key presence, saving anything at all -
   // Memory, toolPriority, or an envPolicy change through the preview/apply route - rewrote the
-  // judge from a stale copy, into whichever repo was active by then. One guard at load covers both
-  // branches; a guard per branch would have to be repeated on the policy-apply route too, which
-  // does not go through the settings route at all.
+  // judge from a stale copy, into whichever repo was active by then. One projection at load covers
+  // both branches; a guard per branch would have to be repeated on the policy-apply route too,
+  // which does not go through the settings route at all.
+  //
+  // The projection is a shared helper now (settings-form-helpers.ts) because the re-seed path
+  // needed it too: `POST /api/settings` answers with the block present, so assigning that response
+  // to `original` raw made `isDirty` true forever. Every assignment to `form`/`original` goes
+  // through it, which this pins by counting the call sites.
   const panel = readFileSync(new URL("../components/SettingsPanel.vue", import.meta.url), "utf8");
-  // No window and no offset: both tokens are distinctive, so a character bound here would only
-  // start silently asserting against whatever moved into the window.
-  expect(panel).toContain("const { typesafe: unmanagedTypesafe, ...managed }");
-  expect(panel).toContain("void unmanagedTypesafe;");
-  expect(panel).toContain("form.value = managed");
-  // Both paths post the form, so with the block absent from the form neither can send it.
-  expect(panel).toContain("api.settings.set(form.value)");
+  const helpers = readFileSync(new URL("../settings-form-helpers.ts", import.meta.url), "utf8");
+  expect(helpers).toContain("export function withoutTypesafe");
+  expect(helpers).toContain("export function coerceEditableDefaults");
+  // Wire-format claim, unchanged: the direct save posts the panel's own form, and the block can
+  // only be absent from a payload the form never carried.
+  expect(panel).toContain("api.settings.set(withoutTypesafe(form.value))");
   expect(panel).toContain("{ ...nonPolicy }");
+  // BOTH save paths re-seed through the projection, and the initial load projects both sides.
+  // Pinned as a count: adding a raw `original.value = clone(...)` anywhere fails here.
+  expect([
+    ...panel.matchAll(/original\.value = coerceEditableDefaults\(withoutTypesafe\(/g),
+  ]).toHaveLength(3);
+  expect(panel).not.toContain("original.value = clone(savedSettings)");
+  expect(panel).not.toContain("JSON.parse(JSON.stringify(savedSettings))");
 });
 
 test("the System One save refusal renders on its own content", () => {
@@ -292,17 +310,40 @@ test("the System One save refusal renders on its own content", () => {
   expect(drawer.slice(at, at + 200)).toContain("{{ typesafeError }}");
 });
 
-test("a stale refusal does not outlive a successful reload", () => {
-  // `typesafeError` is bound to its own content, so any path that loads rows successfully has to
-  // clear it - otherwise a 409 from a moved repository stays on screen above correct rows.
+test("a stale verdict does not outlive a successful reload", () => {
+  // `typesafeError` and `typesafeProbe` are both bound to their own content, so any path that
+  // loads rows successfully has to clear both - otherwise a 409 from a moved repository, or a
+  // probe verdict recorded against the OLD repo, stays on screen above correct rows.
   const drawer = readFileSync(
     new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
     "utf8",
   );
   const at = drawer.indexOf("async function loadTypesafe");
-  const head = drawer.slice(at, at + 400);
+  const head = drawer.slice(at, at + 2000);
   expect(head).toContain('typesafeError.value = "";');
+  // The probe half, inside the same slice: `loadTypesafe` clears it next to the error, because a
+  // verdict is repo- and model-specific (`testConnection` sends `view.repo`).
+  expect(head).toContain('typesafeProbe.value = "";');
   expect(drawer).toContain('typesafeProbe.value = "";\n    typesafeError.value = "";');
+});
+
+test("only the latest load wins: the response is applied behind a generation token", () => {
+  // Two loads are already in flight on first open (`load()` and the `detect()`-triggered reload),
+  // and a repo change during either issues another. Without a token the slower response wins and
+  // the rows and the `typesafeRepo` stamp describe the superseded repo - which the save guard then
+  // blocks forever. Both arms are guarded, and the response is bound to a local so the guards are
+  // the only way the refs are written.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function loadTypesafe");
+  const nextFn = drawer.indexOf("\nasync function", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  expect(body).toContain("const seq = ++typesafeLoadSeq;");
+  expect([...body.matchAll(/if \(seq !== typesafeLoadSeq\) return;/g)]).toHaveLength(2);
+  expect(body).not.toContain("typesafeView.value = await api.typesafe.view()");
+  expect(drawer).toContain("let typesafeLoadSeq = 0;");
 });
 
 test("the cross-repo stamp is taken from the server response, not the local path", () => {
@@ -313,5 +354,5 @@ test("the cross-repo stamp is taken from the server response, not the local path
     new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
     "utf8",
   );
-  expect(drawer).toContain("typesafeRepo.value = typesafeView.value.repo;");
+  expect(drawer).toContain("typesafeRepo.value = view.repo;");
 });

@@ -260,6 +260,35 @@ describe("allowCall", () => {
     expect(second.next.cooldown_until).toBeUndefined();
   });
 
+  test("the probe lease EXPIRES, so a streak-neutral probe cannot wedge half-open forever", () => {
+    // Reproduced before the lease existed: trip the breaker, let the cooldown elapse, then let the
+    // ONE probe answer `abort` (a timeout - the likely outcome on the hook path, where
+    // `hookTimeoutMs` is 1500 ms). `transition`'s ABORT arm returns `base` unchanged, so the record
+    // stayed `half-open` with NO deadline, and the unconditional half-open refusal held it there
+    // for every later call: one slow network disabled the judge until a manual reset or a key
+    // rotation, while `status` printed a bare `half-open` with no countdown.
+    const h = transition(idle(), FAILURE_CLASS.BUDGET, T0, undefined, 429);
+    const after = T0 + h.cooldown_ms + 1;
+    const first = allowCall(h, after);
+    expect(first.allow).toBe(true);
+    const probed = transition(first.next, FAILURE_CLASS.ABORT, after + 1500);
+    expect(probed.state).toBe(TYPESAFE_STATE.HALF_OPEN);
+    // Inside the lease a second caller still short-circuits to null - "exactly one probe" holds.
+    expect(allowCall(probed, after + 1500 + 1).allow).toBe(false);
+    // Past the lease the next caller gets a probe again, which is the self-heal.
+    const regranted = allowCall(probed, after + probed.cooldown_ms + 1);
+    expect(regranted.allow).toBe(true);
+    expect(regranted.next.state).toBe(TYPESAFE_STATE.HALF_OPEN);
+  });
+
+  test("a hostile half-open record with no parseable opened_at is granted a probe (fail OPEN)", () => {
+    // `opened_at` is optional in the record guard, so a truncated file can leave half-open with no
+    // lease start. Treating that as "still probing" would be a wedge with no way out; the breaker
+    // must fail open when it cannot measure.
+    const hostile: TypesafeHealth = { ...IDLE_HEALTH, state: TYPESAFE_STATE.HALF_OPEN };
+    expect(allowCall(hostile, T0).allow).toBe(true);
+  });
+
   test("the cooldown deadline is inclusive: exactly at cooldown_until a probe is granted", () => {
     const h = transition(
       readHealth({ userRoot: root() }),

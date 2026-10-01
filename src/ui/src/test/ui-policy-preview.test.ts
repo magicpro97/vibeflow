@@ -82,9 +82,12 @@ assert(
 // #692 regression: original.value must be reassigned from the RETURNED settings
 // of applyPolicy — not form.value/nonPolicy (that drops envPolicy/hooks from the
 // baseline, so every later save re-detects a policy diff and previews again).
+// The rebase goes through the shared projection (`coerceEditableDefaults(withoutTypesafe(clone(...)))`)
+// for the same reason the direct-save path does: the response carries `typesafe`, the form does not,
+// and re-seeding the baseline raw leaves `isDirty` permanently true.
 assert(
   "applyPolicy rebases original from returned settings, not nonPolicy",
-  /const savedSettings = await api\.settings\.applyPolicy\([\s\S]*original\.value = clone\(savedSettings\)/.test(
+  /const savedSettings = await api\.settings\.applyPolicy\([\s\S]*original\.value = coerceEditableDefaults\(withoutTypesafe\(clone\(savedSettings\)\)\)/.test(
     panel,
   ),
 );

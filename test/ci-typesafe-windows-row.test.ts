@@ -247,11 +247,29 @@ describe("the win32 gate is wired into both workflows", () => {
     // Move either to another job and the platform selector becomes `test.skip`, the module-scope
     // guard has no env to fire on, and the whole thing reports success with 2 skips while both
     // win32 claims are unverified - with WINDOWS_RESULT reading success. A whole-file `toContain`
-    // for the env name did not pin any of that; these are scoped to the jobs that must carry them.
+    // for the env name did not pin any of this; these are scoped to the jobs that must carry them.
     for (const job of [jobBlock(ci, "windows"), inWindowsJob]) {
       expect(job).toContain("runs-on: windows-latest");
       expect(job).toContain('VF_REQUIRE_LIVE_WINDOWS: "1"');
     }
+    // The release job gained a test that hard-requires Node (`Bun.which("node")`), so the toolchain
+    // must be pinned HERE too - the ci.yml half was updated in the same change and the release half
+    // was not. Without it the gate rides the ambient Node of `windows-latest` and fails as
+    // "node is not on PATH", which is not the win32 claim the row exists to measure.
+    expect(inWindowsJob).toContain("uses: actions/setup-node@v4");
+    // ...and the shipped artifact must be BUILT before the live test drives it, in the right ORDER.
+    // Deleting the build step, or moving it after the live test, left all three meta-tests green
+    // while the gate measured whatever `dist/` happened to hold. The ci.yml half pinned node and
+    // the build gating; this half pinned neither, which is the asymmetry the same round fixed.
+    // Resolved through the job's OWN steps, so a build step parked in another job cannot satisfy it.
+    const buildAt = inWindowsJob.indexOf("- name: Build shipped artifact");
+    const liveAt = inWindowsJob.indexOf("- name: Windows typesafe hook budget release gate");
+    expect(buildAt).toBeGreaterThan(-1);
+    expect(liveAt).toBeGreaterThan(-1);
+    expect(buildAt).toBeLessThan(liveAt);
+    // `bun run build` inside that step, anchored at end of line: `|| true` or a trailing `; exit 0`
+    // keeps the substring and un-builds the artifact without touching any other pin here.
+    expect(inWindowsJob).toMatch(/^ {8}run: bun run build$/m);
   });
 
   test("the module-scope guard makes a non-Windows runner fail loudly, not skip to green", () => {
@@ -356,8 +374,8 @@ describe("the win32 gate is wired into both workflows", () => {
     // module scope, say - changed nothing they measured. The comment here previously claimed the
     // pin "closes the class"; it did not, and a round-36 review found the exact line that escaped.
     // Changing any of these numbers means deliberately changing the live test.
-    expect(statementLines(body).length).toBe(123);
-    expect(chunks.map(statementLines).map((l) => l.length)).toEqual([46, 31]);
+    expect(statementLines(body).length).toBe(124);
+    expect(chunks.map(statementLines).map((l) => l.length)).toEqual([47, 31]);
 
     const assertions = [...body.matchAll(/^[ \t]*expect\(/gm)].map((m) => {
       // `callText` closes on the `)` of `expect(` itself; the MATCHER follows it, so read on to the

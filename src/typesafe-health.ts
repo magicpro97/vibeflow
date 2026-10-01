@@ -28,6 +28,7 @@ export {
   TYPESAFE_BUDGET_BUCKET,
   type TypesafeBudgetBucket,
   fileForBucket,
+  healthPath,
 } from "./typesafe-health-file.js";
 
 import {
@@ -68,23 +69,25 @@ export type HealthIo = HealthFileIo;
 /** `HealthIo` plus the clock seam the guard and the write budget read. */
 export type HealthClockIo = HealthFileClockIo;
 
-/** The four user-tunable breaker numbers. `maxCalls` travels HERE so ONE `tuning` object reaches
- *  every call site — a per-seam parameter could be forgotten by a future one. */
-export interface BreakerTuning {
-  failStreakLimit: number;
-  cooldownBaseMs: number;
-  cooldownCapMs: number;
-  maxCalls: number;
-}
-/** DEFAULTS ONLY, for tests and for callers with no settings in hand; production threads the
- *  settings values through `tuningFor`, so a user retunes the breaker without editing source.
- *  Every number here also exists as a `TypesafeSettings` field. */
-export const BREAKER_DEFAULTS: BreakerTuning = Object.freeze({
-  failStreakLimit: 2,
-  cooldownBaseMs: 60_000,
-  cooldownCapMs: 900_000,
-  maxCalls: 20,
-});
+// The PURE state machine (transition/allowCall/classifiers/tuning) lives in
+// src/typesafe-breaker.ts - the 400-line cap forced that split - and is re-exported here, because
+// src/typesafe-health.ts stays the ONE module a call site imports.
+export {
+  BREAKER_DEFAULTS,
+  type BreakerTuning,
+  allowCall,
+  classifyHttp,
+  classifyThrown,
+  transition,
+  tuningFor,
+} from "./typesafe-breaker.js";
+import {
+  BREAKER_DEFAULTS,
+  type BreakerTuning,
+  allowCall,
+  classifyThrown,
+  transition,
+} from "./typesafe-breaker.js";
 
 /** The machine's codec for the record on disk: encode, and decode anything unusable to idle. */
 const CODEC = healthCodec(BREAKER_DEFAULTS.cooldownBaseMs);
@@ -144,110 +147,6 @@ export async function mutateHealth<T>(
     const { next, result } = update(current);
     return result === undefined ? { next } : { next, result };
   });
-}
-
-/** Structural, NOT an import of src/typesafe-settings.ts (the isolation rule holds). */
-export function tuningFor(s: BreakerTuning): BreakerTuning {
-  return {
-    failStreakLimit: s.failStreakLimit,
-    cooldownBaseMs: s.cooldownBaseMs,
-    cooldownCapMs: s.cooldownCapMs,
-    maxCalls: s.maxCalls,
-  };
-}
-
-/** 401/403 → auth (trip now), 429/529 → budget (trip now), 422 → schema, other 5xx → server
- *  (retryable), any other non-2xx → malformed (a rejected request, counted but never retried),
- *  2xx → none. */
-export function classifyHttp(status: number): FailureClass {
-  if (status >= 200 && status < 300) return FAILURE_CLASS.NONE;
-  if (status === 401 || status === 403) return FAILURE_CLASS.AUTH;
-  if (status === 429 || status === 529) return FAILURE_CLASS.BUDGET;
-  if (status === 422) return FAILURE_CLASS.SCHEMA;
-  if (status >= 500) return FAILURE_CLASS.SERVER;
-  return FAILURE_CLASS.MALFORMED;
-}
-
-/** The caller's own signal, or a Timeout/Abort error, is an `abort`: streak-neutral, never
- *  retried (a second attempt only doubles the wait). Everything else is a transport failure. */
-export function classifyThrown(err: unknown, aborted: boolean): FailureClass {
-  if (aborted) return FAILURE_CLASS.ABORT;
-  const name = (err as { name?: unknown } | null)?.name;
-  if (name === "TimeoutError" || name === "AbortError") return FAILURE_CLASS.ABORT;
-  return FAILURE_CLASS.NETWORK;
-}
-
-/** The pure state function. Every external dependency (fs, clock, settings, key) is an argument
- *  or absent: the off/unconfigured arms are reached by CALLING it with those classes. */
-export function transition(
-  prev: TypesafeHealth,
-  cls: FailureClass,
-  now: number,
-  tuning: BreakerTuning = BREAKER_DEFAULTS,
-  status?: number,
-): TypesafeHealth {
-  const base: TypesafeHealth = {
-    ...prev,
-    last_class: cls,
-    ...(status !== undefined ? { last_status: status } : {}),
-  };
-  if (cls === FAILURE_CLASS.NONE) {
-    return {
-      ...base,
-      state: TYPESAFE_STATE.IDLE,
-      fail_streak: 0,
-      consecutive_trips: 0,
-      cooldown_ms: tuning.cooldownBaseMs,
-      opened_at: undefined,
-      cooldown_until: undefined,
-    };
-  }
-  if (cls === FAILURE_CLASS.DISABLED) {
-    return { ...base, state: TYPESAFE_STATE.OFF, fail_streak: 0, consecutive_trips: 0 };
-  }
-  if (cls === FAILURE_CLASS.UNCONFIGURED) {
-    return { ...base, state: TYPESAFE_STATE.UNCONFIGURED, fail_streak: 0, consecutive_trips: 0 };
-  }
-  if (cls === FAILURE_CLASS.ABORT || cls === FAILURE_CLASS.COOLDOWN) return base;
-  const tripsNow = cls === FAILURE_CLASS.AUTH || cls === FAILURE_CLASS.BUDGET;
-  const streak = prev.fail_streak + 1;
-  if (!tripsNow && streak < tuning.failStreakLimit) return { ...base, fail_streak: streak };
-  const consecutiveTrips = prev.consecutive_trips + 1;
-  const cooldownMs = Math.min(
-    tuning.cooldownCapMs,
-    tuning.cooldownBaseMs * 2 ** (consecutiveTrips - 1),
-  );
-  return {
-    ...base,
-    state: TYPESAFE_STATE.OPEN,
-    fail_streak: streak,
-    consecutive_trips: consecutiveTrips,
-    cooldown_ms: cooldownMs,
-    opened_at: new Date(now).toISOString(),
-    cooldown_until: new Date(now + cooldownMs).toISOString(),
-  };
-}
-
-/** See the ALLOW TABLE in the header: one `half-open` probe per cooldown, refusals stamped
- *  through `transition`. */
-export function allowCall(
-  h: TypesafeHealth,
-  now: number,
-): { allow: boolean; next: TypesafeHealth } {
-  if (h.state === TYPESAFE_STATE.HALF_OPEN) {
-    return { allow: false, next: transition(h, FAILURE_CLASS.COOLDOWN, now) };
-  }
-  if (h.state === TYPESAFE_STATE.OPEN) {
-    const until = h.cooldown_until === undefined ? undefined : Date.parse(h.cooldown_until);
-    if (until !== undefined && now < until) {
-      return { allow: false, next: transition(h, FAILURE_CLASS.COOLDOWN, now) };
-    }
-    return {
-      allow: true,
-      next: { ...h, state: TYPESAFE_STATE.HALF_OPEN, cooldown_until: undefined },
-    };
-  }
-  return { allow: true, next: h };
 }
 
 /** The per-RUN call budget's storage. Module scope is the point: `vf hook` is a fresh process
@@ -358,8 +257,15 @@ export async function withTypesafeGuard<T>(
 ): Promise<T | null> {
   const now = (inject.now ?? Date.now)();
   // Every read and write below goes through this, not `inject`, so the probe's outcome lands in its own
-  // record and can never transition the enforcement circuit.
-  const io: GuardIo = { ...inject, healthFile: fileForBucket(inject.bucket) };
+  // record and can never transition the enforcement circuit. `startedAt` is threaded HERE because
+  // this is the only place that knows when the leg began: `writeUnlocked` compares it against
+  // `writeBudgetMs`, and without it the comparison measured two adjacent clock reads (i.e. nothing)
+  // and the hook's 500 ms WRITE reservation bounded no write at all.
+  const io: GuardIo = {
+    ...inject,
+    healthFile: fileForBucket(inject.bucket),
+    startedAt: inject.startedAt ?? now,
+  };
   const maxCalls = inject.tuning?.maxCalls ?? BREAKER_DEFAULTS.maxCalls;
   const probe = inject.bucket === TYPESAFE_BUDGET_BUCKET.PROBE;
   const used = probe ? probeCallsThisRun : callsThisRun;

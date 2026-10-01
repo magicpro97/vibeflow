@@ -435,10 +435,10 @@ is owner-only on POSIX (`0600`) and on Windows (a migrated owner-only DACL, veri
 written to `.vibeflow/SETTINGS.json`. `--key` is refused: it would land in shell history
 and in `ps` output.
 
-`test` exits `0` on a healthy probe, `2` when no key resolves, and `1` when the request
-failed. `reset` clears the breaker but is **not** uninstall; the documented uninstall is
-`vf config typesafe off` followed by
-`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe.env`.
+`test` exits `0` on a healthy probe, `2` when no key resolves and when the judge is disabled,
+and `1` when the request failed. `reset` clears the breaker but is **not** uninstall; the
+documented uninstall is `vf config typesafe off` followed by
+`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe.env`.
 
 ## Skills (demand-driven)
 

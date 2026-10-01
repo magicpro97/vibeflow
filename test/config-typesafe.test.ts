@@ -18,11 +18,18 @@ import {
   promptHidden,
 } from "../src/commands/config-typesafe.js";
 import { readSettings } from "../src/settings.js";
-import { typesafeHealthPath } from "../src/typesafe-health.js";
-import { TYPESAFE_CALL_SITE_NAMES, typesafeEnvPath } from "../src/typesafe-settings.js";
+import { PROBE_HEALTH_FILE, healthPath, typesafeHealthPath } from "../src/typesafe-health.js";
+import {
+  TYPESAFE_CALL_SITE_NAMES,
+  typesafeEnvPath,
+  writeTypesafeEnv,
+} from "../src/typesafe-settings.js";
 import type { JudgeInject } from "../src/typesafe.js";
 
 const repo = (): string => mkdtempSync(join(tmpdir(), "vf-ts-cli-"));
+/** The operator probe's OWN record, derived from the same authority `status` prints it from -
+ *  a filename this test retyped would not notice the product renaming it. */
+const typesafeProbePath = (root: string): string => healthPath(root, PROBE_HEALTH_FILE);
 /** A per-user `.vibeflow` root, created because the health/env writers need it to exist. */
 const userRoot = (): string => {
   const r = join(mkdtempSync(join(tmpdir(), "vf-ts-root-")), ".vibeflow");
@@ -58,8 +65,10 @@ const enable = (base: string): void => {
   writeFileSync(p, JSON.stringify({ typesafe: { enabled: true } }, null, 2));
 };
 
-const OPEN_COOLDOWN_LINE = (root: string) =>
-  `remove both: rm -f ${typesafeHealthPath(root)} ${typesafeEnvPath(root)}`;
+/** The full uninstall command `status` prints. It names a THIRD artifact (the probe record) - a
+ *  `rm -f` listing only two leaves state on disk, which is what the docs used to promise. */
+const REMOVE_ALL_LINE = (root: string) =>
+  `remove all: rm -f ${typesafeHealthPath(root)} ${typesafeProbePath(root)} ${typesafeEnvPath(root)}`;
 
 describe("vf config typesafe — status", () => {
   test("status on a fresh repo reports off + no key source", async () => {
@@ -93,13 +102,16 @@ describe("vf config typesafe — status", () => {
     const base = repo();
     enable(base);
     // A health record with a call count and a key file, so every optional segment of the
-    // contract is exercised for real instead of being assumed.
+    // contract is exercised for real instead of being assumed. The key goes through the REAL
+    // writer (`writes the key at 0600` and verifies it), because a plain `writeFileSync` leaves it
+    // world-readable and `status` now reports exactly that - the fixture has to satisfy the
+    // property the line asserts.
     writeFileSync(typesafeHealthPath(root), JSON.stringify({ ...HEALTH, calls: 3 }));
-    writeFileSync(typesafeEnvPath(root), "TYPESAFE_API_KEY=sk-file\n");
+    writeTypesafeEnv("sk-file", { userRoot: root });
     const { lines, out } = collector();
     const code = await configTypesafe(["status"], base, {}, { out, env: {}, userRoot: root });
     expect(code).toBe(0);
-    expect(lines.slice(0, 14)).toEqual([
+    expect(lines.slice(0, 15)).toEqual([
       "calls: 3/20 last run",
       "enabled: true",
       "key source: ~/.vibeflow/typesafe.env",
@@ -112,10 +124,11 @@ describe("vf config typesafe — status", () => {
       "probe breaker: idle",
       "last probe: never",
       `health file: ${typesafeHealthPath(root)} (${statSync(typesafeHealthPath(root)).mtime.toISOString()})`,
-      `key file: ${typesafeEnvPath(root)} (present 0600)`,
-      OPEN_COOLDOWN_LINE(root),
+      `probe file: ${typesafeProbePath(root)} (absent)`,
+      `key file: ${typesafeEnvPath(root)} (present owner-only)`,
+      REMOVE_ALL_LINE(root),
     ]);
-    expect(lines.slice(14)).toEqual([...TYPESAFE_EGRESS_LINES]);
+    expect(lines.slice(15)).toEqual([...TYPESAFE_EGRESS_LINES]);
   });
 
   test("status names all four payloads, the endpoint, and the per-site shutoff", async () => {
@@ -146,7 +159,8 @@ describe("vf config typesafe — status", () => {
     expect(lines[9]).toBe(`probe breaker: ${enforcement.slice("breaker state: ".length)}`);
     expect(lines[10]).toBe("last probe: never");
     expect(lines[11]).toBe(`health file: ${typesafeHealthPath(root)} (absent)`);
-    expect(lines[12]).toBe(`key file: ${typesafeEnvPath(root)} (absent)`);
+    expect(lines[12]).toBe(`probe file: ${typesafeProbePath(root)} (absent)`);
+    expect(lines[13]).toBe(`key file: ${typesafeEnvPath(root)} (absent)`);
   });
 
   test("a malformed health file degrades only `last call`", async () => {
@@ -162,7 +176,7 @@ describe("vf config typesafe — status", () => {
     expect(lines[10]).toBe("last probe: never");
     expect(lines[11]).toContain(typesafeHealthPath(root));
     expect(lines[11]).not.toContain("absent");
-    expect(lines.slice(14)).toEqual([...TYPESAFE_EGRESS_LINES]);
+    expect(lines.slice(15)).toEqual([...TYPESAFE_EGRESS_LINES]);
   });
 
   test("last call prints a status-less record as status=none", async () => {
@@ -501,15 +515,21 @@ describe("vf config typesafe — key", () => {
     expect(existsSync(typesafeEnvPath(root))).toBe(false);
   });
 
-  test("a visible --key flag is refused", async () => {
-    const root = userRoot();
-    const { lines, out } = collector();
-    const code = await configTypesafe(["key", "--sk-abc"], repo(), {}, { out, userRoot: root });
-    expect(code).toBe(2);
-    expect(lines).toEqual([
-      "refusing --key (visible in shell history and ps) — pipe the key on stdin instead",
-    ]);
-    expect(existsSync(typesafeEnvPath(root))).toBe(false);
+  test("a visible key argument is refused, in either syntax", async () => {
+    // The guard used to match only a `--`-prefixed argument, so `vf config typesafe key sk-abc`
+    // put the secret in shell history and ps output, discarded it, and prompted anyway. Both
+    // spellings are refused now.
+    for (const leaked of ["--sk-abc", "sk-abc"]) {
+      const root = userRoot();
+      const { lines, out } = collector();
+      const code = await configTypesafe(["key", leaked], repo(), {}, { out, userRoot: root });
+      expect(code).toBe(2);
+      expect(lines).toEqual([
+        "refusing a key argument (visible in shell history and ps) — pipe the key on stdin instead",
+      ]);
+      expect(lines.join("\n")).not.toContain(leaked);
+      expect(existsSync(typesafeEnvPath(root))).toBe(false);
+    }
   });
 });
 
@@ -545,11 +565,15 @@ describe("vf config typesafe — reset", () => {
 describe("vf config typesafe — test", () => {
   test("test subcommand reports 200 + model + latency", async () => {
     const seen: { state?: string; goal?: string; timeoutMs?: number } = {};
-    let ticks = 0;
     const lines: string[] = [];
     // The double ASSERTS its arguments through `seen`. An argument-less
     // `async () => ({...})` answers a call the real judge would refuse, which is how the
     // missing `inject.goal` survived: the probe always returned null while the test stayed green.
+    // The clock advances by 42 ms per READ, and the exact-millisecond line is asserted as a
+    // RELATION below rather than a literal: the guard reads the clock to stamp its own records
+    // (start instant, `record`), so a hard-coded total would re-break whenever that bookkeeping
+    // legitimately grows - and a literal is the weaker claim anyway.
+    let ticks = 0;
     const code = await configTypesafe(
       ["test"],
       repo(),
@@ -559,8 +583,8 @@ describe("vf config typesafe — test", () => {
         env: withKey,
         userRoot: userRoot(),
         now: () => {
-          ticks += 42;
-          return 1_800_000_000_000 + ticks;
+          ticks += 1;
+          return 1_800_000_000_000 + ticks * 42;
         },
         judge: async (state: string, inject?: JudgeInject) => {
           seen.state = state;
@@ -577,8 +601,10 @@ describe("vf config typesafe — test", () => {
     expect(seen.goal).toBe("the change adds a compute-confidence function");
     expect(seen.state).toContain("computeConfidence");
     expect(seen.timeoutMs).toBe(3000);
+    const ms = Number(lines[0]?.match(/· (\d+)ms$/)?.[1]);
+    expect(ms).toBeGreaterThan(0);
     expect(lines).toEqual([
-      "HTTP 200 · model jev-latest · 42ms",
+      `HTTP 200 · model jev-latest · ${ms}ms`,
       "covers_goal = 0.9 (confidence 0.8)",
       "breaker: idle",
     ]);
@@ -639,6 +665,71 @@ describe("vf config typesafe — test", () => {
       ),
     ).toBe(2);
     expect(lines).toEqual(["TypeSafe: no key configured"]);
+  });
+
+  test("a disabled judge is diagnosed as disabled, not as a key/quota fault", async () => {
+    // The old probe printed "request failed — check key/quota" for a `disabled` class, which sent
+    // the user hunting a key problem on the exact "safe to run before enabling" flow the fixed
+    // PROBE_STATE literals exist to support. Exit 2, like the other refusal.
+    const base = repo();
+    const { lines, out } = collector();
+    const code = await configTypesafe(
+      ["test"],
+      base,
+      {},
+      {
+        out,
+        env: withKey,
+        userRoot: userRoot(),
+        judge: async (_state: string, inject?: JudgeInject) => {
+          inject?.onOutcome?.({ ok: false, class: "disabled" }, 1);
+          return null;
+        },
+      },
+    );
+    expect(code).toBe(2);
+    expect(lines).toEqual(["TypeSafe: judge is disabled — run `vf config typesafe on` first"]);
+  });
+
+  test("the probe records into its OWN breaker, never the enforcement one", async () => {
+    // A passing probe used to `writeHealth` the ENFORCEMENT record (no `healthFile`), so a local
+    // `vf config typesafe test` cleared a breaker the hook/verify/review seams depend on - and the
+    // probe record this same file prints stayed untouched, so `last probe: never` outlived a probe
+    // that had just run. Both halves are asserted here.
+    const root = userRoot();
+    const base = repo();
+    enable(base);
+    writeFileSync(
+      typesafeHealthPath(root),
+      JSON.stringify({
+        ...HEALTH,
+        state: "open",
+        fail_streak: 2,
+        consecutive_trips: 2,
+        last_class: "auth",
+        cooldown_until: new Date(Date.now() + 600_000).toISOString(),
+      }),
+    );
+    const before = readFileSync(typesafeHealthPath(root), "utf8");
+    const { out } = collector();
+    const code = await configTypesafe(
+      ["test"],
+      base,
+      {},
+      {
+        out,
+        env: withKey,
+        userRoot: root,
+        judge: async () => ({ covers: { score: 0.9, confidence: 0.8 } }),
+      },
+    );
+    expect(code).toBe(0);
+    // The enforcement record is byte-identical: the tripped breaker survives a passing probe.
+    expect(readFileSync(typesafeHealthPath(root), "utf8")).toBe(before);
+    // ...and the probe's own record exists and holds the call, so `status` can report it.
+    const probe = JSON.parse(readFileSync(typesafeProbePath(root), "utf8"));
+    expect(probe.state).toBe("idle");
+    expect(probe.last_call.caller).toBe("probe");
   });
 
   test("with no injected judge the REAL client loads lazily and no key means no HTTP", async () => {
@@ -715,7 +806,7 @@ describe("vf config typesafe — real dispatcher", () => {
     const r = runCli(["config", "typesafe", "status"], repo(), root);
     expect(r.code).toBe(0);
     const printed = r.stdout.split("\n").filter((l) => l.trim().length > 0);
-    expect(printed.slice(0, 14)).toEqual([
+    expect(printed.slice(0, 15)).toEqual([
       "calls: 0/20 last run",
       "enabled: false",
       "key source: none",
@@ -728,10 +819,11 @@ describe("vf config typesafe — real dispatcher", () => {
       "probe breaker: off",
       "last probe: never",
       `health file: ${typesafeHealthPath(root)} (absent)`,
+      `probe file: ${typesafeProbePath(root)} (absent)`,
       `key file: ${typesafeEnvPath(root)} (absent)`,
-      `remove both: rm -f ${typesafeHealthPath(root)} ${typesafeEnvPath(root)}`,
+      `remove all: rm -f ${typesafeHealthPath(root)} ${typesafeProbePath(root)} ${typesafeEnvPath(root)}`,
     ]);
-    expect(printed.slice(14)).toEqual([...TYPESAFE_EGRESS_LINES]);
+    expect(printed.slice(15)).toEqual([...TYPESAFE_EGRESS_LINES]);
   });
 
   test("an unknown subcommand exits 2 through the dispatcher", () => {

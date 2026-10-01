@@ -273,16 +273,17 @@ never writes `typesafe-health.json`, and never reads `typesafe.env`. The HTTP cl
 module is also not even loaded on a disabled path, so the integration costs nothing
 until you turn it on.
 
-An **enabled** run leaves exactly two artifacts, both outside the repository and never
+An **enabled** run leaves exactly three artifacts, all outside the repository and never
 git-tracked:
 
 | Path | Written by | Contents | Mode |
 | --- | --- | --- | --- |
 | `~/.vibeflow/typesafe.env` | `vf config typesafe key` | the API key, one `TYPESAFE_API_KEY=` line | owner-only (`0600` on POSIX, migrated owner-only DACL on Windows) |
-| `~/.vibeflow/typesafe-health.json` | any call site | breaker state plus a `last_call` audit record; never the key, never payload text | `0644` |
+| `~/.vibeflow/typesafe-health.json` | any enforcement call site | breaker state plus a `last_call` audit record; never the key, never payload text | `0644` |
+| `~/.vibeflow/typesafe-health.probe.json` | `vf config typesafe test` and the Control Center probe | the same record shape for the OPERATOR probe, kept separate so a passing probe can never clear the enforcement breaker | `0644` |
 
 `vf config typesafe reset` is **not** uninstall: it rewrites the health record to `idle`
-so a tripped breaker recovers after a key rotation, and it deliberately leaves both
+so a tripped breaker recovers after a key rotation, and it deliberately leaves all three
 files in place. Removing the files is always safe, because the health read is fail-open
 and an absent file means `idle`.
 
@@ -290,11 +291,12 @@ Complete removal, the documented uninstall path:
 
 ```bash
 vf config typesafe off                       # stop all four call sites
-rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe.env
+rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe.env
 ```
 
-`vf config typesafe status` names `~/.vibeflow/typesafe-health.json` on its own line
-with the file's presence and modification time, so you can always find what to delete
+`vf config typesafe status` names all three paths on their own lines
+with each file's presence and modification time, and prints the exact
+`remove all:` command, so you can always find what to delete
 without reading this page.
 
 ## Getting started
@@ -307,5 +309,6 @@ vf config typesafe status                     # see the state and the last call
 ```
 
 `vf config typesafe test` uses fixed literal content, so it is safe to run before
-anything repository-specific leaves the machine. It exits `2` when no key resolves and
-`1` when the request failed, so the two are distinguishable in a script.
+anything repository-specific leaves the machine. It exits `2` when no key resolves or the
+judge is disabled, and `1` when the request failed, so the two are distinguishable in a
+script.

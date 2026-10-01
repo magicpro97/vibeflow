@@ -14,18 +14,23 @@
 //      module with a dynamic `import()` INSIDE the `test` branch (C27-c). A static import here
 //      would evaluate the repo's only socket on every `vf` invocation.
 
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { Writable } from "node:stream";
 import { out } from "../logbus.js";
 import { type VibeSettings, readSettings, writeSettings } from "../settings.js";
+import { TYPESAFE_EGRESS_LINES } from "../typesafe-egress.js";
 import {
-  PROBE_HEALTH_FILE,
-  TYPESAFE_STATE,
+  FAILURE_CLASS,
+  type FailureClass,
+  TYPESAFE_BUDGET_BUCKET,
+  fileForBucket,
   idleHealth,
+  outcomeProbe,
   readHealth,
   tuningFor,
   typesafeHealthPath,
+  withTypesafeGuard,
   writeHealth,
 } from "../typesafe-health.js";
 import {
@@ -34,24 +39,16 @@ import {
   type TypesafeCallSiteName,
   type TypesafeSettings,
   coerceTypesafeSettings,
-  resolveTypesafeKey,
   typesafeEnvPath,
   writeTypesafeEnv,
 } from "../typesafe-settings.js";
+import { printStatus, thresholdsLine } from "../typesafe-status-report.js";
 import type { judgeAssessment } from "../typesafe.js";
 
-/** What leaves the machine, per call site — the single runtime authority for the wording that
- *  `docs/SECURITY_MODEL.md` and the Control Center restate. `state` travels verbatim. */
-export const TYPESAFE_EGRESS_LINES: readonly string[] = Object.freeze([
-  "sends to https://api.typesafe.ai/v1/systemone (third party) when a call site is on:",
-  "  reviewer     the unified diff of your changes + the goal text",
-  "  goalCoverage the unified diff of your changes + the goal text",
-  "  risk         the raw shell command, including any secret typed inline in it",
-  "  planner      the work-unit name and its full spec text",
-  "content is sent verbatim: not redacted, not truncated. the API key is a header, never payload.",
-  "stop it: vf config typesafe call-site <name> off (one site) or vf config typesafe off (all four)",
-]);
-
+// `TYPESAFE_EGRESS_LINES` is re-exported (not re-declared): it moved to
+// src/typesafe-egress.ts when this file hit the 400-line cap, and the CLI, the
+// tests and the docs all import it from HERE, so the name stays. Its home is the egress module.
+export { TYPESAFE_EGRESS_LINES };
 /** Fixed literals, never repository content: a probe must be safe to run BEFORE the feature is
  *  enabled. Both are named so the egress table can enumerate exactly what a probe sends. */
 export const PROBE_STATE =
@@ -107,11 +104,8 @@ export async function promptHidden(
 const clock = (deps: ConfigTypesafeDeps): number => (deps.now ?? Date.now)();
 const block = (base: string, read: typeof readSettings): TypesafeSettings =>
   coerceTypesafeSettings(read(base).typesafe) ?? DEFAULT_TYPESAFE_SETTINGS;
-const mmss = (ms: number): string => {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-};
-const fileStamp = (path: string, io: ConfigTypesafeDeps): string => {
+/** A file's mtime, or `absent`. `reset` reports where the record it just wrote lives. */
+const mtimeStamp = (path: string): string => {
   try {
     return statSync(path).mtime.toISOString();
   } catch {
@@ -119,57 +113,35 @@ const fileStamp = (path: string, io: ConfigTypesafeDeps): string => {
   }
 };
 
-/** `off` when the user never enabled it, `unconfigured` when enabled with no key, else the
- *  breaker's own state — so an open breaker is never mistaken for a healthy one. */
-const breakerState = (
+/** Overwrite the breaker with a fresh `idle` record. `bucket` decides WHICH record: the CLI probe
+ *  resets its own, so a passing probe cannot clear the enforcement breaker the hook/verify/review
+ *  seams depend on - that cross-bucket write is exactly what the separate record files exist to
+ *  prevent. Only `key` (the documented key-rotation recovery path) resets enforcement.
+ *
+ *  The probe bucket KEEPS its `last_call`/`calls` audit: dropping them made `status` print
+ *  `last probe: never` for a probe that had just run, which is the same class of lie as reporting
+ *  a world-readable key as protected. */
+async function resetBreaker(
   settings: TypesafeSettings,
   deps: ConfigTypesafeDeps,
-  health: ReturnType<typeof readHealth>,
-): string => {
-  if (!settings.enabled) return TYPESAFE_STATE.OFF;
-  const key = resolveTypesafeKey({ env: deps.env, userRoot: deps.userRoot });
-  if (key === null) return TYPESAFE_STATE.UNCONFIGURED;
-  if (health.state !== TYPESAFE_STATE.OPEN) return health.state;
-  const until = health.cooldown_until ? Date.parse(health.cooldown_until) : Number.NaN;
-  const remaining = Number.isFinite(until) ? until - clock(deps) : 0;
-  return `${TYPESAFE_STATE.OPEN} (resumes in ${mmss(remaining)})`;
-};
-
-const keySourceLine = (deps: ConfigTypesafeDeps): string => {
-  const key = resolveTypesafeKey({ env: deps.env, userRoot: deps.userRoot });
-  if (key === null) return "key source: none";
-  return key.source === "env"
-    ? "key source: env TYPESAFE_API_KEY"
-    : "key source: ~/.vibeflow/typesafe.env";
-};
-
-const thresholdsLine = (s: TypesafeSettings): string =>
-  `thresholds: run=${s.runAtConfidence} accept=${s.acceptAtConfidence}`;
-
-const sitesLine = (s: TypesafeSettings): string =>
-  `call sites: ${TYPESAFE_CALL_SITE_NAMES.map((n) => `${n}=${s.callSites[n] ? "on" : "off"}`).join(" ")}`;
-
-/** The probe's own report. Separate from `lastCallLine` on purpose: the two buckets have separate
- *  budgets and separate breakers, so reporting one record's call under the other's label would
- *  attribute a refusal to the wrong circuit. */
-const probeLine = (health: ReturnType<typeof readHealth>): string => {
-  const call = health.last_call;
-  if (!call) return "last probe: never";
-  return `last probe: ${call.at} caller=${call.caller} status=${call.status ?? "none"} ms=${call.ms}`;
-};
-
-const lastCallLine = (health: ReturnType<typeof readHealth>): string => {
-  const call = health.last_call;
-  if (!call) return "last call: never";
-  return `last call: ${call.at} caller=${call.caller} status=${call.status ?? "none"} ms=${call.ms}`;
-};
-
-/** Overwrite the breaker with a fresh `idle` record: the key-rotation recovery path. */
-async function resetBreaker(settings: TypesafeSettings, deps: ConfigTypesafeDeps): Promise<void> {
-  await writeHealth(idleHealth(tuningFor(settings).cooldownBaseMs), {
-    userRoot: deps.userRoot,
-    now: () => clock(deps),
-  });
+  bucket?: (typeof TYPESAFE_BUDGET_BUCKET)[keyof typeof TYPESAFE_BUDGET_BUCKET],
+): Promise<void> {
+  const file = bucket === undefined ? undefined : fileForBucket(bucket);
+  const idle = idleHealth(tuningFor(settings).cooldownBaseMs);
+  const previous =
+    file === undefined ? undefined : readHealth({ userRoot: deps.userRoot, healthFile: file });
+  await writeHealth(
+    {
+      ...idle,
+      ...(previous?.last_call === undefined ? {} : { last_call: previous.last_call }),
+      ...(previous?.calls === undefined ? {} : { calls: previous.calls }),
+    },
+    {
+      userRoot: deps.userRoot,
+      now: () => clock(deps),
+      ...(file === undefined ? {} : { healthFile: file }),
+    },
+  );
 }
 
 export async function configTypesafe(
@@ -185,29 +157,13 @@ export async function configTypesafe(
   const sub = rest[0];
 
   if (sub === undefined || sub === "status") {
-    const health = readHealth({ userRoot: deps.userRoot });
-    const healthPath = typesafeHealthPath(deps.userRoot);
-    const envPath = typesafeEnvPath(deps.userRoot);
-    print(`calls: ${health.calls ?? 0}/${current.maxCalls} last run`);
-    print(`enabled: ${String(current.enabled)}`);
-    print(keySourceLine(deps));
-    print(`model: ${current.model}`);
-    print(thresholdsLine(current));
-    print(`breaker state: ${breakerState(current, deps, health)}`);
-    print(
-      `breaker: failStreakLimit=${current.failStreakLimit} cooldownBaseMs=${current.cooldownBaseMs} cooldownCapMs=${current.cooldownCapMs} hookTimeoutMs=${current.hookTimeoutMs}`,
-    );
-    print(sitesLine(current));
-    print(lastCallLine(health));
-    // Operator probes have their own record (PROBE_HEALTH_FILE), so they cannot transition the
-    // enforcement breaker - and they get their own section here for the same reason.
-    const probeHealth = readHealth({ userRoot: deps.userRoot, healthFile: PROBE_HEALTH_FILE });
-    print(`probe breaker: ${breakerState(current, deps, probeHealth)}`);
-    print(probeLine(probeHealth));
-    print(`health file: ${healthPath} (${fileStamp(healthPath, deps)})`);
-    print(`key file: ${envPath} (${existsSync(envPath) ? "present 0600" : "absent"})`);
-    print(`remove both: rm -f ${healthPath} ${envPath}`);
-    for (const line of TYPESAFE_EGRESS_LINES) print(line);
+    // The whole report lives in its own module (typesafe-status-report.ts): it only formats, while
+    // this file owns the writes, and the extraction is what keeps both under the 400-line cap.
+    printStatus(print, current, {
+      ...(deps.env === undefined ? {} : { env: deps.env }),
+      ...(deps.userRoot === undefined ? {} : { userRoot: deps.userRoot }),
+      ...(deps.now === undefined ? {} : { now: deps.now }),
+    });
     return 0;
   }
 
@@ -265,8 +221,14 @@ export async function configTypesafe(
   }
 
   if (sub === "key") {
-    if (rest[1]?.startsWith("--")) {
-      print("refusing --key (visible in shell history and ps) — pipe the key on stdin instead");
+    // ANY argument is refused, not just a `--` one. The old arm only caught `--key`, so
+    // `vf config typesafe key sk-live-XXXX` still put the secret in shell history and `ps` output,
+    // then silently discarded it and prompted anyway - the exact leak the refusal exists to stop,
+    // reachable through the syntax the guard did not name.
+    if (rest[1] !== undefined) {
+      print(
+        "refusing a key argument (visible in shell history and ps) — pipe the key on stdin instead",
+      );
       return 2;
     }
     const ask = deps.ask ?? promptHidden;
@@ -287,7 +249,7 @@ export async function configTypesafe(
     await resetBreaker(current, deps);
     const healthPath = typesafeHealthPath(deps.userRoot);
     print("breaker: idle");
-    print(`health file: ${healthPath} (${fileStamp(healthPath, deps)})`);
+    print(`health file: ${healthPath} (${mtimeStamp(healthPath)})`);
     print(
       `note: reset clears the breaker, it does not delete the file — rm -f ${healthPath} ${typesafeEnvPath(deps.userRoot)}`,
     );
@@ -302,29 +264,62 @@ export async function configTypesafe(
 
 /** One live production invocation, with a FULL `JudgeInject` (a bare state string would always
  *  come back `null`, because `judgeAssessment` grades against `inject.goal`). The outcome seam
- *  is what separates "you have no key" (exit 2) from "the request failed" (exit 1). */
+ *  is what separates "you have no key" (exit 2) from "the request failed" (exit 1).
+ *
+ *  It runs through `withTypesafeGuard` with `bucket: PROBE`, exactly as the HTTP probe route does:
+ *  a raw `judgeAssessment` call here was unbudgeted, outside the file-backed breaker, and recorded
+ *  in neither health file - so the `probe breaker`/`last probe` section of `status` could never
+ *  reflect a CLI probe, and the success path's `resetBreaker` wrote the ENFORCEMENT record (the
+ *  cross-bucket leak the separate records exist to prevent). */
 async function probe(
   print: (message: string) => void,
   settings: TypesafeSettings,
   deps: ConfigTypesafeDeps,
 ): Promise<number> {
   const judgeFn = deps.judge ?? (await import("../typesafe.js")).judgeAssessment;
-  let unconfigured = false;
+  let refusal: FailureClass | undefined;
   const started = clock(deps);
-  const verdict = await judgeFn(PROBE_STATE, {
-    settings,
-    env: deps.env ?? process.env,
-    userRoot: deps.userRoot,
-    goal: PROBE_GOAL,
-    timeoutMs: settings.timeoutMs,
-    onOutcome: (o) => {
-      if (!o.ok && o.class === "unconfigured") unconfigured = true;
+  const outcome = outcomeProbe();
+  let attempted = false;
+  const verdict = await withTypesafeGuard(
+    "probe",
+    async () => {
+      attempted = true;
+      return judgeFn(PROBE_STATE, {
+        settings,
+        env: deps.env ?? process.env,
+        userRoot: deps.userRoot,
+        goal: PROBE_GOAL,
+        timeoutMs: settings.timeoutMs,
+        onOutcome: (o) => {
+          outcome.onOutcome(o);
+          if (!o.ok && o.class !== undefined) refusal = o.class;
+        },
+      });
     },
-  });
+    {
+      ...(deps.userRoot === undefined ? {} : { userRoot: deps.userRoot }),
+      bucket: TYPESAFE_BUDGET_BUCKET.PROBE,
+      tuning: tuningFor(settings),
+      outcome: outcome.outcome,
+      now: () => clock(deps),
+    },
+  );
   if (!verdict) {
-    if (unconfigured) {
+    // Three distinct refusals, three distinct diagnoses. `disabled` used to print "check
+    // key/quota" - a wrong answer for the documented "safe to run before enabling" flow, since
+    // the real cause is that the feature is off.
+    if (refusal === FAILURE_CLASS.UNCONFIGURED) {
       print("TypeSafe: no key configured");
       return 2;
+    }
+    if (refusal === FAILURE_CLASS.DISABLED) {
+      print("TypeSafe: judge is disabled — run `vf config typesafe on` first");
+      return 2;
+    }
+    if (!attempted) {
+      print("TypeSafe: refused by the call budget or an open probe breaker");
+      return 1;
     }
     print("TypeSafe: request failed — check key/quota");
     return 1;
@@ -334,8 +329,9 @@ async function probe(
   print(
     `covers_goal = ${verdict.covers.score} (confidence ${verdict.covers.confidence ?? "unknown"})`,
   );
-  // A passing probe must not leave a breaker stuck `open` behind a healthy key.
-  await resetBreaker(settings, deps);
+  // A passing probe must not leave ITS OWN breaker stuck `open` behind a healthy key. The
+  // enforcement record is untouched on purpose: clearing it is the `key` subcommand's job.
+  await resetBreaker(settings, deps, TYPESAFE_BUDGET_BUCKET.PROBE);
   print("breaker: idle");
   return 0;
 }

@@ -37,13 +37,14 @@
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
         <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus === 'loading' || typesafeSaveBlocked()" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
-        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. With it off, every path behaves exactly as it does today.</p>
+        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted.</p>
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
         <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
         <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — key missing: set the environment variable or run <code>vf config typesafe key</code>.</p>
-        <p v-else-if="typesafeView?.state === 'open'" class="home-control-warning" role="alert">Circuit open — judge calls are paused until {{ typesafeView?.cooldownUntil ?? "the cooldown ends" }}.</p>
+        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? "Circuit half-open — calls are refused while a single probe is in flight." : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
         <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p>
+        <p v-if="typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
 
         <dl v-if="typesafeView" class="home-control-list">
           <div><dt>enabled</dt><dd>{{ typesafeView.enabled ? "on" : "off" }}</dd></div>
@@ -131,17 +132,15 @@ const typesafeTesting = ref(false);
 const thresholdError = ref("");
 /** Repo whose System One view the rows currently describe. */
 const typesafeRepo = ref("");
+/** Monotonic load generation; only the latest load's response is applied. See `loadTypesafe`. */
+let typesafeLoadSeq = 0;
 
 /**
  * The form is seeded from the load, so it must never post before that load succeeded — and never
- * while the rows describe a repo the server is no longer going to write to.
- *
- * The race the repo check closes: the Repository input's `@blur` dispatches `POST /api/detect`
- * (which calls `setActiveRepo` server-side) the moment the user leaves the field, and `POST
- * /api/settings` writes to whichever repo is active when it lands. Clicking Save in that window
- * posts the OLD repo's loaded block — the form's `...view.settings` — onto the NEW repo, silently
- * enabling the judge there. Reloading after `detect()` resolves is too late: it runs after the
- * write. Blocking the button while the two disagree is what actually closes the window.
+ * while the rows describe a repo the server is no longer going to write to. The Repository field's
+ * `@blur` calls `POST /api/detect` (moving the server's active repo) the moment focus leaves, and
+ * `POST /api/settings` writes to whichever repo is active when it lands; blocking the button while
+ * the two disagree is what closes that cross-repo window.
  */
 function typesafeSaveBlocked(): boolean {
   return typesafeSaveDisabled({
@@ -162,25 +161,30 @@ function validateThresholds(): void {
 }
 
 async function loadTypesafe(): Promise<void> {
+  // Generation token: without it a slower response wins and the rows/stamp describe a superseded
+  // repo.
+  const seq = ++typesafeLoadSeq;
   typesafeStatus.value = "loading";
   typesafeError.value = "";
+  // Cleared with the error: a probe verdict names the repo it probed, so it must not outlive these rows.
+  typesafeProbe.value = "";
   try {
-    typesafeView.value = await api.typesafe.view();
+    const view = await api.typesafe.view();
+    if (seq !== typesafeLoadSeq) return;
+    typesafeView.value = view;
     settingsForm.typesafe = {
-      enabled: typesafeView.value.enabled,
-      runAtConfidence: typesafeView.value.thresholds.run,
-      acceptAtConfidence: typesafeView.value.thresholds.accept,
-      callSites: { ...typesafeView.value.callSites },
+      enabled: view.enabled,
+      runAtConfidence: view.thresholds.run,
+      acceptAtConfidence: view.thresholds.accept,
+      callSites: { ...view.callSites },
     };
     validateThresholds();
-    // Stamped from the RESPONSE, never from `repoPath.value`. The field is live text: while this
-    // request is in flight the user can type another path, so a stamp read after the `await`
-    // describes what they typed rather than the repo the server answered for. The save guard is
-    // built on this ref, so a forged stamp waves through exactly the cross-repo write it exists
-    // to stop. The server echoes the repo it read for that reason.
-    typesafeRepo.value = typesafeView.value.repo;
+    // Stamped from the RESPONSE, never `repoPath.value`: the field is live text, so a stamp read
+    // after the `await` describes what the user typed.
+    typesafeRepo.value = view.repo;
     typesafeStatus.value = "ready";
   } catch (cause) {
+    if (seq !== typesafeLoadSeq) return;
     typesafeView.value = null;
     typesafeStatus.value = "error";
     typesafeError.value = cause instanceof Error ? cause.message : "unreachable";
@@ -204,29 +208,20 @@ async function testConnection(): Promise<void> {
 
 // Owns ONLY the fields it edits: the write re-coerces a partial block onto the STORED block
 // (216a04f), so echoing the loaded snapshot merely reverted changes made elsewhere.
-/** Save System One. A refusal lands in `typesafeError`, whose paragraph renders on its own content: the
- *  component-wide `error` sits ~250 lines above this button, and a failed save cannot set the status. */
+/** A refusal lands in `typesafeError`, whose paragraph is bound to its own content. */
 async function saveTypesafe(): Promise<void> {
   validateThresholds();
   if (thresholdError.value) return;
-  // The control is disabled until the view has loaded, so this is unreachable from the UI. It
-  // stays as a guard because posting a zeros-only block makes the server refill the whole thing
-  // from DEFAULT_TYPESAFE_SETTINGS, and because the payload must not be built from `undefined`.
+  // Unreachable from the UI, kept so a zeros-only block cannot refill the defaults.
   const view = typesafeView.value;
   if (!view) return;
   saving.value = true;
   try {
-    // Round-trip the server's effective block and overlay only the edited fields.
-    // The response is deliberately discarded. `applySettings(value)` used to consume it, and that
-    // helper overwrites memory, tools, enabledEngines and mcpServers — so saving this section
-    // silently reverted edits staged in the others (untick "Memory", save System One, and the box
-    // re-ticks with no message). The call below is what refreshes the rows this section owns.
+    // Overlay only edited fields and DISCARD the response (`applySettings` would overwrite
+    // memory/tools/engines); `loadTypesafe` refreshes these rows instead.
     await api.settings.set({
-      // The write lands in the server's process-global active repo, so it must say which repo
-      // these rows describe and let the server compare. Another client (another tab, another
-      // page load) can move that global with POST /api/detect between this panel's load and this
-      // save, and the guard below cannot see it: it compares two client-side mirrors, which still
-      // agree with each other. Server-side is the only place the comparison means anything.
+      // The write lands in the server's process-global active repo, and another client can move
+      // it between this panel's load and save — which no client-side guard can see.
       expectRepo: view.repo,
       typesafe: {
         ...settingsForm.typesafe,
@@ -235,8 +230,10 @@ async function saveTypesafe(): Promise<void> {
     });
     typesafeProbe.value = "";
     typesafeError.value = "";
-    message.value = "System One settings saved.";
+    // Reports on the section's OWN surface, not the shared `message` 224 lines up: the same
+    // in-section treatment the failure path gets.
     await loadTypesafe();
+    typesafeProbe.value = "System One settings saved.";
   } catch (cause) {
     typesafeError.value = cause instanceof Error ? cause.message : "System One save failed";
     typesafeProbe.value = "";
@@ -268,18 +265,21 @@ async function load(): Promise<void> {
 async function detect(): Promise<void> {
   if (detecting.value) return;
   detecting.value = true;
+  let reloadNeeded = false;
   try {
     detection.value = await api.detect(repoPath.value);
     repoPath.value = detection.value.repo;
     detected.value = true;
-    // The server just made this repo active, so the rows on screen still describe the old one.
-    if (typesafeNeedsReload(typesafeRepo.value, repoPath.value)) await loadTypesafe();
+    reloadNeeded = typesafeNeedsReload(typesafeRepo.value, repoPath.value);
   } catch (cause) {
     detected.value = false;
     error.value = cause instanceof Error ? cause.message : "Repository detection failed";
   } finally {
     detecting.value = false;
   }
+  // AFTER the flag is released: holding `detecting` across this read made a blur return at the
+  // re-entrancy guard, so `api/detect` was never sent for the typed path — Save/Test disabled.
+  if (reloadNeeded) await loadTypesafe();
 }
 
 async function initialize(withAi: boolean): Promise<void> {

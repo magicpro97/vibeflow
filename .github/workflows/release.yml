@@ -100,6 +100,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      # The typesafe live gate below drives the SHIPPED artifact under Node (`Bun.which("node")`),
+      # so the toolchain must be pinned here too: without this, the release gate rides the ambient
+      # Node of the `windows-latest` image and fails as "node is not on PATH" instead of a
+      # toolchain error. ci.yml pins the same version for the same test.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - run: bun ci
       - name: Assert the release commit on a real Windows runtime
         run: |

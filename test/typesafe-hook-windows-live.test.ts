@@ -94,10 +94,15 @@ describe("live Windows typesafe hook path", () => {
         );
         // A key that cannot authenticate: the judge must fail OPEN and return fast. The budget is
         // what is under test, not the vendor's availability.
+        // `VF_USER_VIBEFLOW_ROOT` is the root the CLI resolves health/key paths from, and
+        // test/preload.ts sets it for every `bun test` run - so without the override below the child
+        // inherited the preload's temp dir and the breaker's file landed outside this test's root.
+        // HOME/USERPROFILE alone cannot redirect it: the env var wins first (see `userVibeflowDir`).
         const env = {
           ...process.env,
           USERPROFILE: root,
           HOME: root,
+          VF_USER_VIBEFLOW_ROOT: root,
           TYPESAFE_API_KEY: "not-a-real-key",
         };
         const started = Date.now();

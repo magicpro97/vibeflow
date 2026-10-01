@@ -199,6 +199,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
+import { coerceEditableDefaults, withoutTypesafe } from "../settings-form-helpers.js";
 import type { VibeSettings } from "../types-settings.js";
 import type { PolicyPreview } from "../types.js";
 import CuratorSettings from "./CuratorSettings.vue";
@@ -257,41 +258,12 @@ onMounted(async () => {
   dialogEl.value?.focus();
   try {
     const settings = await api.settings.get();
-    // Deep clone so edits don't mutate the API-cached object.
-    // This panel has no System One UI, so that block is not carried into the form at all. It used
-    // to ride along on BOTH save paths - the direct one and the policy-preview one - because the
-    // form is a snapshot of the WHOLE settings and `mergeTypesafeSettings` is replace-on-write on
-    // mere key presence, so saving anything at all rewrote the judge from a stale copy. Dropping it
-    // here covers both branches at once instead of one guard per branch, and keeps the dirty check
-    // honest: neither side carries it.
-    const { typesafe: unmanagedTypesafe, ...managed } = JSON.parse(
-      JSON.stringify(settings),
-    ) as VibeSettings;
-    void unmanagedTypesafe;
-    form.value = managed as VibeSettings;
-    original.value = JSON.parse(JSON.stringify(managed)) as VibeSettings;
-    // Coerce envPolicy → {} on BOTH so EnvScrubEditor's v-model binds an object
-    // AND the dirty-check baseline matches (else isDirty is true on open).
-    if (form.value && !form.value.envPolicy) form.value.envPolicy = {};
-    if (original.value && !original.value.envPolicy) original.value.envPolicy = {};
-    // #689: coerce missing curator → defaults on BOTH (same rationale as envPolicy)
-    // so the CuratorSettings editor binds and the dirty baseline matches.
-    if (form.value && !form.value.curator) {
-      form.value.curator = {
-        enabled: false,
-        observeMode: true,
-        schedule: "0 9 * * 1",
-        severityThreshold: "medium",
-      };
-    }
-    if (original.value && !original.value.curator) {
-      original.value.curator = {
-        enabled: false,
-        observeMode: true,
-        schedule: "0 9 * * 1",
-        severityThreshold: "medium",
-      };
-    }
+    // `withoutTypesafe` on BOTH sides (see the helper): the panel has no System One UI, and the
+    // save response CARRIES the block while `form` does not - so re-seeding `original` from it made
+    // `isDirty` permanently true. `coerceEditableDefaults` then gives each editor an object to bind
+    // on both sides, so the baseline agrees with the form until something is actually edited.
+    form.value = coerceEditableDefaults(withoutTypesafe(clone(settings)));
+    original.value = coerceEditableDefaults(withoutTypesafe(clone(settings)));
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -358,8 +330,12 @@ async function save() {
     if (JSON.stringify(originalPolicy) !== JSON.stringify(nextPolicy)) {
       policyPreview.value = await api.settings.previewPolicy(nextPolicy);
     } else {
-      const savedSettings = await api.settings.set(form.value);
-      original.value = JSON.parse(JSON.stringify(savedSettings)) as VibeSettings;
+      // The form never carries `typesafe` (dropped at load); the api union requires `expectRepo`
+      // whenever a caller DOES send the block, so this projection is the only shape this call
+      // site can take.
+      const savedSettings = await api.settings.set(withoutTypesafe(form.value));
+      // Re-seeded through the SAME projection: the response carries `typesafe`, the form does not.
+      original.value = coerceEditableDefaults(withoutTypesafe(clone(savedSettings)));
       saved.value = true;
       setTimeout(() => emit("close"), 1500);
     }
@@ -393,7 +369,7 @@ async function applyPolicy(confirmation: string) {
       policyPreview.value.relaxation ? confirmation : "",
       { ...nonPolicy },
     );
-    original.value = clone(savedSettings);
+    original.value = coerceEditableDefaults(withoutTypesafe(clone(savedSettings)));
     saved.value = true;
     policyPreview.value = null;
     setTimeout(() => emit("close"), 500);
