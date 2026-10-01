@@ -359,8 +359,13 @@ test("an in-flight probe is visible to the wipe, and a superseded verdict is dis
   const writeAt = body.indexOf("typesafeProbe.value = result.ok");
   expect(body.indexOf("if (typesafeRepo.value !== probed) return;")).toBeLessThan(writeAt);
   expect(body.lastIndexOf("if (typesafeRepo.value !== probed) return;")).toBeGreaterThan(writeAt);
-  // The stamp must not be written before the call: that named the PENDING probe, not the verdict.
+  // The stamp must not be written before the call (that named the PENDING probe), nor on either
+  // superseded path: the only stamp sits after the LAST guard, so a discarded verdict never
+  // advances it.
   expect(body.slice(0, awaitAt)).not.toContain("typesafeProbeRepo =");
+  expect(body.indexOf("typesafeProbeRepo = probed;")).toBeGreaterThan(
+    body.lastIndexOf("if (typesafeRepo.value !== probed) return;"),
+  );
   // The failure arm blanks the repo, or an in-flight probe for the old one still matches it.
   const loadAt = drawer.indexOf("async function loadTypesafe");
   const loadBody = drawer.slice(loadAt, drawer.indexOf("\nasync ", loadAt + 1));
@@ -381,9 +386,28 @@ test("a failed load clears the verdict, and the api union still forbids the bare
   expect(body).toContain('typesafeProbe.value = "";');
   expect(body).toContain('typesafeProbeRepo = "";');
   // `typesafe?: never` on the non-writing arm is ENFORCEMENT, not decoration: probe-verified that
-  // `{ memory: true, typesafe: {...} }` fails `tsc --strict` with it and compiles without it.
+  // `{ memory: true, typesafe: {...} }` fails `tsc --strict` with it (TS2322 assigned, TS2345 as a
+  // call argument) and compiles without it.
   const apiSrc = readFileSync(new URL("../api.ts", import.meta.url), "utf8");
   expect(apiSrc).toContain("| { typesafe?: never; expectRepo?: string }");
+});
+
+test("the save confirmation only lands when the reload that follows it succeeded", () => {
+  // `loadTypesafe` resolves normally even when it takes its FAILURE arm (blank verdict, blank stamp,
+  // blank repo, `typesafeError` set), and the confirmation used to be written unconditionally after
+  // it - re-creating the "System One settings saved." under a "connection failed" double render,
+  // with a stamp naming a repo the blanked rows no longer describe.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function saveTypesafe");
+  const nextFn = drawer.indexOf("\nfunction ", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  const gate = body.indexOf("if (typesafeRepo.value === view.repo)");
+  const confirm = body.indexOf('typesafeProbe.value = "System One settings saved.";');
+  expect(gate).toBeGreaterThan(-1);
+  expect(confirm).toBeGreaterThan(gate); // the confirmation sits inside the landing check
 });
 
 test("only the latest load wins: the response is applied behind a generation token", () => {

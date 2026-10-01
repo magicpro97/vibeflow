@@ -176,7 +176,7 @@ async function loadTypesafe(): Promise<void> {
       callSites: { ...view.callSites },
     };
     validateThresholds();
-    // Dropped when the rows land on a DIFFERENT repo vs the INCOMING `view.repo`; a re-open keeps it.
+    // Dropped on a DIFFERENT repo vs the INCOMING `view.repo`; a re-open keeps it.
     if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) typesafeProbe.value = "";
     typesafeRepo.value = view.repo; // from the RESPONSE: `repoPath` is live text and would lie
     typesafeStatus.value = "ready";
@@ -191,7 +191,6 @@ async function loadTypesafe(): Promise<void> {
   }
 }
 
-// Paint the verdict only while the rows describe the probed repo; the stamp tracks the TEXT.
 async function testConnection(): Promise<void> {
   if (typesafeTesting.value) return;
   const probed = typesafeView.value?.repo ?? ""; // also null in the error state: "responded for :"
@@ -212,7 +211,6 @@ async function testConnection(): Promise<void> {
   typesafeProbeRepo = probed; // stamped with the TEXT, never with the pending probe
 }
 
-// Writes ONLY the fields it edits: the write re-coerces a partial block onto the STORED one.
 async function saveTypesafe(): Promise<void> {
   validateThresholds();
   if (thresholdError.value) return;
@@ -221,8 +219,7 @@ async function saveTypesafe(): Promise<void> {
   saving.value = true;
   try {
     await api.settings.set({
-      // Lands in the server's PROCESS-GLOBAL active repo, which another client can move unseen;
-      // the response is discarded so `applySettings` cannot overwrite memory/tools.
+      // PROCESS-GLOBAL active repo (another client can move it unseen); response discarded.
       expectRepo: view.repo,
       typesafe: {
         ...settingsForm.typesafe,
@@ -233,8 +230,11 @@ async function saveTypesafe(): Promise<void> {
     typesafeProbeRepo = "";
     typesafeError.value = "";
     await loadTypesafe(); // this section's OWN surface, not the shared `message` up top
-    typesafeProbe.value = "System One settings saved.";
-    typesafeProbeRepo = view.repo; // the stamp tracks the text, so a repo change drops this too
+    // Only when the reload LANDED, or it renders below that error against blanked rows.
+    if (typesafeRepo.value === view.repo) {
+      typesafeProbe.value = "System One settings saved.";
+      typesafeProbeRepo = view.repo;
+    }
   } catch (cause) {
     typesafeError.value = cause instanceof Error ? cause.message : "System One save failed";
     typesafeProbe.value = "";
