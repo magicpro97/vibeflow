@@ -311,20 +311,28 @@ test("the System One save refusal renders on its own content", () => {
 });
 
 test("a stale verdict does not outlive a successful reload", () => {
-  // `typesafeError` and `typesafeProbe` are both bound to their own content, so any path that
-  // loads rows successfully has to clear both - otherwise a 409 from a moved repository, or a
-  // probe verdict recorded against the OLD repo, stays on screen above correct rows.
+  // `typesafeError` is bound to its own content, so any path that loads rows successfully clears it
+  // - otherwise a 409 from a moved repository stays on screen above correct rows. The probe verdict
+  // is repo-specific (`testConnection` sends one repo and names it in the text), so it is dropped
+  // when the loaded rows belong to a DIFFERENT repo.
   const drawer = readFileSync(
     new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
     "utf8",
   );
   const at = drawer.indexOf("async function loadTypesafe");
-  const head = drawer.slice(at, at + 2000);
-  expect(head).toContain('typesafeError.value = "";');
-  // The probe half, inside the same slice: `loadTypesafe` clears it next to the error, because a
-  // verdict is repo- and model-specific (`testConnection` sends `view.repo`).
-  expect(head).toContain('typesafeProbe.value = "";');
-  expect(drawer).toContain('typesafeProbe.value = "";\n    typesafeError.value = "";');
+  const nextFn = drawer.indexOf("\nasync function", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  expect(body).toContain('typesafeError.value = "";');
+  // The comparison is against the INCOMING `view.repo`, and it sits AFTER the `await`: comparing
+  // before it read the PREVIOUS repo, which equals `typesafeProbeRepo` by construction, so the
+  // wipe never fired and repo A's verdict stayed beside repo B's rows.
+  expect(body).toContain(
+    'if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) typesafeProbe.value = "";',
+  );
+  const awaitAt = body.indexOf("await api.typesafe.view()");
+  const clearAt = body.indexOf("typesafeProbeRepo !== view.repo");
+  expect(awaitAt).toBeGreaterThan(-1);
+  expect(clearAt).toBeGreaterThan(awaitAt);
 });
 
 test("only the latest load wins: the response is applied behind a generation token", () => {

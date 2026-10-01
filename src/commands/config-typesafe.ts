@@ -131,7 +131,7 @@ async function resetAllBreakers(
  *  `last probe: never` for a probe that had just run, which is the same class of lie as reporting
  *  a world-readable key as protected.
  *
- *  The operator paths (`reset`, `key`) clear BOTH records through `resetAllBreakers` below: a
+ *  The operator paths (`reset`, `key`) clear BOTH records through `resetAllBreakers` above: a
  *  tripped PROBE breaker is otherwise unrecoverable, since the probe is refused before it can prove
  *  itself. This function stays the internal single-record primitive. */
 async function resetBreaker(
