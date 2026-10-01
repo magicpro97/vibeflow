@@ -190,15 +190,18 @@ async function testConnection(): Promise<void> {
   if (typesafeTesting.value) return;
   const probed = typesafeView.value?.repo ?? ""; // also null in the error state: "responded for :"
   if (probed === "") return;
+  // This verdict's generation: `saveTypesafe`/`detect()` route through `loadTypesafe`, which bumps
+  // it, so a verdict issued BEFORE a save cannot paint over the confirmation with pre-save values.
+  const seq = typesafeLoadSeq;
   typesafeTesting.value = true;
   try {
     const result = await api.typesafe.test(probed);
-    if (!rowsDescribe(probed)) return; // superseded: not this repo's verdict
+    if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return; // superseded: another load won
     typesafeProbe.value = result.ok
       ? `System One responded for ${probed}: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
       : `System One connection failed for ${probed} — ${result.error ?? "no verdict"}`;
   } catch (cause) {
-    if (!rowsDescribe(probed)) return; // superseded
+    if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return; // superseded
     typesafeProbe.value = `System One connection failed for ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
   } finally {
     typesafeTesting.value = false;
@@ -273,7 +276,10 @@ async function detect(): Promise<void> {
   } finally {
     detecting.value = false;
   }
-  if (reloadNeeded) await loadTypesafe(); // AFTER the flag: a blur here hits the re-entrancy guard
+  if (reloadNeeded)
+    await loadTypesafe(); // AFTER the flag: a blur here hits the re-entrancy guard
+  // A failed `api.detect` skips the reload above, leaving any error with no way to retry.
+  else if (typesafeStatus.value === "error") await loadTypesafe();
 }
 
 async function initialize(withAi: boolean): Promise<void> {

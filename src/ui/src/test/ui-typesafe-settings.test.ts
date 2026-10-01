@@ -355,7 +355,7 @@ test("an in-flight probe is visible to the wipe, and a superseded verdict is dis
   expect(awaitAt).toBeGreaterThan(-1);
   expect(stampAt).toBeGreaterThan(awaitAt); // stamped with the TEXT, past the await
   // Both resolution arms discard a superseded verdict: exactly one guard each, before the write.
-  const guard = "if (!rowsDescribe(probed)) return;";
+  const guard = "if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return;";
   expect(body.indexOf(guard)).toBeGreaterThan(-1);
   const writeAt = body.indexOf("typesafeProbe.value = result.ok");
   expect(body.indexOf(guard)).toBeLessThan(writeAt);
@@ -364,6 +364,9 @@ test("an in-flight probe is visible to the wipe, and a superseded verdict is dis
   // superseded path: the only stamp sits after the LAST guard, so a discarded verdict never
   // advances it.
   expect(body.slice(0, awaitAt)).not.toContain("typesafeProbeRepo =");
+  // The probe carries its own generation: a save routes through `loadTypesafe`, which bumps it, so a
+  // verdict issued before the save is discarded instead of painting over the confirmation.
+  expect(body).toContain("const seq = typesafeLoadSeq;");
   expect(body.indexOf("typesafeProbeRepo = probed;")).toBeGreaterThan(body.lastIndexOf(guard));
   // The failure arm must NOT blank the repo: `typesafeNeedsReload("")` is always false, so blanking
   // it disabled `detect()`'s reload and pinned the section on the error until a re-open. The gate
