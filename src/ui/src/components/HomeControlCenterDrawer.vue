@@ -193,7 +193,7 @@ async function testConnection(): Promise<void> {
   if (typesafeTesting.value) return;
   const probed = typesafeView.value?.repo ?? ""; // also null in the error state: "responded for :"
   if (probed === "") return;
-  const seq = typesafeLoadSeq;
+  const seq = typesafeLoadSeq; // a verdict issued BEFORE a save must not outlive its confirmation
   typesafeTesting.value = true;
   try {
     const result = await api.typesafe.test(probed);
@@ -279,6 +279,8 @@ async function detect(): Promise<void> {
   }
   if (reloadNeeded)
     await loadTypesafe(); // AFTER the flag: a blur here hits the re-entrancy guard
+  // NOT dead: `reloadNeeded` is set only in the `try`, so a THROWING `api.detect` leaves it false and
+  // this is the only retry (the `||` above covers the other case).
   else if (typesafeStatus.value === "error") await loadTypesafe();
 }
 
@@ -351,11 +353,9 @@ onMounted(() => nextControl(props.open));
 </script>
 
 <style scoped>
-/* WCAG 2.1 §2.4.7: every control in the System One section keeps a visible focus
-   ring. The status colours are never the only signal — each state also carries
-   text and an ARIA role. */
+/* WCAG 2.1 §2.4.7: visible focus ring; status colour is never the only signal. */
 .home-control-section :focus-visible {
-  outline: 2px solid #f5f5f5;
+  outline: 2px solid var(--home-amber);
   outline-offset: 2px;
 }
 .home-control-list {
@@ -363,7 +363,7 @@ onMounted(() => nextControl(props.open));
   gap: 0.25rem;
   margin: 0.5rem 0;
   font-size: 0.75rem;
-  color: #a3a3a3;
+  color: var(--home-muted);
 }
 .home-control-list div {
   display: flex;
@@ -377,22 +377,22 @@ onMounted(() => nextControl(props.open));
   gap: 0.5rem;
   margin: 0.35rem 0;
   font-size: 0.8125rem;
-  color: #d4d4d4;
+  color: var(--home-ink);
 }
 .home-control-field input {
   width: 6rem;
   background: transparent;
-  border: 1px solid #262626;
+  border: 1px solid var(--home-line-strong);
   border-radius: 0.375rem;
   padding: 0.25rem 0.5rem;
-  color: #e5e5e5;
+  color: var(--home-ink);
 }
 .home-control-warning {
-  color: #fbbf24;
+  color: var(--home-amber);
   font-size: 0.8125rem;
 }
 dd[data-state="open"],
 dd[data-state="half-open"] {
-  color: #fbbf24;
+  color: var(--home-amber);
 }
 </style>

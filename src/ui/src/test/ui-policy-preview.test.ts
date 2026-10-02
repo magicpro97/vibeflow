@@ -101,8 +101,12 @@ assert("previewPolicy POSTs to /api/settings/preview", /"\/api\/settings\/previe
 assert("api exposes applyPolicy", /applyPolicy:/.test(api));
 assert("applyPolicy POSTs to /api/settings/apply", /"\/api\/settings\/apply"/.test(api));
 assert(
-  "applyPolicy forwards non-policy settings in the apply payload",
-  /applyPolicy:[\s\S]*settings\?: Partial<VibeSettings>[\s\S]*\? \{\s*settings\s*\}/.test(api),
+  // `Omit<..., "typesafe">`, the same projection `set` uses: the server 400s a `typesafe` block on
+  // this route, and the preview that authorises the request owns no such field.
+  "applyPolicy forwards non-policy settings, and cannot carry the System One block",
+  /applyPolicy:[\s\S]*settings\?: Omit<Partial<VibeSettings>, "typesafe">[\s\S]*\? \{\s*settings\s*\}/.test(
+    api,
+  ),
 );
 
 // ── Results ──

@@ -51,6 +51,22 @@ test("each state is announced as TEXT inside a live-region element, not by colou
   expect(drawer).toMatch(/role="alert"[^>]*>\s*[A-Z][^<{]{5,}/);
 });
 
+test("the System One styles use the theme variables, never literal colours", () => {
+  // The scoped block shipped literal dark-theme hexes. In light mode (`--home-panel: #ebe7de`) that
+  // put the egress disclosure and the circuit warning at 1.2-2.0:1 contrast - the two most
+  // safety-critical strings in the section, below the 4.5:1 WCAG 2.1 AA floor, while every other
+  // rule in this drawer reads `var(--home-*)` and home.css ships a real dark variant.
+  const drawerSrc = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const style = drawerSrc.slice(drawerSrc.indexOf("<style scoped>"));
+  expect(style).not.toMatch(/#[0-9a-fA-F]{3,8}\b/); // no literal colour anywhere in the block
+  expect(style).toContain("color: var(--home-muted)");
+  expect(style).toContain("color: var(--home-amber)"); // the warning/circuit colour
+  expect(style).toContain("color: var(--home-ink)");
+});
+
 test("the browser discloses what leaves the machine, from the SAME authority the CLI prints", () => {
   // `vf config typesafe on` prints `TYPESAFE_EGRESS_LINES` before it writes the setting, and
   // `status` prints it unconditionally. The browser toggles are the same act: without this the only

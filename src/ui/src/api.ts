@@ -95,21 +95,16 @@ export const api = {
         (r) => r.settings,
       ),
     set: (
-      // A UNION, not two independent optionals. The server refuses a `typesafe` write with no
-      // `expectRepo` (400, `assertTypesafeWriteAllowed`), and expressing that on the client is the
-      // only thing that stops the next call site from omitting it: `{ typesafe: {…} }` alone used
-      // to type-check, and a test that string-matches THIS call site cannot hold the next one.
+      // A UNION, not two optionals. The server refuses a `typesafe` write with no `expectRepo`
+      // (400, `assertTypesafeWriteAllowed`), and saying that in the type is the only thing that
+      // stops the NEXT call site from omitting it - a test matching THIS call site cannot.
       //
-      // `Omit` because `Partial<VibeSettings>` is shallow: intersecting it with a partial
-      // `typesafe` would produce `TypesafeSettings & Partial<TypesafeSettings>`, i.e. a full block
-      // again. The WIRE accepts a partial one - the write path re-coerces it onto the STORED block
-      // (src/typesafe-settings.ts:333) - and typing it as a full block is what invited callers to
-      // echo a snapshot, reverting anything changed elsewhere.
+      // `Omit` because `Partial<VibeSettings>` is shallow: intersecting it with a partial `typesafe`
+      // gives a FULL block again. The wire takes a partial one (re-coerced onto the STORED block,
+      // src/typesafe-settings.ts:333); typing it whole invited callers to echo a snapshot.
       //
-      // The second arm forbids the key outright. Probe (`{ memory: true, typesafe: {...} }`): with
-      // `typesafe?: never` it fails `tsc --strict` - TS2322 as an assignment, TS2345 as a call
-      // argument - with a message naming only arm 1's missing `expectRepo`; this arm's `never` is
-      // never mentioned. With the key merely omitted it compiles, so `never` is the enforcement.
+      // Arm 2 forbids the key outright: probe-verified that `{ memory: true, typesafe: {...} }`
+      // fails `tsc --strict` (TS2322/TS2345) with `typesafe?: never`, and compiles without it.
       s: Omit<Partial<VibeSettings>, "typesafe"> &
         (
           | {
@@ -129,7 +124,13 @@ export const api = {
       req<{ settings: VibeSettings }>("POST", "/api/settings", s, signal).then((r) => r.settings),
     previewPolicy: (s: Pick<VibeSettings, "envPolicy" | "hooks">) =>
       req<import("./types.js").PolicyPreview>("POST", "/api/settings/preview", s),
-    applyPolicy: (previewId: string, confirmationText: string, settings?: Partial<VibeSettings>) =>
+    // `Omit` here, like `set`: the server 400s a `typesafe` block on this route (the preview that
+    // authorises the request owns no such field), so the type must not admit one.
+    applyPolicy: (
+      previewId: string,
+      confirmationText: string,
+      settings?: Omit<Partial<VibeSettings>, "typesafe">,
+    ) =>
       req<{ ok: boolean }>("POST", "/api/settings/apply", {
         previewId,
         confirmationText,

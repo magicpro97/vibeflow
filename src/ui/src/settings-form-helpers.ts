@@ -40,12 +40,14 @@ export function withoutTypesafe(settings: VibeSettings): Omit<VibeSettings, "typ
  * dirty check. Without it `v-model` binds `undefined`, and the baseline disagrees with the form
  * the moment either editor is touched.
  *
- * Generic over the input so the RETURN TYPE preserves whatever the caller passed in: called on the
- * `withoutTypesafe` projection, it must not re-assert a `typesafe` block the object provably lacks
- * (that would let a future call site read `form.value.typesafe!.enabled` at runtime `undefined`).
+ * Its parameter and return are `ManagedSettings`, NOT a generic over `Omit<VibeSettings,
+ * "typesafe">`: `Omit` is not a closed constraint, so `T extends Omit<...>` accepted a FULL
+ * `VibeSettings` and re-asserted a `typesafe` block the projection provably lacks - letting a later
+ * call site read `form.value.typesafe!.enabled` at runtime `undefined`. A concrete type with no
+ * `VibeSettings` cast inside makes that write impossible to spell.
  */
-export function coerceEditableDefaults<T extends Omit<VibeSettings, "typesafe">>(value: T): T {
-  const out = value as VibeSettings;
+export function coerceEditableDefaults(value: ManagedSettings): ManagedSettings {
+  const out: ManagedSettings = value;
   if (!out.envPolicy) out.envPolicy = {};
   if (!out.curator) {
     out.curator = {
@@ -55,5 +57,5 @@ export function coerceEditableDefaults<T extends Omit<VibeSettings, "typesafe">>
       severityThreshold: "medium",
     };
   }
-  return out as T;
+  return out;
 }

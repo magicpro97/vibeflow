@@ -361,13 +361,16 @@ function pickPolicy(s: ManagedSettings | null): Partial<Pick<VibeSettings, "envP
 
 /** #692: apply a confirmed preview; close on success. */
 async function applyPolicy(confirmation: string) {
-  if (!policyPreview.value) return;
+  const current = form.value;
+  if (!policyPreview.value || !current) return;
   saving.value = true;
   try {
     err.value = null;
     // #692: apply sends non-policy settings as the payload so policy + regular
-    // edits land in ONE server write — no separate /api/settings POST.
-    const { envPolicy: _ep, hooks: _hk, ...nonPolicy } = form.value as VibeSettings;
+    // edits land in ONE server write — no separate /api/settings POST. No `as VibeSettings`
+    // re-assertion: `current` is the projection the load path dropped `typesafe` from, and the
+    // destructure only needs these two.
+    const { envPolicy: _ep, hooks: _hk, ...nonPolicy } = current;
     const savedSettings = await api.settings.applyPolicy(
       policyPreview.value.id,
       policyPreview.value.relaxation ? confirmation : "",
