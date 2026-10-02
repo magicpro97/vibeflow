@@ -33,7 +33,9 @@ test("control center exposes a System One section with the four states and acces
     "No System One key configured",
     "Loading System One settings",
     "System One connection failed",
-    "key missing",
+    // The remediation must NAME the variable: "set the environment variable" sent the operator
+    // hunting for its name, which the server's own message already spells out.
+    "TYPESAFE_API_KEY",
     "loading",
     "error",
   ]) {
@@ -151,6 +153,28 @@ test("configured and state are separate rows, and an open breaker warns with its
     "<p v-else-if=\"typesafeView?.state === 'open' || typesafeView?.state === 'half-open'\"",
   );
   expect(drawer).toContain("cooldownUntil");
+  // ...and the banner must name the TEST among the silenced calls: the probe button is disabled in
+  // both states, so the banner is the only place the operator reads why the button they cannot
+  // press would be refused anyway.
+  expect(drawer).toContain("including this test");
+});
+
+test("a refusal is worded as a refusal, never as a failed connection", () => {
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  // At the shipped default (`enabled: false`) every probe answers the disabled refusal; rendering
+  // it through "System One connection failed" sends the operator hunting for a network problem
+  // that does not exist. The discriminator is the server's typed flag, not the error string.
+  expect(drawer).toContain('result.refused === true ? "System One did not run the test for"');
+  expect(drawer).toContain('"System One connection failed for"');
+  // And the flag exists on the wire: the route marks every precondition/breaker refusal.
+  const route = readFileSync(
+    new URL("../../../server/routes-typesafe.ts", import.meta.url),
+    "utf8",
+  );
+  expect([...route.matchAll(/refused: true,/g)]).toHaveLength(4);
 });
 
 test("thresholds come from settingsForm.typesafe, never from literals in the component", () => {

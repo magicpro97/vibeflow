@@ -187,6 +187,11 @@ export interface TypesafeSettingsView {
 /** `POST /api/typesafe/test` — the probe runs server-side, so the browser holds no key. */
 export interface TypesafeTestResult {
   ok: boolean;
+  /** The server REFUSED to run the test — a precondition or the budget/breaker, never a failed
+   *  connection. The drawer words these as "did not run", not "connection failed": at the shipped
+   *  default (`enabled: false`) the refusal is the judge being off, and reporting that as a
+   *  connectivity failure sends the operator hunting for a network problem that does not exist. */
+  refused?: boolean;
   status?: number;
   model?: string;
   ms?: number;

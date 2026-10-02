@@ -165,18 +165,19 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   // read from, and the server compares. Required, like the save path: an unnamed probe is the hole.
   if (inject.expectRepo !== inject.repo) {
     return Response.json(
-      { ok: false, error: "the active repository changed; reload before testing" },
+      { ok: false, refused: true, error: "the active repository changed; reload before testing" },
       { status: 409 },
     );
   }
   const settings = inject.settings ?? readSettings(inject.repo);
   const resolved = settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS;
   if (!isTypesafeEnabled(settings)) {
-    return Response.json({ ok: false, error: "System One judge is disabled" });
+    return Response.json({ ok: false, refused: true, error: "System One judge is disabled" });
   }
   if (!resolveTypesafeKey({ env: inject.env, userRoot: inject.userRoot })) {
     return Response.json({
       ok: false,
+      refused: true,
       error: "key missing — set TYPESAFE_API_KEY or run vf config typesafe key",
     });
   }
@@ -239,6 +240,7 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   if (!attempted) {
     return Response.json({
       ok: false,
+      refused: true,
       model: resolved.model,
       ms,
       error: "refused by the call budget or an open circuit breaker",

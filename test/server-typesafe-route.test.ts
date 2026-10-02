@@ -190,6 +190,9 @@ describe("handleTypesafeTestRoute", () => {
     });
     expect((await res.json()) as unknown).toEqual({
       ok: false,
+      // TYPED as a refusal, not a failed connection: at the shipped default the judge is off, and
+      // the drawer words `refused` as "did not run the test" instead of "connection failed".
+      refused: true,
       error: "System One judge is disabled",
     });
   });
@@ -205,8 +208,9 @@ describe("handleTypesafeTestRoute", () => {
         throw new Error("judge must not be reached");
       },
     });
-    const body = (await res.json()) as { ok: boolean; error: string };
+    const body = (await res.json()) as { ok: boolean; refused?: boolean; error: string };
     expect(body.ok).toBe(false);
+    expect(body.refused).toBe(true); // a precondition, not a connection failure
     expect(body.error).toBe("key missing — set TYPESAFE_API_KEY or run vf config typesafe key");
   });
 
@@ -232,9 +236,10 @@ describe("handleTypesafeTestRoute", () => {
         return null;
       },
     });
-    const body = (await res.json()) as { ok: boolean; error: string };
+    const body = (await res.json()) as { ok: boolean; refused?: boolean; error: string };
     expect(reached).toBe(0);
     expect(body.ok).toBe(false);
+    expect(body.refused).toBe(true); // the breaker/budget refusal is its own kind, not a failure
     // A refusal is not a judge failure: reporting one would send the user hunting for a key or
     // network problem that does not exist.
     expect(body.error).toBe("refused by the call budget or an open circuit breaker");

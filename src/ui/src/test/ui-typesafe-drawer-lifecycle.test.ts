@@ -162,6 +162,20 @@ test("only the latest load wins: the response is applied behind a generation tok
   expect(drawer).toContain("let typesafeLoadSeq = 0;");
 });
 
+test("a re-open that detect() already reloaded does not fire a second GET", () => {
+  // On the error path (and on a repo change) `detect()` reloads the section itself, and `load()`
+  // then issued a SECOND concurrent `GET /api/typesafe`; the `typesafeLoadSeq` guard discarded the
+  // loser, so it was a doubled request on every error-path re-open. `detect()` now reports whether
+  // it reloaded, and `load()` skips its own call when it did.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  expect(drawer).toContain("async function detect(): Promise<boolean>");
+  expect(drawer).toContain("const reloaded = await detect();");
+  expect(drawer).toContain("...(reloaded ? [] : [loadTypesafe()])");
+});
+
 test("the cross-repo stamp is taken from the server response, not the local path", () => {
   // The guard compares `typesafeRepo` against the current path, so it is worth no more than where
   // `typesafeRepo` came from: assigning it the local `repoPath` would make the comparison always

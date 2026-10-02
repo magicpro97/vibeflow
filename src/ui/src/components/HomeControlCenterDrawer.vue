@@ -41,8 +41,8 @@
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
         <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
-        <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — key missing: set the environment variable or run <code>vf config typesafe key</code>.</p>
-        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — calls are refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
+        <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — set <code>TYPESAFE_API_KEY</code> or run <code>vf config typesafe key</code>.</p>
+        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — every call, including this test, is refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls, including this test, are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
         <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p>
         <p v-if="typesafeView && typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
 
@@ -200,7 +200,7 @@ async function testConnection(): Promise<void> {
     if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return; // superseded: another load won
     typesafeProbe.value = result.ok
       ? `System One responded for ${probed}: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
-      : `System One connection failed for ${probed} — ${result.error ?? "no verdict"}`;
+      : `${result.refused === true ? "System One did not run the test for" : "System One connection failed for"} ${probed} — ${result.error ?? "no verdict"}`;
   } catch (cause) {
     if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return; // superseded
     typesafeProbe.value = `System One connection failed for ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
@@ -254,15 +254,16 @@ async function load(): Promise<void> {
   try {
     const value = await api.settings.get();
     applySettings(value);
-    await detect();
-    await Promise.all([loadSkills(), loadCapabilities(), loadTypesafe()]);
+    // `detect()` may already have reloaded here; a second GET would only race the same guard.
+    const reloaded = await detect();
+    await Promise.all([loadSkills(), loadCapabilities(), ...(reloaded ? [] : [loadTypesafe()])]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load control center";
   }
 }
 
-async function detect(): Promise<void> {
-  if (detecting.value) return;
+async function detect(): Promise<boolean> {
+  if (detecting.value) return false;
   detecting.value = true;
   let reloadNeeded = false;
   try {
@@ -277,11 +278,10 @@ async function detect(): Promise<void> {
   } finally {
     detecting.value = false;
   }
-  if (reloadNeeded)
-    await loadTypesafe(); // AFTER the flag: a blur here hits the re-entrancy guard
-  // NOT dead: `reloadNeeded` is set only in the `try`, so a THROWING `api.detect` leaves it false and
-  // this is the only retry (the `||` above covers the other case).
-  else if (typesafeStatus.value === "error") await loadTypesafe();
+  // A THROWING `api.detect` leaves `reloadNeeded` false, so this `||` is the only retry.
+  const reload = reloadNeeded || typesafeStatus.value === "error";
+  if (reload) await loadTypesafe();
+  return reload;
 }
 
 async function initialize(withAi: boolean): Promise<void> {
