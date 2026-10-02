@@ -51,6 +51,27 @@ test("each state is announced as TEXT inside a live-region element, not by colou
   expect(drawer).toMatch(/role="alert"[^>]*>\s*[A-Z][^<{]{5,}/);
 });
 
+test("the browser discloses what leaves the machine, from the SAME authority the CLI prints", () => {
+  // `vf config typesafe on` prints `TYPESAFE_EGRESS_LINES` before it writes the setting, and
+  // `status` prints it unconditionally. The browser toggles are the same act: without this the only
+  // surface that let an operator switch on egress - including the `risk` site, which sends the raw
+  // shell command with any secret typed inline - was the one that never said so.
+  const drawerSrc = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  expect(drawerSrc).toContain(
+    'import { TYPESAFE_EGRESS_LINES } from "../../../typesafe-egress.js";',
+  );
+  const at = drawerSrc.indexOf('v-if="settingsForm.typesafe.enabled"');
+  expect(at).toBeGreaterThan(-1); // shown the moment the block can egress, not only when it does
+  const notice = drawerSrc.slice(at, at + 400);
+  expect(notice).toContain("TYPESAFE_EGRESS_LINES");
+  // The import must be the shared constant, never a hand-copied string: the CLI prints `state`
+  // verbatim, so its tests and the docs break together if this is re-inlined.
+  expect(drawerSrc).not.toContain("raw shell command");
+});
+
 test("the drawer never renders a secret: no key value, only a source label", () => {
   expect(drawer).toContain("typesafeView.keySource");
   // What holds this property is that the SOURCE LABEL is the only key-related field the drawer

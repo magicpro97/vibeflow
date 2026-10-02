@@ -67,6 +67,8 @@
         <label for="typesafe-callsite-goalCoverage" class="home-control-toggle"><input id="typesafe-callsite-goalCoverage" v-model="settingsForm.typesafe.callSites.goalCoverage" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>goalCoverage</strong><small>Judge whether the change covers the goal.</small></span></label>
         <label for="typesafe-callsite-planner" class="home-control-toggle"><input id="typesafe-callsite-planner" v-model="settingsForm.typesafe.callSites.planner" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>planner</strong><small>Suggest an engine for a work unit.</small></span></label>
 
+        <p v-if="settingsForm.typesafe.enabled" class="home-control-warning">Leaves this machine when a call site is on:<br /><span v-for="line in TYPESAFE_EGRESS_LINES" :key="line">{{ line }}<br /></span></p>
+
         <p v-if="typesafeProbe" class="home-control-message" role="status" aria-live="polite">{{ typesafeProbe }}</p>
         <button class="home-control-save typesafe-save" type="button" :disabled="typesafeSaveBlocked()" @click="saveTypesafe">{{ saving ? "Saving…" : "Save System One settings" }}</button>
       </section>
@@ -95,6 +97,7 @@
 import { nextTick, onMounted, reactive, ref, watch } from "vue";
 import { ENGINES, type Engine } from "../../../core/agent-contract.js";
 import { CAPABILITY_SCOPE } from "../../../core/capability-contract.js";
+import { TYPESAFE_EGRESS_LINES } from "../../../typesafe-egress.js";
 import { api } from "../api.js";
 import { conversationHomeApi } from "../conversation-home-api.js";
 import type { ControlCenterCapability } from "../conversation-home-types.js";
