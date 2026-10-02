@@ -191,6 +191,13 @@ describe("live Windows typesafe hook path", () => {
       // stopped enforcing owner-only would still pass and this gate could not catch the regression
       // it exists for. `windowsVerifyPathAcl` only reads. The descriptor is the identity witness:
       // the check reopens the path, so binding it is what makes the answer about THIS object.
+      //
+      // Inheritance from the just-sealed `root` cannot satisfy this verdict on the writer's behalf,
+      // so this assertion still fails if the file-level leg is deleted: the verdict requires
+      // `control & SE_DACL_PROTECTED` (a DACL that arrived by propagation is NOT protected - the
+      // parent's protection cannot propagate) and, for a FILE, `ace.flags === 0` (every propagated
+      // ACE carries `INHERITED_ACE`, 0x10). test/windows-private-authority.test.ts pins both refusal
+      // shapes structurally: `{ control: 0 }` and `{ ace.flags: 1 }` both throw.
       const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
         expect(

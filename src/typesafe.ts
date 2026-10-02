@@ -13,7 +13,11 @@ import {
   classifyHttp,
   classifyThrown,
 } from "./typesafe-health.js";
-import { type TypesafeSettings, resolveTypesafeKey } from "./typesafe-settings.js";
+import {
+  DEFAULT_TYPESAFE_SETTINGS,
+  type TypesafeSettings,
+  resolveTypesafeKey,
+} from "./typesafe-settings.js";
 
 export const TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -219,12 +223,15 @@ export const ASSESS_QUESTION_IDS = Object.freeze({
  * sees an in-order value. Declaring a second tier vocabulary here would make
  * `RISK_ORDER.indexOf("CRITICAL")` return -1 and the judge could never raise.
  */
-const RISK_WIRE_LABELS = Object.freeze({
+/** The API's uppercase wire labels → the repo's lowercase authority. Typed as an index signature so
+ *  the lookup below does not need a cast: the cast that used to be here erased the key type, which is
+ *  the type that would catch a refactor sending anything but the raw wire string. */
+const RISK_WIRE_LABELS: Readonly<Record<string, RiskLevel | undefined>> = Object.freeze({
   LOW: RISK_LEVEL.LOW,
   MEDIUM: RISK_LEVEL.MEDIUM,
   HIGH: RISK_LEVEL.HIGH,
   CRITICAL: RISK_LEVEL.CRITICAL,
-} as const);
+});
 
 /**
  * Standing clause prefixed to EVERY `state` payload.
@@ -314,9 +321,15 @@ export async function judgeRisk(
   if (!parsed) return null;
   const choice = choiceOf(parsed.raw.risk_tier, parsed.answers.risk_tier?.confidence);
   if (!choice) return null;
+  // The `runAtConfidence` FLOOR, the same discard gate the reviewer seam applies: a command is
+  // attacker-influenceable payload, so an answer the judge itself is unsure of must not be able to
+  // raise a tier - least of all to CRITICAL and block a tool call. A missing confidence reads as
+  // zero, so a bare tier can never act.
+  const floor = inject.settings?.runAtConfidence ?? DEFAULT_TYPESAFE_SETTINGS.runAtConfidence;
+  if ((choice.confidence ?? 0) < floor) return null;
   // Map the API's uppercase wire label onto the repo's lowercase authority; anything the
   // wire does not name is dropped (never guessed), so the raise-only merge stays total.
-  const mapped: string | undefined = (RISK_WIRE_LABELS as Record<string, string>)[choice.choice];
+  const mapped = RISK_WIRE_LABELS[choice.choice];
   return isRiskLevel(mapped) ? mapped : null;
 }
 

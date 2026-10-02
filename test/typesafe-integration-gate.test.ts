@@ -87,7 +87,9 @@ async function runHook(
       stdin: fakeStdin as never,
       stdinTimeoutMs: 100,
       userRoot: inject.userRoot ?? base,
-      judgeRisk: inject.judgeRisk ?? (async () => RISK_LEVEL.LOW),
+      // Only a DEFAULT when the caller named none: a `??` here made every "exercise the real seam"
+      // test a double, so the assertion passed no matter what the product did.
+      ...("judgeRisk" in options ? {} : { judgeRisk: async () => RISK_LEVEL.LOW }),
     });
     return { exitCode, stdout: captured.join("\n") };
   } finally {
@@ -101,6 +103,43 @@ async function runHook(
 /** The FIRST emitted line is the decision envelope; later lines are the audit record. */
 const decisionOf = (stdout: string): string =>
   JSON.parse(stdout.split("\n")[0] ?? "{}").hookSpecificOutput.permissionDecision as string;
+
+describe("System One hook gate — the kill-switch is read BEFORE the seam", () => {
+  test("VIBEFLOW_HOOKS=off performs no POST, even with an enabled judge", async () => {
+    // `evaluateHook` reads the kill-switch deep inside, so calling the risk seam before it made a
+    // hooks-OFF run still POST the raw shell command to the vendor (and charge the budget, and write
+    // a `caller:"risk"` breaker record). The seam is gated on `hooksDisabled` FIRST, so what a
+    // disabled hook must not do is enter it at all. `posts` counts the judge, and `evaluateHook`
+    // ignores the judge when disabled, so a decision assertion could never fail here.
+    let posts = 0;
+    {
+      const { exitCode } = await runHook({
+        // Deterministically LOW but consult-worthy: a `| sh` command scores CRITICAL on its own,
+        // so the seam is never reached and the count would be 0 either way (a vacuous pin).
+        command: "wget http://example.com/f",
+        typesafe: {
+          ...DEFAULT_TYPESAFE_SETTINGS,
+          enabled: true,
+          callSites: { ...DEFAULT_TYPESAFE_SETTINGS.callSites, risk: true },
+        },
+        // The kill-switch must live in the SAME env the seam reads. This process's `process.env`
+        // is not enough: an injected `env` replaces it for the key read, so a switch set only
+        // outside would be masked - the mirror of the bug where the caller's gate and
+        // `evaluateHook` read DIFFERENT sources and a disarmed run still egressed.
+        env: { TYPESAFE_API_KEY: "k", VIBEFLOW_HOOKS: "off" } as NodeJS.ProcessEnv,
+        // Counted on the JUDGE double, not the wire: `runHook` installs this double when the caller
+        // names none, and the seam is what must not be entered - a fetch count would also be 0 when
+        // the seam runs but the key is missing, which is a different (already-covered) path.
+        judgeRisk: async () => {
+          posts += 1;
+          return RISK_LEVEL.CRITICAL;
+        },
+      });
+      expect(exitCode).toBe(0);
+      expect(posts).toBe(0); // no egress, no budget charge, no breaker record
+    }
+  });
+});
 
 describe("System One hook gate — a failing integration leg changes nothing", () => {
   test("a throwing installLogbus does not change hook()'s exit code or JSON envelope", async () => {
@@ -255,20 +294,39 @@ describe("System One hook gate — the audit leg's budget is settings-derived", 
     // residual 20, never the repo's 100: at 100 the five legs are 17 000 ms and the host's
     // spawnSync kill turns an allowed call into a BLOCK.
     const busSeen: Array<{ lockRetries?: number }> = [];
-    let healthIoSeen: { lockWaitMs?: number; writeBudgetMs?: number } | undefined;
+    let healthIoSeen:
+      | { lockWaitMs?: number; writeBudgetMs?: number; now?: () => number }
+      | undefined;
+    const clock = (): number => 42;
     await runHook({
       command: "wget http://x",
       typesafe: enabledSettings({ hookBusLockRetries: 5000 }),
       installLogbus: (opts: { lockRetries?: number }) => {
         busSeen.push(opts);
       },
-      healthIo: (io: { lockWaitMs?: number; writeBudgetMs?: number }) => {
+      now: clock,
+      healthIo: (io: { lockWaitMs?: number; writeBudgetMs?: number; now?: () => number }) => {
         healthIoSeen = io;
       },
     });
     expect(busSeen[0]?.lockRetries).toBe(HOOK_BUS_LOCK_RETRIES_MAX);
     expect(healthIoSeen?.lockWaitMs).toBe(0);
     expect(healthIoSeen?.writeBudgetMs).toBe(HOOK_HEALTH_WRITE_BUDGET_MS);
+    // The `now` seam must reach the breaker's io or `cooldown_until`/`last_call.ms`/`holdingOpen`
+    // are untimeable through this seam: an injected clock that the seam silently drops leaves
+    // those fields on the real clock while the caller believes it set the time.
+    expect(healthIoSeen?.now).toBe(clock);
+    // Absent injection stays absent (the default clock), not a stray `undefined` key.
+    let bare: { now?: () => number } | undefined;
+    await runHook({
+      command: "wget http://x",
+      typesafe: enabledSettings({ hookBusLockRetries: 5000 }),
+      installLogbus: () => {},
+      healthIo: (io: { now?: () => number }) => {
+        bare = io;
+      },
+    });
+    expect(bare === undefined || bare.now === undefined).toBe(true);
   });
 
   test("the five legs at their MAXIMA sum to 9 000 ms, strictly under the spawn budget", () => {

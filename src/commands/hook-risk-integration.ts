@@ -45,6 +45,9 @@ import { join } from "node:path";
 import type { HookInput } from "../core.js";
 import { type SemanticJudge, shouldConsultSemantic } from "../hooks/risk-semantic.js";
 import { scoreRisk } from "../hooks/risk.js";
+// TYPE-ONLY: erased at compile time, so it evaluates nothing. The HTTP client module is loaded
+// by the `await import` inside the enabled gate in `integrateRiskJudge` (C27-c).
+import { hooksDisabled } from "../hooks/runner.js";
 import type { ResolvedHookPolicy } from "../hooks/templates.js";
 import { installLogbus, outBusOnly } from "../logbus.js";
 import type { VibeSettings } from "../settings.js";
@@ -57,15 +60,13 @@ import {
   isTypesafeEnabled,
 } from "../typesafe-settings.js";
 import type { TypesafeSettings } from "../typesafe-settings.js";
-// TYPE-ONLY: erased at compile time, so it evaluates nothing. The HTTP client module is loaded
-// by the `await import` inside the enabled gate in `integrateRiskJudge` (C27-c).
-import type { judgeRisk } from "../typesafe.js";
+import type { TypesafeFetch, judgeRisk } from "../typesafe.js";
 import { CTX_DIR } from "./_shared.js";
 
 /** The audit bus install, as `hook()` performs it — injected so a test never touches disk. */
 export type BusInstall = (opts: { dir: string; lockRetries?: number }) => unknown;
 /** The two disk bounds the seam hands the breaker, observed as a whole (a test seam). */
-export type HealthIoProbe = { lockWaitMs?: number; writeBudgetMs?: number };
+export type HealthIoProbe = { lockWaitMs?: number; writeBudgetMs?: number; now?: () => number };
 
 /** Everything `hook()` may inject for this seam. Disabled settings reach NONE of it. */
 export interface RiskJudgeInject {
@@ -79,6 +80,10 @@ export interface RiskJudgeInject {
   /** The breaker's cross-process lock seam (`HealthIo.lock`) — a test holds it by throwing. */
   lock?: HealthIo["lock"];
   judgeRisk?: typeof judgeRisk;
+  /** The wire seam, forwarded to `judgeRisk`. Without it an end-to-end test through `hook()` cannot
+   *  observe what this seam sends or how it classifies an answer — only a `judgeRisk` double, which
+   *  is exactly the level the seam's own behaviour must not be tested at. */
+  fetchFn?: TypesafeFetch;
 }
 
 export interface RiskJudgeDeps {
@@ -118,6 +123,9 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
     userRoot: inject.userRoot ?? userVibeflowDir(),
     lockWaitMs: 0,
     writeBudgetMs: HOOK_HEALTH_WRITE_BUDGET_MS,
+    // Threaded through, not dropped: a caller that injects a clock must get it in the breaker's
+    // record too, or `cooldown_until`/`last_call.ms`/`holdingOpen` are untimeable through this seam.
+    ...(inject.now === undefined ? {} : { now: inject.now }),
     ...(inject.lock ? { lock: inject.lock } : {}),
   };
   inject.healthIo?.(healthIo);
@@ -139,6 +147,10 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
   const deterministic = scoreRisk(input, deps.policy);
   const command = input.command ?? "";
   if (
+    // The kill-switch, checked HERE as well as at the caller: `VIBEFLOW_HOOKS=off` means the
+    // hook-decision layer is off, and leaving the guard to `hooks.ts` meant any other caller - or a
+    // future reordering - POSTed the raw command to the vendor on a disarmed run.
+    hooksDisabled(inject.env ?? process.env) ||
     !shouldConsultSemantic(deterministic.risk, command) ||
     !isTypesafeEnabled(settings) ||
     ts?.callSites.risk !== true ||
@@ -183,6 +195,7 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
         userRoot: healthIo.userRoot as string,
         timeoutMs: hookTimeoutMs,
         onOutcome: probe.onOutcome,
+        ...(inject.fetchFn === undefined ? {} : { fetchFn: inject.fetchFn }),
       }),
     // Transition lines only; the per-call audit record uses outBusOnly directly. `tuning`
     // MUST come from settings or the breaker ignores failStreakLimit/cooldown* entirely, and

@@ -103,7 +103,7 @@ string is sent **verbatim**: not redacted, not truncated, not scrubbed.
 
 | Call site | `state` sent to `api.typesafe.ai` | Also on the wire | Why it is sensitive |
 | --- | --- | --- | --- |
-| `reviewer` | the **unified diff of the unit's changes**, verbatim | the **goal text** (inside the question instructions), `model` | proprietary source, including any secret, token, or customer data a diff happens to add |
+| `reviewer` | the **unified diff of the unit's changes**, verbatim | the **goal text** (sent as `state`, never inside `instructions`), `model` | proprietary source, including any secret, token, or customer data a diff happens to add |
 | `goalCoverage` | the **same unified diff** (or the literal `(no diff available)`) | the **goal text**, `model` | same as `reviewer` |
 | `risk` | the **raw shell command**, exactly as the agent proposed it | the static `risk_tier` criteria, `model` | a command line routinely carries an inline secret (`AWS_SECRET...=`, `curl -H "Authorization: ..."`, `psql "postgres://user:pw@host"`) |
 | `planner` | `UNIT: <unit.name>` and `SPEC: <unit.spec>`, the **full work-unit spec text** | the ready engine names as Choice criteria, `model` | the spec describes unshipped work and may quote internal systems |
@@ -279,8 +279,8 @@ never git-tracked:
 | Path | Written by | Contents | Mode |
 | --- | --- | --- | --- |
 | `~/.vibeflow/typesafe.env` | `vf config typesafe key` | the API key, one `TYPESAFE_API_KEY=` line | owner-only (`0600` on POSIX, migrated owner-only DACL on Windows) |
-| `~/.vibeflow/typesafe-health.json` | any enforcement call site | breaker state plus a `last_call` audit record; never the key, never payload text | `0644` |
-| `~/.vibeflow/typesafe-health.probe.json` | `vf config typesafe test` and the Control Center probe | the same record shape for the OPERATOR probe, kept separate so a passing probe can never clear the enforcement breaker | `0644` |
+| `~/.vibeflow/typesafe-health.json` | any enforcement call site | breaker state plus a `last_call` audit record; never the key, never payload text | owner-only (`0600` on POSIX) |
+| `~/.vibeflow/typesafe-health.probe.json` | `vf config typesafe test` and the Control Center probe | the same record shape for the OPERATOR probe, kept separate so a passing probe can never clear the enforcement breaker | owner-only (`0600` on POSIX) |
 
 An enabled run also appends to the hook's audit bus at `.vibeflow/logs/current.log`,
 which IS in-repo but gitignored (`.vibeflow/.gitignore`). It records the hook's own

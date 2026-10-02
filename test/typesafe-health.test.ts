@@ -562,6 +562,30 @@ describe("health file", () => {
     expect(callsUsedThisRun()).toBe(2);
   });
 
+  test("a breaker-refused call spends nothing: the charge follows the VERDICT, not the attempt", async () => {
+    // The increments used to sit at the guard's entry, above `allowCall`, so a call the breaker had
+    // already refused still consumed a unit - `maxCalls` refused calls exhausted the whole per-run
+    // budget and every later legitimate call returned null for the rest of the process (there is no
+    // production caller of `resetCallBudget`). One 429 trips the breaker OPEN, so all three calls
+    // below are refused; the budget must be untouched.
+    resetCallBudget();
+    const inst = { userRoot: root(), now: () => T0 };
+    const tuning = tuningFor({ ...DEFAULT_TYPESAFE_SETTINGS, maxCalls: 3 });
+    await writeHealth(transition(readHealth(inst), FAILURE_CLASS.BUDGET, T0, undefined, 429), inst);
+    let calls = 0;
+    for (let i = 0; i < 3; i++)
+      await withTypesafeGuard(
+        "reviewer",
+        async () => {
+          calls += 1;
+          return null;
+        },
+        { ...inst, tuning },
+      );
+    expect(calls).toBe(0); // every call refused by the open breaker
+    expect(callsUsedThisRun()).toBe(0); // and none of them charged the budget
+  });
+
   test("lockWaitMs: 0 skips the write instead of queueing behind a concurrent writer", async () => {
     const inst = { userRoot: root() };
     await writeHealth(transition(readHealth(inst), FAILURE_CLASS.BUDGET, T0, undefined, 429), inst);

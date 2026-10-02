@@ -154,6 +154,15 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(windowsJob.split(gatedOnRow).length - 1).toBe(2);
     // One gates `actions/setup-node`, the other gates the build step itself.
     expect(windowsJob).toContain(`${gatedOnRow}\n        run: bun run build`);
+    // ...and the same ORDERING the release half pins. Gating is not position: swapping the build
+    // and live steps here left every assertion in this file green, and the live step then drives
+    // whatever `dist/` the checkout happened to hold (empty on a clean runner - a loud failure, but
+    // the file's contract is that both workflows hold the build BEFORE the live row).
+    const ciBuildAt = windowsJob.indexOf("- name: Build shipped artifact");
+    const ciLiveAt = windowsJob.indexOf("- name: Live Windows typesafe hook budget");
+    expect(ciBuildAt).toBeGreaterThan(-1);
+    expect(ciLiveAt).toBeGreaterThan(-1);
+    expect(ciBuildAt).toBeLessThan(ciLiveAt);
     // `uses:` precedes `if:` on the setup-node step, unlike the build step above.
     expect(windowsJob).toContain(`uses: actions/setup-node@v4\n        ${gatedOnRow}`);
     // And the step must still be able to FAIL its job. `continue-on-error: true` inserted anywhere
@@ -270,6 +279,14 @@ describe("the win32 gate is wired into both workflows", () => {
     // `bun run build` inside that step, anchored at end of line: `|| true` or a trailing `; exit 0`
     // keeps the substring and un-builds the artifact without touching any other pin here.
     expect(inWindowsJob).toMatch(/^ {8}run: bun run build$/m);
+    // And the step must be unable to skip itself: the live step two lines below is held to an exact
+    // key list, and this build step had none, so inserting `if: false` under it left all three
+    // meta-tests green while the artifact was never built (again loud - missing `dist/` - but this
+    // was the one gap in the "each step can FAIL its job" chain).
+    expect(stepKeys(stepBlock(inWindowsJob, "- name: Build shipped artifact"))).toEqual([
+      "- name",
+      "run",
+    ]);
   });
 
   test("the module-scope guard makes a non-Windows runner fail loudly, not skip to green", () => {

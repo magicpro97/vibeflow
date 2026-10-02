@@ -287,15 +287,16 @@ export async function withTypesafeGuard<T>(
   const probe = inject.bucket === TYPESAFE_BUDGET_BUCKET.PROBE;
   const used = probe ? probeCallsThisRun : callsThisRun;
   if (used >= maxCalls) return null;
-  if (probe) probeCallsThisRun += 1;
-  else callsThisRun += 1;
   const allow = await mutateHealth((h) => {
     const r = allowCall(h, now);
     return { next: r.next, result: r.allow };
   }, io);
-  // `undefined` (the lock was lost) is treated as ALLOW: a breaker that cannot be read must
-  // not block a run, and a dropped record can only lose an increment.
+  // Charged only once the call is actually allowed: incrementing at entry spent a unit on a call the
+  // breaker had already refused, so `maxCalls` refused calls exhausted the whole per-run budget and
+  // every later legitimate call returned null for the rest of the process.
   if (allow === false) return null;
+  if (probe) probeCallsThisRun += 1;
+  else callsThisRun += 1;
   try {
     const value = await fn();
     const signal = inject.outcome?.();

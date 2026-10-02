@@ -40,6 +40,7 @@ import {
   engineHookFiles,
   evaluateHook,
   guardrailOffNote,
+  hooksDisabled,
   liveGuardrailArmed,
   out,
   parseHookInput,
@@ -208,9 +209,24 @@ export async function hook(
   // System One risk tier: OPTIONAL, raise-only, fail-open, and skipped entirely when the
   // deterministic gate already decided or the integration is off. `undefined` here is
   // byte-for-byte the pre-integration call.
-  const { integrateRiskJudge } = await import("./hook-risk-integration.js");
-  const semanticJudge = await integrateRiskJudge({ input, settings, policy, base: cwd(), inject });
-  const result = evaluateHook(input, () => process.env, policy, specStale, semanticJudge);
+  //
+  // Gated on the kill-switch FIRST: `evaluateHook` reads `VIBEFLOW_HOOKS` deep inside, so calling
+  // the seam before it made a hooks-OFF run still POST the raw shell command to the vendor, charge
+  // the budget and record a `caller:"risk"` breaker entry. A disabled hook must send nothing.
+  // ONE authority: this gate and `evaluateHook` below are both handed `inject.env ?? process.env`,
+  // so they can never disagree. Gating here alone (on either source) is not enough -
+  // `integrateRiskJudge` guards itself too, so no caller can leak egress on a disarmed run.
+  const env = (): NodeJS.ProcessEnv => inject.env ?? process.env;
+  const semanticJudge = hooksDisabled(env())
+    ? undefined
+    : await (await import("./hook-risk-integration.js")).integrateRiskJudge({
+        input,
+        settings,
+        policy,
+        base: cwd(),
+        inject,
+      });
+  const result = evaluateHook(input, env, policy, specStale, semanticJudge);
   // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals.
   const { json, exitCode } = antigravity
     ? presentAntigravityDecision(result)

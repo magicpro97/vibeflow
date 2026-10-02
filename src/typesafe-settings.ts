@@ -121,8 +121,7 @@ export function coerceTypesafeSettings(
   if (finite(obj.runAtConfidence)) out.runAtConfidence = clamp(obj.runAtConfidence, 0, 1);
   if (finite(obj.acceptAtConfidence)) out.acceptAtConfidence = clamp(obj.acceptAtConfidence, 0, 1);
   if (finite(obj.judgeScoreLevels)) out.judgeScoreLevels = clamp(obj.judgeScoreLevels, 1, 10);
-  if (finite(obj.judgePassLevel))
-    out.judgePassLevel = clamp(obj.judgePassLevel, 0, out.judgeScoreLevels);
+  if (finite(obj.judgePassLevel)) out.judgePassLevel = clamp(obj.judgePassLevel, 0, 10);
   if (finite(obj.judgeTestFloor)) out.judgeTestFloor = clamp(obj.judgeTestFloor, 0, 1);
   if (
     typeof obj.reviewerEngine === "string" &&
@@ -165,6 +164,11 @@ export function coerceTypesafeSettings(
       if (typeof s[name] === "boolean") out.callSites[name] = s[name];
     }
   }
+  // Re-clamped against the FINAL `judgeScoreLevels`, unconditionally. Clamping only here inside the
+  // `judgePassLevel` branch used the BASE's level count, so a write that lowered `judgeScoreLevels`
+  // alone left the stored pass level above it - and a perfect score then FAILS `score < passLevel`
+  // (levels=1, passLevel=2 → every change rejected). The pair must hold whatever order they arrive.
+  out.judgePassLevel = clamp(out.judgePassLevel, 0, out.judgeScoreLevels);
   return out;
 }
 
