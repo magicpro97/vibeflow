@@ -163,6 +163,43 @@ describe("handleTypesafeReadRoute", () => {
   });
 });
 
+describe("the view reports the PROBE's breaker separately from the judge's", () => {
+  test("probeState reads the probe record, so an open probe breaker cannot render as idle", () => {
+    // The probe runs on the PROBE bucket, which reads and writes
+    // `typesafe-health.probe.json`. The view used to expose only the ENFORCEMENT record, so the
+    // section showed `state: idle` and left the button enabled while every click came back
+    // "refused by the call budget or an open circuit breaker" — the operator's one diagnostic
+    // control, reporting the wrong breaker.
+    const view = typesafeSettingsView(REPO, {
+      settings: settings(),
+      env: { TYPESAFE_API_KEY: KEY },
+      health: health(), // enforcement: idle
+      probeHealth: health({ state: TYPESAFE_STATE.OPEN, cooldown_until: "2026-01-01T00:00:00Z" }),
+    });
+    expect(view.state).toBe(TYPESAFE_STATE.IDLE);
+    expect(view.probeState).toBe(TYPESAFE_STATE.OPEN);
+    expect(view.probeCooldownUntil).toBe("2026-01-01T00:00:00Z");
+    // The converse: an open ENFORCEMENT breaker leaves the probe reporting idle, because the probe
+    // has its own bucket and its own file — the two records routinely disagree.
+    const converse = typesafeSettingsView(REPO, {
+      settings: settings(),
+      env: { TYPESAFE_API_KEY: KEY },
+      health: health({ state: TYPESAFE_STATE.OPEN }),
+      probeHealth: health(),
+    });
+    expect(converse.state).toBe(TYPESAFE_STATE.OPEN);
+    expect(converse.probeState).toBe(TYPESAFE_STATE.IDLE);
+    // A disabled judge is `off` for both: the test would be refused as disabled.
+    const off = typesafeSettingsView(REPO, {
+      settings: { ...BASE, typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: false } },
+      env: { TYPESAFE_API_KEY: KEY },
+      health: health(),
+      probeHealth: health(),
+    });
+    expect(off.probeState).toBe(TYPESAFE_STATE.OFF);
+  });
+});
+
 describe("handleTypesafeTestRoute", () => {
   // Two pieces of state leak between tests here now that the probe goes through the guard.
   // `callsThisRun` is PROCESS-global (src/typesafe-health.ts:243), and the breaker lives in the

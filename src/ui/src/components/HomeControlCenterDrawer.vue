@@ -36,13 +36,14 @@
       </section>
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
-        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || typesafeSaveBlocked() || typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
+        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || typesafeSaveBlocked() || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
         <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. Off by default: with it off every path behaves exactly as it does today.</p>
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
         <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
         <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — set <code>TYPESAFE_API_KEY</code> or run <code>vf config typesafe key</code>.</p>
-        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — every call, including this test, is refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls, including this test, are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
+        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — calls are refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
+        <p v-if="typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" class="home-control-warning" role="alert">Test connection is refused until {{ typesafeView?.probeCooldownUntil ?? "its own breaker clears" }} — the probe's own breaker is {{ typesafeView?.probeState }}, and the judge's calls are unaffected.</p>
         <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p>
         <p v-if="typesafeView && typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
 
@@ -203,7 +204,7 @@ async function testConnection(): Promise<void> {
       : `${result.refused === true ? "System One did not run the test for" : "System One connection failed for"} ${probed} — ${result.error ?? "no verdict"}`;
   } catch (cause) {
     if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return; // superseded
-    typesafeProbe.value = `System One connection failed for ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
+    typesafeProbe.value = `${(cause as { status?: number }).status === 409 ? "System One did not run the test for" : "System One connection failed for"} ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
   } finally {
     typesafeTesting.value = false;
   }
@@ -254,8 +255,7 @@ async function load(): Promise<void> {
   try {
     const value = await api.settings.get();
     applySettings(value);
-    // `detect()` may already have reloaded here; a second GET would only race the same guard.
-    const reloaded = await detect();
+    const reloaded = await detect(); // true when `detect()` already reloaded: skip the second GET
     await Promise.all([loadSkills(), loadCapabilities(), ...(reloaded ? [] : [loadTypesafe()])]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load control center";

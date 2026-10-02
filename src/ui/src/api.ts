@@ -57,8 +57,8 @@ async function req<T>(
     } catch (_e) {
       // body unreadable — fall through to generic message
     }
-    // Prefer server's error message; fall back to a terse status-only string
-    throw new Error(detail || `Server error ${res.status}`);
+    // Prefer the server's message; carry the STATUS for status-specific callers (e.g. the probe's 409).
+    throw Object.assign(new Error(detail || `Server error ${res.status}`), { status: res.status });
   }
   try {
     return res.json() as Promise<T>;

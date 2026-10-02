@@ -17,6 +17,7 @@ import {
   TYPESAFE_STATE,
   type TypesafeHealth,
   type TypesafeState,
+  fileForBucket,
   outcomeProbe,
   readHealth,
   resetCallBudget,
@@ -45,6 +46,14 @@ export interface TypesafeSettingsView {
   repo: string;
   state: TypesafeState;
   cooldownUntil?: string;
+  /** The PROBE's own recorded breaker, read from its own health file. The probe runs through
+   *  the PROBE bucket, which reads and writes
+   *  `typesafe-health.probe.json`, so `state` above (the enforcement record) says NOTHING about
+   *  whether "Test connection" will be refused: at the shipped default the two records routinely
+   *  disagree, and the section used to show `idle` with an enabled button while every click came
+   *  back "refused by the call budget or an open circuit breaker". */
+  probeState: TypesafeState;
+  probeCooldownUntil?: string;
   lastClass?: FailureClass;
   calls?: number;
   enabled: boolean;
@@ -55,9 +64,10 @@ export interface TypesafeSettingsView {
   thresholds: { run: number; accept: number };
   callSites: TypesafeCallSites;
   lastCall?: { at: string; caller: string; status?: number; ms: number };
-  /** The effective, coerced block. The control center round-trips THIS on save:
-   *  `coerceTypesafeSettings` fills a partial block from the DEFAULTS, so echoing
-   *  only the edited fields would silently reset model, timeoutMs and the breaker. */
+  /** The effective, coerced block, for DISPLAY. The control center posts only the four editable
+   *  fields on save, and the write path re-coerces them onto the STORED block
+   *  (`mergeTypesafeSettings`), so the unsent fields come from disk — echoing this snapshot would
+   *  revert anything changed out of band (e.g. `vf config typesafe model`). */
   settings: TypesafeSettings;
 }
 
@@ -66,6 +76,8 @@ export interface TypesafeViewInject {
   env?: NodeJS.ProcessEnv;
   userRoot?: string;
   health?: TypesafeHealth;
+  /** The PROBE record, injected by a test; production reads it off disk like `health`. */
+  probeHealth?: TypesafeHealth;
 }
 
 /** Every call-site toggle, projected off the ONE shared authority — never restated here. */
@@ -97,6 +109,14 @@ export function typesafeSettingsView(
   const resolved = settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS;
   const enabled = isTypesafeEnabled(settings);
   const health = inject.health ?? readHealth({ userRoot: inject.userRoot });
+  // A SEPARATE read of a SEPARATE file: the probe's breaker is its own, so the section can only
+  // report truthfully about the button it shows by reading the record the button's call writes.
+  const probeHealth =
+    inject.probeHealth ??
+    readHealth({
+      userRoot: inject.userRoot,
+      healthFile: fileForBucket(TYPESAFE_BUDGET_BUCKET.PROBE),
+    });
   const key: TypesafeKeySource = resolveTypesafeKey({
     env: inject.env,
     userRoot: inject.userRoot,
@@ -105,6 +125,8 @@ export function typesafeSettingsView(
     repo,
     state: effectiveState(enabled, key !== null, health.state),
     ...(health.cooldown_until ? { cooldownUntil: health.cooldown_until } : {}),
+    probeState: effectiveState(enabled, key !== null, probeHealth.state),
+    ...(probeHealth.cooldown_until ? { probeCooldownUntil: probeHealth.cooldown_until } : {}),
     ...(health.last_class ? { lastClass: health.last_class } : {}),
     ...(typeof health.calls === "number" ? { calls: health.calls } : {}),
     enabled,

@@ -153,10 +153,12 @@ test("configured and state are separate rows, and an open breaker warns with its
     "<p v-else-if=\"typesafeView?.state === 'open' || typesafeView?.state === 'half-open'\"",
   );
   expect(drawer).toContain("cooldownUntil");
-  // ...and the banner must name the TEST among the silenced calls: the probe button is disabled in
-  // both states, so the banner is the only place the operator reads why the button they cannot
-  // press would be refused anyway.
-  expect(drawer).toContain("including this test");
+  // The probe has its OWN bucket and health file, so the enforcement banner must not claim to
+  // silence the test (it does not: an open enforcement breaker leaves the probe runnable). The
+  // probe's own breaker gets its own line, gated on `probeState`.
+  expect(drawer).not.toContain("including this test");
+  expect(drawer).toContain("typesafeView?.probeState === 'open'");
+  expect(drawer).toContain("the probe's own breaker is");
 });
 
 test("a refusal is worded as a refusal, never as a failed connection", () => {
@@ -169,6 +171,9 @@ test("a refusal is worded as a refusal, never as a failed connection", () => {
   // that does not exist. The discriminator is the server's typed flag, not the error string.
   expect(drawer).toContain('result.refused === true ? "System One did not run the test for"');
   expect(drawer).toContain('"System One connection failed for"');
+  // ...and the same wording on the THROWN path: `req` discards the body's `refused` flag, so the
+  // moved-repository refusal (the route's only 409) is recognised by its status.
+  expect(drawer).toContain("(cause as { status?: number }).status === 409");
   // And the flag exists on the wire: the route marks every precondition/breaker refusal.
   const route = readFileSync(
     new URL("../../../server/routes-typesafe.ts", import.meta.url),
@@ -300,9 +305,11 @@ test("the cross-repo guard is wired at its production call site, not only as a p
     drawer,
   );
   expect(probeButton?.[1]).toContain("typesafeSaveBlocked()");
-  // The circuit banner says calls are refused while the circuit is open/half-open, so the button
-  // must agree with it instead of offering a click the server will refuse.
-  expect(probeButton?.[1]).toContain("typesafeView?.state === 'open'");
+  // The button's gate follows the PROBE's own breaker: the probe runs through
+  // the PROBE bucket (its own health file), so an OPEN ENFORCEMENT breaker does not refuse it
+  // and gating on `state` disabled the one control that could report a healthy probe.
+  expect(probeButton?.[1]).toContain("typesafeView?.probeState === 'open'");
+  expect(probeButton?.[1]).not.toContain("typesafeView?.state === 'open'");
   expect(drawer).toContain('@click="saveTypesafe"');
 });
 

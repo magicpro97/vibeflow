@@ -43,4 +43,31 @@ describe("the System One probe client", () => {
       { path: "/api/typesafe/test", method: "POST", body: { expectRepo: "repo-a" } },
     ]);
   });
+
+  test("a 409 keeps its status on the thrown error, so the drawer can word it as a refusal", async () => {
+    // `req` throws on a non-2xx and keeps only the message, discarding the body's `refused: true`.
+    // The moved-repository refusal is the route's only 409, and without the status on the error
+    // the drawer rendered it as "System One connection failed" — the same defect class its own
+    // wording branch was built to close.
+    const { restore } = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({ ok: false, refused: true, error: "the active repository changed" }),
+          { status: 409, headers: { "content-type": "application/json" } },
+        ),
+    );
+    try {
+      await api.typesafe.test("repo-a").then(
+        () => {
+          throw new Error("expected the 409 to throw");
+        },
+        (cause: unknown) => {
+          expect((cause as { status?: number }).status).toBe(409);
+          expect((cause as Error).message).toBe("the active repository changed");
+        },
+      );
+    } finally {
+      restore();
+    }
+  });
 });

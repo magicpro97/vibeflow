@@ -157,6 +157,11 @@ export interface TypesafeSettingsView {
   repo: string;
   state: "off" | "unconfigured" | "idle" | "open" | "half-open";
   cooldownUntil?: string;
+  /** The PROBE's own recorded breaker ("Test connection" runs on its own bucket + health file).
+   *  `state` above describes the enforcement seams and says nothing about the button, so the
+   *  button's gate and its banner read THIS. */
+  probeState: "off" | "unconfigured" | "idle" | "open" | "half-open";
+  probeCooldownUntil?: string;
   lastClass?:
     | "none"
     | "disabled"
