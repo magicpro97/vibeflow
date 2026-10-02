@@ -137,13 +137,17 @@ describe("live Windows typesafe hook path", () => {
         expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);
         // The verdict itself. A well-formed payload is answered in the host's native shape, so
         // `permissionDecision` is where the decision lives; reading only the flat `decision` field
-        // would compare `undefined` against "block" and pass without checking anything.
+        // would compare `undefined` against a verdict and pass without checking anything.
+        //
+        // The assertion is the SPECIFIC fail-open value, not `not.toBe("block")`: the envelope
+        // never carries the literal "block" (`presentDecision` maps it to "deny"), so the negative
+        // form could not fail even when the judge blocked the call - it was vacuous.
         const out = parseHookStdout(run.stdout.toString()) as {
           hookSpecificOutput?: { permissionDecision?: string };
           decision?: string;
         };
-        expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).toBeDefined();
-        expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");
+        expect(out.hookSpecificOutput).toBeDefined();
+        expect(out.hookSpecificOutput?.permissionDecision).toBe("allow");
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

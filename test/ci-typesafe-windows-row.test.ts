@@ -336,11 +336,11 @@ describe("the win32 gate is wired into both workflows", () => {
     // log witness with `expect(true).toBe(true)` left every gate green (probe), and a win32
     // regression in the arming/consult path would then pass a row that verified nothing.
     expect(body).toContain('expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);');
-    // The fail-open half: the shipped artifact must not return `block` for a failing judge on a real
-    // win32 runtime. Loosening this matcher to `.toBeDefined()` also left every gate green (probe).
-    expect(body).toContain(
-      'expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");',
-    );
+    // The fail-open half: the shipped artifact must answer `allow` for a failing judge on a real
+    // win32 runtime. The old pin was `not.toBe("block")`, which is VACUOUS - the envelope carries
+    // "deny"/"ask"/"allow" and never the literal "block", so it passed even when the judge blocked
+    // the call. The assertion is now the specific value, so a `deny` fails the row.
+    expect(body).toContain('expect(out.hookSpecificOutput?.permissionDecision).toBe("allow");');
     // The pins above are the assertions I happened to remember. Five rounds of review found the next
     // one from the other side - the companion `toBeDefined()`, a loosened matcher on a call that was
     // already pinned elsewhere - because a per-string list can always be asked for one more. This
@@ -392,8 +392,8 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(assertions).toEqual([
       "expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);",
       'expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);',
-      "expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).toBeDefined();",
-      'expect(out.hookSpecificOutput?.permissionDecision ?? out.decision).not.toBe("block");',
+      "expect(out.hookSpecificOutput).toBeDefined();",
+      'expect(out.hookSpecificOutput?.permissionDecision).toBe("allow");',
       "expect( windowsVerifyPathAcl(path, WINDOWS_AUTHORITY_PATH_KIND.FILE, { identity: descriptorIdentity(fd), }), ).toBe(true);",
       'expect(readFileSync(path, "utf8")).toContain("TYPESAFE_API_KEY=");',
       // The DACL claim, which is multi-line - the previous line-only regex never saw it, so the
@@ -401,8 +401,8 @@ describe("the win32 gate is wired into both workflows", () => {
     ]);
     // Provenance of `out`, which the two verdict assertions above consume. Pinning their TEXT while
     // leaving the binding free made the win32 fail-open claim unfailable: replacing the right-hand side
-    // with a literal keeps every string below byte-identical, so on windows-latest `not.toBe("block")`
-    // compares a constant, a regression where the shipped artifact answers `block` passes the row,
+    // with a literal keeps every string below byte-identical, so on windows-latest the verdict pin
+    // compares a constant, a regression where the shipped artifact answers `deny` passes the row,
     // `WINDOWS_RESULT` reads success and the release proceeds. Whole line, whitespace-normalized, exactly
     // one of them: that also refuses the two escapes a substring pin admits - a `||` fallback that
     // swallows an empty stdout (a CLI crash going green) and a `run.stderr` swap.

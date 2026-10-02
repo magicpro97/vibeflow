@@ -273,14 +273,18 @@ never writes `typesafe-health.json`, and never reads `typesafe.env`. The HTTP cl
 module is also not even loaded on a disabled path, so the integration costs nothing
 until you turn it on.
 
-An **enabled** run leaves exactly three artifacts, all outside the repository and never
-git-tracked:
+An **enabled** run leaves three files under `~/.vibeflow`, all outside the repository and
+never git-tracked:
 
 | Path | Written by | Contents | Mode |
 | --- | --- | --- | --- |
 | `~/.vibeflow/typesafe.env` | `vf config typesafe key` | the API key, one `TYPESAFE_API_KEY=` line | owner-only (`0600` on POSIX, migrated owner-only DACL on Windows) |
 | `~/.vibeflow/typesafe-health.json` | any enforcement call site | breaker state plus a `last_call` audit record; never the key, never payload text | `0644` |
 | `~/.vibeflow/typesafe-health.probe.json` | `vf config typesafe test` and the Control Center probe | the same record shape for the OPERATOR probe, kept separate so a passing probe can never clear the enforcement breaker | `0644` |
+
+An enabled run also appends to the hook's audit bus at `.vibeflow/logs/current.log`,
+which IS in-repo but gitignored (`.vibeflow/.gitignore`). It records the hook's own
+decisions; the judge's payload text is never written to it.
 
 `vf config typesafe reset` is **not** uninstall: it rewrites the health record to `idle`
 so a tripped breaker recovers after a key rotation, and it deliberately leaves all three
