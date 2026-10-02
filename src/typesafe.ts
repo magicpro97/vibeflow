@@ -6,7 +6,7 @@
 // Every entry point FAILS OPEN. "No key", 401, 429, 529, a timeout, a malformed
 // body, or an out-of-range number all collapse to `null`, and every call site is
 // written so `null` means "behave exactly like before this module existed".
-import { RISK_LEVEL, type RiskLevel, isRiskLevel } from "./core/hook-contract.js";
+import { RISK_LEVEL, type RiskLevel } from "./core/hook-contract.js";
 import {
   FAILURE_CLASS,
   type FailureClass,
@@ -223,15 +223,21 @@ export const ASSESS_QUESTION_IDS = Object.freeze({
  * sees an in-order value. Declaring a second tier vocabulary here would make
  * `RISK_ORDER.indexOf("CRITICAL")` return -1 and the judge could never raise.
  */
-/** The API's uppercase wire labels → the repo's lowercase authority. Typed as an index signature so
- *  the lookup below does not need a cast: the cast that used to be here erased the key type, which is
- *  the type that would catch a refactor sending anything but the raw wire string. */
-const RISK_WIRE_LABELS: Readonly<Record<string, RiskLevel | undefined>> = Object.freeze({
+/** The API's uppercase wire labels → the repo's lowercase authority. `as const satisfies` keeps the
+ *  KEY union (`RiskWireLabel` below) - so a literal the map does not name is a compile error, which
+ *  an index signature would silently accept - while still rejecting a value that is not a
+ *  `RiskLevel`. The runtime lookup narrows through `isRiskWireLabel`: anything else is a dropped
+ *  answer, never a guess. */
+const RISK_WIRE_LABELS = Object.freeze({
   LOW: RISK_LEVEL.LOW,
   MEDIUM: RISK_LEVEL.MEDIUM,
   HIGH: RISK_LEVEL.HIGH,
   CRITICAL: RISK_LEVEL.CRITICAL,
-});
+} as const satisfies Readonly<Record<string, RiskLevel>>);
+type RiskWireLabel = keyof typeof RISK_WIRE_LABELS;
+/** Narrows a wire string to the map's OWN keys. `Object.hasOwn`, not `in`: `in` walks the prototype
+ *  chain, where `"toString"` and friends are always present. */
+const isRiskWireLabel = (key: string): key is RiskWireLabel => Object.hasOwn(RISK_WIRE_LABELS, key);
 
 /**
  * Standing clause prefixed to EVERY `state` payload.
@@ -329,8 +335,7 @@ export async function judgeRisk(
   if ((choice.confidence ?? 0) < floor) return null;
   // Map the API's uppercase wire label onto the repo's lowercase authority; anything the
   // wire does not name is dropped (never guessed), so the raise-only merge stays total.
-  const mapped = RISK_WIRE_LABELS[choice.choice];
-  return isRiskLevel(mapped) ? mapped : null;
+  return isRiskWireLabel(choice.choice) ? RISK_WIRE_LABELS[choice.choice] : null;
 }
 
 /** Pick an engine for a unit from the READY set. A single ready engine never calls the API. */
@@ -356,5 +361,12 @@ export async function judgeEngineKey(
   if (!parsed) return null;
   const choice = choiceOf(parsed.raw.engine, parsed.answers.engine?.confidence);
   if (!choice) return null;
+  // The `runAtConfidence` FLOOR, exactly as `judgeRisk` applies it: routing is a POSITIVE decision
+  // that overrides the run-global `resolveEngine(flags)`, and the spec text is issue-body prose, so
+  // an answer the judge itself is unsure of (or one with no confidence at all, which reads as zero)
+  // must not assign an engine. The `engines.includes` filter below only bounds WHICH engine, never
+  // WHETHER to route.
+  const floor = inject.settings?.runAtConfidence ?? DEFAULT_TYPESAFE_SETTINGS.runAtConfidence;
+  if ((choice.confidence ?? 0) < floor) return null;
   return engines.includes(choice.choice) ? choice.choice : null;
 }

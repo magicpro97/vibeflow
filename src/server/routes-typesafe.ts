@@ -19,6 +19,7 @@ import {
   type TypesafeState,
   outcomeProbe,
   readHealth,
+  resetCallBudget,
   tuningFor,
   withTypesafeGuard,
 } from "../typesafe-health.js";
@@ -185,9 +186,11 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   // The probe must go through the SAME choke point as every other call site. Calling
   // `judgeAssessment` directly left it outside the per-process call budget and outside the
   // file-backed breaker (both live in `withTypesafeGuard`), so a client holding the page token
-  // could loop this route and issue unbounded billed requests — even while the breaker was open
-  // for every real call site. The CLI probe has the same shape and stays a single human-initiated
-  // command; this one is scriptable, so it pays the same toll.
+  // could loop this route issuing billed requests that never touched the breaker — even while the
+  // breaker was open for every real call site. The CLI probe has the same shape and stays a single
+  // human-initiated command; this one is scriptable, so it pays the same toll: every click feeds
+  // the breaker and its own budget bucket (see the `resetCallBudget` note below for why the bucket
+  // restarts per click).
   //
   // `outcome: probe.outcome` is not decoration. The guard reads `inject.outcome?.()` and falls back
   // to `FAILURE_CLASS.NONE`, so a guard call that omits it stamps every vendor failure as a
@@ -195,6 +198,14 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   // reset an open breaker to idle. `judgeAssessment` never throws (it collapses classified
   // failures to null), so the guard's catch arm cannot classify in its place. Mirrors
   // src/commands/dispatch-reviewer-llm.ts.
+  // A CLICK is the run; this long-lived server is not. The counter is per process and
+  // `resetCallBudget` had no production caller, so after `maxCalls` (default 20) clicks EVER
+  // "Test connection" answered "refused by the call budget or an open circuit breaker" for the
+  // rest of the process - and `vf config typesafe reset` only rewrites the JSON record, so it
+  // cannot reach module memory. Only a server restart recovered it. Same shape as one
+  // `vf config typesafe test` invocation, and the probe bucket alone, so a probe can never refund
+  // the enforcement count.
+  resetCallBudget(TYPESAFE_BUDGET_BUCKET.PROBE);
   const probe = outcomeProbe();
   let attempted = false;
   const verdict = await withTypesafeGuard(

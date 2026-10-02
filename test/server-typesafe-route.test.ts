@@ -212,10 +212,11 @@ describe("handleTypesafeTestRoute", () => {
 
   test("pays the same call-budget toll as every other call site", async () => {
     // The probe used to call `judgeAssessment` directly, which left it outside the per-process
-    // call budget and outside the file-backed breaker — both live in `withTypesafeGuard`. A
-    // client holding the page token could therefore loop this route and issue unbounded billed
-    // requests, even while the breaker was open for every real call site. `maxCalls: 0` is the
-    // cheapest way to show the guard is on the path: the judge must not be reached at all.
+    // call budget and outside the file-backed breaker — both live in `withTypesafeGuard`. A client
+    // holding the page token could therefore loop this route issuing billed requests that never
+    // touched the breaker. `maxCalls: 0` is the cheapest way to show the budget is consulted on
+    // the path: the judge must not be reached at all. (The bucket restarts per click — see "every
+    // click is its own run" below — so `0` is also the only way a click is ever refused.)
     let reached = 0;
     const res = await handleTypesafeTestRoute({
       repo: REPO,
@@ -237,6 +238,32 @@ describe("handleTypesafeTestRoute", () => {
     // A refusal is not a judge failure: reporting one would send the user hunting for a key or
     // network problem that does not exist.
     expect(body.error).toBe("refused by the call budget or an open circuit breaker");
+  });
+
+  test("every click is its own run, so the budget never latches the button off", async () => {
+    // The server is long-lived and `resetCallBudget` had no production caller: after `maxCalls`
+    // (default 20) clicks EVER, "Test connection" answered "refused by the call budget or an open
+    // circuit breaker" for the rest of the process — and `vf config typesafe reset` only rewrites
+    // the JSON record, so it cannot reach module memory. Only a server restart recovered it. A
+    // click is a discrete operator action, exactly like one `vf config typesafe test` invocation,
+    // so 21 clicks must reach the judge 21 times.
+    let reached = 0;
+    for (let i = 0; i < 21; i++) {
+      const res = await handleTypesafeTestRoute({
+        repo: REPO,
+        expectRepo: REPO,
+        userRoot: root,
+        settings: settings(),
+        env: { TYPESAFE_API_KEY: KEY },
+        judge: async () => {
+          reached += 1;
+          return { covers: { score: 0.9, confidence: 0.8 } };
+        },
+      });
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    }
+    expect(reached).toBe(21);
   });
 
   test("returns the score, confidence and latency of a live probe", async () => {

@@ -541,4 +541,39 @@ describe("matrix (e) — the goal-coverage seam hands the judge config to the go
     expect(goalEvalOptions(undefined, retuned)).toBeNull();
     expect(goalEvalOptions("", retuned)).toBeNull();
   });
+
+  test("a judged request is the run: its options assembly starts a fresh budget", async () => {
+    // The budget is counted per PROCESS; the server process is not a run. Without a reset at the
+    // request boundary, after `maxCalls` goal-coverage calls EVER the seam fell through (judge
+    // silence, so the veto is gone with the UI still reading healthy) for the server's whole
+    // lifetime, with no in-process recovery. `handleVerifyRoute` assembles these options once per
+    // judged request, right before the chain that spends the budget.
+    const { goalEvalOptions } = await import("../src/server/routes-verify.js");
+    const { callsUsedThisRun, resetCallBudget } = await import("../src/typesafe-health.js");
+    const { typesafeGoalCoverageVerdict } = await import("../src/verify/typesafe-goal-coverage.js");
+    const { DEFAULT_TYPESAFE_SETTINGS } = await import("../src/typesafe-settings.js");
+    resetCallBudget();
+    const root = mkdtempSync(join(tmpdir(), "vf-matrix-e-"));
+    try {
+      const retuned = {
+        ...DEFAULT_TYPESAFE_SETTINGS,
+        enabled: true,
+        callSites: { ...DEFAULT_TYPESAFE_SETTINGS.callSites, goalCoverage: true },
+      };
+      await typesafeGoalCoverageVerdict({
+        goal: "ship the thing",
+        diff: "d",
+        userRoot: root,
+        settings: retuned,
+        env: { TYPESAFE_API_KEY: "test-key" },
+        judge: async () => ({ covers: { score: 0.9, confidence: 0.9 } }),
+      });
+      expect(callsUsedThisRun()).toBe(1); // the seam spent the budget
+      goalEvalOptions("ship the thing", retuned); // a new request assembles its judge options
+      expect(callsUsedThisRun()).toBe(0); // ...and starts on a fresh budget
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      resetCallBudget();
+    }
+  });
 });

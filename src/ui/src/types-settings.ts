@@ -216,9 +216,10 @@ export interface VibeSettings {
   curator?: CuratorSettings;
   /** System One (Jev) decision judge — optional, off by default. */
   /**
-   * The server reports the full coerced block here, not the four editable fields, and the save
-   * path posts the whole block back (it spreads `typesafeView.settings` first). Typing it as the
-   * four-field form under-described the payload.
+   * The server reports the full coerced block here (for DISPLAY), so this is the block type and not
+   * the four-field `TypesafeFormSettings`. The SAVE posts only those four fields — the write path
+   * re-coerces a partial block onto the STORED one, so echoing this snapshot back would revert
+   * anything changed elsewhere (e.g. `vf config typesafe model`).
    */
   typesafe?: TypesafeSettings;
   projectClassification?: ProjectClassificationPatch["projectClassification"];

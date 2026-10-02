@@ -233,13 +233,18 @@ The block is `.vibeflow/SETTINGS.json` -> `typesafe`, and it never carries the k
 | `failStreakLimit` | `2` | settings only |
 | `cooldownBaseMs` | `60000` | settings only |
 | `cooldownCapMs` | `900000` | settings only |
-| `maxCalls` | `20` | settings only; per process, counted in guard entries |
+| `maxCalls` | `20` | settings only; per process (a server request restarts its own bucket), counted in guard entries |
 | the four call-site toggles | all `true` | `vf config typesafe call-site <name> <on\|off>` |
 | `status`, `key`, `reset`, `test` | - | `vf config typesafe <sub>` |
 | `~/.vibeflow/typesafe.env`, `~/.vibeflow/typesafe-health.json` | - | paths, and the removal command below |
 
 `maxCalls` is counted in **guard entries**, not HTTP requests: the client retries once
 on a `network` or `server` failure, so the hard HTTP bound is `2 x maxCalls`.
+
+A long-lived `vf serve` process is not one run: `POST /api/verify?goal-eval=1` and
+`POST /api/typesafe/test` each restart their own bucket at the request boundary, so neither
+route latches off after its first `maxCalls` calls — the enforcement bucket and the probe
+bucket still never consume each other.
 
 ### The two clamps that keep the hook path alive
 

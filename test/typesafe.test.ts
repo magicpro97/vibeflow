@@ -420,6 +420,20 @@ describe("judgeEngineKey", () => {
     expect(await judgeEngineKey({ name: "u1" }, ["claude"], inject(engineBody))).toBeNull();
   });
 
+  test("a bare or below-floor answer is discarded, like every other seam", async () => {
+    // `judgeEngineKey` was the only judge with no confidence floor: a bare `{choice}` (confidence
+    // reads as zero) and `confidence: 0.01` both returned an engine, and the caller assigns
+    // `unit.engine` from it - a positive routing decision silently overriding the run-global
+    // `resolveEngine(flags)`. `judgeRisk` discards the identical answer at `runAtConfidence`.
+    const bare = { model: "m", answers: { engine: { type: "choice", choice: "codex" } } };
+    expect(await judgeEngineKey({ name: "u1" }, ["claude", "codex"], inject(bare))).toBeNull();
+    const unsure = {
+      model: "m",
+      answers: { engine: { type: "choice", choice: "codex", confidence: 0.01 } },
+    };
+    expect(await judgeEngineKey({ name: "u1" }, ["claude", "codex"], inject(unsure))).toBeNull();
+  });
+
   test("the unit spec travels in the state, and a missing one is spelled out", async () => {
     const seen: Array<{ state: string; criteria: Record<string, string | null> }> = [];
     const spy = async (_u: string, init: { body: string }) => {

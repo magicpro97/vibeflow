@@ -5,6 +5,7 @@
 import { collectVerifyReportAsync, defaultGoalEvalFn } from "../commands/tools-detect.js";
 import { readState } from "../core.js";
 import { readSettings } from "../settings.js";
+import { TYPESAFE_BUDGET_BUCKET, resetCallBudget } from "../typesafe-health.js";
 import { DEFAULT_TYPESAFE_SETTINGS, type TypesafeSettings } from "../typesafe-settings.js";
 
 /**
@@ -17,6 +18,11 @@ import { DEFAULT_TYPESAFE_SETTINGS, type TypesafeSettings } from "../typesafe-se
  *
  * Extracted and exported so a test can assert the wiring without running the whole gate chain,
  * which spawns typecheck and lint.
+ *
+ * This is also the request's RUN BOUNDARY for the call budget: the counter is per process
+ * (`src/typesafe-health.ts`), and `vf serve` is not a run - without this reset, after `maxCalls`
+ * judged requests EVER the seam fell through for the server's whole lifetime. `handleVerifyRoute`
+ * calls this once per request, immediately before the chain that spends the budget.
  */
 export function goalEvalOptions(
   goal: string | undefined,
@@ -27,6 +33,7 @@ export function goalEvalOptions(
   goalEvalInject: { typesafe: { settings: TypesafeSettings; env: NodeJS.ProcessEnv } };
 } | null {
   if (!goal) return null;
+  resetCallBudget(TYPESAFE_BUDGET_BUCKET.ENFORCEMENT);
   return {
     goal,
     goalEvalFn: defaultGoalEvalFn,

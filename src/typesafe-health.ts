@@ -160,8 +160,14 @@ export async function mutateHealth<T>(
  *  with no business touching the judge spend the ENFORCEMENT budget, after which every
  *  hook/verify/review call in that process returns `null` - the seam reports fall-through, the
  *  veto is gone, and `GET /api/typesafe` still reads `idle` because a budget stop returns before
- *  `record`. Separation means neither bucket can exhaust the other; each is still capped by the
- *  same `maxCalls`, so a probe cadence cannot run up an unbounded vendor bill either. */
+ *  `record`. Separation means neither bucket can exhaust the other.
+ *
+ *  A long-lived server is NOT a run. `vf serve` answers requests for days, so a counter that only
+ *  ever climbs would latch each seam off after its first `maxCalls` calls, for the server's whole
+ *  lifetime, with no in-process recovery (a JSON-only `vf config typesafe reset` cannot reach
+ *  module memory). The two server request boundaries therefore reset their own bucket at entry -
+ *  `goalEvalOptions` (one `POST /api/verify?goal-eval=1`) and `handleTypesafeTestRoute` (one tested
+ *  click) - which is exactly the shape of one CLI invocation each. */
 let callsThisRun = 0;
 let probeCallsThisRun = 0;
 export function callsUsedThisRun(): number {
@@ -170,9 +176,15 @@ export function callsUsedThisRun(): number {
 export function probeCallsUsedThisRun(): number {
   return probeCallsThisRun;
 }
-export function resetCallBudget(): void {
-  callsThisRun = 0;
-  probeCallsThisRun = 0;
+/** Zero one bucket, or both when no bucket is named.
+ *
+ *  Bucket-scoped because a reset is a REQUEST-boundary action: `POST /api/verify` restarts the
+ *  enforcement count without touching a probe in flight, and a "Test connection" click restarts
+ *  the probe count alone. Zeroing both from either route would let one route's boundary silently
+ *  refund the other's in-flight call. */
+export function resetCallBudget(bucket?: TypesafeBudgetBucket): void {
+  if (bucket === undefined || bucket === TYPESAFE_BUDGET_BUCKET.ENFORCEMENT) callsThisRun = 0;
+  if (bucket === undefined || bucket === TYPESAFE_BUDGET_BUCKET.PROBE) probeCallsThisRun = 0;
 }
 
 /** One line per TRANSITION (never per call), shaped by the user-facing error table. */
