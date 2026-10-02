@@ -82,7 +82,14 @@ export async function routeUnits(
     const routed = await withTypesafeGuard(
       "planner",
       // Explicit JudgeInject field list; never a `{ ...inject }` spread.
-      () => judgeFn(u, pool, { settings, env, timeoutMs, onOutcome: probe.onOutcome }),
+      () =>
+        judgeFn(u, pool, {
+          settings,
+          env,
+          timeoutMs,
+          onOutcome: probe.onOutcome,
+          ...(userRoot === undefined ? {} : { userRoot }),
+        }),
       {
         out: outBusOnly,
         tuning: tuningFor(settings),

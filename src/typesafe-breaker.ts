@@ -57,13 +57,19 @@ export const BREAKER_DEFAULTS: BreakerTuning = Object.freeze({
   maxCalls: 20,
 });
 
-/** Structural, NOT an import of src/typesafe-settings.ts (the isolation rule holds). */
-export function tuningFor(s: BreakerTuning): BreakerTuning {
+/** Structural, NOT an import of src/typesafe-settings.ts (the isolation rule holds).
+ *
+ *  Field-wise over `BREAKER_DEFAULTS`: a caller that hand-builds a `tuning` (the settings bridge
+ *  does, from a partial `TypesafeSettings`) previously had every missing field pass through as
+ *  `undefined`, and `cooldownMs = Math.min(undefined, ...)` is `NaN` - `new Date(now + NaN)`
+ *  throws a `RangeError` inside the locked update, which the lock helper swallows. The outcome was
+ *  then never recorded, the breaker never tripped, and nothing was logged. */
+export function tuningFor(s: Partial<BreakerTuning>): BreakerTuning {
   return {
-    failStreakLimit: s.failStreakLimit,
-    cooldownBaseMs: s.cooldownBaseMs,
-    cooldownCapMs: s.cooldownCapMs,
-    maxCalls: s.maxCalls,
+    failStreakLimit: s.failStreakLimit ?? BREAKER_DEFAULTS.failStreakLimit,
+    cooldownBaseMs: s.cooldownBaseMs ?? BREAKER_DEFAULTS.cooldownBaseMs,
+    cooldownCapMs: s.cooldownCapMs ?? BREAKER_DEFAULTS.cooldownCapMs,
+    maxCalls: s.maxCalls ?? BREAKER_DEFAULTS.maxCalls,
   };
 }
 

@@ -990,6 +990,45 @@ describe("guard integration contract (Task 2c)", () => {
     return judged ?? CALLER_FALLBACK;
   }
 
+  test("a classified failure nulls the answer, not just disabled/unconfigured", async () => {
+    // The guard's documented contract is that ANY classified failure returns null so the caller's
+    // pre-existing gate stays authoritative. Only disabled/unconfigured were nulled, so a `fn` that
+    // returned a value while its outcome reported SERVER/AUTH/etc. passed that value straight
+    // through - the last-line fail-open defence delegated to whichever helper called it.
+    for (const [cls, status] of [
+      [FAILURE_CLASS.SERVER, 500],
+      [FAILURE_CLASS.AUTH, 401],
+      [FAILURE_CLASS.BUDGET, 429],
+    ] as const) {
+      const inst = { userRoot: root(), now: () => T0 };
+      const result = await withTypesafeGuard<string>("reviewer", async () => "FAIL-THE-UNIT", {
+        ...inst,
+        outcome: () => ({ cls, status }),
+      });
+      expect(result, `${cls} must be refused`).toBeNull();
+      expect(readHealth(inst).last_class).toBe(cls);
+    }
+  });
+
+  test("a PARTIAL tuning falls back field-wise, never to NaN", async () => {
+    // `inject.tuning ?? BREAKER_DEFAULTS` was field-blind: a present-but-partial tuning made
+    // `cooldownMs = Math.min(undefined, ...)` NaN, `new Date(now + NaN)` threw a RangeError inside
+    // the locked update, and the lock helper swallowed it - so the outcome was never recorded and
+    // the breaker never tripped. Reproduced through the settings bridge, which hand-builds the
+    // tuning from a partial block.
+    const inst = { userRoot: root(), now: () => T0 };
+    for (let i = 0; i < 3; i++) {
+      await withTypesafeGuard("risk", async () => "ok", {
+        ...inst,
+        tuning: { failStreakLimit: 1 } as never,
+        outcome: () => ({ cls: FAILURE_CLASS.SERVER, status: 500 }),
+      });
+    }
+    const health = readHealth(inst);
+    expect(Number.isFinite(health.cooldown_ms)).toBe(true);
+    expect(health.fail_streak).toBeGreaterThan(0); // the outcome WAS recorded
+  });
+
   test("an open breaker refuses: null, fn never runs, the caller's fallback is authoritative", async () => {
     const inst = { userRoot: root(), now: () => T0 };
     await writeHealth(transition(readHealth(inst), FAILURE_CLASS.AUTH, T0, undefined, 401), inst);

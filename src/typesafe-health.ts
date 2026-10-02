@@ -89,6 +89,7 @@ import {
   allowCall,
   classifyThrown,
   transition,
+  tuningFor,
 } from "./typesafe-breaker.js";
 
 /** The machine's codec for the record on disk: encode, and decode anything unusable to idle. */
@@ -216,7 +217,7 @@ async function record(
   inject: GuardIo,
 ): Promise<void> {
   const at = (inject.now ?? Date.now)();
-  const tuning = inject.tuning ?? BREAKER_DEFAULTS;
+  const tuning = inject.tuning ? tuningFor(inject.tuning) : BREAKER_DEFAULTS;
   // `writeBudgetMs` bounds whether a WRITE starts, so it must be measured from the start of THIS
   // write leg — not from guard entry. Threading the guard's `startedAt` (which also covers the
   // judge round-trip, up to `hookTimeoutMs`) meant every judge call slower than the hook's 500 ms
@@ -300,11 +301,13 @@ export async function withTypesafeGuard<T>(
     const signal = inject.outcome?.();
     const cls = signal?.cls ?? FAILURE_CLASS.NONE;
     await record(caller, cls, signal?.status, now, io);
-    // `disabled` and `unconfigured` are REFUSALS, not answers: the call site that reported one
-    // had no key or no permission, so whatever `fn` returned is not a verdict the seam may act
-    // on. The record is still written (so `status` tells the truth) and the caller still gets the
-    // `null` that sends it down its pre-existing fallback.
-    if (cls === FAILURE_CLASS.DISABLED || cls === FAILURE_CLASS.UNCONFIGURED) return null;
+    // ANY classified failure is a REFUSAL, not an answer: `disabled`/`unconfigured` mean no key or
+    // no permission, and auth/budget/server/schema/malformed/network mean the judge could not
+    // answer. Whatever `fn` returned in those cases is not a verdict the seam may act on - treating
+    // only the first two as refusals delegated this last-line defence to each caller, so one helper
+    // returning a cached value would let a verdict through a failed call. The record is still
+    // written (so `status` tells the truth) and the caller gets the `null` for its fallback.
+    if (cls !== FAILURE_CLASS.NONE) return null;
     return value;
   } catch (err) {
     await record(caller, classifyThrown(err, inject.signal?.aborted ?? false), undefined, now, io);

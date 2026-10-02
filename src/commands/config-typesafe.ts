@@ -333,8 +333,16 @@ async function probe(
       return 2;
     }
     if (!attempted) {
-      print("TypeSafe: refused by the call budget or an open probe breaker");
-      return 1;
+      // `fn` never ran, so the guard refused: EITHER the judge is disabled OR the call budget/open
+      // breaker stopped it. `disabled` is the documented "safe to run before enabling" case and the
+      // one an operator hits first, so it is named before the breaker - a tripped breaker during an
+      // earlier enabled period made this unreadable when the two shared one message.
+      print(
+        settings.enabled
+          ? "TypeSafe: refused by the call budget or an open probe breaker"
+          : "TypeSafe: judge is disabled — run `vf config typesafe on` first",
+      );
+      return settings.enabled ? 1 : 2;
     }
     print("TypeSafe: request failed — check key/quota");
     return 1;
