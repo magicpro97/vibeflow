@@ -51,6 +51,7 @@ export async function typesafeGoalCoverageVerdict(input: {
         goal,
         timeoutMs,
         onOutcome: probe.onOutcome,
+        ...(userRoot === undefined ? {} : { userRoot }),
       }),
     {
       ...(userRoot === undefined ? {} : { userRoot }),

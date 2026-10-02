@@ -235,7 +235,13 @@ test("the cross-repo guard is wired at its production call site, not only as a p
   // The probe acts on the server's PROCESS-GLOBAL active repo too, so it needs the same staleness
   // guard Save has: without it, a probe clicked from a stale panel bills and reports against
   // whichever repo is active by then, under rows that describe the one it was opened for.
-  expect(drawer).toMatch(/:disabled="typesafeTesting[^"]*typesafeSaveBlocked\(\)"/);
+  const probeButton = /<button type="button" :disabled="([^"]*)" @click="testConnection"/.exec(
+    drawer,
+  );
+  expect(probeButton?.[1]).toContain("typesafeSaveBlocked()");
+  // The circuit banner says calls are refused while the circuit is open/half-open, so the button
+  // must agree with it instead of offering a click the server will refuse.
+  expect(probeButton?.[1]).toContain("typesafeView?.state === 'open'");
   expect(drawer).toContain('@click="saveTypesafe"');
 });
 

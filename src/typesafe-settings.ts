@@ -1,26 +1,3 @@
-import { randomBytes } from "node:crypto";
-import {
-  constants,
-  type Stats,
-  closeSync,
-  existsSync,
-  fchmodSync,
-  fstatSync,
-  fsyncSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-// The cross-platform private-file authority. Windows has no POSIX mode bits, so `chmod 0600`
-// is a no-op there and a mode-bit assertion passes without checking anything; these helpers ask
-// the DACL instead and migrate inherited ACEs to owner-only.
-import { ensurePrivateDirectory } from "./durability/path.js";
-import { hasPrivateMode } from "./durability/posix-fs-semantics.js";
 import type { VibeSettings } from "./settings.js";
 // src/typesafe-settings.ts
 //

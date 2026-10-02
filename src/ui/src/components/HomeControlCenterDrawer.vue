@@ -36,7 +36,7 @@
       </section>
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
-        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus === 'loading' || typesafeSaveBlocked()" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
+        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || typesafeSaveBlocked() || typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
         <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. Off by default: with it off every path behaves exactly as it does today.</p>
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
@@ -44,7 +44,7 @@
         <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — key missing: set the environment variable or run <code>vf config typesafe key</code>.</p>
         <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — calls are refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
         <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p>
-        <p v-if="typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
+        <p v-if="typesafeView && typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
 
         <dl v-if="typesafeView" class="home-control-list">
           <div><dt>enabled</dt><dd>{{ typesafeView.enabled ? "on" : "off" }}</dd></div>
@@ -56,16 +56,16 @@
           <div v-if="typesafeView.lastCall"><dt>last call</dt><dd>{{ typesafeView.lastCall.caller }} · {{ typesafeView.lastCall.status ?? "—" }} · {{ typesafeView.lastCall.ms }} ms</dd></div>
         </dl>
 
-        <label for="typesafe-enabled" class="home-control-toggle"><input id="typesafe-enabled" v-model="settingsForm.typesafe.enabled" type="checkbox" /><span><strong>Enable System One judge</strong><small>Off by default. The API key stays on the machine.</small></span></label>
+        <label for="typesafe-enabled" class="home-control-toggle"><input id="typesafe-enabled" v-model="settingsForm.typesafe.enabled" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>Enable System One judge</strong><small>Off by default. The API key stays on the machine.</small></span></label>
 
-        <label for="typesafe-run-threshold" class="home-control-field"><span>Run judge at confidence</span><input id="typesafe-run-threshold" v-model.number="settingsForm.typesafe.runAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" /></label>
-        <label for="typesafe-accept-threshold" class="home-control-field"><span>Accept verdict at confidence</span><input id="typesafe-accept-threshold" v-model.number="settingsForm.typesafe.acceptAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" /></label>
+        <label for="typesafe-run-threshold" class="home-control-field"><span>Run judge at confidence</span><input id="typesafe-run-threshold" v-model.number="settingsForm.typesafe.runAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
+        <label for="typesafe-accept-threshold" class="home-control-field"><span>Accept verdict at confidence</span><input id="typesafe-accept-threshold" v-model.number="settingsForm.typesafe.acceptAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
         <p v-if="thresholdError" id="typesafe-threshold-error" class="home-control-error" role="alert">{{ thresholdError }}</p>
 
-        <label for="typesafe-callsite-reviewer" class="home-control-toggle"><input id="typesafe-callsite-reviewer" v-model="settingsForm.typesafe.callSites.reviewer" type="checkbox" /><span><strong>reviewer</strong><small>Judge the unit diff before the engine reviewer.</small></span></label>
-        <label for="typesafe-callsite-risk" class="home-control-toggle"><input id="typesafe-callsite-risk" v-model="settingsForm.typesafe.callSites.risk" type="checkbox" /><span><strong>risk</strong><small>Raise the risk tier of a proposed shell command.</small></span></label>
-        <label for="typesafe-callsite-goalCoverage" class="home-control-toggle"><input id="typesafe-callsite-goalCoverage" v-model="settingsForm.typesafe.callSites.goalCoverage" type="checkbox" /><span><strong>goalCoverage</strong><small>Judge whether the change covers the goal.</small></span></label>
-        <label for="typesafe-callsite-planner" class="home-control-toggle"><input id="typesafe-callsite-planner" v-model="settingsForm.typesafe.callSites.planner" type="checkbox" /><span><strong>planner</strong><small>Suggest an engine for a work unit.</small></span></label>
+        <label for="typesafe-callsite-reviewer" class="home-control-toggle"><input id="typesafe-callsite-reviewer" v-model="settingsForm.typesafe.callSites.reviewer" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>reviewer</strong><small>Judge the unit diff before the engine reviewer.</small></span></label>
+        <label for="typesafe-callsite-risk" class="home-control-toggle"><input id="typesafe-callsite-risk" v-model="settingsForm.typesafe.callSites.risk" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>risk</strong><small>Raise the risk tier of a proposed shell command.</small></span></label>
+        <label for="typesafe-callsite-goalCoverage" class="home-control-toggle"><input id="typesafe-callsite-goalCoverage" v-model="settingsForm.typesafe.callSites.goalCoverage" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>goalCoverage</strong><small>Judge whether the change covers the goal.</small></span></label>
+        <label for="typesafe-callsite-planner" class="home-control-toggle"><input id="typesafe-callsite-planner" v-model="settingsForm.typesafe.callSites.planner" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>planner</strong><small>Suggest an engine for a work unit.</small></span></label>
 
         <p v-if="typesafeProbe" class="home-control-message" role="status" aria-live="polite">{{ typesafeProbe }}</p>
         <button class="home-control-save typesafe-save" type="button" :disabled="typesafeSaveBlocked()" @click="saveTypesafe">{{ saving ? "Saving…" : "Save System One settings" }}</button>
@@ -190,8 +190,6 @@ async function testConnection(): Promise<void> {
   if (typesafeTesting.value) return;
   const probed = typesafeView.value?.repo ?? ""; // also null in the error state: "responded for :"
   if (probed === "") return;
-  // This verdict's generation: `saveTypesafe`/`detect()` route through `loadTypesafe`, which bumps
-  // it, so a verdict issued BEFORE a save cannot paint over the confirmation with pre-save values.
   const seq = typesafeLoadSeq;
   typesafeTesting.value = true;
   try {
@@ -227,10 +225,10 @@ async function saveTypesafe(): Promise<void> {
     typesafeProbeRepo = "";
     typesafeError.value = "";
     const applied = await loadTypesafe(); // this section's OWN surface, not the shared `message` up top
-    if (applied) {
-      typesafeProbe.value = "System One settings saved.";
-      typesafeProbeRepo = typesafeRepo.value; // the rows' repo, which this load just stamped
-    }
+    typesafeProbe.value = applied
+      ? "System One settings saved."
+      : `System One settings saved, but these rows could not refresh — ${typesafeError.value}`;
+    typesafeProbeRepo = applied ? typesafeRepo.value : "";
   } catch (cause) {
     typesafeError.value = cause instanceof Error ? cause.message : "System One save failed";
     typesafeProbe.value = "";
@@ -278,7 +276,6 @@ async function detect(): Promise<void> {
   }
   if (reloadNeeded)
     await loadTypesafe(); // AFTER the flag: a blur here hits the re-entrancy guard
-  // A failed `api.detect` skips the reload above, leaving any error with no way to retry.
   else if (typesafeStatus.value === "error") await loadTypesafe();
 }
 

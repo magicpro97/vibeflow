@@ -101,11 +101,11 @@ test("a failed load clears the verdict, and the api union still forbids the bare
   expect(apiSrc).toContain("| { typesafe?: never; expectRepo?: string }");
 });
 
-test("the save confirmation only lands when the reload that follows it succeeded", () => {
-  // `loadTypesafe` resolves normally even when it takes its FAILURE arm (blank verdict, blank stamp,
-  // blank repo, `typesafeError` set), and the confirmation used to be written unconditionally after
-  // it - re-creating the "System One settings saved." under a "connection failed" double render,
-  // with a stamp naming a repo the blanked rows no longer describe.
+test("the save confirmation reports a failed refresh as a refresh failure, never as a failed save", () => {
+  // `loadTypesafe` resolves normally even when it takes its FAILURE arm (blank view, "error" status,
+  // `typesafeError` set), so the confirmation has to read `applied` rather than being written
+  // unconditionally: the bare GET error rendered as "connection failed" for a write that had
+  // SUCCEEDED, which read as a failed save and invited a duplicate.
   const drawer = readFileSync(
     new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
     "utf8",
@@ -113,10 +113,34 @@ test("the save confirmation only lands when the reload that follows it succeeded
   const at = drawer.indexOf("async function saveTypesafe");
   const nextFn = drawer.indexOf("\nfunction ", at + 1);
   const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
-  const gate = body.indexOf("if (applied)");
-  const confirm = body.indexOf('typesafeProbe.value = "System One settings saved.";');
-  expect(gate).toBeGreaterThan(-1);
-  expect(confirm).toBeGreaterThan(gate); // the confirmation sits inside the landing check
+  expect(body).toContain("const applied = await loadTypesafe()");
+  expect(body).toContain("typesafeProbe.value = applied");
+  expect(body).toContain("but these rows could not refresh");
+});
+
+test("every editable System One control is inert until the rows are ready", () => {
+  // The load replaces `settingsForm.typesafe` wholesale, so an edit made during the round-trip is
+  // discarded with no message. Gating only the buttons left all six inputs live; each now carries
+  // the same readiness guard.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  for (const id of [
+    "typesafe-enabled",
+    "typesafe-run-threshold",
+    "typesafe-accept-threshold",
+    "typesafe-callsite-reviewer",
+    "typesafe-callsite-risk",
+    "typesafe-callsite-goalCoverage",
+    "typesafe-callsite-planner",
+  ]) {
+    const input = new RegExp(`<input id="${id}"[^>]*/>`).exec(drawer);
+    expect(input, `${id} should be present`).not.toBeNull();
+    expect(input?.[0], `${id} must be gated on the rows being ready`).toContain(
+      ":disabled=\"typesafeStatus !== 'ready'\"",
+    );
+  }
 });
 
 test("only the latest load wins: the response is applied behind a generation token", () => {
