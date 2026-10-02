@@ -184,12 +184,13 @@ describe("live Windows typesafe hook path", () => {
       // Only the DACL answers the question on this platform, so the assertion goes through the
       // same authority the writer used - but the VERIFY leg of it, not the ensure leg.
       // `hasPrivateMode` routes to `windowsEnsurePrivateAcl`, which is repair-then-recheck: it
-      // catches the failed verdict, calls `migrateHandle`, re-runs the verdict and then returns
-      // true unconditionally. Asserting through it mutates the file it just created and then
-      // checks that the mutation worked, so a writer that stopped enforcing owner-only would still
-      // pass and this gate could not catch the regression it exists for. `windowsVerifyPathAcl`
-      // only reads. The descriptor is the identity witness: the check reopens the path, so binding
-      // it is what makes the answer about THIS object rather than whatever now holds that name.
+      // catches the failed verdict, calls `migrateHandle` and re-runs the verdict, so it REPAIRS on
+      // the way (it does return false when the verdict still fails after migration - that hard
+      // error is what SECURITY_MODEL.md means by "not a degradation"). Asserting through it would
+      // mutate the file it just created and then check that the mutation worked, so a writer that
+      // stopped enforcing owner-only would still pass and this gate could not catch the regression
+      // it exists for. `windowsVerifyPathAcl` only reads. The descriptor is the identity witness:
+      // the check reopens the path, so binding it is what makes the answer about THIS object.
       const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
         expect(

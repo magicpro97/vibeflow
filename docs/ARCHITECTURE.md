@@ -387,15 +387,17 @@ src/typesafe.ts                 # System One HTTP client + judgeAssessment / jud
 
 ## Optional System One judge
 
-An optional decision judge, off by default, consumed through four injected seams. The
+An optional decision judge, off by default, consumed by four call sites behind three judge
+seams (`judgeAssessment` is shared by `reviewer` and `goalCoverage`; one fail-open guard
+protects both). The
 dependency runs one way: `src/typesafe.ts` imports `typesafe-settings.ts` and
 `typesafe-health.ts`, never the reverse, so the modules a disabled run does load stay free
 of the HTTP client.
 
 ```text
 settings.typesafe.enabled && callSites.<site>   # evaluated BEFORE any seam is entered
-  └─ withTypesafeGuard()                        # breaker check, budget, audit; always returns null on failure
-       └─ dynamic import("../typesafe.js")      # the only socket; never evaluated on a disabled path
+  └─ dynamic import("../typesafe.js")           # the only socket; resolved before the guard, inside the gate
+       └─ withTypesafeGuard()                   # breaker check, budget, audit; always returns null on failure
             └─ systemOne()                      # one AbortSignal.timeout, retry only on network/server
                  └─ parseSystemOneResponse()    # typed validate; a bad body is null, never a partial verdict
 ```
