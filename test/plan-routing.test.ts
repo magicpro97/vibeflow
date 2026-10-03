@@ -255,6 +255,20 @@ describe("reviewer implementer resolution", () => {
     const mk = makeReviewer("cli", 0.8);
     expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("codex");
   });
+
+  test("a non-canonical unit engine never steers the reviewer", () => {
+    // `unit.engine` arrives from plan/state JSON (`WorkUnit.engine` is `Engine`, but the file
+    // can carry any string). `pickReviewerEngine` picks the first available engine that merely
+    // `!==` its `implementer`, so a foreign id silently loses the cross-review invariant (the
+    // reviewer could resolve back to the ACTUAL implementer). The seam must validate against
+    // `ENGINES` and fall back to the run-global pin.
+    const mk = makeReviewer("cli", 0.8, { implementer: "claude" });
+    expect(mk.__implementerFor({ ...unit("a"), engine: "not-an-engine" as never })).toBe("claude");
+    const bare = makeReviewer("cli", 0.8);
+    expect(
+      bare.__implementerFor({ ...unit("a"), engine: "not-an-engine" as never }),
+    ).toBeUndefined();
+  });
 });
 
 describe("the dispatch-routing preflight default", () => {

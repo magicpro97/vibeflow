@@ -68,10 +68,19 @@ export function makeReviewer(
   // only falls back to the run-global engine when the judge routed nothing — so a fail-open
   // planner stays byte-for-byte today's behaviour. ADR-001's cross-review invariant is
   // preserved either way: `resolveReviewerEngine` still avoids whatever this resolves to.
+  // `u.engine` is typed `Engine` but arrives from plan/state JSON (`readSettings`/ledger reads
+  // cast the file), so it is validated against the runtime authority before it can steer the
+  // reviewer: `pickReviewerEngine` returns the first available engine that merely `!==` its
+  // `implementer` (src/review-engine.ts:34), so a foreign id silently loses the ADR-001
+  // cross-review invariant. A non-canonical id falls back to the run-global pin.
+  const canonicalEngine = (engine: WorkUnit["engine"]): Engine | undefined =>
+    engine !== undefined && (ENGINES as readonly string[]).includes(engine)
+      ? (engine as Engine)
+      : undefined;
   const implementerFor = (u: WorkUnit): Engine | undefined =>
     settings.typesafe?.reviewerEngine === "global"
       ? inject?.implementer
-      : (u.engine ?? inject?.implementer);
+      : (canonicalEngine(u.engine) ?? inject?.implementer);
 
   const review = async (
     unit: WorkUnit,

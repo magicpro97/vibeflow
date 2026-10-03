@@ -49,7 +49,7 @@ import { scoreRisk } from "../hooks/risk.js";
 // by the `await import` inside the enabled gate in `integrateRiskJudge` (C27-c).
 import { hooksDisabled } from "../hooks/runner.js";
 import type { ResolvedHookPolicy } from "../hooks/templates.js";
-import { installLogbus, outBusOnly } from "../logbus.js";
+import { getLogbus, installLogbus, outBusOnly } from "../logbus.js";
 import type { VibeSettings } from "../settings.js";
 import { type HealthIo, outcomeProbe, tuningFor, withTypesafeGuard } from "../typesafe-health.js";
 import { userVibeflowDir } from "../typesafe-key-file.js";
@@ -158,21 +158,12 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
   ) {
     return undefined;
   }
-  // `installLogbus` is NOT fail-safe: `new Logbus(...)` runs mkdirSync / appendFileSync /
-  // chmodSync / statSync (src/logbus.ts:60-67) and throws on EROFS/EACCES/ENOSPC. `hook()`
-  // has no enclosing try, so an uncaught throw there escapes to the CLI, sets exitCode 1 and
-  // the local gate's verdict is never emitted — a `block` would silently become an allowed
-  // call. `lockRetries` is what keeps the audit leg inside the tool-call budget. Idempotent,
-  // and only on the enabled path: the disabled hook installs nothing.
-  try {
-    (inject.installLogbus ?? installLogbus)({
-      dir: join(base, CTX_DIR, "logs"),
-      lockRetries: hookBusLockRetries,
-    });
-  } catch {
-    // The audit sink degrades to a no-op; `outBusOnly` already no-ops on a null bus, so the
-    // breaker still records to the health file and the tool gate is unaffected.
-  }
+  // The bus install happens INSIDE the guarded lambda below, once `allowCall` has allowed the
+  // call: installing here (before the guard) replaced the process-wide bus even when the guard
+  // then REFUSED on budget/breaker — a side effect of a call that never happened. `installLogbus`
+  // is NOT fail-safe OR idempotent: `new Logbus(...)` runs mkdirSync / appendFileSync / chmodSync
+  // / statSync (src/logbus.ts:60-67), throws on EROFS/EACCES/ENOSPC, and stamps a fresh
+  // `runId` — which is why the DEFAULT install is additionally seeded-if-absent.
   // C27-c: the HTTP client module is evaluated ONLY here, inside the enabled gate — a disabled
   // hook, or `callSites.risk: false` above, never loads it. No try/catch: unlike `installLogbus`
   // (mkdir / appendFile / chmod at construction) a module import performs no I/O, so a load
@@ -188,15 +179,33 @@ export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJ
   const probe = outcomeProbe();
   const tier = await withTypesafeGuard(
     "risk",
-    () =>
-      judge(command, {
+    async () => {
+      // Only past `allowCall`, and (for the DEFAULT installer) only when no bus is active: an
+      // in-process caller's own routing must survive the seam rather than be replaced by a
+      // fresh runId (splitting one process's audit lines across two). An INJECTED installer is
+      // an explicit override and always runs — same contract as before (test doubles, embedders).
+      // `lockRetries` is what keeps the audit leg inside the tool-call budget; the catch keeps
+      // the audit sink degradable to a no-op (`outBusOnly` no-ops on a null bus, so the breaker
+      // still records to the health file and the tool gate is unaffected).
+      if (inject.installLogbus !== undefined || getLogbus() === null) {
+        try {
+          (inject.installLogbus ?? installLogbus)({
+            dir: join(base, CTX_DIR, "logs"),
+            lockRetries: hookBusLockRetries,
+          });
+        } catch {
+          // Degraded audit sink; the verdict is unaffected.
+        }
+      }
+      return judge(command, {
         settings: ts,
         env: inject.env ?? process.env,
         userRoot: healthIo.userRoot as string,
         timeoutMs: hookTimeoutMs,
         onOutcome: probe.onOutcome,
         ...(inject.fetchFn === undefined ? {} : { fetchFn: inject.fetchFn }),
-      }),
+      });
+    },
     // Transition lines only; the per-call audit record uses outBusOnly directly. `tuning`
     // MUST come from settings or the breaker ignores failStreakLimit/cooldown* entirely, and
     // `...healthIo` carries the two seam-passed disk bounds so the breaker's own I/O legs stay
