@@ -116,4 +116,15 @@ describe("the typesafe uninstall lists on the OTHER wiki pages", () => {
     expect(doc).toContain("POST /api/orchestrate");
     expect(doc).toContain("`dry: false`");
   });
+
+  test("the planner row does not promise an exclusion the routing seam cannot perform", () => {
+    // Round-80 review (ci longcat): the row said the planner's negative answer "may exclude
+    // engines from the ready pool" - but `routeUnits` (src/commands/orchestrate-routing.ts)
+    // only drops an answer it cannot admit and leaves `unit.engine` undefined (fail-open to
+    // `resolveEngine(flags)`); nothing ever shrinks the pool preflight produced. The claim
+    // also contradicted the fail-open paragraph earlier on the same page.
+    const doc = normalize(readFileSync(join(root, DOC), "utf8"));
+    expect(doc).not.toContain("exclude");
+    expect(doc).toContain("there is no negative that skips work: a failed or absent answer");
+  });
 });

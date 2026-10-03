@@ -57,7 +57,7 @@ Concretely, per call site: the judge's **negative** answer may short-circuit, an
 | `reviewer` | `pass: false` or a score below `judgePassLevel` returns the failing result without spawning the engine | `pass: true` **continues to the engine reviewer**; the engine verdict is authoritative and the agreement is only recorded as `judge.agreed` |
 | `goalCoverage` | `covered: false` is returned, so `vf verify` reports the goal uncovered | `covered: true` **continues to the `VIBEFLOW_AI` bridge**; the bridge answer is authoritative |
 | `risk` | n/a, there is no negative that skips work | raise-only through the existing strict `>` merge against the deterministic tier: a lower or equal tier is discarded |
-| `planner` | may **exclude** engines from the ready pool | may select **only among ready engines**, and a failed or absent answer leaves `unit.engine` undefined rather than defaulting to the first entry |
+| `planner` | n/a, there is no negative that skips work: a failed or absent answer leaves `unit.engine` undefined | may select **only among ready engines**, and a failed or absent answer leaves `unit.engine` undefined rather than defaulting to the first entry |
 
 `acceptAtConfidence` is therefore **not** a skip-the-engine boundary. It gates only
 whether the judge's *negative* answer is trusted enough to short-circuit early. No
