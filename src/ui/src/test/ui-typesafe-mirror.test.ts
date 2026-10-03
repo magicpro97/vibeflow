@@ -61,11 +61,13 @@ describe("the UI's System One types are a mirror, and this is what keeps it hone
     expect(members.length).toBeGreaterThan(0);
     const state = ui.match(/^\s{2}state: (.+);$/m)?.[1] ?? "";
     expect(state).not.toBe("string");
-    for (const member of members) expect(state).toContain(`"${member}"`);
+    const uiMembers = [...state.matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? "");
+    expect([...new Set(uiMembers)].sort()).toEqual([...new Set(members)].sort());
 
     // `lastClass` had the same exposure and did not get the same treatment: the union written into
     // the mirror was invented - four members the server cannot produce - and nothing checked it,
-    // because only `state` was held to the server.
+    // because only `state` was held to the server. Both pins compare whole sets now, so an extra
+    // member (the invented-union defect above) fails exactly like a missing one.
     const failures = health.slice(health.indexOf("FAILURE_CLASS = Object.freeze({"));
     const classes = [
       ...failures.slice(0, failures.indexOf("} as const")).matchAll(/: "([^"]+)"/g),
@@ -73,6 +75,7 @@ describe("the UI's System One types are a mirror, and this is what keeps it hone
     expect(classes.length).toBeGreaterThan(0);
     const lastClass = ui.match(/^\s{2}lastClass\?:\n([\s\S]*?);$/m)?.[1] ?? "";
     expect(lastClass).not.toBe("");
-    for (const member of classes) expect(lastClass).toContain(`"${member}"`);
+    const uiClasses = [...lastClass.matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? "");
+    expect([...new Set(uiClasses)].sort()).toEqual([...new Set(classes)].sort());
   });
 });
