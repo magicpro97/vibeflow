@@ -3,10 +3,12 @@
 // The browser never holds the key, so every assertion here is about what the
 // wire DOES NOT carry as much as what it does.
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeState } from "../src/core.js";
 import { UI_LAN_TOKEN_HEADER } from "../src/core/ui-cli-contract.js";
+import { outBusOnly } from "../src/logbus.js";
 import { startServer } from "../src/server.js";
 import {
   handleTypesafeReadRoute,
@@ -16,7 +18,7 @@ import {
 import { handleMutationRoute } from "../src/server/routes.js";
 import { type VibeSettings, readSettings } from "../src/settings.js";
 import { TYPESAFE_STATE } from "../src/typesafe-health-file.js";
-import { resetCallBudget } from "../src/typesafe-health.js";
+import { callsUsedThisRun, resetCallBudget, withTypesafeGuard } from "../src/typesafe-health.js";
 import type { TypesafeHealth } from "../src/typesafe-health.js";
 import {
   DEFAULT_TYPESAFE_SETTINGS,
@@ -495,5 +497,54 @@ describe("the probe names the repository it was read from", () => {
       env: {},
     } as never);
     expect(res.status).toBe(409);
+  });
+});
+
+describe("POST /api/orchestrate restarts the enforcement budget", () => {
+  test("a dispatched plan starts from a full budget, not the serve process's leftovers", async () => {
+    // `vf serve` is not one run: with no entry reset, the 21st hook/review/planner call EVER made
+    // in that process answered "refused by the call budget" for the rest of its life - a latch no
+    // in-process recovery could clear, since `vf config typesafe reset` only rewrites the JSON
+    // record. A dispatched plan is one run, exactly like one `vf orchestrate` CLI invocation, so
+    // the route resets the ENFORCEMENT bucket at entry.
+    resetCallBudget();
+    const burnRoot = mkdtempSync(join(tmpdir(), "vf-orchestrate-burn-"));
+    for (let i = 0; i < 3; i++) {
+      await withTypesafeGuard("planner", async () => i, { userRoot: burnRoot, out: outBusOnly });
+    }
+    expect(callsUsedThisRun()).toBe(3); // leftovers, exactly what the route must discard
+
+    const dir = mkdtempSync(join(tmpdir(), "vf-orchestrate-budget-"));
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    writeState(dir, {
+      task_id: "t",
+      goal: "g",
+      success_criteria: [],
+      work_units: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    } as never);
+
+    let seen = -1;
+    const req = new Request("http://127.0.0.1/api/orchestrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dry: true }),
+    });
+    const res = await handleMutationRoute(
+      {
+        getActiveRepo: () => dir,
+        setActiveRepo: () => {},
+        orchestrateFn: (async () => {
+          seen = callsUsedThisRun();
+          return { ok: true };
+        }) as never,
+      },
+      "POST",
+      "/api/orchestrate",
+      req,
+      new URL(req.url),
+    );
+    expect(res?.status).toBe(200);
+    expect(seen).toBe(0); // reset at the boundary: the plan's own run starts from full budget
   });
 });

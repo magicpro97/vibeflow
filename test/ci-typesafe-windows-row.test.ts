@@ -348,11 +348,13 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(body.indexOf("const elapsed = Date.now() - started;")).toBeGreaterThan(
       body.indexOf(spawnCall),
     );
-    // And the two assertions that prove the measured window was a real judge run, not just a fast
-    // one. The timing claim is empty if nothing shows the judge was consulted: replacing the audit
-    // log witness with `expect(true).toBe(true)` left every gate green (probe), and a win32
-    // regression in the arming/consult path would then pass a row that verified nothing.
-    expect(body).toContain('expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);');
+    // The two witnesses that the measured window was a real judge run, not just a fast one. The
+    // timing claim is empty if nothing shows the judge was consulted: a round-60 review found the
+    // OLD witness (`existsSync` on the audit log) proved only what `installLogbus` proves - it runs
+    // before the judge module is even imported, so the row stayed green with the judge call
+    // deleted. The witness is now the breaker's own record, which only exists if the guard ran.
+    expect(body).toContain('expect(health.last_call?.caller).toBe("risk");');
+    expect(body).toContain("expect(attemptedAt).toBeLessThanOrEqual(started + elapsed);");
     // The fail-open half: the shipped artifact must answer `allow` for a failing judge on a real
     // win32 runtime. The old pin was `not.toBe("block")`, which is VACUOUS - the envelope carries
     // "deny"/"ask"/"allow" and never the literal "block", so it passed even when the judge blocked
@@ -385,14 +387,16 @@ describe("the win32 gate is wired into both workflows", () => {
         .filter(
           (l) => l.length > 0 && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"),
         );
-    // 123 for the WHOLE file, then 46 and 31 for the two callback bodies. The whole-file count is
+    // 135 for the WHOLE file, then 59 and 31 for the two callback bodies. The whole-file count is
     // the one that covers module scope: the per-body numbers only see text after the first
     // `liveWindowsTest(`, so an early exit planted before the registrations - a platform guard at
     // module scope, say - changed nothing they measured. The comment here previously claimed the
     // pin "closes the class"; it did not, and a round-36 review found the exact line that escaped.
+    // (Round 60: the numbers moved with the witness/exit-status fix - and the comment then MISMATCHED
+    // the asserts beside it, which is what this comment rewrite is for.)
     // Changing any of these numbers means deliberately changing the live test.
-    expect(statementLines(body).length).toBe(124);
-    expect(chunks.map(statementLines).map((l) => l.length)).toEqual([47, 31]);
+    expect(statementLines(body).length).toBe(135);
+    expect(chunks.map(statementLines).map((l) => l.length)).toEqual([59, 31]);
 
     const assertions = [...body.matchAll(/^[ \t]*expect\(/gm)].map((m) => {
       // `callText` closes on the `)` of `expect(` itself; the MATCHER follows it, so read on to the
@@ -408,7 +412,10 @@ describe("the win32 gate is wired into both workflows", () => {
     });
     expect(assertions).toEqual([
       "expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);",
-      'expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);',
+      'expect(health.last_call?.caller).toBe("risk");',
+      "expect(Number.isFinite(attemptedAt)).toBe(true);",
+      "expect(attemptedAt).toBeGreaterThanOrEqual(started);",
+      "expect(attemptedAt).toBeLessThanOrEqual(started + elapsed);",
       "expect(out.hookSpecificOutput).toBeDefined();",
       'expect(out.hookSpecificOutput?.permissionDecision).toBe("allow");',
       "expect( windowsVerifyPathAcl(path, WINDOWS_AUTHORITY_PATH_KIND.FILE, { identity: descriptorIdentity(fd), }), ).toBe(true);",

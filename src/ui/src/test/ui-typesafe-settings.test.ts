@@ -343,12 +343,11 @@ test("the save names the repository its rows describe, so the server can refuse 
 
 test("the generic settings panel never carries the System One block into its form", () => {
   // That panel has no System One UI, and its `form` is a snapshot of the WHOLE settings taken when
-  // its dialog opened. The block used to ride along on BOTH of its save paths and, because
-  // `mergeTypesafeSettings` is replace-on-write on mere key presence, saving anything at all -
+  // its dialog opened - so the block rode along on BOTH of its save paths, and (because
+  // `mergeTypesafeSettings` is replace-on-write on mere key presence) saving anything at all -
   // Memory, toolPriority, or an envPolicy change through the preview/apply route - rewrote the
   // judge from a stale copy, into whichever repo was active by then. One projection at load covers
-  // both branches; a guard per branch would have to be repeated on the policy-apply route too,
-  // which does not go through the settings route at all.
+  // both branches; a per-branch guard would repeat on the policy-apply route, which it does not cover.
   //
   // The projection is a shared helper now (settings-form-helpers.ts) because the re-seed path
   // needed it too: `POST /api/settings` answers with the block present, so assigning that response
@@ -382,4 +381,20 @@ test("the System One save refusal renders on its own content", () => {
   const at = drawer.indexOf("typesafeError && typesafeStatus !== 'error'");
   expect(at).toBeGreaterThan(-1);
   expect(drawer.slice(at, at + 200)).toContain("{{ typesafeError }}");
+});
+
+test("coerceEditableDefaults never writes through its parameter", async () => {
+  // The panel seeds `original` with a clone of what it also hands to `coerceEditableDefaults`.
+  // While that helper merged IN PLACE it refilled the very object the clone existed to protect:
+  // `form` and `original` aliased the same nested `envPolicy`/`curator`, so the `JSON.stringify`
+  // dirty check read equal after an edit (no prompt for real edits) and unequal before one (a
+  // prompt with no edits) - wrong both ways, and invisible to any string pin about the SHAPE.
+  const { coerceEditableDefaults } = await import("../settings-form-helpers.js");
+  const api = { envPolicy: undefined, curator: undefined };
+  const out = coerceEditableDefaults(api as never);
+  expect(out).not.toBe(api);
+  expect(api.envPolicy).toBeUndefined();
+  expect(api.curator).toBeUndefined();
+  expect(out.envPolicy).toEqual({});
+  expect(out.curator?.severityThreshold).toBe("medium");
 });

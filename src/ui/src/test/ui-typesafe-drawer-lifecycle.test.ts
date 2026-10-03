@@ -186,3 +186,24 @@ test("the cross-repo stamp is taken from the server response, not the local path
   );
   expect(drawer).toContain("typesafeRepo.value = view.repo;");
 });
+
+test("the probe repaints the rows it just dirtied", () => {
+  // `testConnection` bills the PROBE bucket server-side and can open the probe breaker. The rows on
+  // screen were loaded BEFORE the click and still say idle/closed, so the detect button stayed
+  // enabled against an open breaker (and its cooldown never appeared) until a re-open. The reload
+  // sits after BOTH superseded guards (a discarded verdict triggers nothing), before the stamp
+  // (the TEXT is what is stamped), and after the `finally` - not inside it, or a superseded probe
+  // would reload the rows a newer load owns.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function testConnection");
+  const nextFn = drawer.indexOf("\nasync ", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  const guard = "if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return;";
+  const reloadAt = body.indexOf("await loadTypesafe();");
+  expect(reloadAt).toBeGreaterThan(-1);
+  expect(reloadAt).toBeGreaterThan(body.lastIndexOf(guard));
+  expect(reloadAt).toBeLessThan(body.indexOf("typesafeProbeRepo = probed;"));
+});

@@ -17,6 +17,7 @@ import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { writeGuidance } from "../dispatch/guidance.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
+import { TYPESAFE_BUDGET_BUCKET, resetCallBudget } from "../typesafe-health.js";
 import {
   type ConversationAskCompatibilityHttpAuthorityV1,
   handleConversationAskCompatibilityRoute,
@@ -204,11 +205,12 @@ export async function handleMutationRoute(
     }
     return Response.json({ ok: true, ...result });
   }
-
   if (path === "/api/orchestrate") {
     if (!readState(ctx.getActiveRepo())) {
       return Response.json({ error: "no workflow state — run init first" }, { status: 400 });
     }
+    // One plan dispatch is one run: the budget restarts, as in a fresh CLI process.
+    resetCallBudget(TYPESAFE_BUDGET_BUCKET.ENFORCEMENT);
     const engine = typeof payload.engine === "string" ? payload.engine : AGENT_ENGINE.CLAUDE;
     // Web dry:false selects a real run; acquisition still uses its injected approver.
     const dry = payload.dry !== false;

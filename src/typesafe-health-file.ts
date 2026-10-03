@@ -267,9 +267,9 @@ export const TYPESAFE_BUDGET_BUCKET = Object.freeze({
   PROBE: "probe",
   /** The goal-coverage seam (verify): the ONE enforcement call site an HTTP request boundary may
    *  spend. Its OWN counter, because the server must be able to restart the run it is about to
-   *  make without zeroing the counter the hook/review seams share — but the ENFORCEMENT record
-   *  file, because a failing goal call IS an enforcement failure (same outage signal, same
-   *  circuit, and only a genuine classified failure can open it). */
+   *  make without zeroing the counter the hook/review seams share. Its OWN record file as well: a
+   *  page token can LOOP the judged route, and every goal call is genuine — repeated ones opened
+   *  the shared circuit with no forgery at all, refusing every hook/review call for the cooldown. */
   GOAL_COVERAGE: "goal-coverage",
 } as const);
 export type TypesafeBudgetBucket =
@@ -284,19 +284,22 @@ export type TypesafeBudgetBucket =
  * token could therefore disable enforcement without spending a unit of the budget the counter split
  * was protecting. A diagnostic must not change the thing it diagnoses, so it keeps its own file.
  *
- * GOAL_COVERAGE deliberately SHARES the enforcement record: a failing goal call is an enforcement
- * failure — same vendor, same outage signal — so its streak belongs to the same circuit, exactly
- * where a CLI `vf verify` failure would land it. Nothing a page token can do can forge a
- * classified failure, so sharing the file adds no reach.
+ * GOAL_COVERAGE keeps its own file too. Sharing it was justified by "only a genuine classified
+ * failure can open the circuit, so sharing adds no reach" — wrong: no forgery is needed, because a
+ * page token can LOOP `POST /api/verify?goal-eval=1` until the shared circuit opens, and the hook
+ * and reviewer judges then read `open` and refuse for the whole cooldown. A seam that fails on its
+ * own bucket must not be able to veto the seams that hold the tool-call veto.
  */
 export const HEALTH_FILE_BY_BUCKET = Object.freeze({
   [TYPESAFE_BUDGET_BUCKET.ENFORCEMENT]: ENFORCEMENT_HEALTH_FILE,
   [TYPESAFE_BUDGET_BUCKET.PROBE]: "typesafe-health.probe.json",
-  [TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE]: ENFORCEMENT_HEALTH_FILE,
+  [TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE]: "typesafe-health.goal.json",
 } as const);
 
 /** The operator probe's own record - what `vf config typesafe status` shows as a separate section. */
 export const PROBE_HEALTH_FILE = HEALTH_FILE_BY_BUCKET[TYPESAFE_BUDGET_BUCKET.PROBE];
+/** The goal-coverage seam's own record, so a looped judged route cannot open the enforcement one. */
+export const GOAL_HEALTH_FILE = HEALTH_FILE_BY_BUCKET[TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE];
 
 /** Guard-internal: which record a bucket's reads and writes go to. */
 export const fileForBucket = (bucket: TypesafeBudgetBucket | undefined): string =>

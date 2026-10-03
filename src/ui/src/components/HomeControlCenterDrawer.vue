@@ -20,7 +20,7 @@
         <p class="home-control-note">Select CLI(s) for init and dispatch. Unchecked CLIs remain installed but VibeFlow will not use them.</p>
         <div class="home-control-engine-list">
           <label v-for="engine in engines" :key="engine" class="home-control-engine">
-            <input v-model="enabledEngines" type="checkbox" :value="engine" @change="saveEnabledEngines" />
+            <input v-model="enabledEngines" type="checkbox" :value="engine" @change="saveSettings" />
             <span><strong>{{ engine }}</strong><small>{{ detection?.engines[engine] ? "initialized" : "not initialized" }} · {{ detection?.clis[engine] ? "CLI ready" : "CLI unavailable" }}</small></span>
             <i :data-ready="detection?.clis[engine] === true" />
           </label>
@@ -208,6 +208,9 @@ async function testConnection(): Promise<void> {
   } finally {
     typesafeTesting.value = false;
   }
+  // The probe spends budget and can trip the PROBE breaker server-side: the rows loaded before the
+  // click describe the pre-probe world, so re-read them (the button's gate reads that state).
+  await loadTypesafe();
   typesafeProbeRepo = probed; // stamped with the TEXT, never with the pending probe
 }
 
@@ -303,10 +306,6 @@ async function initialize(withAi: boolean): Promise<void> {
   } finally {
     busy.value = false;
   }
-}
-
-async function saveEnabledEngines(): Promise<void> {
-  await saveSettings();
 }
 
 async function saveSettings(): Promise<void> {

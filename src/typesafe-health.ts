@@ -26,6 +26,7 @@
 // one way), so it stays testable in isolation and the disabled path never loads the HTTP client.
 import { LOG_CHANNEL, LOG_LEVEL, type LogChannel } from "./core/log-contract.js";
 export {
+  GOAL_HEALTH_FILE,
   PROBE_HEALTH_FILE,
   TYPESAFE_BUDGET_BUCKET,
   type TypesafeBudgetBucket,
@@ -169,10 +170,11 @@ export async function mutateHealth<T>(
  *  A long-lived server is NOT a run. `vf serve` answers requests for days, so a counter that only
  *  ever climbs would latch each seam off after its first `maxCalls` calls, for the server's whole
  *  lifetime, with no in-process recovery (a JSON-only `vf config typesafe reset` cannot reach
- *  module memory). The two server request boundaries therefore reset their own bucket at entry -
- *  `goalEvalOptions` (one `POST /api/verify?goal-eval=1`, the GOAL_COVERAGE bucket) and
- *  `handleTypesafeTestRoute` (one tested click, the PROBE bucket) - which is exactly the shape of
- *  one CLI invocation each. */
+ *  module memory). Each server request boundary therefore resets the bucket IT is about to spend,
+ *  at entry - `goalEvalOptions` (one `POST /api/verify?goal-eval=1`, the GOAL_COVERAGE bucket),
+ *  `handleTypesafeTestRoute` (one tested click, the PROBE bucket), and the orchestrate route
+ *  (one dispatched plan, the ENFORCEMENT bucket the planner/reviewer seams spend) - which is
+ *  exactly the shape of one CLI invocation each. */
 let callsThisRun = 0;
 let probeCallsThisRun = 0;
 let goalCallsThisRun = 0;
@@ -190,8 +192,10 @@ export function goalCallsUsedThisRun(): number {
  *
  *  Bucket-scoped because a reset is a REQUEST-boundary action: `POST /api/verify` restarts the
  *  goal-coverage count without touching a probe in flight or the enforcement count the hook/review
- *  seams share, and a "Test connection" click restarts the probe count alone. Zeroing another
- *  bucket from a route would let one route's boundary silently refund the other's in-flight call. */
+ *  seams share, a "Test connection" click restarts the probe count alone, and the orchestrate
+ *  route restarts the enforcement count alone for the plan it is about to dispatch. Zeroing
+ *  another bucket from a route would let one route's boundary silently refund the other's
+ *  in-flight call. */
 export function resetCallBudget(bucket?: TypesafeBudgetBucket): void {
   if (bucket === undefined || bucket === TYPESAFE_BUDGET_BUCKET.ENFORCEMENT) callsThisRun = 0;
   if (bucket === undefined || bucket === TYPESAFE_BUDGET_BUCKET.PROBE) probeCallsThisRun = 0;

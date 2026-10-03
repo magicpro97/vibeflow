@@ -18,6 +18,7 @@ import {
   FAILURE_CLASS,
   FAILURE_CLASSES,
   type FailureClass,
+  GOAL_HEALTH_FILE,
   PROBE_HEALTH_FILE,
   TYPESAFE_BUDGET_BUCKET,
   TYPESAFE_STATE,
@@ -26,6 +27,7 @@ import {
   callsUsedThisRun,
   classifyHttp,
   classifyThrown,
+  goalCallsUsedThisRun,
   isFailureClass,
   isTypesafeHealth,
   mutateHealth,
@@ -1354,6 +1356,52 @@ describe("a probe cannot open the enforcement circuit", () => {
     for (let i = 0; i < 4; i++) await withTypesafeGuard("probe", boom, probeIo);
     // The probe's own record did absorb them: its leg refuses now.
     expect(await withTypesafeGuard("probe", async () => 7, probeIo)).toBeNull();
+    // And enforcement never saw a single one of those failures.
+    expect(
+      await withTypesafeGuard("reviewer", async () => 1, {
+        userRoot: root,
+        out: outBusOnly,
+        tuning,
+      }),
+    ).toBe(1);
+  });
+});
+
+describe("a looped goal-eval route cannot open the enforcement circuit", () => {
+  // A page token holder can LOOP `POST /api/verify?goal-eval=1` without forging anything: every
+  // call is a genuine goal-coverage judgement. While the goal seam shared the enforcement RECORD,
+  // its failures tripped the shared breaker, and for the whole cooldown every hook/review call
+  // refused and fell through with no judge - the tool-call veto silently reported "no seam".
+  test("a goal-eval record stores the GOAL counter, never the enforcement one", async () => {
+    resetCallBudget();
+    const inst = { userRoot: mkdtempSync(join(tmpdir(), "typesafe-goal-count-")) };
+    const goalIo = { ...inst, bucket: TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE } as never;
+    await withTypesafeGuard("goal", async () => ({ ok: true }), goalIo);
+    const goal = readHealth({ ...inst, healthFile: GOAL_HEALTH_FILE });
+    expect(goal.calls).toBe(goalCallsUsedThisRun());
+    expect(goal.calls).toBe(1); // the goal seam's own charge, not the enforcement counter's 0
+    // And the enforcement record was not written by that call at all: no `last_call` was stamped
+    // into it, so nothing about the goal seam leaks into what the hook/review seams read.
+    expect(readHealth(inst).last_call).toBeUndefined();
+  });
+
+  test("goal-eval failures leave the enforcement breaker closed for hook and review calls", async () => {
+    resetCallBudget();
+    const root = mkdtempSync(join(tmpdir(), "typesafe-goal-breaker-"));
+    const tuning = { ...BREAKER_DEFAULTS, failStreakLimit: 2 };
+    const boom = async () => {
+      throw new Error("vendor unavailable");
+    };
+    const goalIo = {
+      userRoot: root,
+      out: outBusOnly,
+      tuning,
+      bucket: TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE,
+      outcome: () => ({ cls: FAILURE_CLASS.SERVER }),
+    };
+    for (let i = 0; i < 4; i++) await withTypesafeGuard("goal", boom, goalIo);
+    // The goal seam's own record absorbed them: its leg refuses now.
+    expect(await withTypesafeGuard("goal", async () => 7, goalIo)).toBeNull();
     // And enforcement never saw a single one of those failures.
     expect(
       await withTypesafeGuard("reviewer", async () => 1, {

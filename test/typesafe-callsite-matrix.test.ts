@@ -34,6 +34,7 @@ import type { EngineReadiness } from "../src/preflight.js";
 import { type VibeSettings, readSettings } from "../src/settings.js";
 import {
   FAILURE_CLASS,
+  GOAL_HEALTH_FILE,
   TYPESAFE_STATE,
   readHealth,
   resetCallBudget,
@@ -409,8 +410,8 @@ describe("matrix (e) — C05: a SETTINGS.json retune reaches EVERY call site", (
   // test too — a clamp that silently rewrote 5000 to 60_000 would show up here.
   const RETUNED = { enabled: true, failStreakLimit: 1, cooldownBaseMs: 5000 };
 
-  const openedAfterOneFailure = () => {
-    const h = readHealth({ userRoot });
+  const openedAfterOneFailure = (healthFile?: string) => {
+    const h = readHealth(healthFile === undefined ? { userRoot } : { userRoot, healthFile });
     expect(h.state).toBe(TYPESAFE_STATE.OPEN);
     expect(h.fail_streak).toBe(1);
     expect(h.cooldown_ms).toBe(5000);
@@ -441,7 +442,13 @@ describe("matrix (e) — C05: a SETTINGS.json retune reaches EVERY call site", (
     delete process.env.VIBEFLOW_AI;
     const ts = settingsWithTypesafe(RETUNED).typesafe;
     await callGoal(ts, exploding());
-    openedAfterOneFailure();
+    // The goal seam's record, not the enforcement one: since round 60 the goal bucket keeps its
+    // OWN file, so the retune has to reach THIS seam's record (a dropped `tuning` here leaves it
+    // `idle` at BREAKER_DEFAULTS). Reading the enforcement file would assert the round-59 world
+    // where a page token looping goal-eval opened the shared circuit the hook vetoes behind.
+    openedAfterOneFailure(GOAL_HEALTH_FILE);
+    // And enforcement never saw it: nothing a goal-eval loop does may veto hook/review calls.
+    expect(readHealth({ userRoot }).state).toBe(TYPESAFE_STATE.IDLE);
   });
 
   test("planner", async () => {

@@ -47,15 +47,18 @@ export function withoutTypesafe(settings: VibeSettings): Omit<VibeSettings, "typ
  * `VibeSettings` cast inside makes that write impossible to spell.
  */
 export function coerceEditableDefaults(value: ManagedSettings): ManagedSettings {
-  const out: ManagedSettings = value;
-  if (!out.envPolicy) out.envPolicy = {};
-  if (!out.curator) {
-    out.curator = {
+  // Returns a NEW object: the parameter may be the API cache (or an object aliased into the form),
+  // and writing into it here would refill the baseline the caller's `clone` exists to protect -
+  // making `form` and `original` share nested `envPolicy`/`curator` objects, which defeats the
+  // `JSON.stringify` dirty check in BOTH directions. Pure, so no caller can alias its way in.
+  return {
+    ...value,
+    envPolicy: value.envPolicy ?? {},
+    curator: value.curator ?? {
       enabled: false,
       observeMode: true,
       schedule: "0 9 * * 1",
       severityThreshold: "medium",
-    };
-  }
-  return out;
+    },
+  };
 }

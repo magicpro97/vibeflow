@@ -22,7 +22,6 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   constants,
   closeSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -121,20 +120,43 @@ describe("live Windows typesafe hook path", () => {
               tool: "Bash",
               command: "curl https://example.com",
             }),
-            timeout: 20_000,
+            // Well past the budget: a HANG and a slow run must be different failures. At the old
+            // 20 s a hung child surfaced as `elapsed = 20000` - "budget violated" for a process
+            // that never finished - and a loaded `windows-latest` cold start could flake the row
+            // red on a correct judge.
+            timeout: 60_000,
           },
         );
+        // A non-zero exit or a spawn error is reported with the child's stderr, so a broken run is
+        // diagnosable instead of arriving as a timing number.
+        if (run.error || run.status !== 0) {
+          throw new Error(
+            `hook child did not finish cleanly: status=${run.status} error=${run.error?.message ?? "-"}\nstderr tail: ${run.stderr.toString().slice(-800)}`,
+          );
+        }
         const elapsed = Date.now() - started;
         // The hook path's whole contract is this number: past 10000 ms the adapter's non-zero exit
         // becomes a blocked tool call, so a fail-open judge that runs slow has blocked a call it is
         // not allowed to block.
         expect(elapsed).toBeLessThan(HOOK_BUDGET_MS);
-        // The audit leg is the only witness that the judge was really inside the measured window.
-        // `installLogbus` runs inside `integrateRiskJudge` AFTER all four gate conditions pass
-        // (src/commands/hook-risk-integration.ts), and it is installed "on the enabled path only:
-        // the disabled hook installs nothing" - so this file existing separates "the judge ran"
-        // from "the payload short-circuited before it".
-        expect(existsSync(join(ctxDir, "logs", "current.log"))).toBe(true);
+        // The witness that the judge was really inside the measured window is the breaker's OWN
+        // record: `withTypesafeGuard` stamps `last_call = {at, caller: "risk", ms}` into the health
+        // file on EVERY attempt - success or fail-open - so a win32 regression that deletes,
+        // short-circuits or reorders the `judge(...)` call leaves it absent. The previous witness
+        // (`logs/current.log` exists) proved only what `installLogbus` proves: it runs BEFORE the
+        // judge module is even imported, so its file exists with the judge call removed - the row
+        // stayed green for the failure mode it names.
+        const health = JSON.parse(readFileSync(join(root, "typesafe-health.json"), "utf8")) as {
+          last_call?: { caller?: string; at?: string; ms?: number };
+        };
+        expect(health.last_call?.caller).toBe("risk");
+        const attemptedAt = Date.parse(health.last_call?.at ?? "");
+        expect(Number.isFinite(attemptedAt)).toBe(true);
+        // And it sits INSIDE the window this test measured: the spawn began at `started`, the
+        // attempt happened before the child exited, so a stamp from any other run (a previous
+        // test's root, say) cannot satisfy this.
+        expect(attemptedAt).toBeGreaterThanOrEqual(started);
+        expect(attemptedAt).toBeLessThanOrEqual(started + elapsed);
         // The verdict itself. A well-formed payload is answered in the host's native shape, so
         // `permissionDecision` is where the decision lives; reading only the flat `decision` field
         // would compare `undefined` against a verdict and pass without checking anything.

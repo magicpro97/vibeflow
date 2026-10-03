@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { collectVerifyReportAsync, defaultGoalEvalFn } from "../src/commands/tools-detect.js";
 import { runWaiverGate } from "../src/commands/waiver-gate.js";
 import { CTX_DIR, readState, writeState } from "../src/core.js";
-import { readHealth, resetCallBudget } from "../src/typesafe-health.js";
+import { GOAL_HEALTH_FILE, readHealth, resetCallBudget } from "../src/typesafe-health.js";
 import { DEFAULT_TYPESAFE_SETTINGS, type TypesafeSettings } from "../src/typesafe-settings.js";
 
 // Async-only: the route uses collectVerifyReportAsync (non-blocking); the old
@@ -584,7 +584,11 @@ describe("defaultGoalEvalFn — System One escalate-only seam", () => {
       },
     });
     expect(result.covered).toBe(true);
-    expect(readHealth({ userRoot }).fail_streak).toBe(1);
+    // The goal seam's OWN record carries the streak: since round 60 this bucket keeps a separate
+    // file, so the enforcement record (read without `healthFile`) is not where it lands - and a
+    // goal eval must never be able to touch what the hook/review judges read.
+    expect(readHealth({ userRoot, healthFile: GOAL_HEALTH_FILE }).fail_streak).toBe(1);
+    expect(readHealth({ userRoot }).fail_streak).toBe(0);
   });
 
   test("judge null → bridge path unchanged", async () => {
