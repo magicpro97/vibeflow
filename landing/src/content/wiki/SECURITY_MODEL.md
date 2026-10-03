@@ -403,14 +403,17 @@ where mode bits are meaningless, by a verified and migrated **owner-only DACL**:
 is a **hard error**, not a degradation, because a printed warning would be a
 trust-boundary check that passes while the key sits readable by other accounts.
 
-**Three artifacts, all outside the repository.** `~/.vibeflow/typesafe.env` holds the key;
+**Four artifacts, all outside the repository.** `~/.vibeflow/typesafe.env` holds the key;
 `~/.vibeflow/typesafe-health.json` holds the file-backed circuit breaker plus a
-`last_call` audit record and never the key, never payload text; and
+`last_call` audit record and never the key, never payload text;
+`~/.vibeflow/typesafe-health.goal.json` holds the GOAL bucket's record, in its own file so a
+looped judged route (`POST /api/verify?goal-eval=1`) can never open the breaker the hook and
+review seams veto behind; and
 `~/.vibeflow/typesafe-health.probe.json` holds the OPERATOR probe's own record, kept in a
 separate file so a passing `vf config typesafe test` cannot clear the enforcement breaker. A
 **disabled** run creates none of them and not the directory. Uninstall is
 `vf config typesafe off` followed by
-`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe.env`
+`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe-health.goal.json ~/.vibeflow/typesafe.env`
 (`vf config typesafe status` prints that command with the resolved paths).
 
 ## Spawned engine env scrub

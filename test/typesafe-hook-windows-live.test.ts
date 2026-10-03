@@ -230,7 +230,14 @@ describe("live Windows typesafe hook path", () => {
       } finally {
         closeSync(fd);
       }
-      expect(readFileSync(path, "utf8")).toContain("TYPESAFE_API_KEY=");
+      // Segment-compared, never whole-file: `toContain(readFileSync(...))` renders the file's
+      // contents into the failure message - the secret-to-error-string path this contract forbids -
+      // and the prefix-only form stayed green for a writer that stored an EMPTY value. The boolean
+      // forms keep the raw line out of any failure output while proving the exact fake key
+      // round-tripped (round-72 review, ci SB).
+      const [keyLine] = readFileSync(path, "utf8").split(/\r?\n/);
+      expect(keyLine?.startsWith("TYPESAFE_API_KEY=")).toBe(true);
+      expect(keyLine?.slice("TYPESAFE_API_KEY=".length) === "not-a-real-key").toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -399,4 +399,24 @@ describe("the hook seam module", () => {
     );
     expect(src).not.toMatch(/^import .* from "node:os";$/m);
   });
+
+  test("bounds the confidence floor for a hand-built settings block", async () => {
+    // Round-72 review (api SB F2): the seam re-clamped the two timing ceilings but handed
+    // `judgeRisk` the RAW block, whose `runAtConfidence` floor is read with `<` - a NaN there is
+    // false for EVERY answer, silently disabling the discard gate for any caller that injects a
+    // hand-built block through `hook({ typesafe })` (never ran `coerceTypesafeSettings`). The
+    // seam now coerces once; the judge must observe bounded values, never the raw dial.
+    const seen: Array<number | undefined> = [];
+    for (const dial of [Number.NaN, 7, -3]) {
+      await runHook({
+        typesafe: enabledSettings({ runAtConfidence: dial }),
+        command: "wget http://x",
+        judgeRisk: async (_command: string, inject?: { settings?: TypesafeSettings }) => {
+          seen.push(inject?.settings?.runAtConfidence);
+          return RISK_LEVEL.LOW;
+        },
+      });
+    }
+    expect(seen).toEqual([DEFAULT_TYPESAFE_SETTINGS.runAtConfidence, 1, 0]);
+  });
 });

@@ -163,8 +163,9 @@ async function loadTypesafe(): Promise<boolean> {
       callSites: { ...view.callSites },
     };
     validateThresholds();
+    typesafeError.value = ""; // this GET settled: hand back any sibling's failure text
     // biome-ignore format: the stamp falls WITH its verdict; one line keeps the pair atomic under the cap
-    if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) { typesafeProbe.value = ""; typesafeProbeRepo = ""; }
+    if (typesafeProbeRepo !== view.repo && (typesafeProbeRepo !== "" || typesafeProbe.value !== "")) { typesafeProbe.value = ""; typesafeProbeRepo = ""; }
     typesafeRepo.value = view.repo; // from the RESPONSE: `repoPath` is live text and would lie
     typesafeStatus.value = "ready";
     return true;
@@ -172,8 +173,7 @@ async function loadTypesafe(): Promise<boolean> {
     if (seq !== typesafeLoadSeq) return false;
     typesafeView.value = null;
     typesafeStatus.value = "error";
-    typesafeProbe.value = ""; // else it renders below the "connection failed" line
-    typesafeProbeRepo = "";
+    [typesafeProbe.value, typesafeProbeRepo] = ["", ""]; // else the verdict renders below the "connection failed" line
     typesafeError.value = cause instanceof Error ? cause.message : "unreachable";
     return false;
   }

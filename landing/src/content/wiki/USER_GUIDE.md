@@ -593,5 +593,5 @@ To stop it, per call site or entirely:
 ```bash
 vf config typesafe call-site risk off     # stop shell commands leaving the machine
 vf config typesafe off                    # stop all four
-rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe.env   # remove all three artifacts
+rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe-health.goal.json ~/.vibeflow/typesafe.env   # remove all four artifacts
 ```

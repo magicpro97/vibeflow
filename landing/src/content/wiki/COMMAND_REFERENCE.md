@@ -438,7 +438,7 @@ and in `ps` output.
 `test` exits `0` on a healthy probe, `2` when no key resolves and when the judge is disabled,
 and `1` when the request failed. `reset` clears the breaker but is **not** uninstall; the
 documented uninstall is `vf config typesafe off` followed by
-`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe.env`.
+`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe-health.goal.json ~/.vibeflow/typesafe.env`.
 
 ## Skills (demand-driven)
 

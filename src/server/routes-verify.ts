@@ -25,6 +25,10 @@ import { DEFAULT_TYPESAFE_SETTINGS, type TypesafeSettings } from "../typesafe-se
  * GOAL_COVERAGE bucket, NOT the enforcement one: the two seams share the enforcement counter, so
  * zeroing that here would refund budget this request never spent - a mounted route could re-arm
  * calls a drained run must refuse (see `resetCallBudget`'s note).
+ *
+ * This reset is also what makes the per-process `maxCalls` ceiling unreachable on this route —
+ * by design: a judged request IS its run, the page token is the operator's own, and the breaker
+ * stays the guard for failing calls (round-72 review; mirrors routes-typesafe.ts).
  */
 export function goalEvalOptions(
   goal: string | undefined,

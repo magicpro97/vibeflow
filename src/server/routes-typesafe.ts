@@ -229,6 +229,12 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   // cannot reach module memory. Only a server restart recovered it. Same shape as one
   // `vf config typesafe test` invocation, and the probe bucket alone, so a probe can never refund
   // the enforcement count.
+  // Round-72 review (api SB): this reset is what makes the per-process `maxCalls` ceiling
+  // unreachable ON THIS ROUTE — by design, not by omission. A request IS its run (the point of
+  // the reset above); the loop bound a script would need is the one the operator already has by
+  // running `vf config typesafe test` in a loop, the operator holds this page token, and the
+  // breaker remains the guard for FAILING calls. A wall-clock rate limit is a new control this
+  // contract never carried.
   resetCallBudget(TYPESAFE_BUDGET_BUCKET.PROBE);
   const probe = outcomeProbe();
   let attempted = false;

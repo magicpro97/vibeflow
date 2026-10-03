@@ -56,6 +56,7 @@ import {
   HOOK_BUS_LOCK_RETRIES_MAX,
   HOOK_HEALTH_WRITE_BUDGET_MS,
   HOOK_TIMEOUT_CAP_MS,
+  coerceTypesafeSettings,
   isTypesafeEnabled,
 } from "../typesafe-settings.js";
 import type { TypesafeSettings } from "../typesafe-settings.js";
@@ -103,7 +104,14 @@ export interface RiskJudgeDeps {
 export async function integrateRiskJudge(deps: RiskJudgeDeps): Promise<SemanticJudge | undefined> {
   const { input, settings, base } = deps;
   const inject = deps.inject ?? {};
-  const ts = settings.typesafe;
+  // Coerce ONCE, at the seam's trust boundary: every read below (the two re-clamps, `tuningFor`,
+  // and `judgeRisk`'s `runAtConfidence` floor) then works off a BOUNDED object. The stored block
+  // is already coerced, so this is idempotent for it; a hand-built `settings.typesafe` (a test, a
+  // future embedder - never ran `coerceTypesafeSettings`) previously smuggled raw dials through
+  // the reads the two re-clamps below do NOT cover: a `NaN` floor made `answer < floor` false for
+  // EVERY judged answer, silently dropping the discard gate this seam exists to hold (round-72
+  // review). Bounds live in ONE authority (`coerceTypesafeSettings`), never re-derived here.
+  const ts = coerceTypesafeSettings(settings.typesafe);
   // Re-apply BOTH ceilings here, exactly as the coercion does
   // (`Math.min(out.hookTimeoutMs, HOOK_TIMEOUT_CAP_MS, out.timeoutMs)`): a
   // `settings.typesafe` built by hand (a test, a future caller) never went through

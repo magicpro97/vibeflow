@@ -30,9 +30,20 @@ test("a stale verdict does not outlive a successful reload", () => {
   // wipe never fired and repo A's verdict stayed beside repo B's rows. The wipe clears the STAMP
   // with the verdict (round 64): leaving the old-repo stamp made its own reload eat the next
   // verdict, so both refs fall together.
+  // Round-72 (ui mimo): the condition is REVERSED and widened. Reversed because an EMPTY stamp
+  // (`""` - the unstamped refresh-failure verdict) never matched the old first clause, so it
+  // survived its own reload forever; widened so the stamp also falls when the verdict TEXT is
+  // already empty and only the stamp ref is stale. The wipe keeps both refs on one
+  // `biome-ignore format` line under the file cap; the shared-cause clear sits on its own line
+  // in the same arm, so a sibling's failure text cannot ride a successful reload.
   expect(body).toContain(
-    'if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) { typesafeProbe.value = ""; typesafeProbeRepo = ""; }',
+    'if (typesafeProbeRepo !== view.repo && (typesafeProbeRepo !== "" || typesafeProbe.value !== "")) { typesafeProbe.value = ""; typesafeProbeRepo = ""; }',
   );
+  // The success-arm clear is the round-72 fix itself: seek it AFTER the rows landed, not merely
+  // anywhere in the function (the pre-await clear would satisfy a bare containment check).
+  expect(
+    body.indexOf('typesafeError.value = "";', body.indexOf("typesafeView.value = view;")),
+  ).toBeGreaterThan(-1);
   const awaitAt = body.indexOf("await api.typesafe.view()");
   const clearAt = body.indexOf("typesafeProbeRepo !== view.repo");
   expect(awaitAt).toBeGreaterThan(-1);
@@ -178,7 +189,9 @@ test("the repo wipe drops the verdict's stamp too", () => {
   const at = drawer.indexOf("async function loadTypesafe");
   const nextFn = drawer.indexOf("\nasync function", at + 1);
   const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
-  const wipeAt = body.indexOf('if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo)');
+  const wipeAt = body.indexOf(
+    'if (typesafeProbeRepo !== view.repo && (typesafeProbeRepo !== "" || typesafeProbe.value !== ""))',
+  );
   expect(wipeAt).toBeGreaterThan(-1);
   const wipe = body.slice(wipeAt, body.indexOf("\n", wipeAt));
   expect(wipe).toContain('typesafeProbe.value = ""');
@@ -274,4 +287,23 @@ test("a sibling surface's failure does not flip a settled System One section", (
   const at = drawer.indexOf("async function load(): Promise<void>");
   const body = drawer.slice(at, drawer.indexOf("async function detect", at));
   expect(body).toContain('if (typesafeStatus.value !== "loading") return;');
+});
+
+test("a load that settles after a sibling failure hands back the shared cause", () => {
+  // Round-72 review (ui mimo): `load()`'s catch stamps the section when a sibling (`/api/skills`
+  // 500) rejects WHILE the typesafe GET is still in flight, and the section cleared its message
+  // only BEFORE its await - so it settled `ready` with healthy rows while still rendering the
+  // sibling's error under its own heading. The success arm now clears it; and the refresh-failure
+  // stamp (imprinted with NO repo) also falls once rows refresh: repo-scoping alone kept it for
+  // the empty stamp forever.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("typesafeView.value = view;");
+  const arm = drawer.slice(at, drawer.indexOf('typesafeStatus.value = "ready";', at));
+  expect(arm).toContain('typesafeError.value = "";');
+  expect(arm).toContain(
+    'if (typesafeProbeRepo !== view.repo && (typesafeProbeRepo !== "" || typesafeProbe.value !== ""))',
+  );
 });

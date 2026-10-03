@@ -199,8 +199,12 @@ describe("the win32 gate is wired into both workflows", () => {
     // leg while every per-step assertion above still matches, and `needs.windows.result` stays
     // success. The job is unconditional by design, so any job-level `if:` is the gate being shut.
     expect(jobBlock(ci, "windows")).not.toMatch(/^ {4}if:/m);
-    // The aggregate the release gate reads must still exist, or a green row decides nothing.
-    expect(commentFree(ci)).toContain("WINDOWS_RESULT: ${{ needs.windows.result }}");
+    // The aggregate the release gate reads must still exist AND sit in the job that reads it:
+    // whole-file matching kept this green when the env block moved to any other job, where the
+    // script then reads `unset` and the pin still passed (round-72 review, ci SB).
+    expect(jobBlock(ci, "release-prerequisites")).toContain(
+      "WINDOWS_RESULT: ${{ needs.windows.result }}",
+    );
     // The mapping is not the gate: `release-please` is gated by the list the script CHECKS, so a
     // `WINDOWS_RESULT` deleted from `names=[...]` (ci.yml:314) left every assertion green while the
     // release job was gated without the windows result - the "green gate, zero win32 evidence"
@@ -250,8 +254,13 @@ describe("the win32 gate is wired into both workflows", () => {
     expect(jobBlock(release, "release-prerequisites")).toMatch(
       /^ {10}if \(\$env:WINDOWS_RESULT -ne "success"\) \{ throw "windows result: \$env:WINDOWS_RESULT" \}$/m,
     );
-    // The aggregate the release decision reads is the job result, so the job must exist.
-    expect(commentFree(release)).toContain("WINDOWS_RESULT");
+    // The aggregate the release decision reads is the job result, so the JOB THAT READS IT must
+    // carry it: whole-file matching stayed green when the env block moved out of
+    // `release-prerequisites`, where the pwsh guard would then read an unset variable
+    // (round-72 review, ci SB).
+    expect(jobBlock(release, "release-prerequisites")).toContain(
+      "WINDOWS_RESULT: ${{ needs.windows-owned-process.result }}",
+    );
     // The row is only loud because the JOB runs on Windows and hands the live test its arming env.
     // Move either to another job and the platform selector becomes `test.skip`, the module-scope
     // guard has no env to fire on, and the whole thing reports success with 2 skips while both
@@ -387,16 +396,18 @@ describe("the win32 gate is wired into both workflows", () => {
         .filter(
           (l) => l.length > 0 && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"),
         );
-    // 135 for the WHOLE file, then 59 and 31 for the two callback bodies. The whole-file count is
+    // 137 for the WHOLE file, then 59 and 33 for the two callback bodies. The whole-file count is
     // the one that covers module scope: the per-body numbers only see text after the first
     // `liveWindowsTest(`, so an early exit planted before the registrations - a platform guard at
     // module scope, say - changed nothing they measured. The comment here previously claimed the
     // pin "closes the class"; it did not, and a round-36 review found the exact line that escaped.
     // (Round 60: the numbers moved with the witness/exit-status fix - and the comment then MISMATCHED
-    // the asserts beside it, which is what this comment rewrite is for.)
+    // the asserts beside it, which is what this comment rewrite is for. Round 72: +2 with the
+    // segment-compared key assertion, which replaced one whole-file `toContain` with a declaration
+    // and two boolean compares.)
     // Changing any of these numbers means deliberately changing the live test.
-    expect(statementLines(body).length).toBe(135);
-    expect(chunks.map(statementLines).map((l) => l.length)).toEqual([59, 31]);
+    expect(statementLines(body).length).toBe(137);
+    expect(chunks.map(statementLines).map((l) => l.length)).toEqual([59, 33]);
 
     const assertions = [...body.matchAll(/^[ \t]*expect\(/gm)].map((m) => {
       // `callText` closes on the `)` of `expect(` itself; the MATCHER follows it, so read on to the
@@ -419,7 +430,8 @@ describe("the win32 gate is wired into both workflows", () => {
       "expect(out.hookSpecificOutput).toBeDefined();",
       'expect(out.hookSpecificOutput?.permissionDecision).toBe("allow");',
       "expect( windowsVerifyPathAcl(path, WINDOWS_AUTHORITY_PATH_KIND.FILE, { identity: descriptorIdentity(fd), }), ).toBe(true);",
-      'expect(readFileSync(path, "utf8")).toContain("TYPESAFE_API_KEY=");',
+      'expect(keyLine?.startsWith("TYPESAFE_API_KEY=")).toBe(true);',
+      'expect(keyLine?.slice("TYPESAFE_API_KEY=".length) === "not-a-real-key").toBe(true);',
       // The DACL claim, which is multi-line - the previous line-only regex never saw it, so the
       // "closes the class" claim was half true, which is the round-25 finding.
     ]);

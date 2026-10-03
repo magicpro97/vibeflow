@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 // Anchored to THIS file, not the process: sibling suites legitimately `chdir` into temp repos, and a
@@ -71,5 +71,37 @@ describe("docs/TYPESAFE.md contract", () => {
     expect(doc).toContain("leaves four files");
     expect(doc).not.toContain("leaves three files");
     expect(doc).not.toContain("names all three paths");
+  });
+});
+
+describe("the typesafe uninstall lists on the OTHER wiki pages", () => {
+  test("anything that lists the probe record also lists the goal bucket's", () => {
+    // Round-72 review (ci mimo): `typesafe-health.goal.json` was added in fc3f1a31 and three
+    // pages - SECURITY_MODEL, COMMAND_REFERENCE, USER_GUIDE - kept a 3-file `rm -f` under
+    // "remove all three artifacts", while docs/TYPESAFE.md and the CLI both said four. An
+    // operator following them left the GOAL bucket record behind after an uninstall.
+    const dir = join(root, "docs");
+    const listing = readdirSync(dir)
+      .filter((f) => f.endsWith(".md"))
+      .filter((f) => readFileSync(join(dir, f), "utf8").includes("typesafe-health.probe.json"));
+    // The pages this contract exists for must be IN the scan: a rename that emptied the loop
+    // would otherwise leave this pin green over nothing.
+    expect(listing).toEqual(
+      expect.arrayContaining(["SECURITY_MODEL.md", "COMMAND_REFERENCE.md", "USER_GUIDE.md"]),
+    );
+    for (const page of listing) {
+      const doc = normalize(readFileSync(join(dir, page), "utf8"));
+      expect(doc).toContain("typesafe-health.goal.json");
+      expect(/\bthree (artifacts|files)\b/i.test(doc)).toBe(false);
+    }
+  });
+
+  test("those pages mirror into the landing wiki byte-identically", () => {
+    for (const page of ["SECURITY_MODEL.md", "COMMAND_REFERENCE.md", "USER_GUIDE.md"]) {
+      const mirror = normalize(
+        readFileSync(join(root, "landing", "src", "content", "wiki", page), "utf8"),
+      );
+      expect(mirror).toBe(normalize(readFileSync(join(root, "docs", page), "utf8")));
+    }
   });
 });
