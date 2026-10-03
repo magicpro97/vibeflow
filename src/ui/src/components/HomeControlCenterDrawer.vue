@@ -171,7 +171,8 @@ async function loadTypesafe(): Promise<boolean> {
       callSites: { ...view.callSites },
     };
     validateThresholds();
-    if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) typesafeProbe.value = "";
+    // biome-ignore format: the stamp falls WITH its verdict; one line keeps the pair atomic under the cap
+    if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) { typesafeProbe.value = ""; typesafeProbeRepo = ""; }
     typesafeRepo.value = view.repo; // from the RESPONSE: `repoPath` is live text and would lie
     typesafeStatus.value = "ready";
     return true;

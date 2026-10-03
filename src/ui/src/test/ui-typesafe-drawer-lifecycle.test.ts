@@ -27,9 +27,11 @@ test("a stale verdict does not outlive a successful reload", () => {
   expect(body).toContain('typesafeError.value = "";');
   // The comparison is against the INCOMING `view.repo`, and it sits AFTER the `await`: comparing
   // before it read the PREVIOUS repo, which equals `typesafeProbeRepo` by construction, so the
-  // wipe never fired and repo A's verdict stayed beside repo B's rows.
+  // wipe never fired and repo A's verdict stayed beside repo B's rows. The wipe clears the STAMP
+  // with the verdict (round 64): leaving the old-repo stamp made its own reload eat the next
+  // verdict, so both refs fall together.
   expect(body).toContain(
-    'if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) typesafeProbe.value = "";',
+    'if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo) { typesafeProbe.value = ""; typesafeProbeRepo = ""; }',
   );
   const awaitAt = body.indexOf("await api.typesafe.view()");
   const clearAt = body.indexOf("typesafeProbeRepo !== view.repo");
@@ -160,6 +162,27 @@ test("only the latest load wins: the response is applied behind a generation tok
   expect([...body.matchAll(/if \(seq !== typesafeLoadSeq\) return false;/g)]).toHaveLength(2);
   expect(body).not.toContain("typesafeView.value = await api.typesafe.view()");
   expect(drawer).toContain("let typesafeLoadSeq = 0;");
+});
+
+test("the repo wipe drops the verdict's stamp too", () => {
+  // Round-64 (ui, medium, reproduced): the wipe cleared the verdict string but LEFT the stamp, so
+  // after a repo change that fired the wipe the stamp still named the old repo. The next probe of
+  // the NEW repo painted its verdict, and `testConnection`'s own reload then discarded it (the
+  // stale stamp != incoming `view.repo`, so the wipe inside the reload fired again) - a silent
+  // no-verdict, no-error dead end for the operator. Enumerate the wipe's effects: it must write
+  // BOTH refs, or the reload it triggers eats the next verdict.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function loadTypesafe");
+  const nextFn = drawer.indexOf("\nasync function", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  const wipeAt = body.indexOf('if (typesafeProbeRepo !== "" && typesafeProbeRepo !== view.repo)');
+  expect(wipeAt).toBeGreaterThan(-1);
+  const wipe = body.slice(wipeAt, body.indexOf("\n", wipeAt));
+  expect(wipe).toContain('typesafeProbe.value = ""');
+  expect(wipe).toContain('typesafeProbeRepo = ""');
 });
 
 test("a re-open that detect() already reloaded does not fire a second GET", () => {
