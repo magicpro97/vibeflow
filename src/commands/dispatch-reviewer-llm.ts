@@ -114,6 +114,8 @@ export async function runLLMReview(opts: LLMReviewOpts): Promise<LLMReviewResult
   // below is the one that carries the judge's recorded (non-authoritative) opinion.
   let recorded: { model: string; ms: number; confidence: number; saidPass?: boolean } | undefined;
   const { judge, settings, env, userRoot } = opts.typesafe ?? {};
+  // `timeoutMs` arrives COERCED (500-10 000 ms): the only production caller forwards
+  // `readSettings` output (`dispatch-reviewer.ts`); a hand-built block is its embedder's contract.
   const timeoutMs = settings?.timeoutMs;
   if (settings?.enabled && settings.callSites.reviewer && timeoutMs !== undefined) {
     // C27-c: `src/typesafe.ts` (the HTTP client) is evaluated ONLY here, inside the gate — a

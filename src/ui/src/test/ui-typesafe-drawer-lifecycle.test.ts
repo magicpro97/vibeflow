@@ -261,3 +261,17 @@ test("a failed settings load does not leave the section loading forever", () => 
   expect(body.slice(catchAt)).toContain('typesafeStatus.value = "error";');
   expect(body.slice(catchAt)).toContain("typesafeError.value = error.value;");
 });
+
+test("a sibling surface's failure does not flip a settled System One section", () => {
+  // Round-69 F (ui SB + ui mimo): the catch used to stamp the section for ANY failure in
+  // `load()` - a `/api/skills` 500 rendered "System One connection failed - <skills error>"
+  // over a judge that answered fine, locked every input and blocked saves. Only a section
+  // still `loading` is stuck and needs the surface; a settled one keeps its own state + cause.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function load(): Promise<void>");
+  const body = drawer.slice(at, drawer.indexOf("async function detect", at));
+  expect(body).toContain('if (typesafeStatus.value !== "loading") return;');
+});

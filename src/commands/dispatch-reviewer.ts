@@ -13,11 +13,11 @@ import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
 import type { UnitOutcome } from "../orchestrator/run.js";
 import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
 import { readSettings } from "../settings.js";
-import { DEFAULT_TYPESAFE_SETTINGS } from "../typesafe-settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS, isTypesafeEnabled } from "../typesafe-settings.js";
 import { out } from "./_shared.js";
 import type { Engine, Reviewer } from "./_shared.js";
 import { type DiffReader, analyzeDiff, defaultDiffReader } from "./dispatch-diff.js";
-import { getUnitDiff, runLLMReview } from "./dispatch-reviewer-llm.js";
+import { getUnitDiffResult, runLLMReview } from "./dispatch-reviewer-llm.js";
 
 /** The reviewer plus its per-unit implementer seam: the ADR-001 cross-review pick depends on
  *  it, so it is exposed (and asserted) rather than buried in a closure. */
@@ -66,9 +66,10 @@ export function makeReviewer(
   // Task 7: per-unit routing means the run-global `implementer` pin is no longer the whole
   // story. `reviewerEngine: "global"` (opt-out) keeps it; the default follows the unit and
   // only falls back to the run-global engine when the judge routed nothing. An install with NO
-  // `typesafe` block at all resolves to `"global"` (coerce never ran): it never opted in, so
-  // an engine-annotated unit (state written while the judge was on, a hand-edited ledger) must
-  // not silently re-route its reviewer - the off path stays byte-for-byte today's behaviour.
+  // `typesafe` block at all resolves to `"global"` (coerce never ran), and so does a block the
+  // operator switched off or whose `reviewer` call site is off: the off path stays byte-for-byte
+  // today's behaviour, so an engine-annotated unit (state written while the judge was on, a
+  // hand-edited ledger) must not silently re-route its reviewer once the judge is off.
   // ADR-001's cross-review invariant is preserved either way: `resolveReviewerEngine` still
   // avoids whatever this resolves to. `u.engine` is typed `Engine` but arrives from plan/state
   // JSON (`readSettings`/ledger reads cast the file), so it is validated against the runtime
@@ -81,6 +82,8 @@ export function makeReviewer(
       ? (engine as Engine)
       : undefined;
   const implementerFor = (u: WorkUnit): Engine | undefined =>
+    isTypesafeEnabled(settings) &&
+    settings.typesafe?.callSites.reviewer === true &&
     settings.typesafe?.reviewerEngine === "unit"
       ? (canonicalEngine(u.engine) ?? inject?.implementer)
       : inject?.implementer;
@@ -137,7 +140,10 @@ export function makeReviewer(
 
     // ADR-001 phase 2: LLM review after local gate passes.
     if (inject?.goal && (llmReviewFn || autoLlmReview)) {
-      const llmDiff = getUnitDiff(cwd, unit.scope ?? []);
+      // An unreadable diff (git failure, missing HEAD~1 in a shallow clone) is NOT an empty
+      // change: a read failure must never reach a judge verdict and block a unit that passed
+      // every local gate - fail-open; the caller's own gates stay authoritative.
+      const { diff: llmDiff, ok: llmDiffOk } = getUnitDiffResult(cwd, unit.scope ?? []);
       const llmResult = await runLLMReview({
         goal: inject.goal,
         spec: unit.spec,
@@ -150,11 +156,15 @@ export function makeReviewer(
         // `userRoot` travels with them: the guard's record is file-backed, so a reviewer run
         // must be able to isolate (or point) the breaker root the same way the hook and
         // goal-coverage seams already do. Omitting it silently wrote to `~/.vibeflow`.
-        typesafe: {
-          settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS,
-          env: process.env,
-          ...(inject?.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
-        },
+        ...(llmDiffOk
+          ? {
+              typesafe: {
+                settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS,
+                env: process.env,
+                ...(inject?.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
+              },
+            }
+          : {}),
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
         // Task 7: the implementer is the UNIT's engine when the planner routed one (or the

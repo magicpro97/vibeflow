@@ -175,7 +175,7 @@ clear `cooldown_until` early, or reset `consecutive_trips`.
 | `off` | not enabled, or the call site is toggled off; no request is made and the judge returns `null` | `vf config typesafe on` and enabling the call site |
 | `unconfigured` | enabled but no key resolves; no request is made | `vf config typesafe key`, or setting `TYPESAFE_API_KEY` |
 | `idle` | healthy, breaker closed, requests allowed | any failure moves the streak up |
-| `open` | breaker tripped; calls short-circuit and **no HTTP is made** until the cooldown elapses | the cooldown elapsing moves it to `half-open`; `vf config typesafe reset` or a passing probe moves it to `idle` |
+| `open` | breaker tripped; calls short-circuit and **no HTTP is made** until the cooldown elapses | the cooldown elapsing moves it to `half-open`; `vf config typesafe reset`, or the half-open probe succeeding on the next enforcement caller, moves it to `idle` |
 | `half-open` | exactly **one** probe request is allowed, for the next caller; concurrent callers short-circuit to `null` | probe success moves it to `idle`; probe failure re-opens with a doubled cooldown |
 
 Failure classification:

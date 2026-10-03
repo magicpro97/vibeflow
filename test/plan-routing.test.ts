@@ -229,13 +229,16 @@ describe("reviewer implementer resolution", () => {
   // The seam reads the repo's settings ONCE per `makeReviewer` (via `cwd`), so every test pins an
   // explicit base directory: defaulting to `process.cwd()` silently read whatever this repo had
   // saved, and left "no block at all" indistinguishable from "opted in".
-  const judgeBase = (reviewerEngine?: "unit" | "global"): string => {
+  const judgeBase = (
+    reviewerEngine?: "unit" | "global",
+    extra?: Record<string, unknown>, // raw block fields written verbatim (e.g. an off switch)
+  ): string => {
     const base = mkdtempSync(join(tmpdir(), "vf-reviewer-"));
     mkdirSync(join(base, ".vibeflow"), { recursive: true });
     writeFileSync(
       join(base, ".vibeflow", "SETTINGS.json"),
       JSON.stringify({
-        typesafe: reviewerEngine ? { enabled: true, reviewerEngine } : { enabled: true },
+        typesafe: { enabled: true, ...(reviewerEngine ? { reviewerEngine } : {}), ...extra },
       }),
     );
     return base;
@@ -312,6 +315,32 @@ describe("reviewer implementer resolution", () => {
       expect(
         bare.__implementerFor({ ...unit("a"), engine: "not-an-engine" as never }),
       ).toBeUndefined();
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("the off switch keeps an engine-annotated unit on the run-global reviewer", () => {
+    // Round-69 F (api SB + api mimo): `coerceTypesafeSettings` keeps `reviewerEngine: "unit"`
+    // for any stored object, so `vf config typesafe off` - which preserves the block - still
+    // re-routed via `implementerFor`. The documented off path must be byte-for-byte the
+    // run-global behaviour regardless of what the unit (or a hand-edited ledger) carries.
+    const base = judgeBase("unit", { enabled: false });
+    try {
+      const mk = makeReviewer("cli", 0.8, { implementer: "claude", cwd: base });
+      expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("claude");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("a reviewer call site switched off keeps the run-global reviewer too", () => {
+    // The seam itself re-checks `callSites.reviewer` and stands down, so routing must resolve
+    // the SAME way: an off call site means the unit's engine never steers the cross-review.
+    const base = judgeBase("unit", { callSites: { reviewer: false } });
+    try {
+      const mk = makeReviewer("cli", 0.8, { implementer: "claude", cwd: base });
+      expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("claude");
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

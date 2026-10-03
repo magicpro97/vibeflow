@@ -254,6 +254,7 @@ async function load(): Promise<void> {
     await Promise.all([loadSkills(), loadCapabilities(), ...(reloaded ? [] : [loadTypesafe()])]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load control center";
+    if (typesafeStatus.value !== "loading") return; // only a still-loading section is stuck
     typesafeStatus.value = "error"; // else the spinner + disabled controls outlive the failure
     typesafeError.value = error.value; // the shared cause, shown in this section too
   }

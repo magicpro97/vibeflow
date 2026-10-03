@@ -19,7 +19,8 @@
 //    fail-open destination, and a developer machine with the bridge set would make the
 //    fail-open assertion assert the wrong thing.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLLMReview } from "../src/commands/dispatch-reviewer-llm.js";
@@ -620,6 +621,18 @@ describe("matrix (g) — the reviewer maker binds its seam to the injected healt
         join(base, ".vibeflow", "SETTINGS.json"),
         JSON.stringify({ typesafe: { enabled: true } }),
       );
+      // A readable HEAD~1 diff: the seam stands the judge down when the diff cannot be read
+      // (round-69), so this pin needs a real two-commit repo to reach the forwarding path.
+      const git = (...args: string[]): void => void execFileSync("git", args, { cwd: base });
+      git("init", "-q");
+      git("config", "user.email", "matrix@test");
+      git("config", "user.name", "matrix");
+      writeFileSync(join(base, "seed.txt"), "seed\n");
+      git("add", "-A");
+      git("commit", "-qm", "one");
+      writeFileSync(join(base, "seed.txt"), "seed two\n");
+      git("add", "-A");
+      git("commit", "-qm", "two");
       const review = makeReviewer("cli", 0.8, {
         cwd: base,
         goal: "ship the thing",
@@ -638,6 +651,45 @@ describe("matrix (g) — the reviewer maker binds its seam to the injected healt
         last_call: { caller: string };
       };
       expect(record.last_call.caller).toBe("reviewer");
+    } finally {
+      if (savedKey === undefined) Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY");
+      else process.env.TYPESAFE_API_KEY = savedKey;
+      rmSync(base, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('an unreadable unit diff stands the judge down instead of reviewing ""', async () => {
+    // Round-69 F (api/mimo): the seam fed `getUnitDiff`'s git-failure fallback ("") straight
+    // into the judge, so a shallow clone or missing HEAD~1 was judged as an empty change - a
+    // read failure reached a judge verdict and could block a unit that passed every local
+    // gate. Fail-open: skip the judge, leave the caller's gates authoritative, write no record.
+    const { makeReviewer } = await import("../src/commands/dispatch-reviewer.js");
+    const savedKey = process.env.TYPESAFE_API_KEY;
+    Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY"); // no key: a leaked judge run does zero HTTP
+    const base = mkdtempSync(join(tmpdir(), "vf-matrix-g-unreadable-")); // NOT a git repo: no HEAD~1
+    const root = mkdtempSync(join(tmpdir(), "vf-matrix-g-unreadable-root-"));
+    try {
+      mkdirSync(join(base, ".vibeflow"), { recursive: true });
+      writeFileSync(
+        join(base, ".vibeflow", "SETTINGS.json"),
+        JSON.stringify({ typesafe: { enabled: true } }),
+      );
+      const review = makeReviewer("cli", 0.8, {
+        cwd: base,
+        goal: "ship the thing",
+        userRoot: root,
+        diffReader: () => "",
+        llmReviewFn: async () => "COVERED",
+      });
+      const result = await review(unit("unit-a"), {
+        status: "verifying",
+        confidence: 0.9,
+        evidence: ["e"],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+      });
+      expect(result.pass).toBe(true);
+      expect(existsSync(join(root, "typesafe-health.json"))).toBe(false); // the judge never ran
     } finally {
       if (savedKey === undefined) Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY");
       else process.env.TYPESAFE_API_KEY = savedKey;
