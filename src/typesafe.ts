@@ -217,16 +217,11 @@ async function systemOneAttempt(
 /** Collapse an outcome to data-or-null for the judge helpers. */
 const dataOrNull = (o: SystemOneOutcome) => (o.ok ? o.data : null);
 
-/** Re-report a 200 that PARSED but cannot answer the one question the call needs as
- *  `malformed` - the class an unparseable body already gets. The HTTP leg did succeed (and the
- *  call is billed), so `systemOneAttempt` reported `ok:true`; without this correction a judge
- *  that systematically does not answer showed up as `none` in the health record and the
- *  breaker's schema/streak arms never advanced. `outcomeProbe` is LAST-WRITE-WINS (`ok` clears
- *  the seen signal), so this report is exactly the class `withTypesafeGuard` records. `ms` is
- *  unknown once the call returned and the probe reads only the class. */
-const reportMalformed = (inject: JudgeInject): void => {
+/** Re-report a 200 that PARSED but cannot answer the call's one question as `malformed` - the
+ *  class an unparseable body already gets; `outcomeProbe` is LAST-WRITE-WINS, so this correction
+ *  is exactly the class `withTypesafeGuard` records (`ok:true` came from the billed HTTP leg). */
+const reportMalformed = (inject: JudgeInject): void =>
   inject.onOutcome?.({ ok: false, class: FAILURE_CLASS.MALFORMED }, 0);
-};
 
 export const ASSESS_QUESTION_IDS = Object.freeze({
   COVERS_GOAL: "covers_goal",
