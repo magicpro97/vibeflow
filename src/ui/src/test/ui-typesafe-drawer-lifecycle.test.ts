@@ -307,3 +307,46 @@ test("a load that settles after a sibling failure hands back the shared cause", 
     'if (typesafeProbeRepo !== view.repo && (typesafeProbeRepo !== "" || typesafeProbe.value !== ""))',
   );
 });
+
+test("the probe button is dead without a key, not merely refused", () => {
+  // Round-73 review (ui SB): the button carried `ready` + probe-breaker gates but not
+  // `configured`, so a keyless install could click it - the server refused, but the click
+  // still toured the budget path. The standing "No System One key configured" row is the
+  // reason the operator sees, and no request is issued at all.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  expect(drawer).toContain(
+    "typesafeStatus !== 'ready' || !typesafeView?.configured || typesafeView?.probeState",
+  );
+});
+
+test("the section's error arm never claims a connectivity fault it cannot know", () => {
+  // Round-73 review (ui mimo): "System One connection failed" was rendered for ANY failure
+  // while `typesafeStatus === "loading"` - on first open the only such failure is
+  // `/api/settings`, a request that never touched `/api/typesafe`. The copy now names the
+  // System One surface that could not load without asserting a cause.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  expect(drawer).toContain("System One settings could not load");
+  // scoped to the section copy (`failed — {{ ... }}`); the probe row's
+  // "connection failed for <repo>" names a request that really failed
+  expect(drawer.includes("System One connection failed —")).toBe(false);
+});
+
+test("sibling writers are locked out while any save is in flight", () => {
+  // Round-73 review (ui mimo): the engine checkboxes `@change="saveSettings"` stayed live
+  // while `saveTypesafe` held `saving`; a toggle then started a second writer whose `finally`
+  // cleared the one flag mid-write, re-enabling the System One save for a racing second POST.
+  // Disabling the checkboxes on `saving` makes the flag exclusive to whichever save runs.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf('@change="saveSettings"');
+  expect(at).toBeGreaterThan(-1);
+  expect(drawer.slice(at, drawer.indexOf("/>", at))).toContain(':disabled="saving"');
+});

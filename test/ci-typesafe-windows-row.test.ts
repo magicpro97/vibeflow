@@ -464,3 +464,42 @@ describe("the win32 gate is wired into both workflows", () => {
     );
   });
 });
+
+describe("the win32 row's timeouts leave room for the row to finish", () => {
+  test("release.yml's windows job carries at least ci.yml's budget", () => {
+    // Round-73 review (ci SB): `windows-owned-process` ran the same cold `bun ci`, build and
+    // live hook gate as ci.yml's `windows` job without a `timeout-minutes` of its own, so it
+    // inherited the 360-minute default while `vf` treats the gate as bounded - a hung row
+    // would burn a release attempt. Parity is now pinned, not just asserted once: both jobs'
+    // budgets are read from the YAML and compared, so raising one alone fails here.
+    const budget = (text: string, job: string): number => {
+      const m = /^ {4}timeout-minutes: (\d+)$/m.exec(jobBlock(text, job));
+      expect(m).not.toBeNull();
+      return Number(m?.[1]);
+    };
+    const ciBudget = budget(ci, "windows");
+    const releaseBudget = budget(release, "windows-owned-process");
+    expect(ciBudget).toBeGreaterThan(0);
+    expect(releaseBudget).toBe(ciBudget);
+  });
+
+  test("the live hook's spawn budget trips before bun kills the test", () => {
+    // Round-73 review (ci SB): the child's `timeout` was 60 s while bun's own budget for this
+    // test is LIVE_WINDOWS_TIMEOUT_MS (30 s), so a hung child never reached the error branch
+    // that carries its stderr - bun killed the test first and the row reported a bare timeout.
+    // The pair has to satisfy 10 s < child < live budget, or the branch is unreachable again.
+    const live = readFileSync(
+      new URL("./typesafe-hook-windows-live.test.ts", import.meta.url),
+      "utf8",
+    );
+    const liveBudget = Number(
+      (/const LIVE_WINDOWS_TIMEOUT_MS = ([\d_]+);/.exec(live)?.[1] ?? "").replaceAll("_", ""),
+    );
+    const childBudget = Number(
+      (/\n\s+timeout: ([\d_]+),\n/.exec(live)?.[1] ?? "").replaceAll("_", ""),
+    );
+    expect(liveBudget).toBe(30_000);
+    expect(childBudget).toBeGreaterThan(10_000);
+    expect(childBudget).toBeLessThan(liveBudget);
+  });
+});

@@ -247,9 +247,12 @@ on a `network` or `server` failure, so the hard HTTP bound is `2 x maxCalls`.
 A long-lived `vf serve` process is not one run, so both server request boundaries restart
 their own bucket: `POST /api/verify?goal-eval=1` restarts the goal-coverage bucket (one
 judged request is one run) and `POST /api/typesafe/test` restarts the probe bucket. Three
-counters, and no bucket can exhaust or refund another — in particular no route ever zeroes
-the enforcement count the hook and review seams share, so a mounted request cannot refund
-budget a drained run must refuse. The goal-coverage call keeps its own record as well
+counters, and no bucket can exhaust or refund another — the verify and probe routes never
+read or write the enforcement count the hook and review seams share, so mounting one cannot
+refund budget a drained run must refuse. The one deliberate exception is
+`POST /api/orchestrate` with `dry: false`: a real dispatch is its own run, so it restarts the
+enforcement bucket at the request boundary (`dry: true` previews dispatch nothing and restart
+nothing). The goal-coverage call keeps its own record as well
 (`typesafe-health.goal.json`): it is the route a page token can loop, so it must not share
 the record whose breaker the hook and review seams hold the tool-call veto behind. Only
 the probe diagnostic keeps its own file for the milder reason: a diagnostic must not

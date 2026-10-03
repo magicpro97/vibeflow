@@ -320,17 +320,25 @@ export async function withTypesafeGuard<T>(
     startedAt: inject.startedAt ?? now,
   };
   const maxCalls = inject.tuning?.maxCalls ?? BREAKER_DEFAULTS.maxCalls;
-  const used = usedForBucket(inject.bucket);
-  if (used >= maxCalls) return null;
+  // Fast path: an already-spent bucket never cycles the health file. The REAL ceiling check runs
+  // below, under the lock: checked outside and charged only after `mutateHealth` resolved, two
+  // guarded calls started in one tick each read the same pre-charge count and each charged - the
+  // run spent one over `maxCalls` (`vf serve` keeps the guard process-wide).
+  if (usedForBucket(inject.bucket) >= maxCalls) return null;
   const allow = await mutateHealth((h) => {
+    // Re-checked INSIDE the callback: read, check, and charge now run under the lock, the one
+    // place a concurrent writer cannot slip between them.
+    if (usedForBucket(inject.bucket) >= maxCalls) return { next: h, result: false };
     const r = allowCall(h, now);
+    // Charged only once the call is actually allowed: incrementing at entry spent a unit on a call
+    // the breaker had already refused, so `maxCalls` refused calls exhausted the whole per-run
+    // budget and every later legitimate call returned null for the rest of the process.
+    if (r.allow) chargeForBucket(inject.bucket);
     return { next: r.next, result: r.allow };
   }, io);
-  // Charged only once the call is actually allowed: incrementing at entry spent a unit on a call the
-  // breaker had already refused, so `maxCalls` refused calls exhausted the whole per-run budget and
-  // every later legitimate call returned null for the rest of the process.
   if (allow === false) return null;
-  chargeForBucket(inject.bucket);
+  // A lock failure (`undefined`) still ALLOWED the call - never a block - so its spend still counts.
+  if (allow === undefined) chargeForBucket(inject.bucket);
   try {
     const value = await fn();
     const signal = inject.outcome?.();

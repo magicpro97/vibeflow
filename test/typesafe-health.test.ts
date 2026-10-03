@@ -564,6 +564,23 @@ describe("health file", () => {
     expect(callsUsedThisRun()).toBe(2);
   });
 
+  test("two guarded calls started in the same tick cannot overspend the per-run budget", async () => {
+    // Round-73 review (api mimo): the ceiling check ran BEFORE `mutateHealth` and the charge
+    // only after it resolved, so two calls started in one tick each read the same pre-charge
+    // count and each charged - the run spent `maxCalls + 1`. `vf serve` keeps the guard
+    // process-wide, so the pair is one event loop away. Check and charge now run inside the
+    // lock's callback, where no concurrent writer can slip between them.
+    resetCallBudget();
+    const inst = { userRoot: root(), now: () => T0 };
+    const tuning = tuningFor({ ...DEFAULT_TYPESAFE_SETTINGS, maxCalls: 1 });
+    const [a, b] = await Promise.all([
+      withTypesafeGuard("reviewer", async () => "ok", { ...inst, tuning }),
+      withTypesafeGuard("reviewer", async () => "ok", { ...inst, tuning }),
+    ]);
+    expect([a, b].filter((r) => r === "ok")).toHaveLength(1); // one admitted, one refused
+    expect(callsUsedThisRun()).toBe(1); // and exactly one unit of the run was spent
+  });
+
   test("a breaker-refused call spends nothing: the charge follows the VERDICT, not the attempt", async () => {
     // The increments used to sit at the guard's entry, above `allowCall`, so a call the breaker had
     // already refused still consumed a unit - `maxCalls` refused calls exhausted the whole per-run

@@ -141,9 +141,13 @@ export function makeReviewer(
     // ADR-001 phase 2: LLM review after local gate passes.
     if (inject?.goal && (llmReviewFn || autoLlmReview)) {
       // An unreadable diff (git failure, missing HEAD~1 in a shallow clone) is NOT an empty
-      // change: a read failure must never reach a judge verdict and block a unit that passed
-      // every local gate - fail-open; the caller's own gates stay authoritative.
+      // change: a read failure must never reach a judge verdict OR an engine review of "" and
+      // block a unit that passed every local gate - fail-open; the caller's own gates stay
+      // authoritative. Round-73: the gate holds for BOTH arms - the withheld settings kept the
+      // judge out of it, yet the engine review still ran on "" and a non-COVERED answer failed
+      // the unit, so the promise held for the judge and not for the seam.
       const { diff: llmDiff, ok: llmDiffOk } = getUnitDiffResult(cwd, unit.scope ?? []);
+      if (!llmDiffOk) return localResult;
       const llmResult = await runLLMReview({
         goal: inject.goal,
         spec: unit.spec,
@@ -156,15 +160,11 @@ export function makeReviewer(
         // `userRoot` travels with them: the guard's record is file-backed, so a reviewer run
         // must be able to isolate (or point) the breaker root the same way the hook and
         // goal-coverage seams already do. Omitting it silently wrote to `~/.vibeflow`.
-        ...(llmDiffOk
-          ? {
-              typesafe: {
-                settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS,
-                env: process.env,
-                ...(inject?.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
-              },
-            }
-          : {}),
+        typesafe: {
+          settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS,
+          env: process.env,
+          ...(inject?.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
+        },
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
         // Task 7: the implementer is the UNIT's engine when the planner routed one (or the

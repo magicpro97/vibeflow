@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import {
   chmodSync,
@@ -700,6 +701,20 @@ describe("makeReviewer — System One settings forward", () => {
   test("a repo with a typesafe block but `reviewer` off reaches the engine and no judge", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vf-final-reviewer-typesafe-"));
     try {
+      // A REAL repo with two commits: the seam's LLM diff read (`git diff HEAD~1 HEAD`) must
+      // SUCCEED here. A diff-read failure is itself fail-open (skip judge AND engine), so a
+      // bare non-repo dir would take the skip path and stop exercising the settings-forward
+      // seam this test pins (`reviewer:false` must silence the judge without silencing the
+      // engine review).
+      execFileSync("git", ["init", "-q"], { cwd: dir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+      execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+      writeFileSync(join(dir, "a.txt"), "one\n");
+      execFileSync("git", ["add", "a.txt"], { cwd: dir });
+      execFileSync("git", ["commit", "-qm", "one"], { cwd: dir });
+      writeFileSync(join(dir, "a.txt"), "two\n");
+      execFileSync("git", ["add", "a.txt"], { cwd: dir });
+      execFileSync("git", ["commit", "-qm", "two"], { cwd: dir });
       mkdirSync(join(dir, ".vibeflow"), { recursive: true });
       writeFileSync(
         join(dir, ".vibeflow", "SETTINGS.json"),

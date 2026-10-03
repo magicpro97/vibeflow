@@ -88,7 +88,9 @@ jobs:
   windows-owned-process:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: windows-latest
-    timeout-minutes: 10
+    # 15 min: parity with ci.yml's `windows` job - the same cold `bun ci`, build, and live hook
+    # gate run here, and a timeout would fail a legitimate release row.
+    timeout-minutes: 15
     env:
       VF_REQUIRE_LIVE_WINDOWS: "1"
       RELEASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}

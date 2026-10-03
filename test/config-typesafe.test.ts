@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 import {
   TYPESAFE_EGRESS_LINES,
   configTypesafe,
@@ -891,5 +892,29 @@ describe("the CLI's own writes satisfy the repo-identity rule", () => {
     );
     expect(code).toBe(0);
     expect(readSettings(base).typesafe?.enabled).toBe(true);
+  });
+});
+
+describe("the key file name is gitignored wherever the repo root IS the user root", () => {
+  test(".gitignore names typesafe.env, and git agrees", () => {
+    // Round-73 review (api mimo): `vf config typesafe key` writes a PLAINTEXT bearer key to
+    // `<userRoot>/typesafe.env`, and `VF_USER_VIBEFLOW_ROOT` may point at a working tree -
+    // `.env`/`.env.*` in this repo's .gitignore do not match `typesafe.env`, so a `git add -A`
+    // committed a live key. The ignore is now explicit; this pin reads the RULE and lets git's
+    // own resolver confirm it covers a file at the repo root.
+    const gitignore = readFileSync(new URL("../.gitignore", import.meta.url), "utf8");
+    const rule = gitignore
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0 && !l.startsWith("#") && l.endsWith("typesafe.env*"));
+    expect(rule).toBeDefined();
+    // git's OWN resolver over the repo this file lives in: `check-ignore` resolves the name
+    // against the tracked rules - path need not exist - and exits non-zero when nothing covers
+    // it, so a rule deleted from .gitignore fails here even though the text search above only
+    // sees what `rule` matched.
+    const r = cpSpawnSync("git", ["check-ignore", "-q", "typesafe.env"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+    });
+    expect(r.status).toBe(0);
   });
 });

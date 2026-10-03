@@ -120,11 +120,12 @@ describe("live Windows typesafe hook path", () => {
               tool: "Bash",
               command: "curl https://example.com",
             }),
-            // Well past the budget: a HANG and a slow run must be different failures. At the old
-            // 20 s a hung child surfaced as `elapsed = 20000` - "budget violated" for a process
-            // that never finished - and a loaded `windows-latest` cold start could flake the row
-            // red on a correct judge.
-            timeout: 60_000,
+            // Below bun's own budget for this test (LIVE_WINDOWS_TIMEOUT_MS, 30 s) and past the
+            // 10 s timing budget: a HANG trips this timeout and surfaces through the error
+            // branch below WITH the child's stderr, while a slow-but-finishing run between 10 s
+            // and 20 s stays a timing failure instead of a hang. At 60 s a hung child instead
+            // starved until bun killed the test itself - no stderr, defeating the branch below.
+            timeout: 20_000,
           },
         );
         // A non-zero exit or a spawn error is reported with the child's stderr, so a broken run is

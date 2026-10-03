@@ -336,7 +336,9 @@ async function save() {
     } else {
       // The form never carries `typesafe` (dropped at load); the api union requires `expectRepo`
       // whenever a caller DOES send the block, so this projection is the only shape this call
-      // site can take.
+      // site can take. Residual gap, accepted (round-73 ui SB): the sibling payload brings no
+      // `expectRepo`, so a save after another client moved the active repo lands in that repo -
+      // pre-existing for every non-typesafe field; the write guard stays typesafe-only here.
       const savedSettings = await api.settings.set(withoutTypesafe(form.value));
       // Re-seeded through the SAME projection: the response carries `typesafe`, the form does not.
       original.value = coerceEditableDefaults(withoutTypesafe(clone(savedSettings)));

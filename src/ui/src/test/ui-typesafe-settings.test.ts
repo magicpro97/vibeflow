@@ -32,7 +32,7 @@ test("control center exposes a System One section with the four states and acces
     'aria-live="polite"',
     "No System One key configured",
     "Loading System One settings",
-    "System One connection failed",
+    "System One settings could not load",
     // The remediation must NAME the variable: "set the environment variable" sent the operator
     // hunting for its name, which the server's own message already spells out.
     "TYPESAFE_API_KEY",

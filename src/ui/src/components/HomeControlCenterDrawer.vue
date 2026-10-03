@@ -19,7 +19,7 @@
         <p class="home-control-note">Select CLI(s) for init and dispatch. Unchecked CLIs remain installed but VibeFlow will not use them.</p>
         <div class="home-control-engine-list">
           <label v-for="engine in engines" :key="engine" class="home-control-engine">
-            <input v-model="enabledEngines" type="checkbox" :value="engine" @change="saveSettings" />
+            <input v-model="enabledEngines" type="checkbox" :value="engine" @change="saveSettings" :disabled="saving" />
             <span><strong>{{ engine }}</strong><small>{{ detection?.engines[engine] ? "initialized" : "not initialized" }} · {{ detection?.clis[engine] ? "CLI ready" : "CLI unavailable" }}</small></span>
             <i :data-ready="detection?.clis[engine] === true" />
           </label>
@@ -35,10 +35,10 @@
       </section>
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
-        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
+        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || !typesafeView?.configured || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
         <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. Off by default: with it off every path behaves exactly as it does today.</p>
 
-        <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p><p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
+        <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p><p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One settings could not load — {{ typesafeError }}</p>
         <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — set <code>TYPESAFE_API_KEY</code> or run <code>vf config typesafe key</code>.</p>
         <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — calls are refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
         <p v-if="typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" class="home-control-warning" role="alert">Test connection is refused until {{ typesafeView?.probeCooldownUntil ?? "its own breaker clears" }} — the probe's own breaker is {{ typesafeView?.probeState }}, and the judge's calls are unaffected.</p>

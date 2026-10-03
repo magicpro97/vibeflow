@@ -705,9 +705,13 @@ describe("matrix (g) — the reviewer maker binds its seam to the injected healt
     // into the judge, so a shallow clone or missing HEAD~1 was judged as an empty change - a
     // read failure reached a judge verdict and could block a unit that passed every local
     // gate. Fail-open: skip the judge, leave the caller's gates authoritative, write no record.
+    // Round-73 (api mimo): fail-open means the ENGINE review is skipped too - it used to run
+    // on the "" fallback and a non-COVERED answer failed the unit, so the promise held for the
+    // judge arm and not for the seam. The early return now covers both.
     const { makeReviewer } = await import("../src/commands/dispatch-reviewer.js");
     const savedKey = process.env.TYPESAFE_API_KEY;
     Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY"); // no key: a leaked judge run does zero HTTP
+    let engineCalls = 0;
     const base = mkdtempSync(join(tmpdir(), "vf-matrix-g-unreadable-")); // NOT a git repo: no HEAD~1
     const root = mkdtempSync(join(tmpdir(), "vf-matrix-g-unreadable-root-"));
     try {
@@ -721,7 +725,10 @@ describe("matrix (g) — the reviewer maker binds its seam to the injected healt
         goal: "ship the thing",
         userRoot: root,
         diffReader: () => "",
-        llmReviewFn: async () => "COVERED",
+        llmReviewFn: async () => {
+          engineCalls += 1;
+          return "COVERED";
+        },
       });
       const result = await review(unit("unit-a"), {
         status: "verifying",
@@ -730,6 +737,7 @@ describe("matrix (g) — the reviewer maker binds its seam to the injected healt
         gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
       });
       expect(result.pass).toBe(true);
+      expect(engineCalls).toBe(0); // the engine review never ran either: "" never reached it
       expect(existsSync(join(root, "typesafe-health.json"))).toBe(false); // the judge never ran
     } finally {
       if (savedKey === undefined) Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY");

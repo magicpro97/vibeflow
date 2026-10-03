@@ -104,4 +104,16 @@ describe("the typesafe uninstall lists on the OTHER wiki pages", () => {
       expect(mirror).toBe(normalize(readFileSync(join(root, "docs", page), "utf8")));
     }
   });
+
+  test("names the orchestrate run boundary in the no-refund sentence", () => {
+    // Round-73 review (ci mimo): the sentence claimed "no route ever" restarts the enforcement
+    // bucket while `POST /api/orchestrate` with `dry: false` deliberately does - a real
+    // dispatch is its own run. An operator reading the blanket claim would file the restart
+    // as a bug; the doc now scopes the rule to verify and probe routes and names the one
+    // exception.
+    const doc = normalize(readFileSync(join(root, DOC), "utf8"));
+    expect(doc).toContain("the verify and probe routes never");
+    expect(doc).toContain("POST /api/orchestrate");
+    expect(doc).toContain("`dry: false`");
+  });
 });
