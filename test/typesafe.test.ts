@@ -345,6 +345,40 @@ describe("judgeAssessment", () => {
     ).toBeNull();
   });
 
+  test("a parsed 200 that answered nothing is re-reported MALFORMED for the health seam", async () => {
+    // The finding (round-79 review, api longcat): `answers: {}` parsed fine, the helper collapsed
+    // to null, and the seam still heard `ok:true` - so `outcomeProbe` kept `none`, the guard
+    // recorded a successful call, and the breaker's schema/streak arms never advanced while every
+    // call was billed. The correction arrives AFTER the ok report; the probe keeps the last write.
+    seenOf.length = 0;
+    const r = await judgeAssessment("d", {
+      ...inject({ model: "m", answers: {} }),
+      onOutcome: record,
+    });
+    expect(r).toBeNull();
+    expect(seenOf).toEqual([{ cls: "none" }, { cls: FAILURE_CLASS.MALFORMED, status: undefined }]);
+  });
+
+  test("a covers_goal answer whose score the parse drops is re-reported MALFORMED", async () => {
+    seenOf.length = 0;
+    const r = await judgeAssessment("d", {
+      ...inject({ model: "m", answers: { covers_goal: { score: 20 } } }),
+      onOutcome: record,
+    });
+    expect(r).toBeNull();
+    expect(seenOf).toEqual([{ cls: "none" }, { cls: FAILURE_CLASS.MALFORMED, status: undefined }]);
+  });
+
+  test("an answered covers_goal keeps the ok-only report (the tests leg stays optional)", async () => {
+    seenOf.length = 0;
+    const r = await judgeAssessment("d", {
+      ...inject({ model: "m", answers: { covers_goal: { score: 2 } } }),
+      onOutcome: record,
+    });
+    expect(r).toEqual({ covers: { score: 2 } });
+    expect(seenOf).toEqual([{ cls: "none" }]);
+  });
+
   test("request carries the bearer token, model, and the two questions", async () => {
     const seen: Array<{ url: string; body: string; headers: Record<string, string> }> = [];
     const r = await judgeAssessment("the-diff", {
@@ -436,6 +470,18 @@ describe("judgeRisk", () => {
       await judgeRisk("c", inject({ model: "m", answers: { risk_tier: { noul: 0.4 } } })),
     ).toBeNull();
   });
+
+  test("a missing risk_tier answer is re-reported MALFORMED for the health seam", async () => {
+    // The same correction judgeAssessment gets (round-79 review, api longcat): a billed 200 that
+    // cannot answer the question must not leave the seam showing `none`.
+    seenOf.length = 0;
+    const r = await judgeRisk("ls", {
+      ...inject({ model: "m", answers: {} }),
+      onOutcome: record,
+    });
+    expect(r).toBeNull();
+    expect(seenOf).toEqual([{ cls: "none" }, { cls: FAILURE_CLASS.MALFORMED, status: undefined }]);
+  });
 });
 
 describe("judgeEngineKey", () => {
@@ -489,6 +535,16 @@ describe("judgeEngineKey", () => {
     expect(await judgeEngineKey({ name: "u1" }, ["claude", "codex"], zeroFloor(explicitZero))).toBe(
       "codex",
     );
+  });
+
+  test("a missing engine answer is re-reported MALFORMED for the health seam", async () => {
+    seenOf.length = 0;
+    const r = await judgeEngineKey({ name: "u1" }, ["claude", "codex"], {
+      ...inject({ model: "m", answers: {} }),
+      onOutcome: record,
+    });
+    expect(r).toBeNull();
+    expect(seenOf).toEqual([{ cls: "none" }, { cls: FAILURE_CLASS.MALFORMED, status: undefined }]);
   });
 
   test("the unit spec travels in the state, and a missing one is spelled out", async () => {

@@ -534,6 +534,30 @@ describe("vf config typesafe — key", () => {
     expect(existsSync(typesafeEnvPath(root))).toBe(false);
   });
 
+  test("a key carrying whitespace is refused and no file is created", async () => {
+    // Interior whitespace would be embedded raw; the read-back keeps only the first line, so the
+    // key would silently truncate and every later call 401s. `\r` matters too: a paste from a
+    // CRLF source must not smuggle a `\r` into the single-line file format.
+    for (const bad of ["sk-abc\ndef", "sk-abc def", "sk-abc\rdef"]) {
+      const root = userRoot();
+      const { lines, out } = collector();
+      const code = await configTypesafe(
+        ["key"],
+        repo(),
+        {},
+        {
+          out,
+          userRoot: root,
+          ask: async () => bad,
+        },
+      );
+      expect(code).toBe(2);
+      expect(lines).toEqual(["TypeSafe API key must be a single token without whitespace"]);
+      expect(lines.join("\n")).not.toContain("sk-abc");
+      expect(existsSync(typesafeEnvPath(root))).toBe(false);
+    }
+  });
+
   test("a visible key argument is refused, in either syntax", async () => {
     // The guard used to match only a `--`-prefixed argument, so `vf config typesafe key sk-abc`
     // put the secret in shell history and ps output, discarded it, and prompted anyway. Both

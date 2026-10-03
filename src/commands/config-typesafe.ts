@@ -252,6 +252,14 @@ export async function configTypesafe(
       print("TypeSafe API key must be provided via hidden stdin");
       return 2;
     }
+    if (/\s/.test(value)) {
+      // Interior whitespace would be embedded by `writeTypesafeEnv` as-is, and the read-back
+      // keeps only the first line: a key with an interior \n writes a second garbage line and
+      // silently reads back TRUNCATED, so every later call 401s on a key the user believes is
+      // stored. Refused like the empty key, before anything touches disk.
+      print("TypeSafe API key must be a single token without whitespace");
+      return 2;
+    }
     const path = writeTypesafeEnv(value, { userRoot: deps.userRoot });
     // A breaker that tripped on `auth` would otherwise keep refusing a freshly rotated key — both
     // records, because the probe has its own breaker and a refusal there is not self-healing.

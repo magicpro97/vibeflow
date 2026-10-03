@@ -135,6 +135,13 @@ export function writeTypesafeEnv(
     fsync?: (fd: number) => void;
   } = {},
 ): string {
+  // The file format is ONE line (`TYPESAFE_API_KEY=<key>`): a key carrying whitespace would be
+  // embedded raw, and `readTypesafeKey` splits on the first line break - a key with an interior
+  // newline silently reads back TRUNCATED (every later call 401s on a key the user believes is
+  // stored). Refused at the source of the corruption; the message never echoes the key.
+  if (/\s/.test(key)) {
+    throw new Error("typesafe key must not contain whitespace");
+  }
   const path = typesafeEnvPath(inject.userRoot);
   ensurePrivateDirectory(dirname(path));
   const temporary = `${path}.${randomBytes(6).toString("hex")}.tmp`;

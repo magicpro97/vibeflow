@@ -145,7 +145,10 @@ The key is **never** written into `.vibeflow/SETTINGS.json`, which is git-tracke
 this repository.
 
 `vf config typesafe key` reads the key from hidden stdin. A `--key` flag is refused on
-purpose: it would sit in shell history and in `ps` output.
+purpose: it would sit in shell history and in `ps` output. A key carrying whitespace is
+refused as well, at the CLI *and* at the writer: the file is a single line, so an interior
+line break would be embedded raw and read back truncated, silently downgrading every later
+call to `401`.
 
 The key file is owner-only on **both** platforms, and the mechanism is the repo's
 durability authority rather than a POSIX-only promise:
@@ -190,7 +193,7 @@ Failure classification:
 | `429`, `529` | `budget` | **immediately** |
 | `422` | `schema` | streak + 1, plus one loud warning line |
 | other `5xx` | `server` | streak + 1, retried at most once |
-| `2xx` with a body that fails validation | `malformed` | streak + 1 |
+| `2xx` whose body fails validation, or parses without answering the question | `malformed` | streak + 1 |
 
 The cooldown starts at `cooldownBaseMs` (60 s), doubles per consecutive trip, and is
 capped at `cooldownCapMs` (15 min).

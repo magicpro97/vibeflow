@@ -217,6 +217,17 @@ async function systemOneAttempt(
 /** Collapse an outcome to data-or-null for the judge helpers. */
 const dataOrNull = (o: SystemOneOutcome) => (o.ok ? o.data : null);
 
+/** Re-report a 200 that PARSED but cannot answer the one question the call needs as
+ *  `malformed` - the class an unparseable body already gets. The HTTP leg did succeed (and the
+ *  call is billed), so `systemOneAttempt` reported `ok:true`; without this correction a judge
+ *  that systematically does not answer showed up as `none` in the health record and the
+ *  breaker's schema/streak arms never advanced. `outcomeProbe` is LAST-WRITE-WINS (`ok` clears
+ *  the seen signal), so this report is exactly the class `withTypesafeGuard` records. `ms` is
+ *  unknown once the call returned and the probe reads only the class. */
+const reportMalformed = (inject: JudgeInject): void => {
+  inject.onOutcome?.({ ok: false, class: FAILURE_CLASS.MALFORMED }, 0);
+};
+
 export const ASSESS_QUESTION_IDS = Object.freeze({
   COVERS_GOAL: "covers_goal",
   HAS_TESTS: "has_tests",
@@ -297,7 +308,10 @@ export async function judgeAssessment(
   const parsed = dataOrNull(await systemOne(framed, assessGoalQuestions(), inject));
   if (!parsed) return null;
   const covers = parsed.answers[ASSESS_QUESTION_IDS.COVERS_GOAL];
-  if (covers?.score === undefined) return null;
+  if (covers?.score === undefined) {
+    reportMalformed(inject);
+    return null;
+  }
   const tests = parsed.answers[ASSESS_QUESTION_IDS.HAS_TESTS];
   return {
     covers: {
@@ -332,7 +346,10 @@ export async function judgeRisk(
   );
   if (!parsed) return null;
   const choice = choiceOf(parsed.raw.risk_tier, parsed.answers.risk_tier?.confidence);
-  if (!choice) return null;
+  if (!choice) {
+    reportMalformed(inject);
+    return null;
+  }
   // The `runAtConfidence` FLOOR, the same discard gate the reviewer seam applies: a command is
   // attacker-influenceable payload, so an answer the judge itself is unsure of must not be able to
   // raise a tier - least of all to CRITICAL and block a tool call. A missing confidence reads as
@@ -370,7 +387,10 @@ export async function judgeEngineKey(
   const parsed = dataOrNull(await systemOne(state, questions, inject));
   if (!parsed) return null;
   const choice = choiceOf(parsed.raw.engine, parsed.answers.engine?.confidence);
-  if (!choice) return null;
+  if (!choice) {
+    reportMalformed(inject);
+    return null;
+  }
   // The `runAtConfidence` FLOOR, exactly as `judgeRisk` applies it: routing is a POSITIVE decision
   // that overrides the run-global `resolveEngine(flags)`, and the spec text is issue-body prose, so
   // an answer the judge itself is unsure of (or one with no confidence at all, which reads as zero)

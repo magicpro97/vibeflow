@@ -42,6 +42,7 @@ import {
   writeHealth,
 } from "../src/typesafe-health.js";
 import { DEFAULT_TYPESAFE_SETTINGS, TYPESAFE_CALL_SITE_NAMES } from "../src/typesafe-settings.js";
+import { judgeAssessment } from "../src/typesafe.js";
 
 const root = (): string => mkdtempSync(join(tmpdir(), "vf-ts-health-"));
 const T0 = Date.parse("2026-09-21T20:40:00.000Z");
@@ -701,6 +702,32 @@ describe("withTypesafeGuard", () => {
     expect(probe.outcome()).toEqual({ cls: FAILURE_CLASS.SERVER, status: 503 });
     probe.onOutcome({ ok: true, status: 200 });
     expect(probe.outcome()).toBeUndefined();
+  });
+
+  test("a billed 200 that answered nothing ends as MALFORMED, not none", async () => {
+    // End to end through the seam the finding names (round-79 review, api longcat): the judge
+    // answers `{}`, the helper re-reports MALFORMED, and the guard must record it - previously
+    // `last_class` stayed `none` and `fail_streak` never advanced on a degraded judge.
+    const inst = { userRoot: root(), now: () => T0 };
+    const probe = outcomeProbe();
+    const r = await withTypesafeGuard(
+      "hook",
+      () =>
+        judgeAssessment("d", {
+          fetchFn: async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({ model: "m", answers: {} }),
+          }),
+          env: { TYPESAFE_API_KEY: "k" } as NodeJS.ProcessEnv,
+          settings: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+          onOutcome: probe.onOutcome,
+        }),
+      { ...inst, outcome: probe.outcome },
+    );
+    expect(r).toBeNull();
+    expect(readHealth(inst).last_class).toBe(FAILURE_CLASS.MALFORMED);
+    expect(readHealth(inst).fail_streak).toBe(1);
   });
 
   test("cooldown refusal records COOLDOWN", async () => {

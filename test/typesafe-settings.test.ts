@@ -406,6 +406,17 @@ describe("writeTypesafeEnv", () => {
     expect(resolveTypesafeKey({ env: {}, userRoot: root })?.key).toBe("secret-value");
   });
 
+  test("a key carrying whitespace is refused and no file is left behind", () => {
+    // The writer is the source of the corruption the CLI also refuses: `\n` inside the value
+    // would make a SECOND line in a format that is ONE line, and `readTypesafeKey` would return
+    // only the truncated first-line prefix.
+    const root = mkdtempSync(join(tmpdir(), "vf-ts-"));
+    expect(() => writeTypesafeEnv("secret\nvalue", { userRoot: root })).toThrow();
+    expect(() => writeTypesafeEnv("secret value", { userRoot: root })).toThrow();
+    const entries = readdirSync(root);
+    expect(entries.filter((n) => n.includes("typesafe.env"))).toEqual([]);
+  });
+
   test("a pre-existing symlink at the key path is not followed", () => {
     const root = mkdtempSync(join(tmpdir(), "vf-ts-"));
     const decoy = join(root, "decoy.txt");
