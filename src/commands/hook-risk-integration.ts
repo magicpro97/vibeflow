@@ -40,7 +40,6 @@
 // `{ hookBusLockRetries: 100 }` alone blocks the tool call. Both health legs are bounded by
 // values the SEAM hands in, not by prose: `lockWaitMs: 0` removes the LOCK wait and
 // `writeBudgetMs` reserves the WRITE.
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HookInput } from "../core.js";
 import { type SemanticJudge, shouldConsultSemantic } from "../hooks/risk-semantic.js";

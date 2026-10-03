@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
@@ -383,5 +383,20 @@ describe("the hook's health root", () => {
     });
     expect(seen?.userRoot).toBe(userVibeflowDir());
     expect(seen?.userRoot).not.toBe(homedir());
+  });
+});
+
+describe("the hook seam module", () => {
+  test("carries no dead imports", () => {
+    // Round-70 review (api SB): `homedir` was imported here and never referenced - a leftover
+    // from the fix that made the hook read the shared per-user root through `userVibeflowDir()`.
+    // `tsc` does not enable `noUnusedLocals` and biome has no equivalent rule, so nothing else
+    // catches it: a dead import in a file whose comments ARE the budget arithmetic is a claim
+    // that no longer executes.
+    const src = readFileSync(
+      new URL("../src/commands/hook-risk-integration.ts", import.meta.url),
+      "utf8",
+    );
+    expect(src).not.toMatch(/^import .* from "node:os";$/m);
   });
 });
