@@ -375,18 +375,20 @@ describe("the win32 gate is wired into both workflows", () => {
     // closes the class: EVERY `expect(...)` statement in the live test must appear in the inventory,
     // so a new assertion, a dropped one, or an edited matcher fails this meta-test until someone
     // deliberately classifies it here.
-    // The inventory below pins the assertions as TEXT, and text is not execution: a `return;` as a
-    // callback body's first statement, or an `if (false) { ... }` around the block, leaves every
-    // string in place and runs none of them - with coverage src-scoped and the ubuntu jobs skipping
-    // both live tests, nothing else in the gate would notice. So the callback bodies are held to a
-    // WHITELIST of statement shapes rather than a blacklist of exit keywords: a blacklist always
-    // loses to the next spelling, and the loop has already paid for that lesson four times. Any
-    // statement line whose opening token is not in this vocabulary fails here.
     // Text is not execution: a `return;` as a callback's first statement - or an `if (false) { }
-    // around the block - leaves every string below intact and runs none of them, and nothing else in
-    // the gate would notice (coverage is src-scoped, the ubuntu jobs skip both live tests). Counting
-    // the bodies' own statement lines closes it without listing the shapes that are allowed: an
-    // early exit, a wrapper, or any other line added to a body changes the count and fails here.
+    // around the block - leaves every string below intact and runs none of them, and nothing else
+    // in the gate would notice (coverage is src-scoped, the ubuntu jobs skip both live tests).
+    // What closes that class is COUNTING the bodies' own statement lines, not a whitelist of
+    // opening tokens: these bodies legitimately open with `if`, `throw` and friends, so any usable
+    // vocabulary admits the `if (false) { }` wrapper it is meant to catch, while an added
+    // statement line always moves the count. Round-77 review (ci SB) found the text here CLAIMING
+    // such a whitelist ("whose opening token is not in this vocabulary") that the code below does
+    // not implement; the numbers are the mechanism, and this paragraph is the correction.
+    // What the numbers do NOT pin is meaning: a reorder keeping every statement line and every
+    // assertion string identical passes here by design, and the diff-level review is the control
+    // for that. A comment alone never moves a number (the filter drops `//` and `*` lines); a
+    // re-wrapped CODE line does, and moving a number is only legitimate as the deliberate
+    // classification step, in a diff that justifies it.
     const chunks = body.split("liveWindowsTest(").slice(1);
     expect(chunks.length).toBe(2);
     const statementLines = (chunk: string): string[] =>

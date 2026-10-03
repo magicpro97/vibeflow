@@ -88,8 +88,11 @@ jobs:
   windows-owned-process:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: windows-latest
-    # 15 min: parity with ci.yml's `windows` job - the same cold `bun ci`, build, and live hook
-    # gate run here, and a timeout would fail a legitimate release row.
+    # 15 min: parity with ci.yml's `windows` row (15 min), which runs the same cold `bun ci`,
+    # build, and live hook gate. Measured on this branch (run 36755694907): the ci.yml windows
+    # rows finished in 49-138 s wall clock, checkout, setup and install included - the slowest,
+    # `windows (owned-process)` at 2 min 18 s, is this job's closest analogue - so the cap carries
+    # >5x headroom and tripping it should mean a hang, not a slow runner. (Round-77 review, ci SB.)
     timeout-minutes: 15
     env:
       VF_REQUIRE_LIVE_WINDOWS: "1"

@@ -92,7 +92,15 @@ describe("live Windows typesafe hook path", () => {
           JSON.stringify({ typesafe: { enabled: true } }),
         );
         // A key that cannot authenticate: the judge must fail OPEN and return fast. The budget is
-        // what is under test, not the vendor's availability.
+        // what is under test, not the vendor's availability - and the vendor cannot smuggle
+        // latency into the window either: the hook path clamps the judge to
+        // `min(hookTimeoutMs, HOOK_TIMEOUT_CAP_MS, timeoutMs)` = 1500 ms
+        // (`src/commands/hook-risk-integration.ts`), and the call carries ONE shared
+        // `AbortSignal.timeout` deadline (`src/typesafe.ts`) covering DNS, TLS and HTTP, so a
+        // refused egress fails in milliseconds and a black-holed one aborts at the bound. The only
+        // way `elapsed` reaches 10 s is the shipped bound regressing - the blocked-call failure
+        // this row exists to catch. (Round-77 review, ci SB: the real-endpoint leg stays; a closed
+        // local port would delete what "live" means.)
         // `VF_USER_VIBEFLOW_ROOT` is the root the CLI resolves health/key paths from, and
         // test/preload.ts sets it for every `bun test` run - so without the override below the child
         // inherited the preload's temp dir and the breaker's file landed outside this test's root.
