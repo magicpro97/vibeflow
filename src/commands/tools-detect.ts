@@ -141,7 +141,9 @@ export async function defaultGoalEvalFn(
   const prompt = buildReviewerPrompt({ goal, diff: diff || "(no diff available)" });
   // The judge runs only when the block is enabled AND `callSites.goalCoverage` is on; the gate
   // lives with the verdict so a disabled run never loads the HTTP client. `null` means "fall
-  // through unchanged", never "allowed".
+  // through unchanged", never "allowed". The short-circuit below is that CONTRACT (docs/TYPESAFE.md
+  // § Judge authority: escalate only): a negative verdict is returned outright - the bridge must
+  // never be paid for a refused goal - while a positive one still defers to it.
   const verdict = await typesafeGoalCoverageVerdict({ goal, diff, ...inject.typesafe });
   if (verdict) return verdict;
   const bridge = process.env.VIBEFLOW_AI;

@@ -132,9 +132,10 @@ test("the save confirmation reports a failed refresh as a refresh failure, never
 });
 
 test("every editable System One control is inert until the rows are ready", () => {
-  // The load replaces `settingsForm.typesafe` wholesale, so an edit made during the round-trip is
-  // discarded with no message. Gating only the buttons left all six inputs live; each now carries
-  // the same readiness guard.
+  // An EXPLICIT load still replaces `settingsForm.typesafe` wholesale, so an edit made during its
+  // round-trip is discarded with no message - gating only the buttons left all six inputs live,
+  // which is why each carries the readiness guard. The PROBE's refresh is exempt (round 74):
+  // `testConnection` passes `seedForm = false`, so clicking Test no longer reverts an unsaved draft.
   const drawer = readFileSync(
     new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
     "utf8",
@@ -154,6 +155,25 @@ test("every editable System One control is inert until the rows are ready", () =
       ":disabled=\"typesafeStatus !== 'ready'\"",
     );
   }
+});
+
+test("the probe's refresh keeps an unsaved draft; only an explicit load reseeds the form", () => {
+  // Round-74 review (ui): `testConnection` called `loadTypesafe()`, whose unpack overwrote
+  // `settingsForm.typesafe` with the STORED values - so a toggle, a floor or a call-site box that
+  // was edited but not yet saved vanished the moment the operator clicked Test connection, and
+  // the probe (which answers about the STORED block) then read as if it had reverted the edit.
+  // The unpack is now gated: the probe's refresh passes `seedForm = false`; explicit loads
+  // (mount, repo change, save) keep the default reseed.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  expect(drawer).toContain("async function loadTypesafe(seedForm = true)");
+  expect(drawer).toContain("if (seedForm) { settingsForm.typesafe =");
+  const at = drawer.indexOf("async function testConnection");
+  const nextFn = drawer.indexOf("\nasync ", at + 1);
+  const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
+  expect(body).toContain("await loadTypesafe(false);");
 });
 
 test("only the latest load wins: the response is applied behind a generation token", () => {
@@ -239,7 +259,7 @@ test("the probe repaints the rows it just dirtied, stamping before the reload", 
   const nextFn = drawer.indexOf("\nasync ", at + 1);
   const body = drawer.slice(at, nextFn === -1 ? drawer.length : nextFn);
   const guard = "if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return;";
-  const reloadAt = body.indexOf("await loadTypesafe();");
+  const reloadAt = body.indexOf("await loadTypesafe(false);");
   expect(reloadAt).toBeGreaterThan(-1);
   expect(reloadAt).toBeGreaterThan(body.lastIndexOf(guard));
   expect(body.indexOf("typesafeProbeRepo = probed;")).toBeLessThan(reloadAt);

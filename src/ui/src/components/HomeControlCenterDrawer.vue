@@ -148,7 +148,7 @@ function validateThresholds(): void {
   thresholdError.value = typesafeThresholdError(settingsForm.typesafe);
 }
 
-async function loadTypesafe(): Promise<boolean> {
+async function loadTypesafe(seedForm = true): Promise<boolean> {
   const seq = ++typesafeLoadSeq; // without it a slower response wins and the rows go stale
   typesafeStatus.value = "loading";
   typesafeError.value = "";
@@ -156,12 +156,8 @@ async function loadTypesafe(): Promise<boolean> {
     const view = await api.typesafe.view();
     if (seq !== typesafeLoadSeq) return false;
     typesafeView.value = view;
-    settingsForm.typesafe = {
-      enabled: view.enabled,
-      runAtConfidence: view.thresholds.run,
-      acceptAtConfidence: view.thresholds.accept,
-      callSites: { ...view.callSites },
-    };
+    // biome-ignore format: the reseed stays one statement so the < 400 pin holds
+    if (seedForm) { settingsForm.typesafe = { enabled: view.enabled, runAtConfidence: view.thresholds.run, acceptAtConfidence: view.thresholds.accept, callSites: { ...view.callSites } }; }
     validateThresholds();
     typesafeError.value = ""; // this GET settled: hand back any sibling's failure text
     // biome-ignore format: the stamp falls WITH its verdict; one line keeps the pair atomic under the cap
@@ -203,7 +199,7 @@ async function testConnection(): Promise<void> {
   }
   // The stamp lands WITH the text, before the reload: the wipe clears the pair together.
   typesafeProbeRepo = probed; // stamped with the TEXT, never with the pending probe
-  await loadTypesafe();
+  await loadTypesafe(false); // the probe answers about the STORED block, so an edit survives it
 }
 
 async function saveTypesafe(): Promise<void> {

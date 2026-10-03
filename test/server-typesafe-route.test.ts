@@ -3,7 +3,7 @@
 // The browser never holds the key, so every assertion here is about what the
 // wire DOES NOT carry as much as what it does.
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeState } from "../src/core.js";
@@ -17,7 +17,7 @@ import {
 } from "../src/server/routes-typesafe.js";
 import { handleMutationRoute } from "../src/server/routes.js";
 import { type VibeSettings, readSettings } from "../src/settings.js";
-import { TYPESAFE_STATE } from "../src/typesafe-health-file.js";
+import { PROBE_HEALTH_FILE, TYPESAFE_STATE, healthPath } from "../src/typesafe-health-file.js";
 import { callsUsedThisRun, resetCallBudget, withTypesafeGuard } from "../src/typesafe-health.js";
 import type { TypesafeHealth } from "../src/typesafe-health.js";
 import {
@@ -284,6 +284,100 @@ describe("handleTypesafeTestRoute", () => {
     expect(body.error).toBe("refused by the call budget or an open circuit breaker");
   });
 
+  test("a passing probe heals its own breaker record, on the route's injected clock", async () => {
+    // Round-74 review (api): the route carries no `resetBreaker` (the CLI's probe does, as
+    // belt-and-braces). None is needed - the guard records the call's SUCCESS and the success
+    // transition IS the clear. But the healing only runs on the clock the route was GIVEN: without
+    // the guard's `now` passthrough it compared the record against WALL-clock, so the clock-
+    // injected route below refused a cooldown that had already elapsed. The seed makes the two
+    // clocks disagree by design: `cooldown_until` is past on the injected clock and ~an hour in
+    // the future on the wall one, so an unthreaded (wall-clock) comparison refuses. The fixture's
+    // shape is proven by the cooldown test below: an unparsed record reads as idle, allows the
+    // call and fails that test's `reached === 0`.
+    const root = mkdtempSync(join(tmpdir(), "vf-typesafe-heal-"));
+    const repo = mkdtempSync(join(tmpdir(), "vf-typesafe-heal-repo-"));
+    try {
+      const fixed = Date.now() + 3_700_000; // the wall clock trails this by ~1h
+      writeFileSync(
+        healthPath(root, PROBE_HEALTH_FILE),
+        JSON.stringify({
+          schema_version: 1,
+          state: TYPESAFE_STATE.OPEN,
+          fail_streak: 2,
+          consecutive_trips: 1,
+          cooldown_ms: 60_000,
+          last_class: "auth",
+          cooldown_until: new Date(fixed - 5_000).toISOString(), // elapsed on the injected clock
+        }),
+      );
+      const res = await handleTypesafeTestRoute({
+        repo,
+        expectRepo: repo,
+        userRoot: root,
+        settings: settings(),
+        env: { TYPESAFE_API_KEY: KEY },
+        now: () => fixed,
+        judge: async () => ({ covers: { score: 0.9, confidence: 0.8 } }),
+      });
+      const body = (await res.json()) as { ok: boolean; refused?: boolean };
+      expect(body.refused).toBe(undefined);
+      expect(body.ok).toBe(true);
+      const record = JSON.parse(
+        readFileSync(healthPath(root, PROBE_HEALTH_FILE), "utf8"),
+      ) as TypesafeHealth;
+      expect(record.state).toBe(TYPESAFE_STATE.IDLE);
+      expect(record.fail_streak).toBe(0);
+      expect(record.consecutive_trips).toBe(0);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a probe inside its cooldown refuses and never reaches the judge", async () => {
+    // The other half of the healing contract: while the open record's cooldown is still RUNNING
+    // the guard short-circuits the call - the judge is never reached, and the refusal wears the
+    // `refused` kind (never "connection failed"). An invalid fixture would read as idle, allow
+    // the call and reach the judge, so `reached` is the discriminator.
+    const root = mkdtempSync(join(tmpdir(), "vf-typesafe-cool-"));
+    const repo = mkdtempSync(join(tmpdir(), "vf-typesafe-cool-repo-"));
+    try {
+      const fixed = Date.now();
+      writeFileSync(
+        healthPath(root, PROBE_HEALTH_FILE),
+        JSON.stringify({
+          schema_version: 1,
+          state: TYPESAFE_STATE.OPEN,
+          fail_streak: 2,
+          consecutive_trips: 1,
+          cooldown_ms: 60_000,
+          last_class: "auth",
+          cooldown_until: new Date(fixed + 30_000).toISOString(), // still cooling
+        }),
+      );
+      let reached = 0;
+      const res = await handleTypesafeTestRoute({
+        repo,
+        expectRepo: repo,
+        userRoot: root,
+        settings: settings(),
+        env: { TYPESAFE_API_KEY: KEY },
+        now: () => fixed,
+        judge: async () => {
+          reached += 1;
+          return null;
+        },
+      });
+      const body = (await res.json()) as { ok: boolean; refused?: boolean };
+      expect(reached).toBe(0);
+      expect(body.ok).toBe(false);
+      expect(body.refused).toBe(true);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("every click is its own run, so the budget never latches the button off", async () => {
     // The server is long-lived and `resetCallBudget` had no production caller: after `maxCalls`
     // (default 20) clicks EVER, "Test connection" answered "refused by the call budget or an open
@@ -332,7 +426,7 @@ describe("handleTypesafeTestRoute", () => {
     expect((await res.json()) as unknown).toEqual({
       ok: true,
       model: DEFAULT_TYPESAFE_SETTINGS.model,
-      ms: 42,
+      ms: 126, // three 42ms reads: `startedAt`, the guard's entry and the report
       score: 0.9,
       confidence: 0.8,
     });

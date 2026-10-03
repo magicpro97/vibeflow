@@ -259,6 +259,9 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
       out: outBusOnly,
       tuning: tuningFor(resolved),
       outcome: probe.outcome,
+      // Breaker transitions run on the SAME clock this route computes `ms` with (the CLI probe
+      // threads its own clock the same way): a caller-injected clock must not observe wall-clock.
+      now: () => now(),
     },
   );
   const ms = now() - startedAt;
@@ -284,6 +287,10 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
       error: describeFailure(signal?.cls),
     });
   }
+  // No `resetBreaker` here, unlike the CLI probe: it would be redundant - the guard records this
+  // call's SUCCESS and the success transition already returns the PROBE record to `idle` with its
+  // streak and trips zeroed (docs/TYPESAFE.md § The circuit breaker; the "heals its own breaker"
+  // test below pins it). ENFORCEMENT heals only through the operator's `vf config typesafe key`.
   return Response.json({
     ok: true,
     model: resolved.model,
