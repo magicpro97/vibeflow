@@ -233,3 +233,31 @@ test("the probe repaints the rows it just dirtied, stamping before the reload", 
   // Nothing re-stamps after the reload: the only stamp is the one written with the text.
   expect(body.slice(reloadAt)).not.toContain("typesafeProbeRepo");
 });
+
+test("a detection already in flight is joined, not abandoned, by a concurrent load()", () => {
+  // `if (detecting.value) return false` answered "nothing was reloaded" while the server-side repo
+  // switch was still in flight, so `load()` read the rows against the pre-detect repo and the stale
+  // verdicts stayed on screen. A caller arriving mid-flight now reuses the running run's promise.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  expect(drawer).not.toContain("if (detecting.value) return false;");
+  expect(drawer).toContain("detectInFlight ??= detectOnce()");
+  expect(drawer).toContain("return detectInFlight;");
+});
+
+test("a failed settings load does not leave the section loading forever", () => {
+  // If `api.settings.get()` rejected, the section stayed in `loading` with every control disabled:
+  // the spinner outlived the failure and nothing on screen pointed at the cause.
+  const drawer = readFileSync(
+    new URL("../components/HomeControlCenterDrawer.vue", import.meta.url),
+    "utf8",
+  );
+  const at = drawer.indexOf("async function load(): Promise<void>");
+  const body = drawer.slice(at, drawer.indexOf("async function detect", at));
+  const catchAt = body.indexOf("} catch (cause) {");
+  expect(catchAt).toBeGreaterThan(-1);
+  expect(body.slice(catchAt)).toContain('typesafeStatus.value = "error";');
+  expect(body.slice(catchAt)).toContain("typesafeError.value = error.value;");
+});

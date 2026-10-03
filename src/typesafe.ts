@@ -338,7 +338,11 @@ export async function judgeRisk(
   // raise a tier - least of all to CRITICAL and block a tool call. A missing confidence reads as
   // zero, so a bare tier can never act.
   const floor = inject.settings?.runAtConfidence ?? DEFAULT_TYPESAFE_SETTINGS.runAtConfidence;
-  if ((choice.confidence ?? 0) < floor) return null;
+  // Absence is discarded OUTRIGHT, not merely compared: `(undefined ?? 0) < floor` stops
+  // discarding at the clamp (0), and an answer with no confidence field would act there - the
+  // exact case the note above promises cannot happen. An explicit zero IS a score, so a zero
+  // floor still accepts it, as the operator's dial says.
+  if (choice.confidence === undefined || choice.confidence < floor) return null;
   // Map the API's uppercase wire label onto the repo's lowercase authority; anything the
   // wire does not name is dropped (never guessed), so the raise-only merge stays total.
   return isRiskWireLabel(choice.choice) ? RISK_WIRE_LABELS[choice.choice] : null;
@@ -373,6 +377,8 @@ export async function judgeEngineKey(
   // must not assign an engine. The `engines.includes` filter below only bounds WHICH engine, never
   // WHETHER to route.
   const floor = inject.settings?.runAtConfidence ?? DEFAULT_TYPESAFE_SETTINGS.runAtConfidence;
-  if ((choice.confidence ?? 0) < floor) return null;
+  // Absence is discarded OUTRIGHT for the same reason as `judgeRisk`: at the clamp (0) the
+  // comparison alone let a bare `{choice}` assign an engine.
+  if (choice.confidence === undefined || choice.confidence < floor) return null;
   return engines.includes(choice.choice) ? choice.choice : null;
 }

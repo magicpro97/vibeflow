@@ -17,7 +17,8 @@ The judge is a typed question endpoint, not a chat model. VibeFlow sends one `st
 string plus typed questions (`Score`, `Choice`, `Noul`) and gets back typed answers with
 a **calibrated confidence** in `[0, 1]`. The point of the calibrated number is that a low
 confidence is a first-class answer, not a failure: below `runAtConfidence` the answer is
-not used at all.
+not used at all, and an answer that omits confidence entirely is discarded too — it never
+rides a floor lowered to its clamp.
 
 Measured latency from Vietnam is **0.72-1.35 s per call**. That is the range observed
 here, not the vendor's: the vendor publishes 70-500 ms, which is West-Coast server-side

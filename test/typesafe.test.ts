@@ -397,6 +397,24 @@ describe("judgeRisk", () => {
     ).toBeNull();
   });
 
+  test("a bare tier is discarded even at the floor's lower clamp", async () => {
+    // `(confidence ?? 0) < floor` alone only discards absence while the floor is > 0: at the
+    // clamp (0) an answer with NO confidence field cleared `0 < 0` and acted, breaking the
+    // invariant above. Absence is discarded outright now. An EXPLICIT zero still clears a zero
+    // floor - the floor is the operator's dial, and 0 means "accept whatever the wire sent".
+    const zeroFloor = (body: unknown) => ({
+      ...inject(body),
+      settings: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true, runAtConfidence: 0 },
+    });
+    const bare = { model: "m", answers: { risk_tier: { choice: "CRITICAL" } } };
+    expect(await judgeRisk("rm -rf /", zeroFloor(bare))).toBeNull();
+    const explicitZero = {
+      model: "m",
+      answers: { risk_tier: { choice: "CRITICAL", confidence: 0 } },
+    };
+    expect(await judgeRisk("rm -rf /", zeroFloor(explicitZero))).toBe(RISK_LEVEL.CRITICAL);
+  });
+
   test("a choice at or above the floor maps; unknown option / noul-shaped → null", async () => {
     expect(
       await judgeRisk(
@@ -452,6 +470,25 @@ describe("judgeEngineKey", () => {
       answers: { engine: { type: "choice", choice: "codex", confidence: 0.01 } },
     };
     expect(await judgeEngineKey({ name: "u1" }, ["claude", "codex"], inject(unsure))).toBeNull();
+  });
+
+  test("a bare engine is discarded even at the floor's lower clamp", async () => {
+    // The same clamp hole as judgeRisk: at runAtConfidence 0, `(undefined ?? 0) < 0` is false,
+    // so a bare `{choice}` routed a unit anyway. Absence discards outright; explicit zero still
+    // clears a zero floor, exactly as judgeRisk keeps it.
+    const zeroFloor = (body: unknown) => ({
+      ...inject(body),
+      settings: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true, runAtConfidence: 0 },
+    });
+    const bare = { model: "m", answers: { engine: { type: "choice", choice: "codex" } } };
+    expect(await judgeEngineKey({ name: "u1" }, ["claude", "codex"], zeroFloor(bare))).toBeNull();
+    const explicitZero = {
+      model: "m",
+      answers: { engine: { type: "choice", choice: "codex", confidence: 0 } },
+    };
+    expect(await judgeEngineKey({ name: "u1" }, ["claude", "codex"], zeroFloor(explicitZero))).toBe(
+      "codex",
+    );
   });
 
   test("the unit spec travels in the state, and a missing one is spelled out", async () => {

@@ -11,8 +11,7 @@
         <div class="home-control-section__heading"><span><small>Project bootstrap</small><strong id="harness-title">Harness initialization</strong></span><button type="button" :disabled="busy" @click="initialize(false)">{{ busy ? "Initializing…" : "Initialize harness" }}</button></div>
         <label class="home-control-path"><span>Repository</span><input v-model="repoPath" type="text" placeholder="/path/to/repo" @blur="detect" /><button type="button" :disabled="detecting" @click="detect">{{ detecting ? "Checking…" : "Detect" }}</button></label>
         <p v-if="detected" class="home-control-note">{{ detection?.isGit ? "Git repository detected" : "Directory detected — git protection unavailable" }}</p>
-        <p v-if="message" class="home-control-message" role="status">{{ message }}</p>
-        <p v-if="error" class="home-control-error" role="alert">{{ error }}</p>
+        <p v-if="message" class="home-control-message" role="status">{{ message }}</p><p v-if="error" class="home-control-error" role="alert">{{ error }}</p>
       </section>
 
       <section class="home-control-section" aria-labelledby="agents-title">
@@ -39,13 +38,11 @@
         <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
         <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. Off by default: with it off every path behaves exactly as it does today.</p>
 
-        <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
-        <p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
+        <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p><p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One connection failed — {{ typesafeError }}</p>
         <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — set <code>TYPESAFE_API_KEY</code> or run <code>vf config typesafe key</code>.</p>
         <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — calls are refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
         <p v-if="typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" class="home-control-warning" role="alert">Test connection is refused until {{ typesafeView?.probeCooldownUntil ?? "its own breaker clears" }} — the probe's own breaker is {{ typesafeView?.probeState }}, and the judge's calls are unaffected.</p>
-        <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p>
-        <p v-if="typesafeView && typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
+        <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p><p v-if="typesafeView && typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
 
         <dl v-if="typesafeView" class="home-control-list">
           <div><dt>enabled</dt><dd>{{ typesafeView.enabled ? "on" : "off" }}</dd></div>
@@ -102,14 +99,8 @@ import { TYPESAFE_EGRESS_LINES } from "../../../typesafe-egress.js";
 import { api } from "../api.js";
 import { conversationHomeApi } from "../conversation-home-api.js";
 import type { ControlCenterCapability } from "../conversation-home-types.js";
-import {
-  type TypesafeSettingsView,
-  type VibeSettings,
-  emptyTypesafeForm,
-  typesafeNeedsReload,
-  typesafeSaveDisabled,
-  typesafeThresholdError,
-} from "../types-settings.js";
+// biome-ignore format: one line keeps the drawer under its line pin
+import { type TypesafeSettingsView, type VibeSettings, emptyTypesafeForm, typesafeNeedsReload, typesafeSaveDisabled, typesafeThresholdError } from "../types-settings.js";
 import type { RepoDetection, SafeSkill } from "../types.js";
 
 const props = defineProps<{ open: boolean }>();
@@ -137,6 +128,7 @@ const thresholdError = ref("");
 const typesafeRepo = ref("");
 let typesafeLoadSeq = 0;
 let typesafeProbeRepo = ""; // repo the current verdict describes; survives a re-open, not a repo change
+let detectInFlight: Promise<boolean> | null = null; // the run a caller arriving mid-detect joins
 
 function typesafeSaveBlocked(): boolean {
   return typesafeSaveDisabled({
@@ -209,8 +201,7 @@ async function testConnection(): Promise<void> {
   } finally {
     typesafeTesting.value = false;
   }
-  // The stamp lands WITH the text, before the reload: the wipe clears the pair together, so no
-  // reload can leave a stamp describing a repo with no verdict; the probe's spend re-reads the rows.
+  // The stamp lands WITH the text, before the reload: the wipe clears the pair together.
   typesafeProbeRepo = probed; // stamped with the TEXT, never with the pending probe
   await loadTypesafe();
 }
@@ -263,11 +254,20 @@ async function load(): Promise<void> {
     await Promise.all([loadSkills(), loadCapabilities(), ...(reloaded ? [] : [loadTypesafe()])]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load control center";
+    typesafeStatus.value = "error"; // else the spinner + disabled controls outlive the failure
+    typesafeError.value = error.value; // the shared cause, shown in this section too
   }
 }
 
 async function detect(): Promise<boolean> {
-  if (detecting.value) return false;
+  // A caller arriving mid-flight JOINS the run: `false` let `load()` read the pre-detect repo.
+  detectInFlight ??= detectOnce().finally(() => {
+    detectInFlight = null;
+  });
+  return detectInFlight;
+}
+
+async function detectOnce(): Promise<boolean> {
   detecting.value = true;
   let reloadNeeded = false;
   try {
@@ -282,8 +282,7 @@ async function detect(): Promise<boolean> {
   } finally {
     detecting.value = false;
   }
-  // A THROWING `api.detect` leaves `reloadNeeded` false, so this `||` is the only retry.
-  const reload = reloadNeeded || typesafeStatus.value === "error";
+  const reload = reloadNeeded || typesafeStatus.value === "error"; // only retry if detect threw
   if (reload) await loadTypesafe();
   return reload;
 }

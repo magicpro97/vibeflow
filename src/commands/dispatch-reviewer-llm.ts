@@ -154,7 +154,14 @@ export async function runLLMReview(opts: LLMReviewOpts): Promise<LLMReviewResult
     // decides whether the answer exists, `acceptAtConfidence` decides whether it may act.
     // A score answer with NO confidence field reads as zero, so a bare score can never act.
     const confidence = result?.covers.confidence ?? 0;
-    if (result !== null && confidence >= settings.runAtConfidence) {
+    // Absence discards OUTRIGHT, not merely compared: `?? 0` alone stops discarding at the
+    // clamp (0), where a bare score cleared both gates although the note above promises it
+    // never acts. `confidence` still feeds the audit record below.
+    if (
+      result !== null &&
+      result.covers.confidence !== undefined &&
+      confidence >= settings.runAtConfidence
+    ) {
       const ms = Math.round(performance.now() - startedAt);
       // JUDGE-ESCALATE-ONLY (see § Judge authority): the judge may short-circuit ONLY the
       // failing branch. `opts.diff` is written by whoever opened the pull request, so a

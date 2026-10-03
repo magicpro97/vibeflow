@@ -262,6 +262,30 @@ describe("runLLMReview — System One escalate-only seam", () => {
     expect(r.judge?.confidence).toBeUndefined();
   });
 
+  test("a bare score is discarded even at the floor's lower clamp", async () => {
+    // The same clamp hole as the two tier judges: `covers.confidence ?? 0` only discards absence
+    // while the floor is > 0, so at 0 a score with NO confidence field cleared both gates and
+    // short-circuited the failing branch (engineCalls 0). Absence discards outright now.
+    let engineCalls = 0;
+    const r = await runLLMReview({
+      goal: "g",
+      diff: "d",
+      llmFn: async () => {
+        engineCalls++;
+        return "COVERED";
+      },
+      typesafe: {
+        judge: async () => ({ covers: { score: 0 }, tests: { noul: 0.1 } }),
+        settings: { ...settings, runAtConfidence: 0, acceptAtConfidence: 0 },
+        env: KEY,
+        userRoot,
+      },
+    });
+    expect(engineCalls).toBe(1);
+    expect(r.judge?.source).toBe("engine");
+    expect(r.judge?.confidence).toBeUndefined();
+  });
+
   test("judge null (no key / error) leaves today's path byte-for-byte", async () => {
     const r = await runLLMReview({
       goal: "g",
