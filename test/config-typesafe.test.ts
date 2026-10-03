@@ -918,3 +918,33 @@ describe("the key file name is gitignored wherever the repo root IS the user roo
     expect(r.status).toBe(0);
   });
 });
+
+describe("the health records are gitignored wherever the repo root IS the user root", () => {
+  test(".gitignore names typesafe-health*.json*, and git agrees", () => {
+    // Round-78 review (ci longcat): the comment above `typesafe.env*` already argues that
+    // `VF_USER_VIBEFLOW_ROOT` may point at a working tree - the health records
+    // (`typesafe-health.json`, `.goal.json`, `.probe.json`, plus proper-lockfile `<name>.lock`
+    // siblings) were still uncovered, so `git add -A` in a repo-rooted user root would commit
+    // breaker state. No secrets (breaker state + last_call only), but the ignore now follows the
+    // key file's reasoning: any run may leave them where a repo lives.
+    const gitignore = readFileSync(new URL("../.gitignore", import.meta.url), "utf8");
+    const rule = gitignore
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0 && !l.startsWith("#") && l.endsWith("typesafe-health*.json*"));
+    expect(rule).toBeDefined();
+    // git's OWN resolver, same shape as the key-file pin above: check-ignore exits non-zero when
+    // nothing covers the name, so the loop fails loudly if the rule is ever dropped.
+    for (const name of [
+      "typesafe-health.json",
+      "typesafe-health.goal.json",
+      "typesafe-health.probe.json",
+      "typesafe-health.json.lock",
+    ]) {
+      const r = cpSpawnSync("git", ["check-ignore", "-q", name], {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+      });
+      expect(r.status).toBe(0);
+    }
+  });
+});
