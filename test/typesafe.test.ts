@@ -267,6 +267,26 @@ describe("judgeAssessment", () => {
     expect(seenOf).toEqual([{ cls: FAILURE_CLASS.ABORT, status: undefined }]);
   });
 
+  test("the caller's cancellation reaches the socket, not just the classifier", async () => {
+    const controller = new AbortController();
+    const aborted: boolean[] = [];
+    await judgeAssessment("d", {
+      ...inject(scoreBody),
+      signal: controller.signal,
+      onOutcome: record,
+      fetchFn: async (_u, init) => {
+        // The POST must carry a signal that FOLLOWS the caller: pre-fix the request carried only
+        // the per-attempt `AbortSignal.timeout`, so a Ctrl-C never cancelled the in-flight socket
+        // (the caller's signal was consulted for classification alone).
+        aborted.push(init.signal?.aborted ?? false);
+        controller.abort();
+        aborted.push(init.signal?.aborted ?? false);
+        throw Object.assign(new Error("cancelled"), { name: "AbortError" });
+      },
+    });
+    expect(aborted).toEqual([false, true]);
+  });
+
   test("a throwing fetch, a throwing json(), and a timeout all fail open", async () => {
     expect(
       await judgeAssessment("d", {

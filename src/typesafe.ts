@@ -178,7 +178,13 @@ async function systemOneAttempt(
         method: "POST",
         headers: { authorization: `Bearer ${key.key}`, "content-type": "application/json" },
         body,
-        signal: AbortSignal.timeout(left),
+        // Compose the caller's cancellation INTO the request: pre-fix only the classifier read
+        // `inject.signal`, so a Ctrl-C left the socket open and the call blocked for the full
+        // `timeoutMs`. `AbortSignal.any` keeps the per-attempt deadline and honours a caller that
+        // already aborted (the composite lands pre-aborted; the catch classes it `abort`).
+        signal: inject.signal
+          ? AbortSignal.any([AbortSignal.timeout(left), inject.signal])
+          : AbortSignal.timeout(left),
       });
       if (!res.ok) {
         const cls = classifyHttp(res.status);
