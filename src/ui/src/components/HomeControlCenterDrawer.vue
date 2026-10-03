@@ -36,7 +36,7 @@
       </section>
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
-        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || typesafeSaveBlocked() || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
+        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
         <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. Off by default: with it off every path behaves exactly as it does today.</p>
 
         <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p>
@@ -209,10 +209,10 @@ async function testConnection(): Promise<void> {
   } finally {
     typesafeTesting.value = false;
   }
-  // The probe spends budget and can trip the PROBE breaker server-side: the rows loaded before the
-  // click describe the pre-probe world, so re-read them (the button's gate reads that state).
-  await loadTypesafe();
+  // The stamp lands WITH the text, before the reload: the wipe clears the pair together, so no
+  // reload can leave a stamp describing a repo with no verdict; the probe's spend re-reads the rows.
   typesafeProbeRepo = probed; // stamped with the TEXT, never with the pending probe
+  await loadTypesafe();
 }
 
 async function saveTypesafe(): Promise<void> {

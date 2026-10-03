@@ -209,14 +209,14 @@ export async function handleMutationRoute(
     if (!readState(ctx.getActiveRepo())) {
       return Response.json({ error: "no workflow state — run init first" }, { status: 400 });
     }
-    // One plan dispatch is one run: the budget restarts, as in a fresh CLI process.
-    resetCallBudget(TYPESAFE_BUDGET_BUCKET.ENFORCEMENT);
     const engine = typeof payload.engine === "string" ? payload.engine : AGENT_ENGINE.CLAUDE;
     // Web dry:false selects a real run; acquisition still uses its injected approver.
     const dry = payload.dry !== false;
     const yes = !dry; // yes:true enables cli mode in resolveMode()
     // Stamp evidence so legacy done units satisfy orchestrate's completeness contract.
     if (!dry) {
+      // Only the run request restarts the budget; a dry preview dispatches nothing to refund.
+      resetCallBudget(TYPESAFE_BUDGET_BUCKET.ENFORCEMENT);
       const preState = readState(ctx.getActiveRepo());
       if (preState) {
         const ts = new Date().toISOString();

@@ -73,7 +73,9 @@ Scores a unit's diff against its goal before the engine reviewer runs. On a fail
 answer the change is sent back in about a second instead of waiting on a 20-40 s engine
 call. On a passing answer the engine reviewer still runs. `reviewerEngine` selects what
 `unit.engine` means for this: `"unit"` uses the unit's own engine, `"global"` uses the
-run-global one. Timeout: `timeoutMs`.
+run-global one. The policy comes from the saved `typesafe` block, so an install with **no
+block at all** resolves to `"global"`: the judge is off, and an engine-annotated unit never
+re-routes its reviewer. Timeout: `timeoutMs`.
 
 ### `goalCoverage`
 
@@ -229,11 +231,11 @@ The block is `.vibeflow/SETTINGS.json` -> `typesafe`, and it never carries the k
 | `judgeScoreLevels` | `3` | settings only |
 | `judgePassLevel` | `2` | settings only |
 | `judgeTestFloor` | `0.5` | settings only |
-| `reviewerEngine` | `"unit"` | settings only, `"unit"` or `"global"` |
+| `reviewerEngine` | `"unit"` | settings only, `"unit"` or `"global"`; an install with no `typesafe` block has no policy and reads as `"global"` |
 | `failStreakLimit` | `2` | settings only |
 | `cooldownBaseMs` | `60000` | settings only |
 | `cooldownCapMs` | `900000` | settings only |
-| `maxCalls` | `20` | settings only; per process (a server request restarts its own bucket), counted in guard entries |
+| `maxCalls` | `20` | settings only; per process (a dispatched server request restarts its own bucket - a dry preview never does), counted in guard entries |
 | the four call-site toggles | all `true` | `vf config typesafe call-site <name> <on\|off>` |
 | `status`, `key`, `reset`, `test` | - | `vf config typesafe <sub>` |
 | `~/.vibeflow/typesafe.env`, `~/.vibeflow/typesafe-health.json` | - | paths, and the removal command below |

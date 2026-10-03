@@ -65,22 +65,25 @@ export function makeReviewer(
 
   // Task 7: per-unit routing means the run-global `implementer` pin is no longer the whole
   // story. `reviewerEngine: "global"` (opt-out) keeps it; the default follows the unit and
-  // only falls back to the run-global engine when the judge routed nothing — so a fail-open
-  // planner stays byte-for-byte today's behaviour. ADR-001's cross-review invariant is
-  // preserved either way: `resolveReviewerEngine` still avoids whatever this resolves to.
-  // `u.engine` is typed `Engine` but arrives from plan/state JSON (`readSettings`/ledger reads
-  // cast the file), so it is validated against the runtime authority before it can steer the
-  // reviewer: `pickReviewerEngine` returns the first available engine that merely `!==` its
-  // `implementer` (src/review-engine.ts:34), so a foreign id silently loses the ADR-001
-  // cross-review invariant. A non-canonical id falls back to the run-global pin.
+  // only falls back to the run-global engine when the judge routed nothing. An install with NO
+  // `typesafe` block at all resolves to `"global"` (coerce never ran): it never opted in, so
+  // an engine-annotated unit (state written while the judge was on, a hand-edited ledger) must
+  // not silently re-route its reviewer - the off path stays byte-for-byte today's behaviour.
+  // ADR-001's cross-review invariant is preserved either way: `resolveReviewerEngine` still
+  // avoids whatever this resolves to. `u.engine` is typed `Engine` but arrives from plan/state
+  // JSON (`readSettings`/ledger reads cast the file), so it is validated against the runtime
+  // authority before it can steer the reviewer: `pickReviewerEngine` returns the first available
+  // engine that merely `!==` its `implementer` (src/review-engine.ts:34), so a foreign id
+  // silently loses the ADR-001 cross-review invariant. A non-canonical id falls back to the
+  // run-global pin.
   const canonicalEngine = (engine: WorkUnit["engine"]): Engine | undefined =>
     engine !== undefined && (ENGINES as readonly string[]).includes(engine)
       ? (engine as Engine)
       : undefined;
   const implementerFor = (u: WorkUnit): Engine | undefined =>
-    settings.typesafe?.reviewerEngine === "global"
-      ? inject?.implementer
-      : (canonicalEngine(u.engine) ?? inject?.implementer);
+    settings.typesafe?.reviewerEngine === "unit"
+      ? (canonicalEngine(u.engine) ?? inject?.implementer)
+      : inject?.implementer;
 
   const review = async (
     unit: WorkUnit,

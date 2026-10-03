@@ -298,13 +298,13 @@ test("the cross-repo guard is wired at its production call site, not only as a p
   expect(typesafeNeedsReload("/repo/a", "/repo/b")).toBe(true);
   expect(drawer).toContain("rowsAreStale: typesafeNeedsReload(typesafeRepo.value, repoPath.value)");
   expect(drawer).toContain(':disabled="typesafeSaveBlocked()"');
-  // The probe acts on the server's PROCESS-GLOBAL active repo too, so it needs the same staleness
-  // guard Save has: without it, a probe clicked from a stale panel bills and reports against
-  // whichever repo is active by then, under rows that describe the one it was opened for.
+  // The probe must NOT ride the save's staleness gate (round 65): the gate includes the
+  // repo-mismatch guard, so a stale panel disabled the one control that could ask the server about
+  // the probe path - and the probe names its own repo (a moved target 409s instead of billing).
   const probeButton = /<button type="button" :disabled="([^"]*)" @click="testConnection"/.exec(
     drawer,
   );
-  expect(probeButton?.[1]).toContain("typesafeSaveBlocked()");
+  expect(probeButton?.[1]).not.toContain("typesafeSaveBlocked()");
   // The button's gate follows the PROBE's own breaker: the probe runs through
   // the PROBE bucket (its own health file), so an OPEN ENFORCEMENT breaker does not refuse it
   // and gating on `state` disabled the one control that could report a healthy probe.

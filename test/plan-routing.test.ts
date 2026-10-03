@@ -226,24 +226,49 @@ describe("routeForDispatch (orchestrate wiring)", () => {
 });
 
 describe("reviewer implementer resolution", () => {
-  test("the reviewer follows the UNIT's engine, not a run-global one", () => {
-    const mk = makeReviewer("cli", 0.8, { implementer: "claude" });
-    expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("codex");
+  // The seam reads the repo's settings ONCE per `makeReviewer` (via `cwd`), so every test pins an
+  // explicit base directory: defaulting to `process.cwd()` silently read whatever this repo had
+  // saved, and left "no block at all" indistinguishable from "opted in".
+  const judgeBase = (reviewerEngine?: "unit" | "global"): string => {
+    const base = mkdtempSync(join(tmpdir(), "vf-reviewer-"));
+    mkdirSync(join(base, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      join(base, ".vibeflow", "SETTINGS.json"),
+      JSON.stringify({
+        typesafe: reviewerEngine ? { enabled: true, reviewerEngine } : { enabled: true },
+      }),
+    );
+    return base;
+  };
+
+  test("the reviewer follows the UNIT's engine when the judge is installed", () => {
+    // An installed block defaults to `reviewerEngine: "unit"` (coerceTypesafeSettings), and a
+    // routed unit is the opt-in contract: the reviewer runs on the engine the unit ran on.
+    const base = judgeBase();
+    try {
+      const mk = makeReviewer("cli", 0.8, { implementer: "claude", cwd: base });
+      expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("codex");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   test("an unrouted unit falls back to the run-global implementer", () => {
-    const mk = makeReviewer("cli", 0.8, { implementer: "claude" });
-    expect(mk.__implementerFor(unit("a"))).toBe("claude");
+    const base = judgeBase();
+    try {
+      const mk = makeReviewer("cli", 0.8, { implementer: "claude", cwd: base });
+      expect(mk.__implementerFor(unit("a"))).toBe("claude");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
-  test("reviewerEngine 'global' pins the run-global implementer", () => {
-    const base = mkdtempSync(join(tmpdir(), "vf-reviewer-global-"));
+  test("an install with no typesafe block keeps the run-global reviewer, engine or not", () => {
+    // The off path stays byte-for-byte: with no block at all the policy resolves to `"global"`,
+    // so a unit that carries an engine (state written while the judge was on, a hand-edited
+    // ledger) must NOT silently re-route its reviewer onto it.
+    const base = mkdtempSync(join(tmpdir(), "vf-reviewer-off-"));
     try {
-      mkdirSync(join(base, ".vibeflow"), { recursive: true });
-      writeFileSync(
-        join(base, ".vibeflow", "SETTINGS.json"),
-        JSON.stringify({ typesafe: { enabled: true, reviewerEngine: "global" } }),
-      );
       const mk = makeReviewer("cli", 0.8, { implementer: "claude", cwd: base });
       expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("claude");
     } finally {
@@ -251,9 +276,24 @@ describe("reviewer implementer resolution", () => {
     }
   });
 
-  test("with no inject implementer at all the seam resolves to undefined", () => {
-    const mk = makeReviewer("cli", 0.8);
-    expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("codex");
+  test("reviewerEngine 'global' pins the run-global implementer", () => {
+    const base = judgeBase("global");
+    try {
+      const mk = makeReviewer("cli", 0.8, { implementer: "claude", cwd: base });
+      expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("claude");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("with no inject implementer at all the seam resolves to the unit's engine", () => {
+    const base = judgeBase();
+    try {
+      const mk = makeReviewer("cli", 0.8, { cwd: base });
+      expect(mk.__implementerFor({ ...unit("a"), engine: "codex" })).toBe("codex");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   test("a non-canonical unit engine never steers the reviewer", () => {
@@ -262,12 +302,19 @@ describe("reviewer implementer resolution", () => {
     // `!==` its `implementer`, so a foreign id silently loses the cross-review invariant (the
     // reviewer could resolve back to the ACTUAL implementer). The seam must validate against
     // `ENGINES` and fall back to the run-global pin.
-    const mk = makeReviewer("cli", 0.8, { implementer: "claude" });
-    expect(mk.__implementerFor({ ...unit("a"), engine: "not-an-engine" as never })).toBe("claude");
-    const bare = makeReviewer("cli", 0.8);
-    expect(
-      bare.__implementerFor({ ...unit("a"), engine: "not-an-engine" as never }),
-    ).toBeUndefined();
+    const base = judgeBase();
+    try {
+      const mk = makeReviewer("cli", 0.8, { implementer: "claude", cwd: base });
+      expect(mk.__implementerFor({ ...unit("a"), engine: "not-an-engine" as never })).toBe(
+        "claude",
+      );
+      const bare = makeReviewer("cli", 0.8, { cwd: base });
+      expect(
+        bare.__implementerFor({ ...unit("a"), engine: "not-an-engine" as never }),
+      ).toBeUndefined();
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });
 

@@ -501,18 +501,20 @@ describe("the probe names the repository it was read from", () => {
 });
 
 describe("POST /api/orchestrate restarts the enforcement budget", () => {
-  test("a dispatched plan starts from a full budget, not the serve process's leftovers", async () => {
+  test("only the request that runs the plan restarts the budget; a dry preview refunds nothing", async () => {
     // `vf serve` is not one run: with no entry reset, the 21st hook/review/planner call EVER made
     // in that process answered "refused by the call budget" for the rest of its life - a latch no
     // in-process recovery could clear, since `vf config typesafe reset` only rewrites the JSON
     // record. A dispatched plan is one run, exactly like one `vf orchestrate` CLI invocation, so
-    // the route resets the ENFORCEMENT bucket at entry.
+    // the run request resets the ENFORCEMENT bucket - and ONLY it: the reset used to fire before
+    // `dry` was even read, so a harmless preview (dry dispatches nothing) refunded a budget the
+    // plan before it had not finished spending.
     resetCallBudget();
     const burnRoot = mkdtempSync(join(tmpdir(), "vf-orchestrate-burn-"));
     for (let i = 0; i < 3; i++) {
       await withTypesafeGuard("planner", async () => i, { userRoot: burnRoot, out: outBusOnly });
     }
-    expect(callsUsedThisRun()).toBe(3); // leftovers, exactly what the route must discard
+    expect(callsUsedThisRun()).toBe(3); // leftovers, exactly what the run request must discard
 
     const dir = mkdtempSync(join(tmpdir(), "vf-orchestrate-budget-"));
     mkdirSync(join(dir, ".vibeflow"), { recursive: true });
@@ -525,26 +527,36 @@ describe("POST /api/orchestrate restarts the enforcement budget", () => {
     } as never);
 
     let seen = -1;
-    const req = new Request("http://127.0.0.1/api/orchestrate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dry: true }),
-    });
-    const res = await handleMutationRoute(
-      {
-        getActiveRepo: () => dir,
-        setActiveRepo: () => {},
-        orchestrateFn: (async () => {
-          seen = callsUsedThisRun();
-          return { ok: true };
-        }) as never,
-      },
-      "POST",
-      "/api/orchestrate",
-      req,
-      new URL(req.url),
-    );
-    expect(res?.status).toBe(200);
-    expect(seen).toBe(0); // reset at the boundary: the plan's own run starts from full budget
+    const post = async (body: Record<string, unknown>) => {
+      const req = new Request("http://127.0.0.1/api/orchestrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return handleMutationRoute(
+        {
+          getActiveRepo: () => dir,
+          setActiveRepo: () => {},
+          orchestrateFn: (async () => {
+            seen = callsUsedThisRun();
+            return { ok: true };
+          }) as never,
+        },
+        "POST",
+        "/api/orchestrate",
+        req,
+        new URL(req.url),
+      );
+    };
+
+    seen = -1;
+    const preview = await post({ dry: true });
+    expect(preview?.status).toBe(200);
+    expect(seen).toBe(3); // a preview dispatches nothing: the leftovers survive it
+
+    seen = -1;
+    const run = await post({ dry: false });
+    expect(run?.status).toBe(200);
+    expect(seen).toBe(0); // the run request restarts the boundary budget
   });
 });
