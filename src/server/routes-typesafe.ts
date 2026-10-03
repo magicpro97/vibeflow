@@ -211,9 +211,10 @@ export async function handleTypesafeTestRoute(inject: TypesafeTestInject): Promi
   // file-backed breaker (both live in `withTypesafeGuard`), so a client holding the page token
   // could loop this route issuing billed requests that never touched the breaker — even while the
   // breaker was open for every real call site. The CLI probe has the same shape and stays a single
-  // human-initiated command; this one is scriptable, so it pays the same toll: every click feeds
-  // the breaker and its own budget bucket (see the `resetCallBudget` note below for why the bucket
-  // restarts per click).
+  // human-initiated command; this one is scriptable, so it pays the same toll: its call feeds the
+  // breaker and charges its own budget bucket, exactly as one `vf config typesafe test` does.
+  // ("Same toll" is per click, NOT a shared allowance: the bucket restarts below because a click
+  // IS its run — see that note.)
   //
   // `outcome: probe.outcome` is not decoration. The guard reads `inject.outcome?.()` and falls back
   // to `FAILURE_CLASS.NONE`, so a guard call that omits it stamps every vendor failure as a

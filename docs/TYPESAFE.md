@@ -241,10 +241,14 @@ The block is `.vibeflow/SETTINGS.json` -> `typesafe`, and it never carries the k
 `maxCalls` is counted in **guard entries**, not HTTP requests: the client retries once
 on a `network` or `server` failure, so the hard HTTP bound is `2 x maxCalls`.
 
-A long-lived `vf serve` process is not one run: `POST /api/verify?goal-eval=1` and
-`POST /api/typesafe/test` each restart their own bucket at the request boundary, so neither
-route latches off after its first `maxCalls` calls — the enforcement bucket and the probe
-bucket still never consume each other.
+A long-lived `vf serve` process is not one run, so both server request boundaries restart
+their own bucket: `POST /api/verify?goal-eval=1` restarts the goal-coverage bucket (one
+judged request is one run) and `POST /api/typesafe/test` restarts the probe bucket. Three
+counters, and no bucket can exhaust or refund another — in particular no route ever zeroes
+the enforcement count the hook and review seams share, so a mounted request cannot refund
+budget a drained run must refuse. The goal-coverage call still records into
+`typesafe-health.json` (a failed goal call IS an enforcement failure); only the probe
+diagnostic keeps its own file, because a diagnostic must not change the thing it diagnoses.
 
 ### The two clamps that keep the hook path alive
 

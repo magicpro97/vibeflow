@@ -258,29 +258,41 @@ export async function updateHealthFile<T, R>(
 }
 
 /** Which counter a call charges. Frozen runtime authority, the repo's convention for a closed
- *  vocabulary: the two buckets are NOT interchangeable, and the Spy/typesafe-ui panel writes one
+ *  vocabulary: the buckets are NOT interchangeable, and the Spy/typesafe-ui panel writes one
  *  of them, so a bare string that drifts would silently re-merge them. */
 export const TYPESAFE_BUDGET_BUCKET = Object.freeze({
-  /** Hook, verify, review: the calls whose refusal is the judge losing its veto. */
+  /** Hook and review: the calls whose refusal is the judge losing its veto. */
   ENFORCEMENT: "enforcement",
   /** The operator-triggered "test connection" probe. */
   PROBE: "probe",
+  /** The goal-coverage seam (verify): the ONE enforcement call site an HTTP request boundary may
+   *  spend. Its OWN counter, because the server must be able to restart the run it is about to
+   *  make without zeroing the counter the hook/review seams share — but the ENFORCEMENT record
+   *  file, because a failing goal call IS an enforcement failure (same outage signal, same
+   *  circuit, and only a genuine classified failure can open it). */
+  GOAL_COVERAGE: "goal-coverage",
 } as const);
 export type TypesafeBudgetBucket =
   (typeof TYPESAFE_BUDGET_BUCKET)[keyof typeof TYPESAFE_BUDGET_BUCKET];
 
 /**
- * Bucket -> record file, so the two buckets cannot share a breaker.
+ * Bucket -> record file, so the DIAGNOSTIC bucket cannot share a breaker with the enforcement ones.
  *
- * They already had separate in-process counters; the RECORD was still shared, which meant two failed
- * probe requests (an invalid key answering `auth`, say) could open the circuit that the
- * hook/verify/review calls then refuse against for the whole cooldown. A caller holding only a page
+ * The probe already had a separate in-process counter; the RECORD was still shared, which meant two
+ * failed probe requests (an invalid key answering `auth`, say) could open the circuit that the
+ * hook/review/goal calls then refuse against for the whole cooldown. A caller holding only a page
  * token could therefore disable enforcement without spending a unit of the budget the counter split
- * was protecting.
+ * was protecting. A diagnostic must not change the thing it diagnoses, so it keeps its own file.
+ *
+ * GOAL_COVERAGE deliberately SHARES the enforcement record: a failing goal call is an enforcement
+ * failure — same vendor, same outage signal — so its streak belongs to the same circuit, exactly
+ * where a CLI `vf verify` failure would land it. Nothing a page token can do can forge a
+ * classified failure, so sharing the file adds no reach.
  */
 export const HEALTH_FILE_BY_BUCKET = Object.freeze({
   [TYPESAFE_BUDGET_BUCKET.ENFORCEMENT]: ENFORCEMENT_HEALTH_FILE,
   [TYPESAFE_BUDGET_BUCKET.PROBE]: "typesafe-health.probe.json",
+  [TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE]: ENFORCEMENT_HEALTH_FILE,
 } as const);
 
 /** The operator probe's own record - what `vf config typesafe status` shows as a separate section. */

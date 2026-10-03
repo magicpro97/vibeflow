@@ -153,40 +153,62 @@ export async function mutateHealth<T>(
 }
 
 /** The per-RUN call budget's storage. Module scope is the point: `vf hook` is a fresh process
- *  per tool call, while the orchestrator's reviewer/goalCoverage/planner calls share one.
+ *  per tool call, while the orchestrator's reviewer/planner calls share one.
  *
- *  Two counters, not one. `probeCallsThisRun` exists because a page token can reach
+ *  Three counters, not one. `probeCallsThisRun` exists because a page token can reach
  *  `POST /api/typesafe/test`, which runs through the same guard: charging it here let a client
  *  with no business touching the judge spend the ENFORCEMENT budget, after which every
- *  hook/verify/review call in that process returns `null` - the seam reports fall-through, the
+ *  hook/review call in that process returns `null` - the seam reports fall-through, the
  *  veto is gone, and `GET /api/typesafe` still reads `idle` because a budget stop returns before
- *  `record`. Separation means neither bucket can exhaust the other.
+ *  `record`. `goalCallsThisRun` splits the goal-coverage seam off the SAME way: it is the one
+ *  enforcement call site an HTTP request boundary may spend, so `goalEvalOptions` must restart
+ *  the run it is about to make WITHOUT zeroing the counter the hook/review seams share - a
+ *  mounted route refunding budget it never spent would re-arm calls a drained run must refuse.
+ *  Separation means no bucket can exhaust or refund another.
  *
  *  A long-lived server is NOT a run. `vf serve` answers requests for days, so a counter that only
  *  ever climbs would latch each seam off after its first `maxCalls` calls, for the server's whole
  *  lifetime, with no in-process recovery (a JSON-only `vf config typesafe reset` cannot reach
  *  module memory). The two server request boundaries therefore reset their own bucket at entry -
- *  `goalEvalOptions` (one `POST /api/verify?goal-eval=1`) and `handleTypesafeTestRoute` (one tested
- *  click) - which is exactly the shape of one CLI invocation each. */
+ *  `goalEvalOptions` (one `POST /api/verify?goal-eval=1`, the GOAL_COVERAGE bucket) and
+ *  `handleTypesafeTestRoute` (one tested click, the PROBE bucket) - which is exactly the shape of
+ *  one CLI invocation each. */
 let callsThisRun = 0;
 let probeCallsThisRun = 0;
+let goalCallsThisRun = 0;
 export function callsUsedThisRun(): number {
   return callsThisRun;
 }
 export function probeCallsUsedThisRun(): number {
   return probeCallsThisRun;
 }
-/** Zero one bucket, or both when no bucket is named.
+/** The goal-coverage seam's own count - what a `POST /api/verify?goal-eval=1` restarts. */
+export function goalCallsUsedThisRun(): number {
+  return goalCallsThisRun;
+}
+/** Zero one bucket, or all of them when no bucket is named.
  *
  *  Bucket-scoped because a reset is a REQUEST-boundary action: `POST /api/verify` restarts the
- *  enforcement count without touching a probe in flight, and a "Test connection" click restarts
- *  the probe count alone. Zeroing both from either route would let one route's boundary silently
- *  refund the other's in-flight call. */
+ *  goal-coverage count without touching a probe in flight or the enforcement count the hook/review
+ *  seams share, and a "Test connection" click restarts the probe count alone. Zeroing another
+ *  bucket from a route would let one route's boundary silently refund the other's in-flight call. */
 export function resetCallBudget(bucket?: TypesafeBudgetBucket): void {
   if (bucket === undefined || bucket === TYPESAFE_BUDGET_BUCKET.ENFORCEMENT) callsThisRun = 0;
   if (bucket === undefined || bucket === TYPESAFE_BUDGET_BUCKET.PROBE) probeCallsThisRun = 0;
+  if (bucket === undefined || bucket === TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE) goalCallsThisRun = 0;
 }
 
+/** One bucket's used count. `undefined` bucket = the enforcement bucket, the guard's default. */
+function usedForBucket(bucket: TypesafeBudgetBucket | undefined): number {
+  if (bucket === TYPESAFE_BUDGET_BUCKET.PROBE) return probeCallsThisRun;
+  if (bucket === TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE) return goalCallsThisRun;
+  return callsThisRun;
+}
+function chargeForBucket(bucket: TypesafeBudgetBucket | undefined): void {
+  if (bucket === TYPESAFE_BUDGET_BUCKET.PROBE) probeCallsThisRun += 1;
+  else if (bucket === TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE) goalCallsThisRun += 1;
+  else callsThisRun += 1;
+}
 /** One line per TRANSITION (never per call), shaped by the user-facing error table. */
 function transitionLine(
   prev: TypesafeHealth,
@@ -251,11 +273,9 @@ async function record(
       ms: Math.max(0, at - startedAt),
       ...(status !== undefined ? { status } : {}),
     };
-    // The bucket's OWN counter, not the enforcement one: a PROBE record that stored
-    // `callsUsedThisRun()` permanently reported another bucket's usage, which is the split this
-    // counter exists to enforce.
-    next.calls =
-      inject.bucket === TYPESAFE_BUDGET_BUCKET.PROBE ? probeCallsUsedThisRun() : callsUsedThisRun();
+    // The bucket's OWN counter, never a blanket one: a record that stored another bucket's usage
+    // permanently misreported it, which is the split these counters exist to enforce.
+    next.calls = usedForBucket(inject.bucket);
     line = transitionLine(fresh, next, cls);
     return { next, result: next.state !== fresh.state };
   }, writeIo);
@@ -296,8 +316,7 @@ export async function withTypesafeGuard<T>(
     startedAt: inject.startedAt ?? now,
   };
   const maxCalls = inject.tuning?.maxCalls ?? BREAKER_DEFAULTS.maxCalls;
-  const probe = inject.bucket === TYPESAFE_BUDGET_BUCKET.PROBE;
-  const used = probe ? probeCallsThisRun : callsThisRun;
+  const used = usedForBucket(inject.bucket);
   if (used >= maxCalls) return null;
   const allow = await mutateHealth((h) => {
     const r = allowCall(h, now);
@@ -307,8 +326,7 @@ export async function withTypesafeGuard<T>(
   // breaker had already refused, so `maxCalls` refused calls exhausted the whole per-run budget and
   // every later legitimate call returned null for the rest of the process.
   if (allow === false) return null;
-  if (probe) probeCallsThisRun += 1;
-  else callsThisRun += 1;
+  chargeForBucket(inject.bucket);
   try {
     const value = await fn();
     const signal = inject.outcome?.();

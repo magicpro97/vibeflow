@@ -19,7 +19,7 @@
 //    fail-open destination, and a developer machine with the bridge set would make the
 //    fail-open assertion assert the wrong thing.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runLLMReview } from "../src/commands/dispatch-reviewer-llm.js";
@@ -542,24 +542,42 @@ describe("matrix (e) — the goal-coverage seam hands the judge config to the go
     expect(goalEvalOptions("", retuned)).toBeNull();
   });
 
-  test("a judged request is the run: its options assembly starts a fresh budget", async () => {
-    // The budget is counted per PROCESS; the server process is not a run. Without a reset at the
-    // request boundary, after `maxCalls` goal-coverage calls EVER the seam fell through (judge
-    // silence, so the veto is gone with the UI still reading healthy) for the server's whole
-    // lifetime, with no in-process recovery. `handleVerifyRoute` assembles these options once per
-    // judged request, right before the chain that spends the budget.
+  test("a judged request restarts ITS OWN bucket, never the counter the hook and review seams share", async () => {
+    // Round-59 F1: this boundary used to zero the ENFORCEMENT counter, the one the hook and
+    // review seams spend from. Every judged request therefore REFUNDED budget a drained run had
+    // already spent: drain the counter, open one `?goal-eval=1` request, and the next hook/review
+    // call was allowed again while the run's seams still had no budget left.
     const { goalEvalOptions } = await import("../src/server/routes-verify.js");
-    const { callsUsedThisRun, resetCallBudget } = await import("../src/typesafe-health.js");
+    const { BREAKER_DEFAULTS } = await import("../src/typesafe-breaker.js");
+    const { callsUsedThisRun, goalCallsUsedThisRun, resetCallBudget, withTypesafeGuard } =
+      await import("../src/typesafe-health.js");
     const { typesafeGoalCoverageVerdict } = await import("../src/verify/typesafe-goal-coverage.js");
     const { DEFAULT_TYPESAFE_SETTINGS } = await import("../src/typesafe-settings.js");
     resetCallBudget();
-    const root = mkdtempSync(join(tmpdir(), "vf-matrix-e-"));
+    const root = mkdtempSync(join(tmpdir(), "vf-matrix-e2-"));
     try {
       const retuned = {
         ...DEFAULT_TYPESAFE_SETTINGS,
         enabled: true,
         callSites: { ...DEFAULT_TYPESAFE_SETTINGS.callSites, goalCoverage: true },
       };
+      // A two-call enforcement budget, spent the way a hook/review seam spends it.
+      const call = () =>
+        withTypesafeGuard("reviewer", async () => "v", {
+          userRoot: root,
+          tuning: { ...BREAKER_DEFAULTS, maxCalls: 2 },
+        });
+      expect(await call()).toBe("v");
+      expect(await call()).toBe("v");
+      expect(callsUsedThisRun()).toBe(2); // drained
+      expect(await call()).toBeNull(); // so the next enforcement call is refused
+
+      goalEvalOptions("ship the thing", retuned); // a new judged request assembles its judge options
+      expect(callsUsedThisRun()).toBe(2); // the SHARED enforcement counter is NOT refunded
+      expect(goalCallsUsedThisRun()).toBe(0); // ...because the request restarted its own bucket
+      expect(await call()).toBeNull(); // and a drained run keeps refusing hook/review calls
+
+      // The request's own seam starts fresh and may spend its OWN bucket.
       await typesafeGoalCoverageVerdict({
         goal: "ship the thing",
         diff: "d",
@@ -568,12 +586,56 @@ describe("matrix (e) — the goal-coverage seam hands the judge config to the go
         env: { TYPESAFE_API_KEY: "test-key" },
         judge: async () => ({ covers: { score: 0.9, confidence: 0.9 } }),
       });
-      expect(callsUsedThisRun()).toBe(1); // the seam spent the budget
-      goalEvalOptions("ship the thing", retuned); // a new request assembles its judge options
-      expect(callsUsedThisRun()).toBe(0); // ...and starts on a fresh budget
+      expect(goalCallsUsedThisRun()).toBe(1);
+      expect(callsUsedThisRun()).toBe(2); // ...without touching the enforcement counter
     } finally {
       rmSync(root, { recursive: true, force: true });
       resetCallBudget();
+    }
+  });
+});
+
+describe("matrix (g) — the reviewer maker binds its seam to the injected health root", () => {
+  test("the reviewed unit's breaker record lands under the maker's `userRoot`, not the real home", async () => {
+    // Round-59 F3: `makeReviewer` forwarded `settings` and `env` but not `userRoot`, so the
+    // guard's file-backed record fell back to the real `~/.vibeflow`. Nothing above the maker
+    // (this suite, an orchestrate e2e, an embedder) could isolate the reviewer's breaker root:
+    // any test that ran the seam silently wrote the developer's LIVE record, and a scenario that
+    // needed an OPEN record to prove the refusal path had no way to plant one under its own root.
+    const { makeReviewer } = await import("../src/commands/dispatch-reviewer.js");
+    const savedKey = process.env.TYPESAFE_API_KEY;
+    Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY"); // no key: judge `unconfigured`, zero HTTP
+    const base = mkdtempSync(join(tmpdir(), "vf-matrix-g-"));
+    const root = mkdtempSync(join(tmpdir(), "vf-matrix-g-root-"));
+    try {
+      mkdirSync(join(base, ".vibeflow"), { recursive: true });
+      writeFileSync(
+        join(base, ".vibeflow", "SETTINGS.json"),
+        JSON.stringify({ typesafe: { enabled: true } }),
+      );
+      const review = makeReviewer("cli", 0.8, {
+        cwd: base,
+        goal: "ship the thing",
+        userRoot: root,
+        diffReader: () => "", // a clean diff, so the local gates pass and the seam is reached
+        llmReviewFn: async () => "COVERED",
+      });
+      const result = await review(unit("unit-a"), {
+        status: "verifying",
+        confidence: 0.9,
+        evidence: ["e"],
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+      });
+      expect(result.pass).toBe(true); // the seam falls open; the engine review decides
+      const record = JSON.parse(readFileSync(join(root, "typesafe-health.json"), "utf8")) as {
+        last_call: { caller: string };
+      };
+      expect(record.last_call.caller).toBe("reviewer");
+    } finally {
+      if (savedKey === undefined) Reflect.deleteProperty(process.env, "TYPESAFE_API_KEY");
+      else process.env.TYPESAFE_API_KEY = savedKey;
+      rmSync(base, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

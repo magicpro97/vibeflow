@@ -20,9 +20,11 @@ import { DEFAULT_TYPESAFE_SETTINGS, type TypesafeSettings } from "../typesafe-se
  * which spawns typecheck and lint.
  *
  * This is also the request's RUN BOUNDARY for the call budget: the counter is per process
- * (`src/typesafe-health.ts`), and `vf serve` is not a run - without this reset, after `maxCalls`
- * judged requests EVER the seam fell through for the server's whole lifetime. `handleVerifyRoute`
- * calls this once per request, immediately before the chain that spends the budget.
+ * (`src/typesafe-health.ts`), and `vf serve` is not a run - without a reset, after `maxCalls`
+ * judged requests EVER the seam fell through for the server's whole lifetime. It restarts the
+ * GOAL_COVERAGE bucket, NOT the enforcement one: the two seams share the enforcement counter, so
+ * zeroing that here would refund budget this request never spent - a mounted route could re-arm
+ * calls a drained run must refuse (see `resetCallBudget`'s note).
  */
 export function goalEvalOptions(
   goal: string | undefined,
@@ -33,7 +35,7 @@ export function goalEvalOptions(
   goalEvalInject: { typesafe: { settings: TypesafeSettings; env: NodeJS.ProcessEnv } };
 } | null {
   if (!goal) return null;
-  resetCallBudget(TYPESAFE_BUDGET_BUCKET.ENFORCEMENT);
+  resetCallBudget(TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE);
   return {
     goal,
     goalEvalFn: defaultGoalEvalFn,

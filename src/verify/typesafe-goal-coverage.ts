@@ -5,7 +5,12 @@
 // C27-c: `src/typesafe.ts` (the HTTP client) is evaluated ONLY here, inside the gate, and the
 // injectable double still wins — so a disabled run never loads the client module.
 import { outBusOnly } from "../logbus.js";
-import { outcomeProbe, tuningFor, withTypesafeGuard } from "../typesafe-health.js";
+import {
+  TYPESAFE_BUDGET_BUCKET,
+  outcomeProbe,
+  tuningFor,
+  withTypesafeGuard,
+} from "../typesafe-health.js";
 import type { TypesafeSettings } from "../typesafe-settings.js";
 import type { judgeAssessment } from "../typesafe.js";
 
@@ -56,6 +61,7 @@ export async function typesafeGoalCoverageVerdict(input: {
     {
       ...(userRoot === undefined ? {} : { userRoot }),
       out: outBusOnly,
+      bucket: TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE,
       tuning: tuningFor(settings),
       outcome: probe.outcome,
     },

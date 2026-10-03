@@ -47,6 +47,10 @@ export function makeReviewer(
     implementer?: Engine;
     /** #522: command runner for acceptance-criteria verification. Defaults to defaultRun. */
     runCmd?: GateRunner;
+    /** Test/embedder seam for the System One health root. Forwarded into the reviewer seam's
+     *  `typesafe` block so the file-backed breaker record lands under THIS root; without it the
+     *  guard fell back to the real `~/.vibeflow`, which no test above the maker could isolate. */
+    userRoot?: string;
   },
 ): RoutedReviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
@@ -131,7 +135,14 @@ export function makeReviewer(
         // Task 4: the System One judge seam. `runLLMReview` re-checks `enabled` and
         // `callSites.reviewer` before it resolves anything, so forwarding the settings here
         // costs a disabled run nothing — no HTTP, and no touch of the per-user health root.
-        typesafe: { settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS, env: process.env },
+        // `userRoot` travels with them: the guard's record is file-backed, so a reviewer run
+        // must be able to isolate (or point) the breaker root the same way the hook and
+        // goal-coverage seams already do. Omitting it silently wrote to `~/.vibeflow`.
+        typesafe: {
+          settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS,
+          env: process.env,
+          ...(inject?.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
+        },
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
         // Task 7: the implementer is the UNIT's engine when the planner routed one (or the
