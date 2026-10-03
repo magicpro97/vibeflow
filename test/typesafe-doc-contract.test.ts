@@ -60,4 +60,16 @@ describe("docs/TYPESAFE.md contract", () => {
     expect(doc).toContain("DACL");
     expect(doc).toContain("hasPrivateMode");
   });
+
+  test("names the goal record among the on-disk artifacts", () => {
+    // Round-71 review (ci/SB): the footprint paragraph promised the goal call records into
+    // `typesafe-health.json` and the documented `rm -f` listed three files - but the GOAL bucket
+    // has had its own record since the judged route became loopable, so an operator following
+    // the page left state on disk with a tripped breaker the page said was recovered.
+    const doc = normalize(readFileSync(join(root, DOC), "utf8"));
+    expect(doc).toContain("typesafe-health.goal.json");
+    expect(doc).toContain("leaves four files");
+    expect(doc).not.toContain("leaves three files");
+    expect(doc).not.toContain("names all three paths");
+  });
 });

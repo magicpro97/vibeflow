@@ -120,6 +120,7 @@ async function resetAllBreakers(
 ): Promise<void> {
   await resetBreaker(settings, deps);
   await resetBreaker(settings, deps, TYPESAFE_BUDGET_BUCKET.PROBE);
+  await resetBreaker(settings, deps, TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE);
 }
 
 /** Overwrite ONE breaker with a fresh `idle` record. `bucket` decides WHICH record: the CLI probe
@@ -131,9 +132,10 @@ async function resetAllBreakers(
  *  `last probe: never` for a probe that had just run, which is the same class of lie as reporting
  *  a world-readable key as protected.
  *
- *  The operator paths (`reset`, `key`) clear BOTH records through `resetAllBreakers` above: a
- *  tripped PROBE breaker is otherwise unrecoverable, since the probe is refused before it can prove
- *  itself. This function stays the internal single-record primitive. */
+ *  The operator paths (`reset`, `key`) clear ALL THREE records through `resetAllBreakers` above:
+ *  a tripped breaker is otherwise unrecoverable, since the site is refused before it can prove
+ *  itself - and the GOAL bucket is no different, because the loopable judged route can trip it
+ *  with no operator watching. This function stays the internal single-record primitive. */
 async function resetBreaker(
   settings: TypesafeSettings,
   deps: ConfigTypesafeDeps,
@@ -263,10 +265,11 @@ export async function configTypesafe(
     await resetAllBreakers(current, deps);
     const healthFile = typesafeHealthPath(deps.userRoot);
     const probeFile = healthPath(deps.userRoot, fileForBucket(TYPESAFE_BUDGET_BUCKET.PROBE));
+    const goalFile = healthPath(deps.userRoot, fileForBucket(TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE));
     print("breaker: idle");
     print(`health file: ${healthFile} (${mtimeStamp(healthFile)})`);
     print(
-      `note: reset clears the breaker, it does not delete the file — rm -f ${healthFile} ${probeFile} ${typesafeEnvPath(deps.userRoot)}`,
+      `note: reset clears the breaker, it does not delete the file — rm -f ${healthFile} ${probeFile} ${goalFile} ${typesafeEnvPath(deps.userRoot)}`,
     );
     return 0;
   }

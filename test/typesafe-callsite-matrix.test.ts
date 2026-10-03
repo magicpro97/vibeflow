@@ -601,6 +601,47 @@ describe("matrix (e) — the goal-coverage seam hands the judge config to the go
       resetCallBudget();
     }
   });
+
+  test("a score answer with NO confidence cannot drive the goal seam either", async () => {
+    // Round-71 F1: every other judge seam discards an answer whose `confidence` is absent
+    // (absence is not a claim), but the goal-coverage seam alone compared `?? 0` against the
+    // floor and shipped the `covered: false` verdict anyway - so a judge emitting `{ score: 0 }`
+    // refused the call through a claim the contract does not let it make.
+    const { typesafeGoalCoverageVerdict } = await import("../src/verify/typesafe-goal-coverage.js");
+    const { DEFAULT_TYPESAFE_SETTINGS } = await import("../src/typesafe-settings.js");
+    const { resetCallBudget } = await import("../src/typesafe-health.js");
+    resetCallBudget();
+    const root = mkdtempSync(join(tmpdir(), "vf-matrix-e3-"));
+    try {
+      const retuned = {
+        ...DEFAULT_TYPESAFE_SETTINGS,
+        enabled: true,
+        acceptAtConfidence: 0,
+        callSites: { ...DEFAULT_TYPESAFE_SETTINGS.callSites, goalCoverage: true },
+      };
+      const ask = (judge: () => Promise<{ covers: { score: number; confidence?: number } }>) =>
+        typesafeGoalCoverageVerdict({
+          goal: "ship the thing",
+          diff: "d",
+          userRoot: root,
+          settings: retuned,
+          env: { TYPESAFE_API_KEY: "test-key" },
+          judge,
+        });
+      // Absence reads as zero for any compare, and zero is still "no claim": the seam must
+      // stand down exactly as a null judge would, even with the most permissive floor.
+      expect(await ask(async () => ({ covers: { score: 0 } }))).toBeNull();
+      // An EXPLICIT zero is a claim, and a zero floor still lets it through - the fix must
+      // not swallow the answer a permissive floor asked for.
+      expect(
+        ((await ask(async () => ({ covers: { score: 0, confidence: 0 } }))) as { covered: boolean })
+          .covered,
+      ).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      resetCallBudget();
+    }
+  });
 });
 
 describe("matrix (g) — the reviewer maker binds its seam to the injected health root", () => {

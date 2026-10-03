@@ -85,6 +85,23 @@ test("landing surfaces the optional System One judge with the fail-open contract
   }
 });
 
+test("every wiki href on the landing page resolves to a real wiki slug", () => {
+  // Round-71 review (ci/mimo): the System One section linked `/wiki/USER_GUIDE`, but Astro
+  // lowercases content-collection slugs (`USER_GUIDE.md` -> `/wiki/user_guide`, verified on
+  // the deployed site) and the host is case-sensitive, so the link 404’d.
+  const page = read("src/pages/index.astro");
+  const slugs = new Set(
+    readdirSync(resolve(landingRoot, "src/content/wiki"))
+      .filter((filename) => filename.endsWith(".md"))
+      .map((filename) => filename.replace(/\.md$/, "").toLowerCase()),
+  );
+  const hrefs = [...page.matchAll(/href="\/wiki\/([^"#]+)"/g)].map((match) => match[1]);
+  assert.ok(hrefs.length > 0, "landing no longer links the wiki");
+  for (const href of hrefs) {
+    assert.equal(slugs.has(href), true, `wiki href does not resolve to a slug: /wiki/${href}`);
+  }
+});
+
 test("work-unit pre-flight heading remains outside fenced examples", () => {
   const content = readFileSync(
     resolve(repositoryRoot, "docs", "WORK_UNIT_ORCHESTRATION.md"),

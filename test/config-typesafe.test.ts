@@ -19,6 +19,7 @@ import {
 } from "../src/commands/config-typesafe.js";
 import { readSettings } from "../src/settings.js";
 import {
+  GOAL_HEALTH_FILE,
   PROBE_HEALTH_FILE,
   healthPath,
   readHealth,
@@ -35,6 +36,9 @@ const repo = (): string => mkdtempSync(join(tmpdir(), "vf-ts-cli-"));
 /** The operator probe's OWN record, derived from the same authority `status` prints it from -
  *  a filename this test retyped would not notice the product renaming it. */
 const typesafeProbePath = (root: string): string => healthPath(root, PROBE_HEALTH_FILE);
+/** The GOAL bucket's own record, derived the same way: the judged route is the one a page
+ *  token can loop, so its file is the likeliest to exist under an operator's root. */
+const typesafeGoalPath = (root: string): string => healthPath(root, GOAL_HEALTH_FILE);
 /** A per-user `.vibeflow` root, created because the health/env writers need it to exist. */
 const userRoot = (): string => {
   const r = join(mkdtempSync(join(tmpdir(), "vf-ts-root-")), ".vibeflow");
@@ -70,10 +74,11 @@ const enable = (base: string): void => {
   writeFileSync(p, JSON.stringify({ typesafe: { enabled: true } }, null, 2));
 };
 
-/** The full uninstall command `status` prints. It names a THIRD artifact (the probe record) - a
- *  `rm -f` listing only two leaves state on disk, which is what the docs used to promise. */
+/** The full uninstall command `status` prints. It names every artifact - the probe record was a
+ *  THIRD and the goal record is a FOURTH; a `rm -f` that lists fewer leaves state on disk, which
+ *  is what the docs used to promise. */
 const REMOVE_ALL_LINE = (root: string) =>
-  `remove all: rm -f ${typesafeHealthPath(root)} ${typesafeProbePath(root)} ${typesafeEnvPath(root)}`;
+  `remove all: rm -f ${typesafeHealthPath(root)} ${typesafeProbePath(root)} ${typesafeGoalPath(root)} ${typesafeEnvPath(root)}`;
 
 describe("vf config typesafe — status", () => {
   test("status on a fresh repo reports off + no key source", async () => {
@@ -116,7 +121,7 @@ describe("vf config typesafe — status", () => {
     const { lines, out } = collector();
     const code = await configTypesafe(["status"], base, {}, { out, env: {}, userRoot: root });
     expect(code).toBe(0);
-    expect(lines.slice(0, 15)).toEqual([
+    expect(lines.slice(0, 18)).toEqual([
       "calls: 3/20 last run",
       "enabled: true",
       "key source: ~/.vibeflow/typesafe.env",
@@ -128,12 +133,15 @@ describe("vf config typesafe — status", () => {
       "last call: never",
       "probe breaker: idle",
       "last probe: never",
+      "goal breaker: idle",
+      "last goal: never",
       `health file: ${typesafeHealthPath(root)} (${statSync(typesafeHealthPath(root)).mtime.toISOString()})`,
       `probe file: ${typesafeProbePath(root)} (absent)`,
+      `goal file: ${typesafeGoalPath(root)} (absent)`,
       `key file: ${typesafeEnvPath(root)} (present owner-only)`,
       REMOVE_ALL_LINE(root),
     ]);
-    expect(lines.slice(15)).toEqual([...TYPESAFE_EGRESS_LINES]);
+    expect(lines.slice(18)).toEqual([...TYPESAFE_EGRESS_LINES]);
   });
 
   test("status names all four payloads, the endpoint, and the per-site shutoff", async () => {
@@ -158,14 +166,17 @@ describe("vf config typesafe — status", () => {
     const { lines, out } = collector();
     expect(await configTypesafe(["status"], repo(), {}, { out, env: {}, userRoot: root })).toBe(0);
     expect(lines[8]).toBe("last call: never");
-    // Derived, not guessed: the probe record is fresh here, so its breaker reports whatever the
-    // enforcement one does - and pinning the RELATION is the invariant worth having.
+    // Derived, not guessed: the probe and goal records are fresh here, so their breakers report
+    // whatever the enforcement one does - pinning the RELATION is the invariant worth having.
     const enforcement = lines.find((l) => l.startsWith("breaker state: ")) ?? "";
     expect(lines[9]).toBe(`probe breaker: ${enforcement.slice("breaker state: ".length)}`);
     expect(lines[10]).toBe("last probe: never");
-    expect(lines[11]).toBe(`health file: ${typesafeHealthPath(root)} (absent)`);
-    expect(lines[12]).toBe(`probe file: ${typesafeProbePath(root)} (absent)`);
-    expect(lines[13]).toBe(`key file: ${typesafeEnvPath(root)} (absent)`);
+    expect(lines[11]).toBe(`goal breaker: ${enforcement.slice("breaker state: ".length)}`);
+    expect(lines[12]).toBe("last goal: never");
+    expect(lines[13]).toBe(`health file: ${typesafeHealthPath(root)} (absent)`);
+    expect(lines[14]).toBe(`probe file: ${typesafeProbePath(root)} (absent)`);
+    expect(lines[15]).toBe(`goal file: ${typesafeGoalPath(root)} (absent)`);
+    expect(lines[16]).toBe(`key file: ${typesafeEnvPath(root)} (absent)`);
   });
 
   test("a malformed health file degrades only `last call`", async () => {
@@ -174,14 +185,16 @@ describe("vf config typesafe — status", () => {
     const { lines, out } = collector();
     expect(await configTypesafe(["status"], repo(), {}, { out, env: {}, userRoot: root })).toBe(0);
     expect(lines[8]).toBe("last call: never");
-    // Derived, not guessed: the probe record is fresh here, so its breaker reports whatever the
-    // enforcement one does - and pinning the RELATION is the invariant worth having.
+    // Derived, not guessed: the probe and goal records are fresh here, so their breakers report
+    // whatever the enforcement one does - pinning the RELATION is the invariant worth having.
     const enforcement = lines.find((l) => l.startsWith("breaker state: ")) ?? "";
     expect(lines[9]).toBe(`probe breaker: ${enforcement.slice("breaker state: ".length)}`);
     expect(lines[10]).toBe("last probe: never");
-    expect(lines[11]).toContain(typesafeHealthPath(root));
-    expect(lines[11]).not.toContain("absent");
-    expect(lines.slice(15)).toEqual([...TYPESAFE_EGRESS_LINES]);
+    expect(lines[11]).toBe(`goal breaker: ${enforcement.slice("breaker state: ".length)}`);
+    expect(lines[12]).toBe("last goal: never");
+    expect(lines[13]).toContain(typesafeHealthPath(root));
+    expect(lines[13]).not.toContain("absent");
+    expect(lines.slice(18)).toEqual([...TYPESAFE_EGRESS_LINES]);
   });
 
   test("last call prints a status-less record as status=none", async () => {
@@ -553,17 +566,31 @@ describe("vf config typesafe — reset", () => {
         last_class: "auth",
       }),
     );
+    // The GOAL bucket is planted open too: `reset` must clear every bucket's breaker, because
+    // a looped judged route can trip this one with no operator watching.
+    writeFileSync(
+      typesafeGoalPath(root),
+      JSON.stringify({
+        ...HEALTH,
+        state: "open",
+        fail_streak: 2,
+        consecutive_trips: 4,
+        cooldown_ms: 300_000,
+        last_class: "auth",
+      }),
+    );
     const { lines, out } = collector();
     expect(await configTypesafe(["reset"], repo(), {}, { out, userRoot: root })).toBe(0);
     expect(lines[0]).toBe("breaker: idle");
     expect(lines[1]).toBe(`health file: ${health} (${statSync(health).mtime.toISOString()})`);
     expect(lines[2]).toBe(
-      `note: reset clears the breaker, it does not delete the file — rm -f ${health} ${typesafeProbePath(root)} ${typesafeEnvPath(root)}`,
+      `note: reset clears the breaker, it does not delete the file — rm -f ${health} ${typesafeProbePath(root)} ${typesafeGoalPath(root)} ${typesafeEnvPath(root)}`,
     );
     // The probe record is cleared too: its breaker is refused before it can prove itself, so a
     // `reset` that only rewrote the enforcement file left the probe circuit stuck for a full
     // cooldown with no operator recovery.
     expect(readHealth({ userRoot: root, healthFile: PROBE_HEALTH_FILE }).state).toBe("idle");
+    expect(readHealth({ userRoot: root, healthFile: GOAL_HEALTH_FILE }).state).toBe("idle");
     const written = JSON.parse(readFileSync(health, "utf8"));
     expect(written.state).toBe("idle");
     expect(written.cooldown_ms).toBe(60_000);
@@ -815,7 +842,7 @@ describe("vf config typesafe — real dispatcher", () => {
     const r = runCli(["config", "typesafe", "status"], repo(), root);
     expect(r.code).toBe(0);
     const printed = r.stdout.split("\n").filter((l) => l.trim().length > 0);
-    expect(printed.slice(0, 15)).toEqual([
+    expect(printed.slice(0, 18)).toEqual([
       "calls: 0/20 last run",
       "enabled: false",
       "key source: none",
@@ -827,12 +854,15 @@ describe("vf config typesafe — real dispatcher", () => {
       "last call: never",
       "probe breaker: off",
       "last probe: never",
+      "goal breaker: off",
+      "last goal: never",
       `health file: ${typesafeHealthPath(root)} (absent)`,
       `probe file: ${typesafeProbePath(root)} (absent)`,
+      `goal file: ${typesafeGoalPath(root)} (absent)`,
       `key file: ${typesafeEnvPath(root)} (absent)`,
-      `remove all: rm -f ${typesafeHealthPath(root)} ${typesafeProbePath(root)} ${typesafeEnvPath(root)}`,
+      REMOVE_ALL_LINE(root),
     ]);
-    expect(printed.slice(15)).toEqual([...TYPESAFE_EGRESS_LINES]);
+    expect(printed.slice(18)).toEqual([...TYPESAFE_EGRESS_LINES]);
   });
 
   test("an unknown subcommand exits 2 through the dispatcher", () => {

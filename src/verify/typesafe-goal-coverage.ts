@@ -67,14 +67,20 @@ export async function typesafeGoalCoverageVerdict(input: {
     },
   );
   // The `acceptAtConfidence` FLOOR: an answer below it is dropped whole, so the path is
-  // byte-identical to a `null` judge. A score answer with NO confidence reads as zero.
+  // byte-identical to a `null` judge. An ABSENT `confidence` reads as zero for the compare,
+  // but absence is not a claim the seam may act on at all: a judge that emits no confidence
+  // must stand down like a null judge does. Mirrors `judgeRisk`/`judgeEngineKey`.
   const confidence = j?.covers.confidence ?? 0;
   // JUDGE-ESCALATE-ONLY (see § Judge authority): `diff` and `goal` are both
   // attacker-influenced (a diff is written by whoever opened the PR, a goal can come from an
   // issue body), so only the NEGATIVE answer may short-circuit. A confident `covered: true`
   // falls through and the bridge in the caller decides — the bridge is authoritative for a
   // POSITIVE coverage claim.
-  if (j !== null && confidence >= settings.acceptAtConfidence) {
+  if (
+    j !== null &&
+    j.covers.confidence !== undefined &&
+    confidence >= settings.acceptAtConfidence
+  ) {
     const covered =
       j.covers.score >= settings.judgePassLevel && (j.tests?.noul ?? 1) >= settings.judgeTestFloor;
     if (!covered) {

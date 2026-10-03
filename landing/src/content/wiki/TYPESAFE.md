@@ -249,9 +249,11 @@ their own bucket: `POST /api/verify?goal-eval=1` restarts the goal-coverage buck
 judged request is one run) and `POST /api/typesafe/test` restarts the probe bucket. Three
 counters, and no bucket can exhaust or refund another — in particular no route ever zeroes
 the enforcement count the hook and review seams share, so a mounted request cannot refund
-budget a drained run must refuse. The goal-coverage call still records into
-`typesafe-health.json` (a failed goal call IS an enforcement failure); only the probe
-diagnostic keeps its own file, because a diagnostic must not change the thing it diagnoses.
+budget a drained run must refuse. The goal-coverage call keeps its own record as well
+(`typesafe-health.goal.json`): it is the route a page token can loop, so it must not share
+the record whose breaker the hook and review seams hold the tool-call veto behind. Only
+the probe diagnostic keeps its own file for the milder reason: a diagnostic must not
+change the thing it diagnoses.
 
 ### The two clamps that keep the hook path alive
 
@@ -285,13 +287,14 @@ never writes `typesafe-health.json`, and never reads `typesafe.env`. The HTTP cl
 module is also not even loaded on a disabled path, so the integration costs nothing
 until you turn it on.
 
-An **enabled** run leaves three files under `~/.vibeflow`, all outside the repository and
+An **enabled** run leaves four files under `~/.vibeflow`, all outside the repository and
 never git-tracked:
 
 | Path | Written by | Contents | Mode |
 | --- | --- | --- | --- |
 | `~/.vibeflow/typesafe.env` | `vf config typesafe key` | the API key, one `TYPESAFE_API_KEY=` line | owner-only (`0600` on POSIX, migrated owner-only DACL on Windows) |
 | `~/.vibeflow/typesafe-health.json` | any enforcement call site | breaker state plus a `last_call` audit record; never the key, never payload text | owner-only (`0600` on POSIX) |
+| `~/.vibeflow/typesafe-health.goal.json` | the goal-coverage call site (`POST /api/verify?goal-eval=1`) | the same record shape for the GOAL bucket, kept separate so a looped judged route can never open the breaker the hook and review seams veto behind | owner-only (`0600` on POSIX) |
 | `~/.vibeflow/typesafe-health.probe.json` | `vf config typesafe test` and the Control Center probe | the same record shape for the OPERATOR probe, kept separate so a passing probe can never clear the enforcement breaker | owner-only (`0600` on POSIX) |
 
 An enabled run also appends to the hook's audit bus at `.vibeflow/logs/current.log`,
@@ -299,7 +302,7 @@ which IS in-repo but gitignored (`.vibeflow/.gitignore`). It records the hook's 
 decisions; the judge's payload text is never written to it.
 
 `vf config typesafe reset` is **not** uninstall: it rewrites the health record to `idle`
-so a tripped breaker recovers after a key rotation, and it deliberately leaves all three
+so a tripped breaker recovers after a key rotation, and it deliberately leaves all four
 files in place. Removing the files is always safe, because the health read is fail-open
 and an absent file means `idle`.
 
@@ -307,10 +310,10 @@ Complete removal, the documented uninstall path:
 
 ```bash
 vf config typesafe off                       # stop all four call sites
-rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe.env
+rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe-health.goal.json ~/.vibeflow/typesafe.env
 ```
 
-`vf config typesafe status` names all three paths on their own lines
+`vf config typesafe status` names all four paths on their own lines
 with each file's presence and modification time, and prints the exact
 `remove all:` command, so you can always find what to delete
 without reading this page.

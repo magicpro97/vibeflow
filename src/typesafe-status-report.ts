@@ -1,16 +1,16 @@
 // src/typesafe-status-report.ts
 //
 // The `vf config typesafe status` REPORT: the exact line order, every on-disk path it names, and
-// the two bucket records it reads. Split out of config-typesafe.ts when the fixes for round 43
+// the three bucket records it reads. Split out of config-typesafe.ts when the fixes for round 43
 // pushed that file past the 400-line cap - and the seam is real rather than a slice: this module
 // only FORMATS what it is handed, while config-typesafe.ts is the write/dispatch authority. The
 // one direction of the dependency is status -> shared helpers, never back.
 //
 // Two rules shape the output:
 //
-//   1. NAME EVERY ARTIFACT. An `enabled` install can leave three files (`typesafe.env`,
-//      `typesafe-health.json`, `typesafe-health.probe.json`); a removal command that lists fewer
-//      leaves state on disk while the docs call it complete.
+//   1. NAME EVERY ARTIFACT. An `enabled` install can leave four files (`typesafe.env`,
+//      `typesafe-health.json`, `typesafe-health.probe.json`, `typesafe-health.goal.json`); a
+//      removal command that lists fewer leaves state on disk while the docs call it complete.
 //   2. SAY WHAT WAS OBSERVED. The key file's permission is measured through `hasPrivateMode` - the
 //      same authority the writer enforces - so "owner-only" is a verdict, not a restatement of the
 //      filename. `existsSync(...) ? "present 0600"` reported a world-readable key as protected.
@@ -18,6 +18,7 @@ import { constants, closeSync, existsSync, fstatSync, openSync, statSync } from 
 import { hasPrivateMode } from "./durability/posix-fs-semantics.js";
 import { TYPESAFE_EGRESS_LINES } from "./typesafe-egress.js";
 import {
+  GOAL_HEALTH_FILE,
   PROBE_HEALTH_FILE,
   TYPESAFE_BUDGET_BUCKET,
   TYPESAFE_STATE,
@@ -57,6 +58,12 @@ const fileStamp = (path: string): string => {
  *  key file, so an operator following the printed removal command left the probe record behind. */
 const probeFilePath = (deps: StatusDeps): string =>
   healthPath(deps.userRoot, fileForBucket(TYPESAFE_BUDGET_BUCKET.PROBE));
+
+/** The fourth artifact's absolute path - the same lesson again. The goal record is written by
+ *  the judged route, the one a page token can loop, so it is the likeliest record to exist and
+ *  a report that does not name it hands the operator an incomplete `rm -f`. */
+const goalFilePath = (deps: StatusDeps): string =>
+  healthPath(deps.userRoot, fileForBucket(TYPESAFE_BUDGET_BUCKET.GOAL_COVERAGE));
 
 /**
  * The key file's own line, with the permission actually observed.
@@ -148,12 +155,20 @@ export function printStatus(
   const probeHealth = readHealth({ userRoot: deps.userRoot, healthFile: PROBE_HEALTH_FILE });
   print(`probe breaker: ${breakerState(settings, deps, probeHealth)}`);
   print(callLine("last probe", probeHealth));
+  // Same reason the probe has one: the GOAL bucket's breaker can refuse every goal call on
+  // its own, and a breach that `reset` recovers must be visible before it is recovered.
+  const goalHealth = readHealth({ userRoot: deps.userRoot, healthFile: GOAL_HEALTH_FILE });
+  print(`goal breaker: ${breakerState(settings, deps, goalHealth)}`);
+  print(callLine("last goal", goalHealth));
   const probePath = probeFilePath(deps);
+  const goalPath = goalFilePath(deps);
   print(`health file: ${healthPath} (${fileStamp(healthPath)})`);
   print(`probe file: ${probePath} (${fileStamp(probePath)})`);
+  print(`goal file: ${goalPath} (${fileStamp(goalPath)})`);
   print(`key file: ${envPath} (${keyFileStamp(envPath)})`);
   // Every artifact this integration can write, so the documented uninstall is complete: the probe
-  // record is a THIRD file, and a `rm -f` that names only two leaves state behind.
-  print(`remove all: rm -f ${healthPath} ${probePath} ${envPath}`);
+  // record was a THIRD file and the goal record is a FOURTH, and a `rm -f` that names fewer
+  // leaves state behind.
+  print(`remove all: rm -f ${healthPath} ${probePath} ${goalPath} ${envPath}`);
   for (const line of TYPESAFE_EGRESS_LINES) print(line);
 }
