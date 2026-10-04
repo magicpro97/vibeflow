@@ -3,6 +3,8 @@
 
 import { readFileSync } from "node:fs";
 
+import { withoutTypesafe } from "../settings-form-helpers.js";
+
 let passed = 0;
 let failed = 0;
 
@@ -107,6 +109,21 @@ assert(
   /applyPolicy:[\s\S]*settings\?: Omit<Partial<VibeSettings>, "typesafe">[\s\S]*\? \{\s*settings\s*\}/.test(
     api,
   ),
+);
+
+// ── 4. `withoutTypesafe` drops only the System One block — as a CALL ──
+// The string pins above cannot notice a helper that returns its input unchanged, and that exact
+// bug re-armed `isDirty` forever on a save response carrying the block the form deliberately lacks.
+
+const source = { typesafe: { enabled: true }, memory: { enabled: true } };
+const projected = withoutTypesafe(source as never);
+const projectedRecord = projected as Record<string, unknown>;
+assert("withoutTypesafe drops the System One block", !("typesafe" in projectedRecord));
+assert(
+  "withoutTypesafe projects a fresh object, keeps the rest, never writes through its input",
+  projected !== (source as unknown) &&
+    JSON.stringify(projectedRecord.memory) === '{"enabled":true}' &&
+    JSON.stringify(source.typesafe) === '{"enabled":true}',
 );
 
 // ── Results ──

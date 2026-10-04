@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -178,6 +179,43 @@ describe("vf config typesafe — status", () => {
     expect(lines[14]).toBe(`probe file: ${typesafeProbePath(root)} (absent)`);
     expect(lines[15]).toBe(`goal file: ${typesafeGoalPath(root)} (absent)`);
     expect(lines[16]).toBe(`key file: ${typesafeEnvPath(root)} (absent)`);
+  });
+
+  test("status prescribes a permissive key file and keeps an unreadable one distinct from it", async () => {
+    // Two different `present`s: a 0644 file needs the exact re-key prescription, while a symlink
+    // (or directory) at that name is not `absent` - something IS there, and only inspection can
+    // tell a stray link from a legacy file, so the line says `unreadable` instead of guessing.
+    const root = userRoot();
+    writeTypesafeEnv("sk-file", { userRoot: root });
+    chmodSync(typesafeEnvPath(root), 0o644);
+    const permissive = collector();
+    expect(
+      await configTypesafe(
+        ["status"],
+        repo(),
+        {},
+        { out: permissive.out, env: {}, userRoot: root },
+      ),
+    ).toBe(0);
+    expect(permissive.lines[16]).toBe(
+      `key file: ${typesafeEnvPath(root)} (present NOT owner-only — run \`vf config typesafe key\`)`,
+    );
+    const linked = userRoot();
+    const real = join(linked, "elsewhere.env");
+    writeFileSync(real, "TYPESAFE_API_KEY=sk-file\n", { mode: 0o600 });
+    symlinkSync(real, typesafeEnvPath(linked));
+    const unreadable = collector();
+    expect(
+      await configTypesafe(
+        ["status"],
+        repo(),
+        {},
+        { out: unreadable.out, env: {}, userRoot: linked },
+      ),
+    ).toBe(0);
+    expect(unreadable.lines[16]).toBe(
+      `key file: ${typesafeEnvPath(linked)} (present (unreadable))`,
+    );
   });
 
   test("a malformed health file degrades only `last call`", async () => {
@@ -621,6 +659,21 @@ describe("vf config typesafe — reset", () => {
     expect(written.cooldown_ms).toBe(60_000);
     expect(existsSync(typesafeEnvPath(root))).toBe(false);
   });
+
+  test("reset reports `absent` when the health write cannot land", async () => {
+    // `mtimeStamp`'s catch is the reset on a user root the write cannot enter: `writeHealth` is
+    // best-effort - it skips rather than queue (the root here is a FILE, so mkdir refuses with
+    // ENOTDIR instantly) - and the record the line is about never lands. The operator must read
+    // `(absent)`, not watch `reset` throw right after it cleared the breaker.
+    const root = join(mkdtempSync(join(tmpdir(), "vf-typesafe-")), "not-a-dir");
+    writeFileSync(root, "x");
+    const { lines, out } = collector();
+    expect(await configTypesafe(["reset"], repo(), {}, { out, userRoot: root })).toBe(0);
+    expect(existsSync(typesafeHealthPath(root))).toBe(false);
+    expect(lines.find((l) => l.startsWith("health file:"))).toBe(
+      `health file: ${typesafeHealthPath(root)} (absent)`,
+    );
+  });
 });
 
 describe("vf config typesafe — test", () => {
@@ -750,6 +803,56 @@ describe("vf config typesafe — test", () => {
     );
     expect(code).toBe(2);
     expect(lines).toEqual(["TypeSafe: judge is disabled — run `vf config typesafe on` first"]);
+  });
+
+  test("a guard that refused before the call is diagnosed as budget/breaker or as disabled", async () => {
+    // The probe's one un-classed refusal: `fn` never ran (open probe breaker here), so no
+    // `onOutcome` ever said WHY. Disabled keeps its name first - "safe to run before enabling" is
+    // the flow an operator hits first - and once enabled the same refusal is the budget/breaker.
+    const root = userRoot();
+    const base = repo();
+    writeFileSync(
+      typesafeProbePath(root),
+      JSON.stringify({
+        ...HEALTH,
+        state: "open",
+        fail_streak: 2,
+        consecutive_trips: 2,
+        last_class: "auth",
+        cooldown_until: new Date(Date.now() + 600_000).toISOString(),
+      }),
+    );
+    let calls = 0;
+    const judge = async () => {
+      calls += 1;
+      return null;
+    };
+    const disabled = collector();
+    expect(
+      await configTypesafe(
+        ["test"],
+        base,
+        {},
+        { out: disabled.out, env: {}, userRoot: root, judge },
+      ),
+    ).toBe(2);
+    expect(disabled.lines).toEqual([
+      "TypeSafe: judge is disabled — run `vf config typesafe on` first",
+    ]);
+    enable(base);
+    const enabled = collector();
+    expect(
+      await configTypesafe(
+        ["test"],
+        base,
+        {},
+        { out: enabled.out, env: withKey, userRoot: root, judge },
+      ),
+    ).toBe(1);
+    expect(enabled.lines).toEqual([
+      "TypeSafe: refused by the call budget or an open probe breaker",
+    ]);
+    expect(calls).toBe(0);
   });
 
   test("the probe records into its OWN breaker, never the enforcement one", async () => {
