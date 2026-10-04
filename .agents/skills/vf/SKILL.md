@@ -1,6 +1,6 @@
 ---
 name: vf
-description: "Drive any task through VibeFlow's local-first CLI (vf) instead of free-handing it. Use whenever the user types /vf, mentions vibeflow, asks to orchestrate, init, implement a spec/issue, run a parallel workflow, or verify/ship under the confidence gate—even without naming vf. SPEC-FIRST: ask clarifying questions BEFORE anything that writes or dispatches. /vf with no args → load references/grill.md and grill the user toward a concrete spec. Wraps vf init / run / orchestrate / units / verify / skills / discover / doctor / hooks."
+description: "Drive any task through VibeFlow's local-first CLI (vf) instead of free-handing. Use on /vf, 'vibeflow', orchestrate/init requests, implementing a spec or issue, parallel workflows, or verify/ship under the confidence gate - even without naming vf. SPEC-FIRST: clarify before any write or dispatch; /vf with no args loads references/grill.md."
 ---
 
 # Driving work through VibeFlow (`vf`)
