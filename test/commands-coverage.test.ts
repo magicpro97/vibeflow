@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -92,6 +93,26 @@ const readSrc = (rel: string): string =>
 
 function freshDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
+}
+
+/** A real two-commit repo whose `git diff HEAD~1 HEAD` succeeds, so the reviewer seam's LLM
+ *  arm actually runs. That arm fails OPEN (skips judge AND engine, round-73) when the diff
+ *  cannot be read, so pins for it must not lean on the ambient repo: CI checks out depth-1,
+ *  where HEAD~1 does not exist and the pins silently stopped exercising the call they name. */
+function initTwoCommitRepo(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const git = (...args: string[]): void => void execFileSync("git", args, { cwd: dir });
+  git("init", "-q");
+  git("config", "user.email", "reviewer@test");
+  git("config", "user.name", "reviewer");
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "x.ts"), "one\n");
+  git("add", "-A");
+  git("commit", "-qm", "one");
+  writeFileSync(join(dir, "src", "x.ts"), "two\n");
+  git("add", "-A");
+  git("commit", "-qm", "two");
+  return dir;
 }
 
 function writeFixture(base: string, overrides: Partial<WorkflowState> = {}): void {
@@ -4566,11 +4587,15 @@ describe("makeReviewer diff injection", () => {
   test("same-tool reviewer warning path returns clean {pass,reason}", async () => {
     const saved = process.env.VF_LLM_REVIEW;
     process.env.VF_LLM_REVIEW = "1";
+    // Own history: with `cwd` omitted the seam read the ambient clone (full history locally,
+    // depth-1 on CI) so this pin's reachability of the engine arm depended on the checkout.
+    const cwd = initTwoCommitRepo("vf-reviewer-same-tool-");
     try {
       const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
         " M src/x.ts";
       const r = makeReviewer("cli", 0.85, {
         diffReader,
+        cwd,
         goal: "do x",
         implementer: "claude",
         llmReviewFn: async () => "COVERED",
@@ -4586,6 +4611,7 @@ describe("makeReviewer diff injection", () => {
       expect(typeof v.pass).toBe("boolean");
       expect(typeof v.reason).toBe("string");
     } finally {
+      rmSync(cwd, { recursive: true, force: true });
       process.env.VF_LLM_REVIEW = saved;
     }
   });
@@ -4649,26 +4675,34 @@ describe("makeReviewer diff injection", () => {
   });
 
   test("ADR-001: calls LLM review when goal + llmReviewFn provided and local gate passes", async () => {
-    const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
-      " M src/x.ts"; // in-scope
-    let llmCalled = false;
-    const llmReviewFn = async (prompt: string) => {
-      llmCalled = true;
-      expect(prompt).toContain("You have NOT seen");
-      return "COVERED";
-    };
-    const r = makeReviewer("cli", 0.85, { diffReader, goal: "add feature X", llmReviewFn });
-    const unit = { scope: ["src/x.ts"] } as WorkUnit;
-    const outcome = {
-      gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
-      confidence: 0.95,
-      evidence: ["src/x.ts:1 — added"],
-      status: "done" as const,
-    };
-    const v = await r(unit, outcome);
-    expect(llmCalled).toBe(true);
-    expect(v.pass).toBe(true);
-    expect(v.reason).toContain("LLM reviewer: COVERED");
+    // The pin must own its history: the LLM arm reads `git diff HEAD~1 HEAD` and fails OPEN
+    // when the read fails (round-73), so leaning on the ambient repo made the one assertion it
+    // exists for (`llmCalled`) go flaky-green on any depth-1 checkout -- CI's exact failure.
+    const cwd = initTwoCommitRepo("vf-reviewer-llm-");
+    try {
+      const diffReader: import("../src/commands/dispatch-runtime.js").DiffReader = () =>
+        " M src/x.ts"; // in-scope
+      let llmCalled = false;
+      const llmReviewFn = async (prompt: string) => {
+        llmCalled = true;
+        expect(prompt).toContain("You have NOT seen");
+        return "COVERED";
+      };
+      const r = makeReviewer("cli", 0.85, { diffReader, cwd, goal: "add feature X", llmReviewFn });
+      const unit = { scope: ["src/x.ts"] } as WorkUnit;
+      const outcome = {
+        gates: { build: "pass", lint: "pass", test: "pass", review: "pending" } as const,
+        confidence: 0.95,
+        evidence: ["src/x.ts:1 — added"],
+        status: "done" as const,
+      };
+      const v = await r(unit, outcome);
+      expect(llmCalled).toBe(true);
+      expect(v.pass).toBe(true);
+      expect(v.reason).toContain("LLM reviewer: COVERED");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });
 
