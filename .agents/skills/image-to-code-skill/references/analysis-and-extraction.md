@@ -1,3 +1,5 @@
+---
+
 ## 8. CLEAN ANALYSIS STANDARD
 
 Analyze cleanly and systematically.

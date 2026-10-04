@@ -10,6 +10,8 @@
 - 31. SECTION RHYTHM RULE
 - 32. DENSITY & SPACING DISCIPLINE
 
+---
+
 ## 12. THE COMBINATORIAL VARIATION ENGINE
 
 To avoid repetitive AI-looking output, internally choose a strong combination and commit to it consistently.

@@ -1,3 +1,5 @@
+---
+
 ## 26. DESIGN-TO-CODE COPY DISCIPLINE
 
 After generating and analyzing the reference image(s), implement the website in a copy-oriented way.

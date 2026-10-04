@@ -12,6 +12,8 @@
 - 33. DEFAULT SECTION PACKS
 - 34. MULTI-IMAGE CONSISTENCY RULE
 
+---
+
 ## 3. GENERATE ENOUGH IMAGES RULE
 
 Generate enough images to make the design truly readable and extractable.
