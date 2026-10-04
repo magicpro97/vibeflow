@@ -1,6 +1,6 @@
 ---
 name: gsap-plugins
-description: Official GSAP skill for GSAP plugins — registration, ScrollToPlugin, ScrollSmoother, Flip, Draggable, Inertia, Observer, SplitText, ScrambleText, SVG and physics plugins, CustomEase, EasePack, CustomWiggle, CustomBounce, GSDevTools. Use when the user asks about a GSAP plugin, scroll-to, flip animations, draggable, SVG drawing, or plugin registration.
+description: "GSAP plugins: registration, ScrollTo/ScrollSmoother, Flip, Draggable, Inertia, Observer, SplitText, ScrambleText, SVG + physics plugins, CustomEase. Use for plugin questions, scroll-to, flip animations, draggable, SVG drawing, or registration."
 license: MIT
 ---
 
@@ -49,28 +49,12 @@ gsap.to(window, { duration: 1, scrollTo: { y: "#section", offsetY: 50 } });
 gsap.to(scrollContainer, { duration: 1, scrollTo: { x: "max" } });
 ```
 
-**ScrollToPlugin — key config (scrollTo object):**
-
-| Option | Description |
-|--------|-------------|
-| `x`, `y` | Target scroll position (number), or `"max"` for maximum |
-| `element` | Selector or element to scroll to (for scroll-into-view) |
-| `offsetX`, `offsetY` | Offset in pixels from the target position |
+**Key config (scrollTo object):** see [references/scroll-plugins.md](references/scroll-plugins.md).
 
 ### ScrollSmoother
 
 Smooth scroll wrapper (smooths native scroll). Requires ScrollTrigger and a specific DOM structure (content wrapper + smooth wrapper). Use when smooth, momentum-style scroll is needed. See GSAP docs for setup; register after ScrollTrigger. DOM structure would look like: 
-
-```html
-<body>
-	<div id="smooth-wrapper">
-		<div id="smooth-content">
-			<!--- ALL YOUR CONTENT HERE --->
-		</div>
-	</div>
-	<!-- position: fixed elements can go outside --->
-</body>
-```
+**Setup & DOM structure:** see [references/scroll-plugins.md](references/scroll-plugins.md).
 
 ## DOM / UI
 
@@ -86,15 +70,7 @@ const state = Flip.getState(".item");
 Flip.from(state, { duration: 0.5, ease: "power2.inOut" });
 ```
 
-**Flip — key config (Flip.from vars):**
-
-| Option | Description |
-|--------|-------------|
-| `absolute` | Use `position: absolute` during the flip (default: `false`) |
-| `nested` | When true, only the first level of children is measured (better for nested transforms) |
-| `scale` | When true, scale elements to fit (avoids stretch); default `true` |
-| `simple` | When true, only position/scale are animated (faster, less accurate) |
-| `duration`, `ease` | Standard tween options |
+**Full config (Flip.from vars):** see [references/dom-ui-plugins.md](references/dom-ui-plugins.md).
 
 #### More information
 
@@ -111,17 +87,7 @@ Draggable.create(".box", { type: "x,y", bounds: "#container", inertia: true });
 Draggable.create(".knob", { type: "rotation" });
 ```
 
-**Draggable — key config options:**
-
-| Option | Description |
-|--------|-------------|
-| `type` | `"x"`, `"y"`, `"x,y"`, `"rotation"`, `"scroll"` |
-| `bounds` | Element, selector, or `{ minX, maxX, minY, maxY }` to constrain drag |
-| `inertia` | `true` to enable throw/momentum (requires InertiaPlugin) |
-| `edgeResistance` | 0–1; resistance when dragging past bounds |
-| `cursor` | CSS cursor during drag |
-| `onDragStart`, `onDrag`, `onDragEnd` | Callbacks; receive event and target |
-| `onThrowUpdate`, `onThrowComplete` | Callbacks when inertia is active |
+**Full config options:** see [references/dom-ui-plugins.md](references/dom-ui-plugins.md).
 
 ### Inertia (InertiaPlugin)
 
@@ -160,14 +126,7 @@ Observer.create({
 });
 ```
 
-**Observer — key config options:**
-
-| Option | Description |
-|--------|-------------|
-| `target` | Element or selector to observe |
-| `onUp`, `onDown`, `onLeft`, `onRight` | Callbacks when swipe/scroll passes tolerance in that direction |
-| `tolerance` | Pixels before direction is detected; default 10 |
-| `type` | `"touch"`, `"pointer"`, or `"wheel"` (default: `"touch,pointer"`) |
+**Full config options:** see [references/dom-ui-plugins.md](references/dom-ui-plugins.md).
 
 ## Text
 
@@ -183,39 +142,7 @@ gsap.from(split.chars, { opacity: 0, y: 20, stagger: 0.03, duration: 0.4 });
 // later: split.revert() or let gsap.context() cleanup revert
 ```
 
-With **onSplit()** (v3.13.0+), animations run on each split and on re-split when **autoSplit** is used; returning a tween/timeline from **onSplit()** lets SplitText clean up and sync progress on re-split:
-
-```javascript
-SplitText.create(".split", {
-  type: "lines",
-  autoSplit: true,
-  onSplit(self) {
-    return gsap.from(self.lines, { y: 100, opacity: 0, stagger: 0.05, duration: 0.5 });
-  }
-});
-```
-
-**SplitText — key config (SplitText.create vars):**
-
-| Option | Description |
-|--------|-------------|
-| **type** | Comma-separated: `"chars"`, `"words"`, `"lines"`. Default `"chars,words,lines"`. Only split what is needed (e.g. `"words, chars"` if not using lines) for performance. Avoid chars-only without words/lines or use **smartWrap: true** to prevent odd line breaks. |
-| **charsClass**, **wordsClass**, **linesClass** | CSS class on each split element. Append `"++"` to add an incremented class (e.g. `linesClass: "line++"` → `line1`, `line2`, …). |
-| **aria** | `"auto"` (default), `"hidden"`, or `"none"`. Accessibility: `"auto"` adds `aria-label` on the split element and `aria-hidden` on line/word/char elements so screen readers read the label; `"hidden"` hides all from readers; `"none"` leaves aria unchanged. Use `"none"` plus a screen-reader-only duplicate if nested links/semantics must be exposed. |
-| **autoSplit** | When `true`, reverts and re-splits when fonts finish loading or when the element width changes (and lines are split), avoiding wrong line breaks. **Animations must be created inside onSplit()** so they target the newly split elements; **return** the animation from **onSplit()** for automatic cleanup and time-sync on re-split. |
-| **onSplit(self)** | Callback when split completes (and on each re-split if **autoSplit** is `true`). Receives the SplitText instance. Returning a GSAP tween or timeline enables automatic revert/sync of that animation when re-splitting. |
-| **mask** | `"lines"`, `"words"`, or `"chars"`. Wraps each unit in an extra element with `overflow: clip` for mask/reveal effects. Only one type; access wrappers on the instance’s **masks** array (or use class `-mask` if a class is set). |
-| **tag** | Wrapper element tag; default `"div"`. Use `"span"` for inline (note: transforms like rotation/scale may not render on inline elements in some browsers). |
-| **deepSlice** | When `true` (default), nested elements (e.g. `<strong>`) that span multiple lines are subdivided so lines don’t stretch vertically. Only applies when splitting lines. |
-| **ignore** | Selector or element(s) to leave unsplit (e.g. `ignore: "sup"`). |
-| **smartWrap** | When splitting **chars** only, wraps words in a `white-space: nowrap` span to avoid mid-word line breaks. Ignored if words or lines are split. Default `false`. |
-| **wordDelimiter** | Word boundary: string (default `" "`), RegExp, or `{ delimiter: RegExp, replaceWith: string }` for custom splitting (e.g. zero-width joiner for hashtags, or non-Latin). |
-| **prepareText(text, parent)** | Function that receives raw text and parent element; return modified text before splitting (e.g. to insert break markers for languages without spaces). |
-| **propIndex** | When `true`, adds a CSS variable with index on each split element (e.g. `--word: 1`, `--char: 2`). |
-| **reduceWhiteSpace** | Collapse consecutive spaces; default `true`. From v3.13.0 also honors line breaks and can insert `<br>` for `<pre>`. |
-| **onRevert** | Callback when the instance is reverted. |
-
-**Tips:** Split only what is animated (e.g. skip chars if only animating words). For custom fonts, split after they load (e.g. `document.fonts.ready.then(...)`) or use **autoSplit: true** with **onSplit()**. To avoid kerning shift when splitting chars, use CSS `font-kerning: none; text-rendering: optimizeSpeed;`. Avoid `text-wrap: balance`; it can interfere with splitting. SplitText does not support SVG `<text>`.
+**Full create() config, onSplit()/autoSplit, tips:** see [references/splittext-deep-dive.md](references/splittext-deep-dive.md).
 
 **Learn more:** [SplitText](https://gsap.com/docs/v3/Plugins/SplitText/)
 
@@ -261,42 +188,7 @@ gsap.to("#path", { duration: 1, drawSVG: "20% 80%" });
 
 Morphs one SVG shape into another by animating the `d` attribute (path data). Start and end shapes do not need the same number of points — MorphSVG converts to cubic beziers and adds points as needed. Use for icon-to-icon morphs, shape transitions, or path-based animations. Works on `<path>`, `<polyline>`, and `<polygon>`; `<circle>`, `<rect>`, `<ellipse>`, and `<line>` are converted internally or via **MorphSVGPlugin.convertToPath(selector | element)** (replaces the element in the DOM with a `<path>`).
 
-**morphSVG value:** Can be a **selector** (e.g. `"#lightning"`), an **element**, **raw path data** (e.g. `"M47.1,0.8 73.3,0.8..."`), or for polygon/polyline a **points string** (e.g. `"240,220 240,70 70,70 70,220"`). For full config use the **object form** with **shape** as the only required property.
-
-```javascript
-gsap.registerPlugin(MorphSVGPlugin);
-
-// convert primitives to path first if needed:
-MorphSVGPlugin.convertToPath("circle, rect, ellipse, line");
-
-gsap.to("#diamond", { duration: 1, morphSVG: "#lightning", ease: "power2.inOut" });
-// object form:
-gsap.to("#diamond", {
-  duration: 1,
-  morphSVG: { shape: "#lightning", type: "rotational", shapeIndex: 2 }
-});
-
-```
-
-**MorphSVG — key config (morphSVG object):**
-
-| Option | Description |
-|--------|-------------|
-| **shape** | _(Required.)_ Target shape: selector, element, or raw path string. |
-| **type** | `"linear"` (default) or `"rotational"`. Rotational uses angle/length interpolation and can avoid kinks mid-morph; try it when linear looks wrong. |
-| **map** | How segments are matched: `"size"` (default), `"position"`, or `"complexity"`. Use when start/end segments don’t line up; if none work, split into multiple paths and morph each. |
-| **shapeIndex** | Offsets which point in the start path maps to the first point in the end path (avoids shape “crossing over” or inverting). Number for single-segment paths; **array** for multi-segment (e.g. `[5, 1, -8]`). Negative reverses that segment. Use **shapeIndex: "log"** once to log the auto-calculated value, then paste the number/array into the tween. **findShapeIndex(start, end)** (separate utility) provides an interactive UI to find a good value. Only applies to closed paths. |
-| **smooth** | (v3.14+). Adds smoothing points. Number (e.g. `80`), `"auto"`, or object: `{ points: 40 \| "auto", redraw: true \| false, persist: true \| false }`. `redraw: false` keeps original anchors (perfect fidelity, less even spacing). `persist: false` removes added points when the tween ends. Use when the default morph looks jagged or unnatural. |
-| **curveMode** | Boolean (v3.14+). Interpolates control-handle angle/length instead of raw x/y to avoid kinks on curves. Try if a morph has a mid-morph kink. |
-| **origin** | Rotation origin for **type: "rotational"**. String: `"50% 50%"` (default) or `"20% 60%, 35% 90%"` for different start/end origins. |
-| **precision** | Decimal places for output path data; default `2`. |
-| **precompile** | Array of precomputed path strings (or use **precompile: "log"** once, copy from console). Skips expensive startup calculations; use for very complex morphs. Only for `<path>` (convert polygon/polyline first). |
-| **render** | Function(rawPath, target) called each update — e.g. draw to canvas. RawPath is an array of segments (each segment = array of alternating x,y cubic bezier coords). |
-| **updateTarget** | When using **render** (e.g. canvas-only), set **updateTarget: false** so the original `<path>` is not updated. **MorphSVGPlugin.defaultUpdateTarget** sets default. |
-
-**Utilities:** **MorphSVGPlugin.convertToPath(selector | element)** converts circle/rect/ellipse/line/polygon/polyline to `<path>` in the DOM. **MorphSVGPlugin.rawPathToString(rawPath)** and **stringToRawPath(d)** convert between path strings and raw arrays. The plugin stores the original `d` on the target (e.g. for tweening back: `morphSVG: "#originalId"` or the same element).
-
-**Tips:** For twisted or inverted morphs, set **shapeIndex** (use `"log"` or findShapeIndex()). For multi-segment paths, **shapeIndex** is an array (one value per segment). Precompile only when the first frame is slow; it does not fix jank during the tween (simplify the SVG or reduce size if needed).
+**morphSVG value forms, object config, utilities, tips:** see [references/svg-plugins.md](references/svg-plugins.md).
 
 **Learn more:** [MorphSVG](https://gsap.com/docs/v3/Plugins/MorphSVGPlugin)
 
@@ -313,15 +205,7 @@ gsap.to(".dot", {
 });
 ```
 
-**MotionPath — key config (motionPath object):**
-
-| Option | Description |
-|--------|-------------|
-| `path` | SVG path element, selector, or path data string |
-| `align` | Path element or selector to align the target to |
-| `alignOrigin` | `[x, y]` origin (0–1); default `[0.5, 0.5]` |
-| `autoRotate` | Rotate element to follow path tangent |
-| `curviness` | 0–2; path smoothing |
+**Full config (motionPath object):** see [references/svg-plugins.md](references/svg-plugins.md).
 
 ### MotionPathHelper
 
@@ -431,3 +315,10 @@ gsap.to(sprite, { pixi: { x: 200, y: 100, scale: 1.5 }, duration: 1 });
 ### Learn More
 
 https://gsap.com/docs/v3/Plugins/
+
+## References
+
+- **references/scroll-plugins.md** — Read when: ScrollToPlugin scrollTo options, or ScrollSmoother setup/DOM structure.
+- **references/dom-ui-plugins.md** — Read when: full config tables for Flip (Flip.from vars), Draggable, or Observer.
+- **references/splittext-deep-dive.md** — Read when: SplitText full create() config, onSplit()/autoSplit usage, or splitting tips.
+- **references/svg-plugins.md** — Read when: MorphSVG value forms/object config/utilities/tips, or MotionPath key config.
