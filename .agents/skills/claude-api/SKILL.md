@@ -1,6 +1,6 @@
 ---
 name: claude-api
-description: "Claude API / Anthropic SDK reference - model ids, pricing, params, streaming, tools, MCP, caching, token counting, migration. Read before any Claude/Anthropic work (claude-*, @anthropic-ai, Opus/Sonnet/Haiku, [1m]) or LLM pricing/model-choice/limits questions; never answer LLM details from memory. Skip when another provider is explicit."
+description: "Claude API / Anthropic SDK reference - model ids, pricing, params, streaming, tools, MCP, caching, token counting, migration. Read before any Claude/Anthropic work (claude-*, @anthropic-ai, Opus/Sonnet/Haiku, [1m]) OR any LLM-shaped task with provider unstated (agents, MCP/tool definitions, multi-agent, RAG, LLM judging, computer use, generate/summarize/extract/classify/rewrite, debugging refusals/cutoffs/streaming/tool-calls, pricing/model-choice/limits) - never answer LLM details from memory. Skip when another provider is explicit."
 license: Complete terms in LICENSE.txt
 ---
 
