@@ -88,7 +88,12 @@ jobs:
   windows-owned-process:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: windows-latest
-    timeout-minutes: 10
+    # 15 min: parity with ci.yml's `windows` row (15 min), which runs the same cold `bun ci`,
+    # build, and live hook gate. Measured on this branch (run 36755694907): the ci.yml windows
+    # rows finished in 49-138 s wall clock, checkout, setup and install included - the slowest,
+    # `windows (owned-process)` at 2 min 18 s, is this job's closest analogue - so the cap carries
+    # >5x headroom and tripping it should mean a hang, not a slow runner. (Round-77 review, ci SB.)
+    timeout-minutes: 15
     env:
       VF_REQUIRE_LIVE_WINDOWS: "1"
       RELEASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
@@ -100,6 +105,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      # The typesafe live gate below drives the SHIPPED artifact under Node (`Bun.which("node")`),
+      # so the toolchain must be pinned here too: without this, the release gate rides the ambient
+      # Node of the `windows-latest` image and fails as "node is not on PATH" instead of a
+      # toolchain error. ci.yml pins the same version for the same test.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - run: bun ci
       - name: Assert the release commit on a real Windows runtime
         run: |
@@ -107,6 +119,12 @@ jobs:
           bun run scripts/assert-win32.ts
       - name: Windows PID, Job Object, release, and orphan release gate
         run: bun test --timeout 30000 test/dispatch-owned-process-windows.test.ts test/dispatch-owned-process-windows-live.test.ts
+      - name: Build shipped artifact
+        run: bun run build
+      - name: Windows typesafe hook budget release gate
+        # A release must not ship a Windows hook path that was never launched: the 10s spawn
+        # budget and the owner-only key-file DACL are win32-only claims.
+        run: bun test --timeout 30000 test/typesafe-hook-windows-live.test.ts
 
   release-prerequisites:
     needs:

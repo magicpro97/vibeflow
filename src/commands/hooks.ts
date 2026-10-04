@@ -40,6 +40,7 @@ import {
   engineHookFiles,
   evaluateHook,
   guardrailOffNote,
+  hooksDisabled,
   liveGuardrailArmed,
   out,
   parseHookInput,
@@ -109,21 +110,17 @@ export async function hook(
     stdin?: { on: any; once: any; resume: any; pause: any };
     stdinTimeoutMs?: number;
     antigravity?: boolean;
-  } = {},
+    // The System One risk seam's own injections, named by an inline TYPE import: the seam
+    // module is loaded by the `await import` below, so no sibling edge exists at runtime
+    // (test/commands-no-cycle.test.ts).
+  } & import("./hook-risk-integration.js").RiskJudgeInject = {},
 ): Promise<number> {
   const antigravity = inject.antigravity === true;
-  // Claude Code spawns the hook with a JSON payload on stdin but does NOT
-  // close the pipe. The kernel/pipe can split the payload across multiple
-  // "data" events (e.g. > 64 KiB crosses the typical pipe chunk boundary),
-  // so we MUST accumulate chunks until the stream ends (or times out) and
-  // only then try to parse. Using `once("data", …)` (the old shape) read
-  // only the first chunk, truncating multi-chunk JSON; parseHookInput then
-  // failed on the partial prefix and the live tool gate fail-opened —
-  // letting any unrecognized input through. The fix uses `on("data", …)`
-  // with a balanced-brace check to detect a complete JSON object, falling
-  // back to the timeout if the stream never produces a complete payload.
-  // A 5 s timeout guards against a hook that receives no input at all
-  // (fallback session where the hook pipe is /dev/null or similar).
+  // Claude Code spawns the hook with a JSON payload on stdin but does NOT close the pipe, so
+  // the payload can be split across several "data" events (> 64 KiB crosses the typical pipe
+  // chunk boundary). `once("data", …)` read only the first chunk, and parseHookInput then
+  // failed on the partial prefix — fail-opening the live tool gate. Accumulate until the JSON
+  // parses, with a 5 s timeout for a hook that receives no input at all (pipe is /dev/null).
   const stdin = inject.stdin ?? process.stdin;
   const timeoutMs = inject.stdinTimeoutMs ?? 5000;
   const MAX_STDIN_BYTES = 1 * 1024 * 1024; // 1 MiB hard cap (security: CWE-400)
@@ -175,10 +172,8 @@ export async function hook(
     });
     stdin.resume();
   });
-  // Decide the gate outcome.
-  // - raw is empty (no input ever arrived): fallback session, fail-OPEN.
-  // - raw is non-empty but parseHookInput fails: hostile/truncated input,
-  //   fail-CLOSED on the live tool gate (was: fail-open, security bug).
+  // Decide the gate outcome: empty input is a fallback session (fail-OPEN), and non-empty
+  // but unparseable input is fail-CLOSED on the live tool gate.
   const trimmed = raw.trim();
   if (!trimmed) {
     out(
@@ -203,25 +198,41 @@ export async function hook(
     );
     return 2;
   }
-  // Load the repo's stored hook policy so the live gate honors the templates the
-  // user kept (and any custom rules). readSettings is fail-safe: a missing/garbage
-  // SETTINGS.json yields the all-on default, so the gate never silently weakens.
-  const policy = resolveHookPolicy(readSettings(cwd()).hooks);
-  // Task 4: advisory spec-drift signal (warn, never block) — compare the current
-  // spec against the dispatch-time snapshot for this task. specStaleSignals is
-  // best-effort (never throws), so the live gate never fails on freshness grounds.
+  // Load the repo's stored settings so the live gate honors the templates the user kept.
+  // readSettings is fail-safe: a missing/garbage SETTINGS.json yields the all-on default.
+  const stored = readSettings(cwd());
+  const settings = inject.typesafe ? { ...stored, typesafe: inject.typesafe } : stored;
+  const policy = resolveHookPolicy(settings.hooks);
+  // Task 4: advisory spec-drift signal (warn, never block).
   const specStale = (hi: HookInput): string[] =>
     hi.taskId ? specStaleSignals(cwd(), hi.taskId, readLocalSpec(cwd())) : [];
-  const result = evaluateHook(input, () => process.env, policy, specStale);
-  // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals while
-  // keeping the exit-code veto (2) correct for block / require_approval on every engine.
+  // System One risk tier: OPTIONAL, raise-only, fail-open, and skipped entirely when the
+  // deterministic gate already decided or the integration is off. `undefined` here is
+  // byte-for-byte the pre-integration call.
+  //
+  // Gated on the kill-switch FIRST: `evaluateHook` reads `VIBEFLOW_HOOKS` deep inside, so calling
+  // the seam before it made a hooks-OFF run still POST the raw shell command to the vendor, charge
+  // the budget and record a `caller:"risk"` breaker entry. A disabled hook must send nothing.
+  // ONE authority: this gate and `evaluateHook` below are both handed `inject.env ?? process.env`,
+  // so they can never disagree. Gating here alone (on either source) is not enough -
+  // `integrateRiskJudge` guards itself too, so no caller can leak egress on a disarmed run.
+  const env = (): NodeJS.ProcessEnv => inject.env ?? process.env;
+  const semanticJudge = hooksDisabled(env())
+    ? undefined
+    : await (await import("./hook-risk-integration.js")).integrateRiskJudge({
+        input,
+        settings,
+        policy,
+        base: cwd(),
+        inject,
+      });
+  const result = evaluateHook(input, env, policy, specStale, semanticJudge);
+  // presentDecision emits the structured Claude "ask" envelope for PreToolUse approvals.
   const { json, exitCode } = antigravity
     ? presentAntigravityDecision(result)
     : presentDecision(result, input, buildVerifyGate(cwd()));
   out("vf", json);
-  // #542: mirror the decision onto the durable "hook" logbus channel (until now a
-  // defined-but-unused channel). Keeps the existing hook-audit.log; adds the ordered
-  // stream so a run's hook decisions interleave with dispatch/verdict events.
+  // #542: mirror the decision onto the durable "hook" logbus channel.
   try {
     out(LOG_CHANNEL.HOOK, `${input.event}: ${result.decision} (${result.risk})`, {
       level: LOG_LEVEL.INFO,

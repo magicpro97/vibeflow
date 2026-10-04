@@ -3,6 +3,8 @@
 
 import { readFileSync } from "node:fs";
 
+import { withoutTypesafe } from "../settings-form-helpers.js";
+
 let passed = 0;
 let failed = 0;
 
@@ -41,9 +43,18 @@ assert(
     panel,
   ),
 );
+// The claim is that the direct save sits in the branch that does NOT go through the policy
+// preview. Anchor on the call and walk back to the nearest `} else {`: the first `} else {` in the
+// file belongs to an outer conditional and encloses the preview call too, so a forward search
+// silently included it. No counts, no offsets.
+const directAt = panel.indexOf("await api.settings.set(");
+const branchAt = panel.lastIndexOf("} else {", directAt);
 assert(
   "non-sensitive save keeps direct settings.set path",
-  /else \{\s*const savedSettings = await api\.settings\.set\(form\.value\)/.test(panel),
+  directAt > -1 &&
+    branchAt > -1 &&
+    branchAt < directAt &&
+    !panel.slice(branchAt, directAt).includes("previewPolicy("),
 );
 assert(
   "applyPolicy calls api.settings.applyPolicy with preview id + confirmation",
@@ -73,9 +84,12 @@ assert(
 // #692 regression: original.value must be reassigned from the RETURNED settings
 // of applyPolicy — not form.value/nonPolicy (that drops envPolicy/hooks from the
 // baseline, so every later save re-detects a policy diff and previews again).
+// The rebase goes through the shared projection (`coerceEditableDefaults(withoutTypesafe(clone(...)))`)
+// for the same reason the direct-save path does: the response carries `typesafe`, the form does not,
+// and re-seeding the baseline raw leaves `isDirty` permanently true.
 assert(
   "applyPolicy rebases original from returned settings, not nonPolicy",
-  /const savedSettings = await api\.settings\.applyPolicy\([\s\S]*original\.value = clone\(savedSettings\)/.test(
+  /const savedSettings = await api\.settings\.applyPolicy\([\s\S]*original\.value = coerceEditableDefaults\(withoutTypesafe\(clone\(savedSettings\)\)\)/.test(
     panel,
   ),
 );
@@ -89,8 +103,27 @@ assert("previewPolicy POSTs to /api/settings/preview", /"\/api\/settings\/previe
 assert("api exposes applyPolicy", /applyPolicy:/.test(api));
 assert("applyPolicy POSTs to /api/settings/apply", /"\/api\/settings\/apply"/.test(api));
 assert(
-  "applyPolicy forwards non-policy settings in the apply payload",
-  /applyPolicy:[\s\S]*settings\?: Partial<VibeSettings>[\s\S]*\? \{\s*settings\s*\}/.test(api),
+  // `Omit<..., "typesafe">`, the same projection `set` uses: the server 400s a `typesafe` block on
+  // this route, and the preview that authorises the request owns no such field.
+  "applyPolicy forwards non-policy settings, and cannot carry the System One block",
+  /applyPolicy:[\s\S]*settings\?: Omit<Partial<VibeSettings>, "typesafe">[\s\S]*\? \{\s*settings\s*\}/.test(
+    api,
+  ),
+);
+
+// ── 4. `withoutTypesafe` drops only the System One block — as a CALL ──
+// The string pins above cannot notice a helper that returns its input unchanged, and that exact
+// bug re-armed `isDirty` forever on a save response carrying the block the form deliberately lacks.
+
+const source = { typesafe: { enabled: true }, memory: { enabled: true } };
+const projected = withoutTypesafe(source as never);
+const projectedRecord = projected as Record<string, unknown>;
+assert("withoutTypesafe drops the System One block", !("typesafe" in projectedRecord));
+assert(
+  "withoutTypesafe projects a fresh object, keeps the rest, never writes through its input",
+  projected !== (source as unknown) &&
+    JSON.stringify(projectedRecord.memory) === '{"enabled":true}' &&
+    JSON.stringify(source.typesafe) === '{"enabled":true}',
 );
 
 // ── Results ──

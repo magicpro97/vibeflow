@@ -23,7 +23,7 @@ import {
 import { useConversationHomeStore } from "./conversation-home-store.js";
 import { conversationProjectApi } from "./conversation-project-api.js";
 import { projectSuggestionAnnouncement } from "./project-rail-group.js";
-import type { VibeSettings } from "./types.js";
+import type { VibeSettings } from "./types-settings.js";
 
 /** The settings block this store owns; the engine fields ride along untouched. */
 type ProjectClassificationSlice = NonNullable<VibeSettings["projectClassification"]>;

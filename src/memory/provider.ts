@@ -1,5 +1,5 @@
 // src/memory/provider.ts
-import type { MemoryMode } from "../settings.js";
+import type { MemoryMode } from "../settings-memory.js";
 import { BuiltinMemoryProvider } from "./builtin.js";
 import { ClaudeMemProvider } from "./claude-mem.js";
 import type { MemoryProvider } from "./types.js";

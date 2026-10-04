@@ -6,14 +6,24 @@
 // surface (commands.ts, _shared.js, tests) keeps importing it unchanged.
 
 import { ENGINES } from "../core/types.js";
+import type { WorkUnit } from "../core/types.js";
 import { GATE_STATE, PRE_REVIEW_WORK_UNIT_GATES } from "../core/workflow-contract.js";
 import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import { verifyAcceptance } from "../orchestrator/acceptance-verify.js";
+import type { UnitOutcome } from "../orchestrator/run.js";
 import { type GateRunner, defaultRun } from "../orchestrator/scoped-gate.js";
+import { readSettings } from "../settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS, isTypesafeEnabled } from "../typesafe-settings.js";
 import { out } from "./_shared.js";
 import type { Engine, Reviewer } from "./_shared.js";
 import { type DiffReader, analyzeDiff, defaultDiffReader } from "./dispatch-diff.js";
-import { getUnitDiff, runLLMReview } from "./dispatch-reviewer-llm.js";
+import { getUnitDiffResult, runLLMReview } from "./dispatch-reviewer-llm.js";
+
+/** The reviewer plus its per-unit implementer seam: the ADR-001 cross-review pick depends on
+ *  it, so it is exposed (and asserted) rather than buried in a closure. */
+export type RoutedReviewer = Reviewer & {
+  __implementerFor: (unit: WorkUnit) => Engine | undefined;
+};
 
 /**
  * Independent reviewer. Signature: `(unit, outcome) → { pass, reason }` — the first arg is the
@@ -37,16 +47,51 @@ export function makeReviewer(
     implementer?: Engine;
     /** #522: command runner for acceptance-criteria verification. Defaults to defaultRun. */
     runCmd?: GateRunner;
+    /** Test/embedder seam for the System One health root. Forwarded into the reviewer seam's
+     *  `typesafe` block so the file-backed breaker record lands under THIS root; without it the
+     *  guard fell back to the real `~/.vibeflow`, which no test above the maker could isolate. */
+    userRoot?: string;
   },
-): Reviewer {
+): RoutedReviewer {
   const readDiff = inject?.diffReader ?? defaultDiffReader;
   const cwd = inject?.cwd ?? process.cwd();
+  // Task 4: the settings load the System One seam reads. Read ONCE per makeReviewer (not per
+  // reviewed unit) so a run's judge configuration cannot change mid-run under it.
+  const settings = readSettings(cwd);
   // ADR-001: auto-wire llmFn only when VF_LLM_REVIEW=1 (opt-in) to avoid smoke/test interference.
   const llmReviewFn = inject?.llmReviewFn;
   const autoLlmReview =
     Boolean(inject?.goal) && process.env.VF_LLM_REVIEW === "1" && Boolean(process.env.VIBEFLOW_AI);
 
-  return async (unit, outcome) => {
+  // Task 7: per-unit routing means the run-global `implementer` pin is no longer the whole
+  // story. `reviewerEngine: "global"` (opt-out) keeps it; the default follows the unit and
+  // only falls back to the run-global engine when the judge routed nothing. An install with NO
+  // `typesafe` block at all resolves to `"global"` (coerce never ran), and so does a block the
+  // operator switched off or whose `reviewer` call site is off: the off path stays byte-for-byte
+  // today's behaviour, so an engine-annotated unit (state written while the judge was on, a
+  // hand-edited ledger) must not silently re-route its reviewer once the judge is off.
+  // ADR-001's cross-review invariant is preserved either way: `resolveReviewerEngine` still
+  // avoids whatever this resolves to. `u.engine` is typed `Engine` but arrives from plan/state
+  // JSON (`readSettings`/ledger reads cast the file), so it is validated against the runtime
+  // authority before it can steer the reviewer: `pickReviewerEngine` returns the first available
+  // engine that merely `!==` its `implementer` (src/review-engine.ts:34), so a foreign id
+  // silently loses the ADR-001 cross-review invariant. A non-canonical id falls back to the
+  // run-global pin.
+  const canonicalEngine = (engine: WorkUnit["engine"]): Engine | undefined =>
+    engine !== undefined && (ENGINES as readonly string[]).includes(engine)
+      ? (engine as Engine)
+      : undefined;
+  const implementerFor = (u: WorkUnit): Engine | undefined =>
+    isTypesafeEnabled(settings) &&
+    settings.typesafe?.callSites.reviewer === true &&
+    settings.typesafe?.reviewerEngine === "unit"
+      ? (canonicalEngine(u.engine) ?? inject?.implementer)
+      : inject?.implementer;
+
+  const review = async (
+    unit: WorkUnit,
+    outcome: UnitOutcome,
+  ): Promise<{ pass: boolean; reason: string; score?: number }> => {
     if (mode === DISPATCH_MODE.DRY) {
       return { pass: true, reason: "dry preview — not evaluated (re-run with --yes)" };
     }
@@ -95,17 +140,38 @@ export function makeReviewer(
 
     // ADR-001 phase 2: LLM review after local gate passes.
     if (inject?.goal && (llmReviewFn || autoLlmReview)) {
-      const llmDiff = getUnitDiff(cwd, unit.scope ?? []);
+      // An unreadable diff (git failure, missing HEAD~1 in a shallow clone) is NOT an empty
+      // change: a read failure must never reach a judge verdict OR an engine review of "" and
+      // block a unit that passed every local gate - fail-open; the caller's own gates stay
+      // authoritative. Round-73: the gate holds for BOTH arms - the withheld settings kept the
+      // judge out of it, yet the engine review still ran on "" and a non-COVERED answer failed
+      // the unit, so the promise held for the judge and not for the seam.
+      const { diff: llmDiff, ok: llmDiffOk } = getUnitDiffResult(cwd, unit.scope ?? []);
+      if (!llmDiffOk) return localResult;
       const llmResult = await runLLMReview({
         goal: inject.goal,
         spec: unit.spec,
         diff: llmDiff,
         ...(llmReviewFn ? { llmFn: llmReviewFn } : {}),
         cwd,
+        // Task 4: the System One judge seam. `runLLMReview` re-checks `enabled` and
+        // `callSites.reviewer` before it resolves anything, so forwarding the settings here
+        // costs a disabled run nothing — no HTTP, and no touch of the per-user health root.
+        // `userRoot` travels with them: the guard's record is file-backed, so a reviewer run
+        // must be able to isolate (or point) the breaker root the same way the hook and
+        // goal-coverage seams already do. Omitting it silently wrote to `~/.vibeflow`.
+        typesafe: {
+          settings: settings.typesafe ?? DEFAULT_TYPESAFE_SETTINGS,
+          env: process.env,
+          ...(inject?.userRoot === undefined ? {} : { userRoot: inject.userRoot }),
+        },
         // ADR-001: route the reviewer to a DIFFERENT tool than the implementer.
         // ENGINES is the canonical candidate pool; pickReviewerEngine avoids the implementer.
-        ...(inject?.implementer
-          ? { implementer: inject.implementer, available: [...ENGINES] }
+        // Task 7: the implementer is the UNIT's engine when the planner routed one (or the
+        // run-global engine under `reviewerEngine: "global"`), so cross-review still lands on
+        // a different tool than the one that actually wrote the change.
+        ...(implementerFor(unit)
+          ? { implementer: implementerFor(unit), available: [...ENGINES] }
           : {}),
       });
       // Surface the same-tool warning to the audit trail — the Reviewer boundary
@@ -119,4 +185,6 @@ export function makeReviewer(
     }
     return localResult;
   };
+
+  return Object.assign(review, { __implementerFor: implementerFor });
 }

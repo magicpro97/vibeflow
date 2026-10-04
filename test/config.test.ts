@@ -368,3 +368,31 @@ describe("settings eval coerce/writeSettings (#549)", () => {
     }
   });
 });
+
+// The `typesafe` branch of `config()` is reached through the DECISION layer, and its own test file
+// drives `configTypesafe()` directly with an injected `out`/`env`. Without these, the two lines of
+// the dynamic-import route are never executed and scripts/coverage-gate.cjs fails the per-file 100%
+// line gate on `src/commands/config-decision.ts` — a gate the task's own focused test cannot see.
+describe("config typesafe route through the decision layer", () => {
+  test("`config typesafe status` runs through the sibling dynamic-import route", async () => {
+    const dir = tmpRepo();
+    try {
+      const { code } = await capture(() => config("typesafe", ["status"], dir));
+      expect(code).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("`config typesafe on|off` toggles the block through the same route", async () => {
+    const dir = tmpRepo();
+    try {
+      expect(await capture(() => config("typesafe", ["on"], dir))).toBeDefined();
+      expect(readSettings(dir).typesafe?.enabled).toBe(true);
+      await capture(() => config("typesafe", ["off"], dir));
+      expect(readSettings(dir).typesafe?.enabled).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -89,7 +89,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../api.js";
 import { isValidSchedule } from "../lib/curator-schedule.js";
-import type { CuratorFindingView, CuratorSettings, CuratorSetupPreview } from "../types.js";
+import type { CuratorSettings } from "../types-settings.js";
+import type { CuratorFindingView, CuratorSetupPreview } from "../types.js";
 import CuratorSetupModal from "./CuratorSetupModal.vue";
 import InfoTip from "./InfoTip.vue";
 

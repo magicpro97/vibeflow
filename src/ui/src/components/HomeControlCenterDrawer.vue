@@ -11,8 +11,7 @@
         <div class="home-control-section__heading"><span><small>Project bootstrap</small><strong id="harness-title">Harness initialization</strong></span><button type="button" :disabled="busy" @click="initialize(false)">{{ busy ? "Initializing…" : "Initialize harness" }}</button></div>
         <label class="home-control-path"><span>Repository</span><input v-model="repoPath" type="text" placeholder="/path/to/repo" @blur="detect" /><button type="button" :disabled="detecting" @click="detect">{{ detecting ? "Checking…" : "Detect" }}</button></label>
         <p v-if="detected" class="home-control-note">{{ detection?.isGit ? "Git repository detected" : "Directory detected — git protection unavailable" }}</p>
-        <p v-if="message" class="home-control-message" role="status">{{ message }}</p>
-        <p v-if="error" class="home-control-error" role="alert">{{ error }}</p>
+        <p v-if="message" class="home-control-message" role="status">{{ message }}</p><p v-if="error" class="home-control-error" role="alert">{{ error }}</p>
       </section>
 
       <section class="home-control-section" aria-labelledby="agents-title">
@@ -20,7 +19,7 @@
         <p class="home-control-note">Select CLI(s) for init and dispatch. Unchecked CLIs remain installed but VibeFlow will not use them.</p>
         <div class="home-control-engine-list">
           <label v-for="engine in engines" :key="engine" class="home-control-engine">
-            <input v-model="enabledEngines" type="checkbox" :value="engine" @change="saveEnabledEngines" />
+            <input v-model="enabledEngines" type="checkbox" :value="engine" @change="saveSettings" :disabled="saving" />
             <span><strong>{{ engine }}</strong><small>{{ detection?.engines[engine] ? "initialized" : "not initialized" }} · {{ detection?.clis[engine] ? "CLI ready" : "CLI unavailable" }}</small></span>
             <i :data-ready="detection?.clis[engine] === true" />
           </label>
@@ -33,6 +32,43 @@
         <label class="home-control-toggle"><input v-model="settingsForm.tools.codegraph" type="checkbox" /><span><strong>CodeGraph</strong><small>Code navigation and impact analysis.</small></span></label>
         <label class="home-control-toggle"><input v-model="settingsForm.tools.lsp" type="checkbox" /><span><strong>LSP Bridge</strong><small>Definitions, references, and diagnostics.</small></span></label>
         <button class="home-control-save" type="button" :disabled="saving" @click="saveSettings">{{ saving ? "Saving…" : "Save configuration" }}</button>
+      </section>
+
+      <section class="home-control-section" aria-labelledby="typesafe-title">
+        <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || !typesafeView?.configured || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
+        <p class="home-control-note">The judge can only reject a change sooner or raise a risk tier. It never opens a gate or skips a review, and it can only suggest an engine from the pool preflight already admitted. Off by default: with it off every path behaves exactly as it does today.</p>
+
+        <p v-if="typesafeStatus === 'loading'" class="home-control-message" role="status" aria-live="polite" aria-busy="true">Loading System One settings…</p><p v-else-if="typesafeStatus === 'error'" class="home-control-error" role="alert">System One settings could not load — {{ typesafeError }}</p>
+        <p v-else-if="typesafeView && !typesafeView.configured" class="home-control-message" role="status" aria-live="polite">No System One key configured — set <code>TYPESAFE_API_KEY</code> or run <code>vf config typesafe key</code>.</p>
+        <p v-else-if="typesafeView?.state === 'open' || typesafeView?.state === 'half-open'" class="home-control-warning" role="alert">{{ typesafeView?.state === "half-open" ? `Circuit half-open — calls are refused while a single probe is in flight; the lease re-grants at ${typesafeView?.cooldownUntil ?? "the next window"}.` : `Circuit open — judge calls are paused until ${typesafeView?.cooldownUntil ?? "the cooldown ends"}.` }}</p>
+        <p v-if="typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" class="home-control-warning" role="alert">Test connection is refused until {{ typesafeView?.probeCooldownUntil ?? "its own breaker clears" }} — the probe's own breaker is {{ typesafeView?.probeState }}, and the judge's calls are unaffected.</p>
+        <p v-if="typesafeError && typesafeStatus !== 'error'" class="home-control-error" role="alert">{{ typesafeError }}</p><p v-if="typesafeView && typesafeNeedsReload(typesafeRepo, repoPath)" class="home-control-warning" role="status">These rows describe {{ typesafeRepo }} — detect again to load the current repository.</p>
+
+        <dl v-if="typesafeView" class="home-control-list">
+          <div><dt>enabled</dt><dd>{{ typesafeView.enabled ? "on" : "off" }}</dd></div>
+          <div><dt>configured</dt><dd>{{ typesafeView.configured ? "yes" : "no" }}</dd></div>
+          <div><dt>state</dt><dd :data-state="typesafeView.state">{{ typesafeView.state }}</dd></div>
+          <div><dt>key source</dt><dd>{{ typesafeView.keySource }}</dd></div>
+          <div><dt>model</dt><dd>{{ typesafeView.model }}</dd></div>
+          <div><dt>timeout</dt><dd>{{ typesafeView.timeoutMs }} ms</dd></div>
+          <div v-if="typesafeView.lastCall"><dt>last call</dt><dd>{{ typesafeView.lastCall.caller }} · {{ typesafeView.lastCall.status ?? "—" }} · {{ typesafeView.lastCall.ms }} ms</dd></div>
+        </dl>
+
+        <label for="typesafe-enabled" class="home-control-toggle"><input id="typesafe-enabled" v-model="settingsForm.typesafe.enabled" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>Enable System One judge</strong><small>Off by default. The API key stays on the machine.</small></span></label>
+
+        <label for="typesafe-run-threshold" class="home-control-field"><span>Run judge at confidence</span><input id="typesafe-run-threshold" v-model.number="settingsForm.typesafe.runAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
+        <label for="typesafe-accept-threshold" class="home-control-field"><span>Accept verdict at confidence</span><input id="typesafe-accept-threshold" v-model.number="settingsForm.typesafe.acceptAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
+        <p v-if="thresholdError" id="typesafe-threshold-error" class="home-control-error" role="alert">{{ thresholdError }}</p>
+
+        <label for="typesafe-callsite-reviewer" class="home-control-toggle"><input id="typesafe-callsite-reviewer" v-model="settingsForm.typesafe.callSites.reviewer" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>reviewer</strong><small>Judge the unit diff before the engine reviewer.</small></span></label>
+        <label for="typesafe-callsite-risk" class="home-control-toggle"><input id="typesafe-callsite-risk" v-model="settingsForm.typesafe.callSites.risk" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>risk</strong><small>Raise the risk tier of a proposed shell command.</small></span></label>
+        <label for="typesafe-callsite-goalCoverage" class="home-control-toggle"><input id="typesafe-callsite-goalCoverage" v-model="settingsForm.typesafe.callSites.goalCoverage" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>goalCoverage</strong><small>Judge whether the change covers the goal.</small></span></label>
+        <label for="typesafe-callsite-planner" class="home-control-toggle"><input id="typesafe-callsite-planner" v-model="settingsForm.typesafe.callSites.planner" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>planner</strong><small>Suggest an engine for a work unit.</small></span></label>
+
+        <p v-if="settingsForm.typesafe.enabled" class="home-control-warning">Leaves this machine when a call site is on:<br /><span v-for="line in TYPESAFE_EGRESS_LINES" :key="line">{{ line }}<br /></span></p>
+
+        <p v-if="typesafeProbe" class="home-control-message" role="status" aria-live="polite">{{ typesafeProbe }}</p>
+        <button class="home-control-save typesafe-save" type="button" :disabled="typesafeSaveBlocked()" @click="saveTypesafe">{{ saving ? "Saving…" : "Save System One settings" }}</button>
       </section>
 
       <section class="home-control-section" aria-labelledby="capabilities-title">
@@ -59,10 +95,13 @@
 import { nextTick, onMounted, reactive, ref, watch } from "vue";
 import { ENGINES, type Engine } from "../../../core/agent-contract.js";
 import { CAPABILITY_SCOPE } from "../../../core/capability-contract.js";
+import { TYPESAFE_EGRESS_LINES } from "../../../typesafe-egress.js";
 import { api } from "../api.js";
 import { conversationHomeApi } from "../conversation-home-api.js";
 import type { ControlCenterCapability } from "../conversation-home-types.js";
-import type { RepoDetection, SafeSkill, VibeSettings } from "../types.js";
+// biome-ignore format: one line keeps the drawer under its line pin
+import { type TypesafeSettingsView, type VibeSettings, emptyTypesafeForm, typesafeNeedsReload, typesafeSaveDisabled, typesafeThresholdError } from "../types-settings.js";
+import type { RepoDetection, SafeSkill } from "../types.js";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -80,7 +119,119 @@ const enabledEngines = ref<Engine[]>([...ENGINES]);
 const skills = ref<SafeSkill[]>([]);
 const capabilities = ref<ControlCenterCapability[]>([]);
 const mcpServers = ref<string[]>([]);
-const settingsForm = reactive({ memory: false, tools: { codegraph: true, lsp: true } });
+const typesafeView = ref<TypesafeSettingsView | null>(null);
+const typesafeStatus = ref<"loading" | "ready" | "error">("loading");
+const typesafeError = ref("");
+const typesafeProbe = ref("");
+const typesafeTesting = ref(false);
+const thresholdError = ref("");
+const typesafeRepo = ref("");
+let typesafeLoadSeq = 0;
+let typesafeProbeRepo = ""; // repo the current verdict describes; survives a re-open, not a repo change
+let detectInFlight: Promise<boolean> | null = null; // the run a caller arriving mid-detect joins
+
+function typesafeSaveBlocked(): boolean {
+  return typesafeSaveDisabled({
+    saving: saving.value,
+    status: typesafeStatus.value,
+    thresholdError: thresholdError.value,
+    rowsAreStale: typesafeNeedsReload(typesafeRepo.value, repoPath.value),
+  });
+}
+const settingsForm = reactive({
+  memory: false,
+  tools: { codegraph: true, lsp: true },
+  typesafe: emptyTypesafeForm(),
+});
+
+function validateThresholds(): void {
+  thresholdError.value = typesafeThresholdError(settingsForm.typesafe);
+}
+
+async function loadTypesafe(seedForm = true): Promise<boolean> {
+  const seq = ++typesafeLoadSeq; // without it a slower response wins and the rows go stale
+  typesafeStatus.value = "loading";
+  typesafeError.value = "";
+  try {
+    const view = await api.typesafe.view();
+    if (seq !== typesafeLoadSeq) return false;
+    typesafeView.value = view;
+    // biome-ignore format: the reseed stays one statement so the < 400 pin holds
+    if (seedForm) { settingsForm.typesafe = { enabled: view.enabled, runAtConfidence: view.thresholds.run, acceptAtConfidence: view.thresholds.accept, callSites: { ...view.callSites } }; }
+    validateThresholds();
+    typesafeError.value = ""; // this GET settled: hand back any sibling's failure text
+    // biome-ignore format: the stamp falls WITH its verdict; one line keeps the pair atomic under the cap
+    if (typesafeProbeRepo !== view.repo && (typesafeProbeRepo !== "" || typesafeProbe.value !== "")) { typesafeProbe.value = ""; typesafeProbeRepo = ""; }
+    typesafeRepo.value = view.repo; // from the RESPONSE: `repoPath` is live text and would lie
+    typesafeStatus.value = "ready";
+    return true;
+  } catch (cause) {
+    if (seq !== typesafeLoadSeq) return false;
+    typesafeView.value = null;
+    typesafeStatus.value = "error";
+    [typesafeProbe.value, typesafeProbeRepo] = ["", ""]; // else the verdict renders below the "connection failed" line
+    typesafeError.value = cause instanceof Error ? cause.message : "unreachable";
+    return false;
+  }
+}
+
+function rowsDescribe(repo: string): boolean {
+  return typesafeStatus.value === "ready" && typesafeRepo.value === repo;
+}
+
+async function testConnection(): Promise<void> {
+  if (typesafeTesting.value) return;
+  const probed = typesafeView.value?.repo ?? ""; // also null in the error state: "responded for :"
+  if (probed === "") return;
+  const seq = typesafeLoadSeq; // a verdict issued BEFORE a save must not outlive its confirmation
+  typesafeTesting.value = true;
+  try {
+    const result = await api.typesafe.test(probed);
+    if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return; // superseded: another load won
+    typesafeProbe.value = result.ok
+      ? `System One responded for ${probed}: covers_goal ${result.score} at confidence ${result.confidence ?? "unknown"} in ${result.ms} ms.`
+      : `${result.refused === true ? "System One did not run the test for" : "System One connection failed for"} ${probed} — ${result.error ?? "no verdict"}`;
+  } catch (cause) {
+    if (seq !== typesafeLoadSeq || !rowsDescribe(probed)) return; // superseded
+    typesafeProbe.value = `${(cause as { status?: number }).status === 409 ? "System One did not run the test for" : "System One connection failed for"} ${probed} — ${cause instanceof Error ? cause.message : "unreachable"}`;
+  } finally {
+    typesafeTesting.value = false;
+  }
+  // The stamp lands WITH the text, before the reload: the wipe clears the pair together.
+  typesafeProbeRepo = probed; // stamped with the TEXT, never with the pending probe
+  await loadTypesafe(false); // the probe answers about the STORED block, so an edit survives it
+}
+
+async function saveTypesafe(): Promise<void> {
+  validateThresholds();
+  if (thresholdError.value) return;
+  const view = typesafeView.value; // unreachable from the UI; a zeros-only block would refill defaults
+  if (!view) return;
+  saving.value = true;
+  try {
+    await api.settings.set({
+      expectRepo: view.repo,
+      typesafe: {
+        ...settingsForm.typesafe,
+        callSites: { ...settingsForm.typesafe.callSites },
+      },
+    });
+    typesafeProbe.value = "";
+    typesafeProbeRepo = "";
+    typesafeError.value = "";
+    const applied = await loadTypesafe(); // this section's OWN surface, not the shared `message` up top
+    typesafeProbe.value = applied
+      ? "System One settings saved."
+      : `System One settings saved, but these rows could not refresh — ${typesafeError.value}`;
+    typesafeProbeRepo = applied ? typesafeRepo.value : "";
+  } catch (cause) {
+    typesafeError.value = cause instanceof Error ? cause.message : "System One save failed";
+    typesafeProbe.value = "";
+    typesafeProbeRepo = "";
+  } finally {
+    saving.value = false;
+  }
+}
 
 function applySettings(value: VibeSettings): void {
   settingsForm.memory = Boolean(value.memory);
@@ -95,26 +246,42 @@ async function load(): Promise<void> {
   try {
     const value = await api.settings.get();
     applySettings(value);
-    await detect();
-    await Promise.all([loadSkills(), loadCapabilities()]);
+    const reloaded = await detect(); // true when `detect()` already reloaded: skip the second GET
+    await Promise.all([loadSkills(), loadCapabilities(), ...(reloaded ? [] : [loadTypesafe()])]);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Failed to load control center";
+    if (typesafeStatus.value !== "loading") return; // only a still-loading section is stuck
+    typesafeStatus.value = "error"; // else the spinner + disabled controls outlive the failure
+    typesafeError.value = error.value; // the shared cause, shown in this section too
   }
 }
 
-async function detect(): Promise<void> {
-  if (detecting.value) return;
+async function detect(): Promise<boolean> {
+  // A caller arriving mid-flight JOINS the run: `false` let `load()` read the pre-detect repo.
+  detectInFlight ??= detectOnce().finally(() => {
+    detectInFlight = null;
+  });
+  return detectInFlight;
+}
+
+async function detectOnce(): Promise<boolean> {
   detecting.value = true;
+  let reloadNeeded = false;
   try {
     detection.value = await api.detect(repoPath.value);
     repoPath.value = detection.value.repo;
     detected.value = true;
+    reloadNeeded =
+      typesafeNeedsReload(typesafeRepo.value, repoPath.value) || typesafeStatus.value === "error";
   } catch (cause) {
     detected.value = false;
     error.value = cause instanceof Error ? cause.message : "Repository detection failed";
   } finally {
     detecting.value = false;
   }
+  const reload = reloadNeeded || typesafeStatus.value === "error"; // only retry if detect threw
+  if (reload) await loadTypesafe();
+  return reload;
 }
 
 async function initialize(withAi: boolean): Promise<void> {
@@ -136,10 +303,6 @@ async function initialize(withAi: boolean): Promise<void> {
   } finally {
     busy.value = false;
   }
-}
-
-async function saveEnabledEngines(): Promise<void> {
-  await saveSettings();
 }
 
 async function saveSettings(): Promise<void> {
@@ -184,3 +347,48 @@ const nextControl = (open: boolean) => {
 watch(() => props.open, nextControl);
 onMounted(() => nextControl(props.open));
 </script>
+
+<style scoped>
+/* WCAG 2.1 §2.4.7: visible focus ring; status colour is never the only signal. */
+.home-control-section :focus-visible {
+  outline: 2px solid var(--home-amber);
+  outline-offset: 2px;
+}
+.home-control-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+  font-size: 0.75rem;
+  color: var(--home-muted);
+}
+.home-control-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.home-control-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+  font-size: 0.8125rem;
+  color: var(--home-ink);
+}
+.home-control-field input {
+  width: 6rem;
+  background: transparent;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  color: var(--home-ink);
+}
+.home-control-warning {
+  color: var(--home-amber);
+  font-size: 0.8125rem;
+}
+dd[data-state="open"],
+dd[data-state="half-open"] {
+  color: var(--home-amber);
+}
+</style>

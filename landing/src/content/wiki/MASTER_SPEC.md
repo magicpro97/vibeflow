@@ -18,6 +18,7 @@ last_updated: 2026-08-27
 - [Skill System](#skill-system)
 - [Hook System](#hook-system)
 - [Security Posture](#security-posture)
+- [Optional System One Judge](#optional-system-one-judge)
 - [Engine Readiness](#engine-readiness)
 - [Pre-Flight Quota Gate](#pre-flight-quota-gate)
 - [Naming Decision](#naming-decision)
@@ -190,6 +191,22 @@ No auto-push
 No auto-merge
 No auto-deploy
 ```
+
+## Optional System One judge
+
+TypeSafe System One (Jev) is an **optional, off-by-default, fail-open** decision judge over
+**four call sites**: `reviewer`, `goalCoverage`, `risk`, and `planner`. It never replaces an
+authority: a judge answer may only move an outcome toward **more** work or more scrutiny.
+A passing `reviewer` or `goalCoverage` answer still reaches the engine reviewer or the
+`VIBEFLOW_AI` bridge, `risk` is raise-only against the deterministic tier, and `planner`
+chooses only among ready engines and leaves `unit.engine` undefined on a failed answer.
+
+It is the only code path in VibeFlow that posts repository content to a third party, and
+`state` is transmitted verbatim; the per-call-site payload table lives in
+[SECURITY_MODEL.md](./SECURITY_MODEL.md) and [TYPESAFE.md](./TYPESAFE.md). The key lives
+in `TYPESAFE_API_KEY` or an owner-only `~/.vibeflow/typesafe.env`, never in the git-tracked
+`.vibeflow/SETTINGS.json`, and the breaker is file-backed because `vf hook` is a fresh
+process per tool call.
 
 ## Engine readiness
 

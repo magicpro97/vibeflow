@@ -6,6 +6,7 @@ import { type RenderDescriptor, renderBlocks } from "./lib/plan-render.js";
 import { resolveRepoPath } from "./lib/resolve-repo-path.js";
 import { createRaceState } from "./store-race.js";
 import { createReleaseProposalState } from "./store-release.js";
+import type { VibeSettings } from "./types-settings.js";
 import type {
   DomainRootView,
   PlanComment,
@@ -14,7 +15,6 @@ import type {
   RegistryPreview,
   RegistryViewEntry,
   SafeSkill,
-  VibeSettings,
   WorkflowDashboardItem,
   WorkflowState,
 } from "./types.js";

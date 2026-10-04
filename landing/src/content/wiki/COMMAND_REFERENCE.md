@@ -18,6 +18,7 @@ last_updated: 2026-09-24
 - [Race (head-to-head)](#race-head-to-head)
 - [Work Units (Ledger)](#work-units-ledger)
 - [Settings (Config)](#settings-config)
+- [TypeSafe System One (Jev) judge](#typesafe-system-one-jev-judge)
 - [Skills (Demand-Driven)](#skills-demand-driven)
 - [Optional Tools (Code Navigation)](#optional-tools-code-navigation)
 - [Discovery (Context7, Approval-Gated)](#discovery-context7-approval-gated)
@@ -403,6 +404,41 @@ Three modes:
 
 The setting does **not** gate the `vf init` prompt (init always asks on a TTY).
 It is the switch `dispatchPrompt` and `buildPlanPrompt` honour for recall injection.
+
+## TypeSafe System One (Jev) judge
+
+Optional, **off by default**, and fail-open. See [TYPESAFE.md](./TYPESAFE.md) for the
+normative page.
+
+```bash
+vf config typesafe on                              # enable; prints the egress notice FIRST
+vf config typesafe off                             # disable all four call sites
+vf config typesafe status                          # state, thresholds, call sites, last call, both file paths
+vf config typesafe model <id>                      # default jev-latest
+vf config typesafe threshold run <0..1>            # runAtConfidence, default 0.7
+vf config typesafe threshold accept <0..1>         # acceptAtConfidence, default 0.85
+vf config typesafe call-site <reviewer|risk|goalCoverage|planner> <on|off>
+vf config typesafe key                             # reads the key from hidden stdin
+vf config typesafe reset                           # rewrite the breaker record to idle
+vf config typesafe test                            # one live probe with fixed literal content
+```
+
+The four call sites are `reviewer`, `risk`, `goalCoverage`, and `planner`, each with its
+own toggle. The judge may only move an outcome toward **more** work: `reviewer` and
+`goalCoverage` always reach the engine reviewer / `VIBEFLOW_AI` bridge on a passing
+answer, `risk` can only raise the deterministic tier, and `planner` may only choose among
+ready engines and leaves `unit.engine` undefined on a failed answer.
+
+The key is read from `TYPESAFE_API_KEY` first, else from `~/.vibeflow/typesafe.env`, which
+is owner-only on POSIX (`0600`) and on Windows (a migrated owner-only DACL, verified by
+`hasPrivateMode`; a machine that cannot enforce it is a hard error). The key is never
+written to `.vibeflow/SETTINGS.json`. `--key` is refused: it would land in shell history
+and in `ps` output.
+
+`test` exits `0` on a healthy probe, `2` when no key resolves and when the judge is disabled,
+and `1` when the request failed. `reset` clears the breaker but is **not** uninstall; the
+documented uninstall is `vf config typesafe off` followed by
+`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe-health.goal.json ~/.vibeflow/typesafe.env`.
 
 ## Skills (demand-driven)
 

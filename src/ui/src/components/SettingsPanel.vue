@@ -199,7 +199,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api.js";
-import type { PolicyPreview, VibeSettings } from "../types.js";
+import {
+  type ManagedSettings,
+  coerceEditableDefaults,
+  withoutTypesafe,
+} from "../settings-form-helpers.js";
+import type { VibeSettings } from "../types-settings.js";
+import type { PolicyPreview } from "../types.js";
 import CuratorSettings from "./CuratorSettings.vue";
 import EnvScrubEditor from "./EnvScrubEditor.vue";
 import InfoTip from "./InfoTip.vue";
@@ -216,14 +222,14 @@ const loading = ref(true);
 const saving = ref(false);
 const saved = ref(false);
 const err = ref<string | null>(null);
-const form = ref<VibeSettings | null>(null);
+const form = ref<ManagedSettings | null>(null);
 const policyPreview = ref<PolicyPreview | null>(null);
 const dialogEl = ref<HTMLElement | null>(null);
 const showDiscardConfirm = ref(false);
 /** #689: curator schedule validity — blocks Save when invalid. */
 const curatorValid = ref(true);
 /** Deep clone of original for dirty-checking — avoids mutating shared API cache */
-const original = ref<VibeSettings | null>(null);
+const original = ref<ManagedSettings | null>(null);
 
 const isDirty = computed(() => {
   if (!form.value || !original.value) return false;
@@ -256,31 +262,12 @@ onMounted(async () => {
   dialogEl.value?.focus();
   try {
     const settings = await api.settings.get();
-    // Deep clone so edits don't mutate the API-cached object
-    form.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
-    original.value = JSON.parse(JSON.stringify(settings)) as VibeSettings;
-    // Coerce envPolicy → {} on BOTH so EnvScrubEditor's v-model binds an object
-    // AND the dirty-check baseline matches (else isDirty is true on open).
-    if (form.value && !form.value.envPolicy) form.value.envPolicy = {};
-    if (original.value && !original.value.envPolicy) original.value.envPolicy = {};
-    // #689: coerce missing curator → defaults on BOTH (same rationale as envPolicy)
-    // so the CuratorSettings editor binds and the dirty baseline matches.
-    if (form.value && !form.value.curator) {
-      form.value.curator = {
-        enabled: false,
-        observeMode: true,
-        schedule: "0 9 * * 1",
-        severityThreshold: "medium",
-      };
-    }
-    if (original.value && !original.value.curator) {
-      original.value.curator = {
-        enabled: false,
-        observeMode: true,
-        schedule: "0 9 * * 1",
-        severityThreshold: "medium",
-      };
-    }
+    // `withoutTypesafe` on BOTH sides (see the helper): the panel has no System One UI, and the
+    // save response CARRIES the block while `form` does not - so re-seeding `original` from it made
+    // `isDirty` permanently true. `coerceEditableDefaults` then gives each editor an object to bind
+    // on both sides, so the baseline agrees with the form until something is actually edited.
+    form.value = coerceEditableDefaults(withoutTypesafe(clone(settings)));
+    original.value = coerceEditableDefaults(withoutTypesafe(clone(settings)));
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -347,8 +334,14 @@ async function save() {
     if (JSON.stringify(originalPolicy) !== JSON.stringify(nextPolicy)) {
       policyPreview.value = await api.settings.previewPolicy(nextPolicy);
     } else {
-      const savedSettings = await api.settings.set(form.value);
-      original.value = JSON.parse(JSON.stringify(savedSettings)) as VibeSettings;
+      // The form never carries `typesafe` (dropped at load); the api union requires `expectRepo`
+      // whenever a caller DOES send the block, so this projection is the only shape this call
+      // site can take. Residual gap, accepted (round-73 ui SB): the sibling payload brings no
+      // `expectRepo`, so a save after another client moved the active repo lands in that repo -
+      // pre-existing for every non-typesafe field; the write guard stays typesafe-only here.
+      const savedSettings = await api.settings.set(withoutTypesafe(form.value));
+      // Re-seeded through the SAME projection: the response carries `typesafe`, the form does not.
+      original.value = coerceEditableDefaults(withoutTypesafe(clone(savedSettings)));
       saved.value = true;
       setTimeout(() => emit("close"), 1500);
     }
@@ -360,7 +353,7 @@ async function save() {
 }
 
 /** Extract just the policy fields for #692 preview routing / dirty baseline. */
-function pickPolicy(s: VibeSettings | null): Partial<Pick<VibeSettings, "envPolicy" | "hooks">> {
+function pickPolicy(s: ManagedSettings | null): Partial<Pick<VibeSettings, "envPolicy" | "hooks">> {
   if (!s) return {};
   return {
     ...(s.envPolicy ? { envPolicy: s.envPolicy } : {}),
@@ -370,19 +363,22 @@ function pickPolicy(s: VibeSettings | null): Partial<Pick<VibeSettings, "envPoli
 
 /** #692: apply a confirmed preview; close on success. */
 async function applyPolicy(confirmation: string) {
-  if (!policyPreview.value) return;
+  const current = form.value;
+  if (!policyPreview.value || !current) return;
   saving.value = true;
   try {
     err.value = null;
     // #692: apply sends non-policy settings as the payload so policy + regular
-    // edits land in ONE server write — no separate /api/settings POST.
-    const { envPolicy: _ep, hooks: _hk, ...nonPolicy } = form.value as VibeSettings;
+    // edits land in ONE server write — no separate /api/settings POST. No `as VibeSettings`
+    // re-assertion: `current` is the projection the load path dropped `typesafe` from, and the
+    // destructure only needs these two.
+    const { envPolicy: _ep, hooks: _hk, ...nonPolicy } = current;
     const savedSettings = await api.settings.applyPolicy(
       policyPreview.value.id,
       policyPreview.value.relaxation ? confirmation : "",
       { ...nonPolicy },
     );
-    original.value = clone(savedSettings);
+    original.value = coerceEditableDefaults(withoutTypesafe(clone(savedSettings)));
     saved.value = true;
     policyPreview.value = null;
     setTimeout(() => emit("close"), 500);

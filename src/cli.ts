@@ -300,7 +300,7 @@ async function main(argv: string[]): Promise<number> {
     case "status":
       return status(positionals[0], positionals.slice(1), flags);
     case "config":
-      return config(positionals[0], positionals.slice(1), cwd(), flags);
+      return await config(positionals[0], positionals.slice(1), cwd(), flags);
     case "skills":
       return await skills(rest[0], rest.slice(1));
     case "superpowers":

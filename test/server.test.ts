@@ -3097,3 +3097,26 @@ test("GET /api/skills omits registry when no lock file", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("GET /api/typesafe reports the key SOURCE, never the key", async () => {
+  const { server, url } = (await startServer()) as {
+    server: { stop: () => void };
+    url: string;
+  };
+  try {
+    const fetchJson = async (path: string): Promise<Record<string, unknown>> => {
+      const res = await fetch(`${url}${path}`);
+      expect(res.status).toBe(200);
+      return (await res.json()) as Record<string, unknown>;
+    };
+    const body = await fetchJson("/api/typesafe");
+    expect(body.keySource).toMatch(/^(env|file|none)$/);
+    expect(JSON.stringify(body)).not.toContain("sk-");
+    // `||`, not `??`: when no key is present we assert the body never echoes the VARIABLE NAME, but
+    // an env var set to the empty string would make `""` the banned literal, and every string
+    // contains `""` — the assertion then fails on any run where something exported an empty value.
+    expect(JSON.stringify(body)).not.toContain(process.env.TYPESAFE_API_KEY || "TYPESAFE_API_KEY");
+  } finally {
+    server.stop();
+  }
+});

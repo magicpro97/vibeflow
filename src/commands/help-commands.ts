@@ -211,7 +211,7 @@ ${c.bold("Options:")}
   --timeline <unit>   dump a unit's append-only status-transition ledger
   --json              emit the raw marker array (machine-readable)`,
 
-  config: () => `${c.bold("vf config")} ${c.dim("<memory|env-policy> ...")}
+  config: () => `${c.bold("vf config")} ${c.dim("<memory|env-policy|typesafe> ...")}
 Read or toggle per-repo settings in .vibeflow/SETTINGS.json.
 
 ${c.bold("Subcommands:")}
@@ -224,6 +224,17 @@ ${c.bold("Subcommands:")}
   env-policy deny <g>  add a glob to drop from the spawned engine env (e.g. FOO_*)
   env-policy allow <g> add a glob to an allowlist (switches to strict pass-only mode)
   env-policy reset     clear the configured policy (back to conservative default)
+  typesafe status      print the judge state and what it sends to api.typesafe.ai (default)
+  typesafe on|off      enable/disable the optional judge (on prints the egress notice first)
+  typesafe model <id>  set the model alias (default jev-latest)
+  typesafe threshold run|accept <0..1>
+                       set the run / accept confidence thresholds
+  typesafe call-site reviewer|risk|goalCoverage|planner on|off
+                       enable/disable the judge for ONE call site: this is how you stop a
+                       single payload (e.g. call-site risk off keeps shell commands local)
+  typesafe key         store the TypeSafe API key (reads stdin; ~/.vibeflow/typesafe.env, 0600)
+  typesafe reset       clear the circuit breaker (recovers an open breaker now)
+  typesafe test        send one live request and report status + latency (also clears the breaker)
 
 ${c.dim("memory picks the backend; env-policy (#556) scrubs host secrets from the env handed to spawned agent CLIs.")}
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import {
   chmodSync,
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import { aiGenerate } from "../src/adapters/context-builders.js";
 import { coord } from "../src/commands/coord.js";
 import { runLLMReview } from "../src/commands/dispatch-reviewer-llm.js";
+import { makeReviewer } from "../src/commands/dispatch-reviewer.js";
 import { run } from "../src/commands/run.js";
 import { BRIEF_PATH, BRIEF_SECTIONS } from "../src/commands/state.js";
 import { writeState } from "../src/core.js";
@@ -682,5 +684,63 @@ describe("final private prompt-file failure coverage", () => {
       }),
     ).toThrow("Copilot conversation prompt pointer exceeds its byte bound");
     unlink.mockRestore();
+  });
+});
+
+// Task 4: the reviewer call site forwards the repo's `typesafe` block into `runLLMReview`.
+// A repo that CONFIGURED the block must not change the review verdict, and a per-call-site
+// toggle in that block must be honoured (no judge call, no per-user health file).
+describe("makeReviewer — System One settings forward", () => {
+  const reviewOutcome = {
+    status: "verifying" as const,
+    confidence: 1,
+    evidence: ["e"],
+    gates: { build: "pass", lint: "pass", test: "pass", review: "pending" },
+  };
+
+  test("a repo with a typesafe block but `reviewer` off reaches the engine and no judge", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-final-reviewer-typesafe-"));
+    try {
+      // A REAL repo with two commits: the seam's LLM diff read (`git diff HEAD~1 HEAD`) must
+      // SUCCEED here. A diff-read failure is itself fail-open (skip judge AND engine), so a
+      // bare non-repo dir would take the skip path and stop exercising the settings-forward
+      // seam this test pins (`reviewer:false` must silence the judge without silencing the
+      // engine review).
+      execFileSync("git", ["init", "-q"], { cwd: dir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+      execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
+      writeFileSync(join(dir, "a.txt"), "one\n");
+      execFileSync("git", ["add", "a.txt"], { cwd: dir });
+      execFileSync("git", ["commit", "-qm", "one"], { cwd: dir });
+      writeFileSync(join(dir, "a.txt"), "two\n");
+      execFileSync("git", ["add", "a.txt"], { cwd: dir });
+      execFileSync("git", ["commit", "-qm", "two"], { cwd: dir });
+      mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+      writeFileSync(
+        join(dir, ".vibeflow", "SETTINGS.json"),
+        JSON.stringify({
+          typesafe: {
+            enabled: true,
+            callSites: { reviewer: false, risk: true, goalCoverage: true, planner: true },
+          },
+        }),
+      );
+      let engineCalls = 0;
+      const reviewer = makeReviewer("cli", 0.85, {
+        cwd: dir,
+        goal: "g",
+        diffReader: () => "",
+        llmReviewFn: async () => {
+          engineCalls += 1;
+          return "COVERED";
+        },
+      });
+      const v = await reviewer({ name: "u", scope: [] } as never, reviewOutcome as never);
+      // The engine ran and decided; the configured-but-toggled-off judge decided nothing.
+      expect(engineCalls).toBe(1);
+      expect(v.pass).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -20,6 +20,7 @@ last_updated: 2026-09-22
 - [Source Modules](#source-modules)
 - [Core Data Flow](#core-data-flow)
 - [Canonical Context Principle](#canonical-context-principle)
+- [Optional System One Judge](#optional-system-one-judge)
 
 ## Overview
 
@@ -378,7 +379,39 @@ src/orchestrator/conversation/project-fts.ts               # bun:sqlite FTS5 ret
 src/skills/project-classifier-runtime.ts # tier 3/4 composition (index + AI seam)
 src/server/conversation-project-route.ts # registry read, engine override, classify, move
 src/ui/src/project-rail-group.ts         # pure, browser-safe folder grouping for the rail
+src/typesafe-contract.ts        # frozen call-site / policy vocabularies (runtime-free)
+src/typesafe-settings.ts        # optional `typesafe` block, key resolution, ~/.vibeflow/typesafe.env
+src/typesafe-health.ts          # file-backed 5-state breaker + withTypesafeGuard
+src/typesafe.ts                 # System One HTTP client + judgeAssessment / judgeRisk / judgeEngineKey
 ```
+
+## Optional System One judge
+
+An optional decision judge, off by default, consumed by four call sites behind three judge
+seams (`judgeAssessment` is shared by `reviewer` and `goalCoverage`; one fail-open guard
+protects both). The
+dependency runs one way: `src/typesafe.ts` imports `typesafe-settings.ts` and
+`typesafe-health.ts`, never the reverse, so the modules a disabled run does load stay free
+of the HTTP client.
+
+```text
+settings.typesafe.enabled && callSites.<site>   # evaluated BEFORE any seam is entered
+  └─ dynamic import("../typesafe.js")           # the only socket; resolved before the guard, inside the gate
+       └─ withTypesafeGuard()                   # breaker check, budget, audit; always returns null on failure
+            └─ systemOne()                      # one AbortSignal.timeout, retry only on network/server
+                 └─ parseSystemOneResponse()    # typed validate; a bad body is null, never a partial verdict
+```
+
+| Seam | Call site | Authority when the judge passes |
+| --- | --- | --- |
+| `judgeAssessment` | `reviewer` (fast path), `goalCoverage` (`vf verify`) | the engine reviewer / the `VIBEFLOW_AI` bridge still runs |
+| `judgeRisk` | `risk` (pre-tool hook) | raise-only merge against the deterministic tier |
+| `judgeEngineKey` | `planner` | ready-engine set only; a failed answer leaves `unit.engine` undefined |
+
+The breaker is file-backed at `~/.vibeflow/typesafe-health.json` because `vf hook` is a
+fresh process per tool call. Its five states are `off`, `unconfigured`, `idle`, `open`, and
+`half-open`; `auth` and `budget` failures trip immediately, an `abort` never trips, and the
+cooldown doubles per consecutive trip up to a cap.
 
 ## Core data flow
 

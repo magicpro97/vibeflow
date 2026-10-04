@@ -176,6 +176,9 @@ export function makeDispatcher(
   >,
 ): UnitDispatcher {
   return async (u, signal) => {
+    // Task 7: a per-unit routing decision (System One planner) wins over the run-global
+    // engine for THIS unit only. Absent ⇒ the run-global engine, byte-for-byte as before.
+    const unitEngine = u.engine ?? engine;
     const unitRel = `${CTX_DIR}/workunits/${u.name}`;
     const unitDir = join(base, unitRel);
     // Quota latch: once an upstream HIGH-confidence limit is seen, skip not-yet-started units
@@ -210,7 +213,7 @@ export function makeDispatcher(
     const prompt = applyGuidance(
       u.name,
       buildEnginePrompt(
-        engine,
+        unitEngine,
         ctx,
         [
           {
@@ -268,20 +271,20 @@ export function makeDispatcher(
       out("engine-stdout", text, {
         level: "info",
         unit: u.name,
-        meta: { engine, unit: u.name },
+        meta: { engine: unitEngine, unit: u.name },
       });
     };
     const emitStderr = (text: string) => {
       out("engine-stderr", text, {
         level: "warn",
         unit: u.name,
-        meta: { engine, unit: u.name },
+        meta: { engine: unitEngine, unit: u.name },
       });
     };
-    const resumeSessionId = resolveResumeId(u.name, resume, engine);
+    const resumeSessionId = resolveResumeId(u.name, resume, unitEngine);
     try {
       const result = await runDispatchWithSessionRuntime({
-        engine,
+        engine: unitEngine,
         prompt,
         mode,
         unit: u.name,
@@ -326,7 +329,7 @@ export function makeDispatcher(
           ),
         );
         const research = makeResearcher(
-          engine,
+          unitEngine,
           ctx,
           mode,
           processSpawner,

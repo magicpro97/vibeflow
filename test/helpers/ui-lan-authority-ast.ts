@@ -13,14 +13,30 @@ export interface SourceFixture {
 }
 const QUERY_METHODS = Object.freeze(["append", "delete", "get", "getAll", "has", "set"] as const);
 const MAX_STATIC_VALUES = 64;
-export function parseUiFixture({ path, source }: SourceFixture): ts.SourceFile {
+/**
+ * Parsed fixtures, keyed by fixture IDENTITY rather than path so that two fixtures carrying the
+ * same path with different source (the mutant cases) never share a parse.
+ *
+ * Without this, every `identifierConsumers` call re-parses the entire production tree, and the
+ * consumer map asks for one identifier at a time: 8 identifiers across ~1380 `src/` files meant
+ * ~11,000 `ts.createSourceFile` calls in a single test, which grew linearly with the size of
+ * `src/` until it crossed the 5s test timeout. Parsing is a pure function of the fixture, so
+ * caching it changes no result.
+ */
+const PARSED_FIXTURES = new WeakMap<SourceFixture, ts.SourceFile>();
+export function parseUiFixture(fixture: SourceFixture): ts.SourceFile {
+  const cached = PARSED_FIXTURES.get(fixture);
+  if (cached) return cached;
+  const { path, source } = fixture;
   const input = path.endsWith(".vue")
     ? [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gu)]
         .map((match) => match[1] ?? "")
         .join("\n")
     : source;
   const kind = path.endsWith(".js") || path.endsWith(".mjs") ? ts.ScriptKind.JS : ts.ScriptKind.TS;
-  return ts.createSourceFile(path, input, ts.ScriptTarget.Latest, true, kind);
+  const parsed = ts.createSourceFile(path, input, ts.ScriptTarget.Latest, true, kind);
+  PARSED_FIXTURES.set(fixture, parsed);
+  return parsed;
 }
 function product(left: ReadonlySet<string>, right: ReadonlySet<string>): Set<string> {
   const values = new Set<string>();

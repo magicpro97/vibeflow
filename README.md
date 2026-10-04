@@ -281,6 +281,7 @@ Quick links:
 - [Command Reference](./docs/COMMAND_REFERENCE.md) — every `vf` command
 - [Architecture](./docs/ARCHITECTURE.md) — how it works
 - [Security Model](./docs/SECURITY_MODEL.md) — guardrails & source protection
+- [TypeSafe System One (Jev) judge](./docs/TYPESAFE.md) — optional, off by default, fail-open
 
 ## Star History
 

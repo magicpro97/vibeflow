@@ -7,6 +7,8 @@ import {
 } from "../../core/ui-cli-contract.js";
 import { type LogEvent, decodeLogEvent } from "../../logbus/types.js";
 import { readUiPageToken } from "./browser-ui-token.js";
+import type { VibeSettings } from "./types-settings.js";
+import type { TypesafeSettingsView, TypesafeTestResult } from "./types-settings.js";
 import type {
   DashboardSelection,
   DomainImpact,
@@ -15,7 +17,6 @@ import type {
   RegistryViewEntry,
   SafeSkill,
   TimelineEntry,
-  VibeSettings,
   WorkflowDashboardItem,
   WorkflowState,
 } from "./types.js";
@@ -56,8 +57,8 @@ async function req<T>(
     } catch (_e) {
       // body unreadable — fall through to generic message
     }
-    // Prefer server's error message; fall back to a terse status-only string
-    throw new Error(detail || `Server error ${res.status}`);
+    // Prefer the server's message; carry the STATUS for status-specific callers (e.g. the probe's 409).
+    throw Object.assign(new Error(detail || `Server error ${res.status}`), { status: res.status });
   }
   try {
     return res.json() as Promise<T>;
@@ -93,11 +94,43 @@ export const api = {
       req<{ settings: VibeSettings }>("GET", "/api/settings", undefined, signal).then(
         (r) => r.settings,
       ),
-    set: (s: Partial<VibeSettings>, signal?: AbortSignal) =>
+    set: (
+      // A UNION, not two optionals. The server refuses a `typesafe` write with no `expectRepo`
+      // (400, `assertTypesafeWriteAllowed`), and saying that in the type is the only thing that
+      // stops the NEXT call site from omitting it - a test matching THIS call site cannot.
+      //
+      // `Omit` because `Partial<VibeSettings>` is shallow: intersecting it with a partial `typesafe`
+      // gives a FULL block again. The wire takes a partial one (re-coerced onto the STORED block,
+      // src/typesafe-settings.ts:333); typing it whole invited callers to echo a snapshot.
+      //
+      // Arm 2 forbids the key outright: probe-verified that `{ memory: true, typesafe: {...} }`
+      // fails `tsc --strict` (TS2322/TS2345) with `typesafe?: never`, and compiles without it.
+      s: Omit<Partial<VibeSettings>, "typesafe"> &
+        (
+          | {
+              /** The fields this caller edits; the rest are preserved from disk. */
+              typesafe: Partial<import("./types-settings.js").TypesafeSettings>;
+              /**
+               * The repository these settings were READ from. The write lands in whichever repo is
+               * active server-side, which another client can move between this panel's load and its
+               * save; the server refuses with 409 when the two disagree.
+               */
+              expectRepo: string;
+            }
+          | { typesafe?: never; expectRepo?: string }
+        ),
+      signal?: AbortSignal,
+    ) =>
       req<{ settings: VibeSettings }>("POST", "/api/settings", s, signal).then((r) => r.settings),
     previewPolicy: (s: Pick<VibeSettings, "envPolicy" | "hooks">) =>
       req<import("./types.js").PolicyPreview>("POST", "/api/settings/preview", s),
-    applyPolicy: (previewId: string, confirmationText: string, settings?: Partial<VibeSettings>) =>
+    // `Omit` here, like `set`: the server 400s a `typesafe` block on this route (the preview that
+    // authorises the request owns no such field), so the type must not admit one.
+    applyPolicy: (
+      previewId: string,
+      confirmationText: string,
+      settings?: Omit<Partial<VibeSettings>, "typesafe">,
+    ) =>
       req<{ ok: boolean }>("POST", "/api/settings/apply", {
         previewId,
         confirmationText,
@@ -106,6 +139,15 @@ export const api = {
   },
   detect: (repoPath: string) =>
     req<import("./types.js").RepoDetection>("POST", "/api/detect", { path: repoPath }),
+  // System One (Jev) judge — the key never reaches the browser: the view reports
+  // `keySource` and the probe runs server-side, so a compromised tab cannot exfiltrate it.
+  typesafe: {
+    view: () => req<TypesafeSettingsView>("GET", "/api/typesafe"),
+    // The repository the view was read from, compared server-side: the probe reads the process-global
+    // active repo, and the drawer's client-side guard cannot see another client moving it.
+    test: (expectRepo: string) =>
+      req<TypesafeTestResult>("POST", "/api/typesafe/test", { expectRepo }),
+  },
   skills: () => req<{ skills: SafeSkill[] }>("GET", "/api/skills").then((r) => r.skills),
   // #689: recent curator findings (severity-badged, sanitized).
   curator: () =>

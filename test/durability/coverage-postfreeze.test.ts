@@ -49,6 +49,7 @@ import {
   openOrCreatePrivateFileAt,
   writePrivateTemporaryAt,
 } from "../../src/durability/path.js";
+import { RUNTIME_PLATFORM } from "../../src/durability/process-identity-contract.js";
 import {
   WINDOWS_AUTHORITY_PATH_KIND,
   windowsVerifyPathAcl,
@@ -721,7 +722,16 @@ test("native runtime initialization exercises Node, unsupported, and Linux loade
   } finally {
     Object.defineProperty(process.versions, "bun", bunDescriptor);
     Object.defineProperty(process, "platform", platformDescriptor);
-    nativeRuntime.loadBunBindings();
+    // Re-initialise for the REAL host. The calls above bound the module-wide errno table and reader
+    // to whichever platform ran last, and the Windows branch replaces that table with Win32 errno
+    // numbers. Restoring `process.platform` does not touch them, so a host whose EAGAIN differs from
+    // the Win32 value (darwin: 35 vs 11) would classify every later lock failure as an unrunnable
+    // syscall instead of a busy lock.
+    nativeRuntime.initializeNativeRuntime({
+      disabled: process.env.VF_TEST_DISABLE_NATIVE_DURABILITY === "1",
+      platform: realHostPlatform,
+      isBun: true,
+    });
   }
 });
 
@@ -792,18 +802,34 @@ test("open directory creation preserves fchmod failure and removes the rejected 
 });
 
 test("open directory creation on win32 refuses a swapped leaf and leaves the substitute alone", () => {
-  const root = sandbox("vf-native-leaf-swap-");
+  // realpath FIRST, because of an interaction with the `process.platform` override below. On darwin
+  // `canonicalDurabilityPath` rewrites /var -> /private/var, and that rewrite is gated on the REAL
+  // platform. `openPrivateDirectory` runs before the override, so it canonicalises this root to
+  // /private/var; the target built from an un-canonicalised root would be canonicalised AFTER the
+  // override, which returns early and leaves it as /var. `openPinnedDescendant` would then compute a
+  // relative() that escapes and refuse with a bogus `lock_lost` (`owning lock does not cover target
+  // directory`) before ever reaching the fail-closed branch this test exists to drive. Making the
+  // sandbox path already-canonical removes the asymmetry: the rewrite has nothing left to do.
+  const root = fs.realpathSync(sandbox("vf-native-leaf-swap-"));
   ensurePrivateDirectory(root);
   const base = openPrivateDirectory(root, false);
   const leaf = join(root, "leaf");
   const elsewhere = join(root, "elsewhere");
   fs.mkdirSync(elsewhere);
+  // The override IS deliberate: the fail-closed branch below is gated on `process.platform ===
+  // WINDOWS` (src/durability/native.ts:149), so without it those seven lines are unreachable on
+  // POSIX and the file can never reach its per-file coverage floor. `repairWindowsLeafAcl` catches
+  // and returns false on a host with no Win32 security APIs, which is exactly the "repair could not
+  // be performed" condition the branch is written for.
   const platformDescriptor = Object.getOwnPropertyDescriptor(
     process,
     "platform",
   ) as PropertyDescriptor;
-  const onWindows = platformDescriptor.value === "win32";
-  Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+  const onWindows = platformDescriptor.value === RUNTIME_PLATFORM.WINDOWS;
+  Object.defineProperty(process, "platform", {
+    ...platformDescriptor,
+    value: RUNTIME_PLATFORM.WINDOWS,
+  });
   try {
     if (onWindows) {
       // A writer that can replace a leaf hands the walk a junction to a directory of its choosing.

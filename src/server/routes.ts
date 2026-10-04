@@ -9,7 +9,6 @@ import {
   resolveRepo,
   skillForFile,
 } from "../commands.js";
-import { collectVerifyReportAsync, defaultGoalEvalFn } from "../commands/tools-detect.js";
 import { type Attachment, CTX_DIR, readState, statePath, writeState } from "../core.js";
 import { AGENT_ENGINE } from "../core/agent-contract.js";
 import { HOOK_DECISION } from "../core/hook-contract.js";
@@ -18,6 +17,7 @@ import { WORK_UNIT_STATUS } from "../core/workflow-contract.js";
 import { lookupDocsHttp, searchSkillsHttp } from "../discovery/context7.js";
 import { writeGuidance } from "../dispatch/guidance.js";
 import { type ProjectEntry, deleteRegistry, readRegistry, upsertRegistry } from "../registry.js";
+import { TYPESAFE_BUDGET_BUCKET, resetCallBudget } from "../typesafe-health.js";
 import {
   type ConversationAskCompatibilityHttpAuthorityV1,
   handleConversationAskCompatibilityRoute,
@@ -25,12 +25,10 @@ import {
 import { handleCuratorSetupRoute } from "./curator-setup-route.js";
 import {
   ATTACH_CAP,
-  applySettings,
   attachDir,
   replayFromLog,
   runPreflight,
   safeAttachName,
-  settingsView,
   syncAttachments,
 } from "./handlers.js";
 import { listPending, resolvePending } from "./pending-hooks.js";
@@ -41,6 +39,9 @@ import {
   handlePlanReviewPost,
 } from "./plan-review.js";
 import { handleRegistryPreview } from "./registry-route.js";
+import { handleSettingsRoute } from "./routes-settings.js";
+import { handleTypesafeTestRoute } from "./routes-typesafe.js";
+import { handleVerifyRoute } from "./routes-verify.js";
 import { handleSkillAcquisitionDecision } from "./skill-acquisition-route.js";
 
 export interface RouteCtx {
@@ -204,7 +205,6 @@ export async function handleMutationRoute(
     }
     return Response.json({ ok: true, ...result });
   }
-
   if (path === "/api/orchestrate") {
     if (!readState(ctx.getActiveRepo())) {
       return Response.json({ error: "no workflow state — run init first" }, { status: 400 });
@@ -215,6 +215,8 @@ export async function handleMutationRoute(
     const yes = !dry; // yes:true enables cli mode in resolveMode()
     // Stamp evidence so legacy done units satisfy orchestrate's completeness contract.
     if (!dry) {
+      // Only the run request restarts the budget; a dry preview dispatches nothing to refund.
+      resetCallBudget(TYPESAFE_BUDGET_BUCKET.ENFORCEMENT);
       const preState = readState(ctx.getActiveRepo());
       if (preState) {
         const ts = new Date().toISOString();
@@ -294,23 +296,21 @@ export async function handleMutationRoute(
     return Response.json(await runPreflight(payload));
   }
 
-  if (path === "/api/settings" && ("envPolicy" in payload || "hooks" in payload))
-    return Response.json({ error: "policy changes require preview approval" }, { status: 400 });
-  // biome-ignore format: keep compact so `}` is not a standalone line (bun:coverage gap)
-  if (path === "/api/settings") { applySettings(ctx.getActiveRepo(), payload); return Response.json({ ok: true, ...settingsView(ctx.getActiveRepo()) }); }
+  if (path === "/api/settings") return handleSettingsRoute(ctx.getActiveRepo(), payload);
 
   // POST /api/verify — async so the server keeps serving state/SSE while gates run.
   if (path === "/api/verify") {
-    const goalEval = url.searchParams.get("goal-eval") === "1";
-    const currentState = readState(ctx.getActiveRepo());
-    const report = await collectVerifyReportAsync(ctx.getActiveRepo(), {
-      coverage: true,
-      ...(goalEval && currentState?.goal
-        ? { goal: currentState.goal, goalEvalFn: defaultGoalEvalFn }
-        : {}),
+    return await handleVerifyRoute(ctx.getActiveRepo(), url);
+  }
+
+  // System One "Test connection" — the probe runs server-side so the browser
+  // never holds the key. Resolved through this dispatcher (not only the module's
+  // own entry point) so the route itself is covered.
+  if (path === "/api/typesafe/test") {
+    return await handleTypesafeTestRoute({
+      repo: ctx.getActiveRepo(),
+      expectRepo: typeof payload.expectRepo === "string" ? payload.expectRepo : "",
     });
-    const gates = report.toolchain.map((g) => ({ label: g.label, pass: g.pass }));
-    return Response.json({ ok: report.ok, gates, policy: report.policy });
   }
   if (path === UI_HOOK_ROUTE.APPROVE) {
     const id = typeof payload.id === "string" ? payload.id : "";

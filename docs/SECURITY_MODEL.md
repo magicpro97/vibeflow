@@ -22,6 +22,7 @@ last_updated: 2026-09-22
 - [npm Package Risk Model](#npm-package-risk-model)
 - [Hook Enforcement](#hook-enforcement)
 - [Secrets Handling](#secrets-handling)
+- [Third-Party Egress: the TypeSafe System One Judge](#third-party-egress-the-typesafe-system-one-judge)
 - [Local Web Server](#local-web-server)
 - [Private One-Shot File Context](#private-one-shot-file-context)
 - [Owned Process Identity and Containment](#owned-process-identity-and-containment)
@@ -356,6 +357,64 @@ Rules:
 - do not store credentials in SKILL.md
 - do not send secrets to external docs/skill services
 ```
+
+## Third-Party Egress: the TypeSafe System One Judge
+
+This is the only code path in VibeFlow that posts repository content to a third party.
+It is **optional, off by default, and fail-open**: with no key, a `401`, a `429`, a
+timeout, or a malformed body, every gate behaves exactly as it did before the feature
+existed. The normative page is [TYPESAFE.md](./TYPESAFE.md).
+
+Requests go to `TYPESAFE_ENDPOINT` = `https://api.typesafe.ai/v1/systemone`. The `state`
+string is sent **verbatim**: not redacted, not truncated, not scrubbed.
+
+| Call site | `state` sent to `api.typesafe.ai` | Also on the wire | Why it is sensitive |
+| --- | --- | --- | --- |
+| `reviewer` | the **unified diff of the unit's changes**, verbatim | the **goal text**, `model` | proprietary source, including any secret, token, or customer data a diff happens to add |
+| `goalCoverage` | the **same unified diff** (or the literal `(no diff available)`) | the **goal text**, `model` | same as `reviewer` |
+| `risk` | the **raw shell command**, exactly as the agent proposed it | the static `risk_tier` criteria, `model` | a command line routinely carries an inline secret (`AWS_SECRET...=`, `curl -H "Authorization: ..."`, `psql "postgres://user:pw@host"`) |
+| `planner` | `UNIT: <unit.name>` and `SPEC: <unit.spec>`, the **full work-unit spec text** | the ready engine names, `model` | the spec describes unshipped work and may quote internal systems |
+| `vf config typesafe test` | a **fixed literal probe string** and a **fixed literal probe goal** | `model` | no repository content; safe to run before enabling anything |
+
+What is **never** sent: the API key travels as an `Authorization` header, never as
+payload; `.vibeflow/SETTINGS.json`, file paths outside the diff, environment variables,
+and git history are never read into `state`.
+
+**Disclosure duty.** The enumeration above is surfaced to the user at three points:
+`vf config typesafe on` prints it before it writes the setting, `vf config typesafe
+status` and the Control Center section print it on demand, and this page is the shipped
+record.
+
+**The control is structural, not prompt text.** Hostile text is placed in `state` and
+never in the question instructions, so it is never structurally an instruction. That is
+mitigation, not a control: a judge that is merely wrong, or steered by prose the
+placement failed to neutralise, still returns a well-formed, high-confidence answer. The
+real control is escalate-only. A judge answer may move an outcome only toward more work
+or more scrutiny; a hostile command that talks the judge into answering `LOW` changes
+nothing, because `LOW` is never greater than the deterministic tier, and a hostile diff
+that talks the judge into `pass: true` still reaches the engine reviewer.
+
+**Key storage, on both platforms.** The key resolves from `TYPESAFE_API_KEY` first, else
+from `~/.vibeflow/typesafe.env`, and is **never** written to the git-tracked
+`.vibeflow/SETTINGS.json`. The file is owner-only on POSIX by mode `0600`, and on Windows,
+where mode bits are meaningless, by a verified and migrated **owner-only DACL**:
+`vf config typesafe key` writes through `ensurePrivateDirectory` and re-verifies with
+`hasPrivateMode` after every write. A machine where the file cannot be made owner-only
+is a **hard error**, not a degradation, because a printed warning would be a
+trust-boundary check that passes while the key sits readable by other accounts.
+
+**Four artifacts, all outside the repository.** `~/.vibeflow/typesafe.env` holds the key;
+`~/.vibeflow/typesafe-health.json` holds the file-backed circuit breaker plus a
+`last_call` audit record and never the key, never payload text;
+`~/.vibeflow/typesafe-health.goal.json` holds the GOAL bucket's record, in its own file so a
+looped judged route (`POST /api/verify?goal-eval=1`) can never open the breaker the hook and
+review seams veto behind; and
+`~/.vibeflow/typesafe-health.probe.json` holds the OPERATOR probe's own record, kept in a
+separate file so a passing `vf config typesafe test` cannot clear the enforcement breaker. A
+**disabled** run creates none of them and not the directory. Uninstall is
+`vf config typesafe off` followed by
+`rm -f ~/.vibeflow/typesafe-health.json ~/.vibeflow/typesafe-health.probe.json ~/.vibeflow/typesafe-health.goal.json ~/.vibeflow/typesafe.env`
+(`vf config typesafe status` prints that command with the resolved paths).
 
 ## Spawned engine env scrub
 

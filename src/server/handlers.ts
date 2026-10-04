@@ -21,6 +21,7 @@ import {
 import { type ProjectProfile, scanRepo } from "../scanner.js";
 import { type VibeSettings, readSettings, writeSettings } from "../settings.js";
 import { TOOLS, TOOL_ORDER } from "../tools/index.js";
+import { type TypesafeSettingsView, typesafeSettingsView } from "./routes-typesafe.js";
 
 export const ATTACH_CAP = 50 * 1024 * 1024;
 
@@ -169,8 +170,14 @@ export function settingsView(
 ): {
   settings: VibeSettings;
   tools: ToolView[];
+  /** Redacted by construction: the key's SOURCE, never the key. */
+  typesafe: TypesafeSettingsView;
 } {
-  return { settings: readSettings(repo), tools: toolViews(repo, inject) };
+  return {
+    settings: readSettings(repo),
+    tools: toolViews(repo, inject),
+    typesafe: typesafeSettingsView(repo),
+  };
 }
 
 export function applySettings(repo: string, payload: Record<string, unknown>): VibeSettings {

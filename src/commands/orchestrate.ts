@@ -171,7 +171,7 @@ export async function orchestrate(
   // #783: dispatch ONLY `pending` units. Blocked (sequential gating), in-flight, awaiting
   // verification and already-complete units stay out of the run and are reported as skipped
   // instead of being dispatched or silently dropped.
-  const { dispatch: units, skipped } = selectDispatchUnits(allUnits);
+  const { dispatch: pending, skipped } = selectDispatchUnits(allUnits);
   for (const group of skipped) {
     const line = `Skipping ${group.units.length} ${group.disposition} unit(s): ${group.units
       .map((u) => u.name)
@@ -183,7 +183,7 @@ export async function orchestrate(
   }
 
   // Nothing left to dispatch — exit early.
-  if (units.length === 0) {
+  if (pending.length === 0) {
     out("vf");
     out("vf", c.green("No pending work unit — nothing to dispatch."));
     // issue #90: apply the spec band threshold (per-unit riskClass) to the verdict, not 1.0.
@@ -246,6 +246,12 @@ export async function orchestrate(
     },
   };
 
+  // Task 7 routing policy lives in orchestrate-routing.ts (DYNAMIC import, issue #80 + ASYNC probe).
+  const { defaultPreflight, routeForDispatch } = await import("./orchestrate-routing.js");
+  const units = await routeForDispatch(pending, settings.typesafe, {
+    preflight: inject.preflight ?? defaultPreflight,
+  });
+
   // Scope-conflict gate: refuse to dispatch overlapping scopes in parallel — serialize them.
   const conflicts = findScopeConflicts(units);
   const requested =
@@ -306,10 +312,10 @@ export async function orchestrate(
       flags.resume === true,
       sessionRuntime,
     ),
+    // ADR-001: LLM review after the local gate; the reviewer resolves the implementer PER
+    // UNIT (Task 7), with `engine` as the run-global fallback.
     reviewer: makeReviewer(mode, thresholdFor(riskClass), {
       cwd: base,
-      // ADR-001: LLM review after local gate — only when goal available
-      // VIBEFLOW_AI bridge used same as defaultGoalEvalFn pattern
       implementer: engine,
       ...(state.goal ? { goal: state.goal } : {}),
     }),

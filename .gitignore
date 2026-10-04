@@ -4,6 +4,14 @@ dist/
 .DS_Store
 .env
 .env.*
+# The plaintext key `vf config typesafe key` writes: the user root can BE a working tree
+# (`VF_USER_VIBEFLOW_ROOT`, or a home directory under the repo), and `.env`/`.env.*` above
+# do not match this name.
+typesafe.env*
+# The health records an enabled run writes - same working-tree user root: `typesafe-health.json`,
+# `.goal.json`, `.probe.json`, and proper-lockfile `<name>.lock` siblings. Breaker state only
+# (no key material), but they must never be committed from a repo-rooted user root either.
+typesafe-health*.json*
 .e2e-workspace*
 test-results
 playwright-report
@@ -53,3 +61,6 @@ coverage/
 # Local Orca worktree tooling (per-developer, not project config)
 .worktreeinclude
 orca.yaml
+
+# Local worktrees (never commit worktree contents)
+.worktrees/

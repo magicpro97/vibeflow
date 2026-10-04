@@ -5,16 +5,22 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CTX_DIR } from "../src/core.js";
 import {
+  DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
+  type ProjectClassificationSettings,
+} from "../src/project-classification-settings.js";
+import {
   DEFAULT_FAILURE_PROTECTION,
   DEFAULT_SETTINGS,
-  DEFAULT_SKILLS_CONFIG,
   DEFAULT_TIMEOUT_SECONDS,
+  type SkillsConfig,
   priorityRank,
   readSettings,
   settingsPath,
   writeSettings,
 } from "../src/settings.js";
-import { DEFAULT_CURATOR_SETTINGS } from "../src/skills/curator-settings.js";
+import { type CuratorSettings, DEFAULT_CURATOR_SETTINGS } from "../src/skills/curator-settings.js";
+import { DEFAULT_SKILLS_CONFIG } from "../src/skills/skills-settings.js";
+import { DEFAULT_TYPESAFE_SETTINGS } from "../src/typesafe-settings.js";
 
 /** Make a throwaway repo dir and return its path. */
 function tmpRepo(): string {
@@ -502,7 +508,20 @@ describe("settings.skills (#687)", () => {
     }
   });
 
-  test("a partial skills write preserves unmentioned fields via coerce", () => {
+  test("a malformed skills block does not delete the stored one", () => {
+    const dir = tmpRepo();
+    try {
+      writeSettings(dir, { skills: { mirrorMode: "full" } as SkillsConfig }, { now: fixedNow });
+      writeSettings(dir, { skills: null } as unknown as Parameters<typeof writeSettings>[1], {
+        now: fixedNow,
+      });
+      expect(readSettings(dir).skills?.mirrorMode).toBe("full");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial project-classification write preserves unmentioned fields via coerce", () => {
     const dir = tmpRepo();
     try {
       writeSettings(
@@ -636,22 +655,149 @@ describe("settings.curator (#689)", () => {
     }
   });
 
-  test("a partial curator write preserves unmentioned fields via coerce", () => {
+  test("a partial skills write preserves unmentioned fields via coerce", () => {
     const dir = tmpRepo();
     try {
       writeSettings(
         dir,
-        { curator: { ...DEFAULT_CURATOR_SETTINGS, enabled: true } },
+        { skills: { autoResolve: false, mirrorMode: "full", targetEngines: ["claude"] } },
         { now: fixedNow },
       );
-      writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
-      const c = readSettings(dir).curator;
-      expect(c?.enabled).toBe(true);
-      expect(c?.observeMode).toBe(true);
-      expect(c?.schedule).toBe("0 9 * * 1");
-      expect(c?.severityThreshold).toBe("medium");
+      writeSettings(dir, { skills: { autoResolve: true } as SkillsConfig }, { now: fixedNow });
+      const sk = readSettings(dir).skills;
+      expect(sk?.autoResolve).toBe(true);
+      expect(sk?.mirrorMode).toBe("full");
+      expect(sk?.targetEngines).toEqual(["claude"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("a partial project-classification write preserves unmentioned fields via coerce", () => {
+    const dir = tmpRepo();
+    try {
+      const eng = DEFAULT_PROJECT_CLASSIFICATION_SETTINGS.engine;
+      writeSettings(
+        dir,
+        { projectClassification: { enabled: true, engine: { ...eng, model: "sentinel-model" } } },
+        { now: fixedNow },
+      );
+      writeSettings(
+        dir,
+        { projectClassification: { enabled: false } as ProjectClassificationSettings },
+        { now: fixedNow },
+      );
+      const pc = readSettings(dir).projectClassification;
+      expect(pc?.enabled).toBe(false);
+      expect(pc?.engine.model).toBe("sentinel-model");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a partial curator write preserves unmentioned fields via coerce", () => {
+    const dir = tmpRepo();
+    try {
+      // Write NON-default values first, then a PARTIAL curator block. The previous version wrote
+      // the full block, so the three "preserved" assertions were byte-identical to the defaults and
+      // passed with a coerce that always started from them - it could not fail on what it names.
+      writeSettings(
+        dir,
+        {
+          curator: {
+            ...DEFAULT_CURATOR_SETTINGS,
+            enabled: false,
+            observeMode: false,
+            schedule: "15 3 * * 2",
+            severityThreshold: "high",
+          },
+        },
+        { now: fixedNow },
+      );
+      // Cast because the TYPE spells a full block while the WIRE does not: `POST /api/settings`
+      // hands this shape through `coerceCuratorSettings`, which is exactly where the defect lived.
+      // Writing the full block here - what the type invites - is what made the test unfailable.
+      const partial = { curator: { enabled: true } as CuratorSettings };
+      writeSettings(dir, partial, { now: fixedNow });
+      writeSettings(dir, { tools: { codegraph: true, lsp: false } }, { now: fixedNow });
+      const c = readSettings(dir).curator;
+      expect(c?.enabled).toBe(true);
+      expect(c?.observeMode).toBe(false);
+      expect(c?.schedule).toBe("15 3 * * 2");
+      expect(c?.severityThreshold).toBe("high");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("writeSettings refuses an unnamed System One write", () => {
+  // Every settings write passes through this function, and the repo it writes is only known here.
+  // Two routes reach disk - /api/settings and /api/settings/apply - so a rule enforced in one of
+  // them is a rule the other one does not have; this is where the rule holds for both.
+  test("accepts a System One write that names the repo it is for", () => {
+    const repo = tmpRepo();
+    writeSettings(repo, {
+      expectRepo: repo,
+      typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+    });
+    expect(readSettings(repo).typesafe?.enabled).toBe(true);
+  });
+
+  test("refuses one that names nothing, and changes neither repo", () => {
+    const repo = tmpRepo();
+    expect(() =>
+      writeSettings(repo, { typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true } }),
+    ).toThrow("must name the repository");
+    expect(readSettings(repo).typesafe).toBeUndefined();
+  });
+
+  test("refuses one that names a different repo, and changes neither", () => {
+    const target = tmpRepo();
+    const named = tmpRepo();
+    expect(() =>
+      writeSettings(target, {
+        expectRepo: named,
+        typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+      }),
+    ).toThrow("must name the repository");
+    expect(readSettings(target).typesafe).toBeUndefined();
+    expect(readSettings(named).typesafe).toBeUndefined();
+  });
+
+  test("refuses a block that is not an object, instead of deleting the stored one", () => {
+    // Reached directly here because the route rejects these before the choke point, which is what
+    // makes the choke point's own check the thing that has to hold for every other caller. A
+    // malformed payload must not read as "no block": that DELETES the stored configuration.
+    for (const bad of [null, "x", []]) {
+      const target = tmpRepo();
+      writeSettings(target, {
+        expectRepo: target,
+        typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+      });
+      expect(() => writeSettings(target, { expectRepo: target, typesafe: bad as never })).toThrow(
+        "block object",
+      );
+      expect(readSettings(target).typesafe?.enabled).toBe(true);
+    }
+  });
+
+  test("omitting the block entirely leaves the stored one alone", () => {
+    // The documented way to NOT touch the block, as opposed to the malformed shapes above.
+    const target = tmpRepo();
+    writeSettings(target, {
+      expectRepo: target,
+      typesafe: { ...DEFAULT_TYPESAFE_SETTINGS, enabled: true },
+    });
+    writeSettings(target, { memory: false });
+    expect(readSettings(target).typesafe?.enabled).toBe(true);
+  });
+
+  test("blocks the settings a panel does own still write without naming a repo", () => {
+    const repo = tmpRepo();
+    writeSettings(repo, {
+      failureProtection: { ...DEFAULT_FAILURE_PROTECTION, timeoutSeconds: 7 },
+    });
+    expect(readSettings(repo).failureProtection.timeoutSeconds).toBe(7);
   });
 });
