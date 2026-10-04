@@ -162,7 +162,7 @@ async function resetBreaker(
 export async function configTypesafe(
   rest: string[],
   base: string,
-  _flags: Record<string, string | boolean> = {},
+  flags: Record<string, string | boolean> = {},
   deps: ConfigTypesafeDeps = {},
 ): Promise<number> {
   const print = deps.out ?? ((message: string) => out("vf", message));
@@ -239,8 +239,10 @@ export async function configTypesafe(
     // ANY argument is refused, not just a `--` one. The old arm only caught `--key`, so
     // `vf config typesafe key sk-live-XXXX` still put the secret in shell history and `ps` output,
     // then silently discarded it and prompted anyway - the exact leak the refusal exists to stop,
-    // reachable through the syntax the guard did not name.
-    if (rest[1] !== undefined) {
+    // reachable through the syntax the guard did not name. The CLI then splits argv with
+    // `parseFlags` FIRST (src/cli.ts), which moves `--sk-XXXX` / `--key sk-XXXX` into `flags` and
+    // hands this module an empty positional list - so the flag map is part of the same guard.
+    if (rest[1] !== undefined || Object.keys(flags).length > 0) {
       print(
         "refusing a key argument (visible in shell history and ps) — pipe the key on stdin instead",
       );

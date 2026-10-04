@@ -19,6 +19,7 @@ import {
   configTypesafe,
   promptHidden,
 } from "../src/commands/config-typesafe.js";
+import { parseFlags } from "../src/core.js";
 import { readSettings } from "../src/settings.js";
 import {
   GOAL_HEALTH_FILE,
@@ -609,6 +610,33 @@ describe("vf config typesafe — key", () => {
         "refusing a key argument (visible in shell history and ps) — pipe the key on stdin instead",
       ]);
       expect(lines.join("\n")).not.toContain(leaked);
+      expect(existsSync(typesafeEnvPath(root))).toBe(false);
+    }
+  });
+
+  test("a key argument hidden in flags is refused as well", async () => {
+    // The real CLI splits argv with `parseFlags` (src/cli.ts): `vf config typesafe key --sk-abc`
+    // arrives as an empty positional list plus a flag entry, so the guard must consult the flag
+    // map too. The old arm inspected only `rest`, let the flag spelling through, and prompted -
+    // the same leak, through the syntax `parseFlags` actually produces.
+    for (const argv of [
+      ["typesafe", "key", "--sk-abc"],
+      ["typesafe", "key", "--key", "sk-xyz"],
+    ]) {
+      const root = userRoot();
+      const { lines, out } = collector();
+      const { positionals, flags } = parseFlags(argv);
+      const code = await configTypesafe(positionals.slice(1), repo(), flags, {
+        out,
+        userRoot: root,
+        ask: async () => "",
+      });
+      expect(code).toBe(2);
+      expect(lines).toEqual([
+        "refusing a key argument (visible in shell history and ps) — pipe the key on stdin instead",
+      ]);
+      expect(lines.join("\n")).not.toContain("sk-abc");
+      expect(lines.join("\n")).not.toContain("sk-xyz");
       expect(existsSync(typesafeEnvPath(root))).toBe(false);
     }
   });
