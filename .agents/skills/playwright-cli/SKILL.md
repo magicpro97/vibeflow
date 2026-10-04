@@ -201,52 +201,6 @@ For structured output wrapping every reply as JSON, pass --json
 playwright-cli list --json
 ```
 
-## Open parameters
-```bash
-# Use specific browser when creating session
-playwright-cli open --browser=chrome
-playwright-cli open --browser=firefox
-playwright-cli open --browser=webkit
-playwright-cli open --browser=msedge
-
-# Use persistent profile (by default profile is in-memory)
-playwright-cli open --persistent
-# Use persistent profile with custom directory
-playwright-cli open --profile=/path/to/profile
-
-# Connect to browser via Playwright Extension
-playwright-cli attach --extension=chrome
-
-# Connect to a running Chrome or Edge by channel name
-playwright-cli attach --cdp=chrome
-playwright-cli attach --cdp=msedge
-
-# Connect to a running browser via CDP endpoint
-playwright-cli attach --cdp=http://localhost:9222
-
-# Start with config file
-playwright-cli open --config=my-config.json
-
-# Close the browser
-playwright-cli close
-# Detach from an attached browser (leaves the external browser running)
-playwright-cli -s=msedge detach
-# Delete user data for the default session
-playwright-cli delete-data
-```
-
-## URLs with `&` on Windows
-
-On Windows, `cmd.exe` and PowerShell treat `&` as a command separator, so URLs with multiple query parameters get truncated before `playwright-cli` runs. Escape `&` with `^&` in `cmd.exe`, or use `--%` in PowerShell:
-
-```batch
-playwright-cli goto "https://example.com/?a=1^&b=2"
-```
-
-```powershell
-playwright-cli --% goto "https://example.com/?a=1&b=2"
-```
-
 ## Snapshots
 
 After each command, playwright-cli provides a snapshot of the current browser state.
@@ -305,24 +259,6 @@ playwright-cli click "getByRole('button', { name: 'Submit' })"
 playwright-cli click "getByTestId('submit-button')"
 ```
 
-## Browser Sessions
-
-```bash
-# create new browser session named "mysession" with persistent profile
-playwright-cli -s=mysession open example.com --persistent
-# same with manually specified profile directory (use when requested explicitly)
-playwright-cli -s=mysession open example.com --profile=/path/to/profile
-playwright-cli -s=mysession click e6
-playwright-cli -s=mysession close  # stop a named browser
-playwright-cli -s=mysession delete-data  # delete user data for persistent session
-
-playwright-cli list
-# Close all browsers
-playwright-cli close-all
-# Forcefully kill all browser processes
-playwright-cli kill-all
-```
-
 ## Installation
 
 If global `playwright-cli` command is not available, try a local version via `npx playwright-cli`:
@@ -337,68 +273,23 @@ When local version is available, use `npx playwright-cli` in all commands. Other
 npm install -g @playwright/cli@latest
 ```
 
-## Example: Form submission
+## References
 
-```bash
-playwright-cli open https://example.com/form
-playwright-cli snapshot
+Deep dives and examples moved out of this file are preserved verbatim. Read a reference only when its trigger applies.
 
-playwright-cli fill e1 "user@example.com"
-playwright-cli fill e2 "password123"
-playwright-cli click e3
-playwright-cli snapshot
-playwright-cli close
-```
+- `references/session-management.md` — Read when: opening with non-default options (`--browser`, `--persistent`, `--profile`, `--config`), attaching to a running browser (`--extension`, `--cdp`), using named sessions (`-s=<name>`), or closing/killing/detaching browsers (`close`, `close-all`, `kill-all`, `detach`, `delete-data`).
+- `references/examples.md` — Read when: you want a worked end-to-end recipe — form submission, multi-tab workflow, or debugging with console/requests/tracing.
+- `references/interactive-ui-review.md` — Read when: the user asks for UI review, design feedback, or to show what they think — `playwright-cli show --annotate` collects annotated screenshots, region snapshots, and notes.
+- `references/windows-ampersand-urls.md` — Read when: on Windows a URL contains `&` and gets truncated before playwright-cli runs (cmd.exe/PowerShell).
 
-## Example: Multi-tab workflow
+Topic references:
 
-```bash
-playwright-cli open https://example.com
-playwright-cli tab-new https://example.com/other
-playwright-cli tab-list
-playwright-cli tab-select 0
-playwright-cli snapshot
-playwright-cli close
-```
-
-## Example: Debugging with DevTools
-
-```bash
-playwright-cli open https://example.com
-playwright-cli click e4
-playwright-cli fill e7 "test"
-playwright-cli console
-playwright-cli requests
-playwright-cli close
-```
-
-```bash
-playwright-cli open https://example.com
-playwright-cli tracing-start
-playwright-cli click e4
-playwright-cli fill e7 "test"
-playwright-cli tracing-stop
-playwright-cli close
-```
-
-## Example: Interactive session
-
-Ask the user for UI review or design feedback. The user draws boxes on the live page and types comments; you receive the annotated screenshot, the snapshot of the marked region, and the user's notes. Use this whenever the user asks for "UI review", "design feedback", or to "ask the user what they think / want / mean":
-
-```bash
-playwright-cli open https://example.com
-playwright-cli show --annotate
-```
-
-## Specific tasks
-
-* **Running and Debugging Playwright tests** [references/playwright-tests.md](references/playwright-tests.md)
-* **Request mocking** [references/request-mocking.md](references/request-mocking.md)
-* **Running Playwright code** [references/running-code.md](references/running-code.md)
-* **Browser session management** [references/session-management.md](references/session-management.md)
-* **Spec-driven testing (plan / generate / heal)** [references/spec-driven-testing.md](references/spec-driven-testing.md)
-* **Storage state (cookies, localStorage)** [references/storage-state.md](references/storage-state.md)
-* **Test generation** [references/test-generation.md](references/test-generation.md)
-* **Tracing** [references/tracing.md](references/tracing.md)
-* **Video recording** [references/video-recording.md](references/video-recording.md)
-* **Inspecting element attributes** [references/element-attributes.md](references/element-attributes.md)
+- `references/playwright-tests.md` — Read when: running and debugging Playwright tests.
+- `references/request-mocking.md` — Read when: request mocking.
+- `references/running-code.md` — Read when: running Playwright code.
+- `references/spec-driven-testing.md` — Read when: spec-driven testing (plan / generate / heal).
+- `references/storage-state.md` — Read when: storage state (cookies, localStorage).
+- `references/test-generation.md` — Read when: test generation.
+- `references/tracing.md` — Read when: tracing.
+- `references/video-recording.md` — Read when: video recording.
+- `references/element-attributes.md` — Read when: inspecting element attributes.
