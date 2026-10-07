@@ -103,6 +103,19 @@ describe("startServerWithBindRetry", () => {
     expect(ok).toBe("server");
     expect(calls).toBe(1);
   });
+  test("default sleep: retries on the real timer", async () => {
+    let calls = 0;
+    const ok = await startServerWithBindRetry(
+      async () => {
+        calls += 1;
+        if (calls === 1) throw Object.assign(new Error("in use"), { code: "EADDRINUSE" });
+        return "server";
+      },
+      { retryMs: 1 },
+    );
+    expect(ok).toBe("server");
+    expect(calls).toBe(2);
+  });
   test("retries EADDRINUSE until success", async () => {
     let calls = 0;
     const slept: number[] = [];

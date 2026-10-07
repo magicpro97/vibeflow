@@ -67,7 +67,11 @@ export async function startServerWithBindRetry<T>(
   const now = options.now ?? Date.now;
   const retryMs = options.retryMs ?? UPDATE_HANDOFF.BIND_RETRY_MS;
   const deadline = now() + (options.deadlineMs ?? UPDATE_HANDOFF.BIND_DEADLINE_MS);
-  for (;;) {
+  // Retry, recursing only after the guard above proved the NEXT attempt
+  // starts before the deadline — depth is bounded by deadline/retryMs
+  // (defaults: ~120 frames). Recursion (not a loop) keeps every line
+  // executable for the per-file coverage gate.
+  const attempt = async (): Promise<T> => {
     try {
       return await start();
     } catch (error) {
@@ -76,8 +80,10 @@ export async function startServerWithBindRetry<T>(
       if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE" || now() + retryMs >= deadline)
         throw error;
       await sleep(retryMs);
+      return attempt();
     }
-  }
+  };
+  return attempt();
 }
 
 function stateBase(seams: HandoffSeams, request: UpdateRequestV1, state: string): HandoffStateV1 {
