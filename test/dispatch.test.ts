@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { shellLaunchArgv, splitCommandLine } from "../src/core.js";
+import { shellLaunchArgv, shouldUseWindowsShell, splitCommandLine } from "../src/core.js";
 import {
   type AsyncSpawner,
   type EngineProbe,
@@ -1232,6 +1232,28 @@ describe("defaultSpawner (test seam)", () => {
       (Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = origSpawnSync;
       (Bun as unknown as { which: typeof Bun.which }).which = origWhich;
       Object.defineProperty(process, "platform", { value: origPlatform });
+    }
+  });
+
+  // The superset shim predicate backs BOTH engine launches and the install path: an extensionless
+  // resolved path with an adjacent .cmd/.bat sibling must fire (issue #88 layouts).
+  test("shouldUseWindowsShell: sibling layouts, suffixed paths, plain paths, copilot", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-shim-"));
+    const bare = join(dir, "npm");
+    writeFileSync(`${bare}.cmd`, "@echo off\r\n");
+    writeFileSync(`${join(dir, "bun")}.bat`, "@echo off\r\n");
+    const origPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      expect(shouldUseWindowsShell("npm", bare)).toBe(true); // .cmd sibling
+      expect(shouldUseWindowsShell("bun", join(dir, "bun"))).toBe(true); // .bat sibling
+      expect(shouldUseWindowsShell("npm", `${bare}.cmd`)).toBe(true); // suffixed path
+      expect(shouldUseWindowsShell("npm", join(dir, "npm.exe"))).toBe(false); // real executable
+      expect(shouldUseWindowsShell("npm", join(dir, "missing"))).toBe(false); // nothing at all
+      expect(shouldUseWindowsShell("copilot", join(dir, "missing"))).toBe(true); // copilot clause
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

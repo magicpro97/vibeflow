@@ -105,6 +105,10 @@ export * from "../logbus.js";
 // that sibling directly, so the helper is routed through this barrel.
 export { requestUiHookApproval } from "./hook-ui-client.js";
 
+// `ui.ts` needs the conversation HTTP authority; the cycle rule forbids the
+// sibling import, so it goes through this barrel.
+export { buildConversationHttpAuthority } from "./conversation-http.js";
+
 // ponytail: liveGuardrailArmed/guardrailOffNote inlined into doctor.ts (#391)
 export { liveGuardrailArmed, guardrailOffNote } from "./doctor.js";
 
@@ -114,6 +118,10 @@ export { liveGuardrailArmed, guardrailOffNote } from "./doctor.js";
 // init.ts from importing from a sibling (./doctor.js), so we
 // re-export resolveRepo through this barrel.
 export { resolveRepo } from "./doctor.js";
+
+// `doctor.ts` needs the Auto-update section printer; the cycle rule forbids
+// the sibling import, so it goes through this barrel.
+export { printDoctorUpdate } from "./doctor-update.js";
 
 // === init Phase 1.5 (claude-mem) re-exported from init-memory.ts ===
 // The `init` subcommand runs the memory opt-in between the deterministic

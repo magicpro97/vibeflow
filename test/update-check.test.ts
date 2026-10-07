@@ -164,7 +164,7 @@ describe("updateAvailableLine", () => {
     const line = updateAvailableLine("0.12.1", "0.13.0");
     expect(line).toContain("0.12.1");
     expect(line).toContain("0.13.0");
-    expect(line).toContain("npm i -g @magicpro97/vibeflow");
+    expect(line).toContain("vf update");
   });
 });
 
@@ -191,6 +191,17 @@ describe("updateCheck (vf update-check)", () => {
       fetch: async () => res(true, { version: "1.0.0" }),
       writeFileSafe: () => {},
       current: "0.12.1",
+      outFn,
+    });
+    expect(code).toBe(0);
+    expect(lines.join("\n")).toContain("Update available");
+  });
+  test("prerelease currents compare by precedence (rc.2 sees the stable release)", async () => {
+    const { lines, outFn } = makeSink();
+    const code = await updateCheck({
+      fetch: async () => res(true, { version: "0.21.0" }),
+      writeFileSafe: () => {},
+      current: "0.21.0-rc.2",
       outFn,
     });
     expect(code).toBe(0);

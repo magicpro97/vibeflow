@@ -52,6 +52,7 @@ export function printHelp(): number {
     ${c.cyan("verify")}            typecheck / lint / test + confidence / evidence / scope gates
     ${c.cyan("eval")}              success-rate + gate breakdown from real telemetry; exit 1 below --min-pass-rate (CI gate)
     ${c.cyan("update-check")}      check npm for a newer VibeFlow release
+    ${c.cyan("update")}            update VibeFlow and seamlessly restart running \`vf ui\` servers
     ${c.cyan("help, --version")}   show help / version
 
   ${c.dim("Run `vf <command> --help` for command-specific usage.")}

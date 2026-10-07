@@ -134,7 +134,7 @@ describe("help text", () => {
 
   test("production UI launch consumers share the dependency-neutral port authority", () => {
     for (const relativePath of [
-      "src/cli.ts",
+      "src/commands/ui.ts",
       "src/commands/help.ts",
       "src/commands/help-commands.ts",
       "src/ui/vite.config.ts",
@@ -178,6 +178,17 @@ describe("help text", () => {
   test("update-check has a per-command help block (covers the COMMAND_HELP['update-check'] arm)", () => {
     expect(hasCommandHelp("update-check")).toBe(true);
     expect(printCommandHelp("update-check")).toBe(0);
+  });
+
+  test("update has a per-command help block naming the seamless handoff", () => {
+    expect(hasCommandHelp("update")).toBe(true);
+    expect(printCommandHelp("update")).toBe(0);
+    const help = COMMAND_HELP.update?.() ?? "";
+    expect(help).toContain("--check");
+    expect(help).toContain("--spec <spec>");
+    expect(help).toContain("--manager <m>");
+    expect(help).toContain("--no-restart");
+    expect(help).toContain("never interrupted");
   });
 
   test("superpowers has dry-default sync help", () => {

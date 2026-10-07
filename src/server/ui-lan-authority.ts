@@ -38,6 +38,12 @@ function matches(
   return timingSafeEqual(digest(kind, candidate), expected);
 }
 
+/** Adopted digests arrive as sha256 hex; anything else is ignored (fail-safe). */
+function digestFromHex(hex: unknown): Buffer | null {
+  if (typeof hex !== "string" || !/^[0-9a-f]{64}$/iu.test(hex)) return null;
+  return Buffer.from(hex, "hex");
+}
+
 function exactCookie(request: Request): string | null {
   const raw = request.headers.get("cookie");
   if (!raw || raw.length > COOKIE_HEADER_CAP) return null;
@@ -54,20 +60,48 @@ function exactCookie(request: Request): string | null {
 export class UiLanPageAuthority {
   readonly #random: RandomToken;
   #launchBootstrap: string | null;
-  #bootstrapDigest: Buffer | null;
+  /** Bootstrap digests this process accepts; adopted predecessors' unspent ones included. */
+  #bootstrapDigests: Buffer[];
   #sessionDigest: Buffer | null = null;
-  readonly #pageDigest: Buffer;
+  /** Page-token digests accepted for transport auth; own first, then adopted. */
+  readonly #pageDigests: Buffer[];
   readonly #pageToken: string;
 
-  constructor(random: RandomToken = randomUUID) {
+  constructor(
+    random: RandomToken = randomUUID,
+    adopt: {
+      pages?: readonly string[];
+      bootstrap?: readonly string[];
+      session?: string | null;
+    } = {},
+  ) {
     this.#random = random;
     this.#pageToken = random();
     const bootstrap = random();
     if (!UUID_TOKEN.test(this.#pageToken) || !UUID_TOKEN.test(bootstrap))
       throw new Error("LAN authority entropy unavailable");
-    this.#pageDigest = digest("page", this.#pageToken);
+    this.#pageDigests = [digest("page", this.#pageToken)];
+    for (const hex of adopt.pages ?? []) {
+      const adopted = digestFromHex(hex);
+      if (adopted !== null) this.#pageDigests.push(adopted);
+    }
     this.#launchBootstrap = bootstrap;
-    this.#bootstrapDigest = digest("bootstrap", bootstrap);
+    this.#bootstrapDigests = [digest("bootstrap", bootstrap)];
+    for (const hex of adopt.bootstrap ?? []) {
+      const adopted = digestFromHex(hex);
+      if (adopted !== null) this.#bootstrapDigests.push(adopted);
+    }
+    const adoptedSession = digestFromHex(adopt.session);
+    if (adoptedSession !== null) this.#sessionDigest = adoptedSession;
+  }
+
+  /** The digests a takeover replacement must adopt to keep issued credentials valid. */
+  digestSnapshot(): { pages: string[]; bootstrap: string[]; session: string | null } {
+    return {
+      pages: this.#pageDigests.map((d) => d.toString("hex")),
+      bootstrap: this.#bootstrapDigests.map((d) => d.toString("hex")),
+      session: this.#sessionDigest?.toString("hex") ?? null,
+    };
   }
 
   ownerUrl(baseUrl: string): string {
@@ -80,7 +114,7 @@ export class UiLanPageAuthority {
   }
 
   authorizeTransport(candidate: string | null): boolean {
-    return matches(candidate, this.#pageDigest, "page");
+    return this.#pageDigests.some((d) => matches(candidate, d, "page"));
   }
 
   pageTokenForHtml(): string {
@@ -92,10 +126,10 @@ export class UiLanPageAuthority {
       return Object.freeze({ kind: UI_LAN_PAGE_ACCESS.AUTHORIZED });
     const bootstrapValues = url.searchParams.getAll(UI_LAN_BOOTSTRAP_QUERY);
     const bootstrap = bootstrapValues.length === 1 ? (bootstrapValues[0] ?? null) : null;
-    if (!matches(bootstrap, this.#bootstrapDigest, "bootstrap"))
-      return Object.freeze({ kind: UI_LAN_PAGE_ACCESS.DENIED });
+    const accepted = this.#bootstrapDigests.some((d) => matches(bootstrap, d, "bootstrap"));
+    if (!accepted) return Object.freeze({ kind: UI_LAN_PAGE_ACCESS.DENIED });
 
-    this.#bootstrapDigest = null;
+    this.#bootstrapDigests = [];
     const session = this.#random();
     if (!UUID_TOKEN.test(session)) throw new Error("LAN authority entropy unavailable");
     this.#sessionDigest = digest("session", session);

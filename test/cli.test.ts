@@ -804,16 +804,18 @@ describe("engines", () => {
 
 describe("server", () => {
   test("ui wiring reuses one shared conversation authority across initial start and hot restart", () => {
-    const src = readFileSync(join(import.meta.dir, "..", "src/cli.ts"), "utf8");
-    expect(src).toContain("const conversation = buildConversationHttpAuthority({}, host, cwd());");
-    expect(src).toContain(
-      "startServerResilient(\n    Number.isFinite(port) ? port : DEFAULT_UI_PORT,\n    host,\n    conversation,\n  )",
+    const uiSrc = readFileSync(join(import.meta.dir, "..", "src", "commands", "ui.ts"), "utf8");
+    const cliSrc = readFileSync(join(import.meta.dir, "..", "src", "cli.ts"), "utf8");
+    expect(cliSrc).toContain("return await uiCommand({ dev: true });");
+    expect(uiSrc).toContain(
+      "const conversation = buildConversationHttpAuthority({}, host, cwd());",
     );
-    expect(src).toContain(
-      'const port = typeof flags.port === "string" ? Number(flags.port) : DEFAULT_UI_PORT',
+    expect(uiSrc).toContain("const uiPort = Number.isFinite(port) ? port : DEFAULT_UI_PORT;");
+    expect(uiSrc).toMatch(
+      /takeover\s*\?\s*await startServerWithBindRetry\(\(\) => startServer\(uiPort, \{ host, conversation \}\)\)/,
     );
-    expect(src).toContain("return await ui({ dev: true })");
-    expect(src).toMatch(/void prev\s*\.stop\(true\)\s*\.then\(\(\) => \{/);
+    expect(uiSrc).toMatch(/: await startServerResilient\(/);
+    expect(uiSrc).toMatch(/void prev\s*\.stop\(true\)\s*\.then\(\(\) => \{/);
   });
 
   test("serves the Vue app and state endpoints on loopback", async () => {
@@ -1649,6 +1651,7 @@ describe("adapters settings integration", () => {
         tools: { codegraph: true, lsp: true },
         toolPriority: ["lsp", "codegraph", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+        update: { mode: "notify", manager: "npm" },
         updatedAt: "",
         memory: false,
         notifications: true,
@@ -1672,6 +1675,7 @@ describe("adapters settings integration", () => {
         tools: { codegraph: true, lsp: false },
         toolPriority: ["codegraph", "lsp", "native"],
         failureProtection: { ...DEFAULT_FAILURE_PROTECTION },
+        update: { mode: "notify", manager: "npm" },
         updatedAt: "",
         memory: false,
         notifications: true,

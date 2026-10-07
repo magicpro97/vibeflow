@@ -1,6 +1,5 @@
-import { existsSync } from "node:fs";
-import { extname, join } from "node:path";
-import { resolveCommand, shellLaunchArgv } from "../core.js";
+import { join } from "node:path";
+import { resolveCommand, shellLaunchArgv, shouldUseWindowsShell } from "../core.js";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 import { filterEnv } from "./env-filter.js";
 import {
@@ -87,18 +86,6 @@ export function defaultSyncSpawner(cmd: string, args: string[], input: string): 
 const TIMEOUT_STATUS = 124;
 /** Default grace between SIGTERM and the hard SIGKILL when a process group ignores the term. */
 const DEFAULT_GRACE_MS = 3000;
-
-function hasWindowsShimSibling(path: string): boolean {
-  if (extname(path)) return false;
-  return existsSync(`${path}.cmd`) || existsSync(`${path}.bat`);
-}
-
-function shouldUseWindowsShell(cmd: string, resolvedCmd: string): boolean {
-  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return false;
-  if (/\.(?:cmd|bat)$/i.test(resolvedCmd)) return true;
-  if (cmd.toLowerCase() === "copilot") return true;
-  return hasWindowsShimSibling(resolvedCmd);
-}
 
 interface AsyncResult {
   status: number;

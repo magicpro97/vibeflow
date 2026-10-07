@@ -2,7 +2,7 @@
 title: Command Reference
 description: Complete reference of all shipped `vf` CLI commands and their flags, including conversations, orchestration, skills, hooks, and verification.
 category: reference
-last_updated: 2026-09-24
+last_updated: 2026-10-06
 ---
 
 # Command Reference
@@ -26,6 +26,7 @@ last_updated: 2026-09-24
 - [PR queue & merge](#pr-queue--merge)
 - [Verification](#verification)
 - [Eval (Telemetry Success-Rate Gate)](#eval-telemetry-success-rate-gate)
+- [Update VibeFlow](#update-vibeflow)
 - [Help / Version](#help--version)
 
 The shipped `vf` surface. See `USER_GUIDE.md` for a verifiable walkthrough.
@@ -715,6 +716,24 @@ it becomes a one-job-two-outcomes gate you can wire into pre-push/CI:
 - **exit 1** — pass-rate below the threshold with enough samples.
 
 Empty telemetry prints a friendly note and exits 0.
+
+## Update VibeFlow
+
+```bash
+vf update                      # install the latest release + hand off every running vf ui
+vf update --check              # report installed vs latest (no install)
+vf update --spec <spec>        # exact npm spec (tarball or @version) — no registry lookup
+vf update --manager bun        # npm (default) | bun | pnpm; or settings update.manager
+vf update --no-restart         # install only; running servers pick the new code on next start
+vf update --force              # restart stale servers even when the install kept the version
+```
+
+`vf update` installs the release, then asks every live `vf ui` server in the project
+registry to hand off: the old server spawns its replacement on the same port, closes its
+listener, and exits once the replacement is healthy. Running agent CLIs are owned by
+detached supervisors and are never interrupted; a failed handoff keeps the original server
+serving. Set `update.mode: "auto"` in `.vibeflow/SETTINGS.json` to let a running UI apply
+updates itself. `vf doctor` reports installed vs latest and every live UI generation.
 
 ## Help / Version
 
