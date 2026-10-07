@@ -13,11 +13,13 @@ ${c.bold("Flags:")}
   --check            report installed vs latest without installing
   --spec <spec>      install an exact npm spec (tarball/version) instead of latest
   --manager <m>      npm | bun | pnpm (default: settings update.manager, else npm)
+  --rollback         reinstall the last recorded previous version (toggles)
   --no-restart       install only; running vf ui servers update on their next start
   --force            restart stale servers even if the install kept the same version
 
 ${c.bold("Examples:")}
   vf update
   vf update --check
+  vf update --rollback
   vf update --spec ./magicpro97-vibeflow-0.21.0.tgz`;
 }

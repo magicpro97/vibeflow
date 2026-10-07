@@ -188,6 +188,7 @@ describe("help text", () => {
     expect(help).toContain("--spec <spec>");
     expect(help).toContain("--manager <m>");
     expect(help).toContain("--no-restart");
+    expect(help).toContain("--rollback");
     expect(help).toContain("never interrupted");
   });
 
