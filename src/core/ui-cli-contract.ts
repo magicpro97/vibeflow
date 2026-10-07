@@ -1,5 +1,5 @@
 /** Dependency-neutral authority for the local web UI's CLI port semantics. */
-import { isValidVersion } from "../update-check.js";
+import { isValidVersion } from "./version-format.js";
 
 export const UI_CLI_PORT = Object.freeze({
   DEFAULT: 7799,

@@ -26,8 +26,15 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { VERSION, c, writeFileSafe } from "./core.js";
+import { isValidVersion } from "./core/version-format.js";
 import { out } from "./logbus.js";
 import type { Channel } from "./logbus.js";
+
+// Public surface kept for existing consumers (tests, update-contract); the
+// definition lives in the dependency-neutral `core/version-format.ts` so
+// browser bundles importing it (via `ui-cli-contract`) never pull this
+// module's node builtins (Task-1 review B1).
+export { isValidVersion } from "./core/version-format.js";
 
 const PKG = "@magicpro97/vibeflow";
 // npm registry expects a scoped name URL-encoded (`%40scope%2Fname`); a raw
@@ -50,17 +57,6 @@ type FetchFn = (
 export interface UpdateCache {
   checkedAt: number;
   latest: string;
-}
-
-/** Accept only a plain dotted-numeric version, optionally with a
- *  prerelease/build suffix (`1.2.3`, `1.2.3-rc.1`, `1.2.3+build`). This is the
- *  trust gate on the version string BEFORE it is cached or printed: the npm
- *  registry response (and the on-disk cache) are untrusted, and the string is
- *  rendered straight to the terminal — a value carrying ANSI/control chars
- *  would inject terminal escapes. `cmpSemver` already coerces to numbers so
- *  comparison is safe; this closes the DISPLAY vector. */
-export function isValidVersion(v: string): boolean {
-  return /^\d+\.\d+\.\d+([-+][\w.]+)*$/.test(v);
 }
 
 /** Compare two semver-ish strings: 1 if a>b, -1 if a<b, 0 if equal.

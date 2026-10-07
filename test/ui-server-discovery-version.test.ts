@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { createUiServerDiscovery, resolveUiServerDiscovery } from "../src/core/ui-cli-contract.js";
 
 const base = {
@@ -54,5 +55,13 @@ describe("ui server discovery app_version", () => {
 
   test("record without app_version still resolves", () => {
     expect(resolveUiServerDiscovery(base)?.app_version).toBeUndefined();
+  });
+
+  test("ui-cli-contract stays browser-bundleable (no node-only module chain)", async () => {
+    const built = await Bun.build({
+      entrypoints: [fileURLToPath(new URL("../src/core/ui-cli-contract.ts", import.meta.url))],
+      target: "browser",
+    });
+    expect(built.success).toBe(true);
   });
 });
