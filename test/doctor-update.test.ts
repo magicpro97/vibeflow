@@ -38,7 +38,9 @@ describe("printDoctorUpdate", () => {
     expect(capture()).toContain("latest: v0.21.0 (run vf update)");
   });
   test("reports up to date", () => {
-    expect(capture({ latest: "0.20.0" })).toContain("installed: v0.20.0");
+    const upToDate = capture({ latest: "0.20.0" });
+    expect(upToDate).toContain("installed: v0.20.0 · latest");
+    expect(upToDate).not.toContain("run vf update");
     expect(capture({ latest: null })).toContain("installed: v0.20.0");
   });
   test("no servers", () => {
@@ -61,7 +63,7 @@ describe("printDoctorUpdate", () => {
     expect(text).toContain("replacement_started");
     expect(text).toContain("stale — safe to delete");
     const drained = capture({ handoffs: handoff("drained", 1_699_999_000_000) });
-    expect(drained).not.toContain("stale handoff");
+    expect(drained).not.toContain("safe to delete");
   });
   test("defaults: reads handoff state via the seam and writes via out (no outFn)", () => {
     const seen: string[] = [];
@@ -84,5 +86,21 @@ describe("printDoctorUpdate", () => {
       now: () => 0,
     });
     expect(seen.length).toBeGreaterThan(0);
+  });
+  test("defaults: dedups server bases when reading handoff state", () => {
+    const seen: string[] = [];
+    capture({
+      handoffs: undefined,
+      servers: [
+        { base: "/repo-a", pid: 1, port: 7799, app_version: "0.20.0" },
+        { base: "/repo-a", pid: 2, port: 7800, app_version: "0.20.0" },
+      ],
+      readHandoff: (base) => {
+        seen.push(base);
+        return null;
+      },
+    });
+    expect(seen.filter((base) => base === "/repo-a").length).toBe(1);
+    expect(seen.length).toBe(2);
   });
 });
