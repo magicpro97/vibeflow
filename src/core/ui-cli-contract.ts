@@ -1,4 +1,6 @@
 /** Dependency-neutral authority for the local web UI's CLI port semantics. */
+import { isValidVersion } from "../update-check.js";
+
 export const UI_CLI_PORT = Object.freeze({
   DEFAULT: 7799,
   EPHEMERAL: 0,
@@ -51,6 +53,9 @@ export interface UiServerDiscoveryV1 {
   readonly port: number;
   readonly pid: number;
   readonly started_at: number;
+  /** Version of the vf binary that wrote this record. Optional: records written
+   *  before versioning existed omit it. Sanitized on read by the resolver. */
+  readonly app_version?: string;
   /** Loopback-only approval origin. It contains no bearer or page bootstrap. */
   readonly hook_origin: string;
 }
@@ -58,6 +63,10 @@ export interface UiServerDiscoveryV1 {
 export interface ResolvedUiServerDiscovery {
   readonly port: number;
   readonly hook_origin: string;
+  /** Present only when the record carried a well-formed version. */
+  readonly app_version?: string;
+  /** The writer's pid when the record was a v1 record (absent on legacy records). */
+  readonly pid?: number;
 }
 
 const LOOPBACK_HOOK_HOSTS = Object.freeze([
@@ -115,7 +124,18 @@ export function resolveUiServerDiscovery(value: unknown): ResolvedUiServerDiscov
       !isUiHookOrigin(value.hook_origin)
     )
       return null;
-    return Object.freeze({ port: value.port, hook_origin: value.hook_origin });
+    // Display-only field: a poisoned value must not sink the record (liveness
+    // checks ride on port/pid), so an invalid version is dropped, not rejected.
+    const appVersion =
+      typeof value.app_version === "string" && isValidVersion(value.app_version)
+        ? value.app_version
+        : undefined;
+    return Object.freeze({
+      port: value.port,
+      pid: value.pid,
+      hook_origin: value.hook_origin,
+      ...(appVersion === undefined ? {} : { app_version: appVersion }),
+    });
   } catch {
     return null;
   }
@@ -126,13 +146,15 @@ export function createUiServerDiscovery(
   pid: number,
   startedAt: number,
   hookOrigin: string,
+  appVersion?: string,
 ): UiServerDiscoveryV1 {
   if (
     !positiveInteger(port) ||
     port > 65_535 ||
     !positiveInteger(pid) ||
     !positiveInteger(startedAt) ||
-    !isUiHookOrigin(hookOrigin)
+    !isUiHookOrigin(hookOrigin) ||
+    (appVersion !== undefined && !isValidVersion(appVersion))
   )
     throw new Error("invalid UI server discovery");
   return Object.freeze({
@@ -141,5 +163,6 @@ export function createUiServerDiscovery(
     pid,
     started_at: startedAt,
     hook_origin: hookOrigin,
+    ...(appVersion === undefined ? {} : { app_version: appVersion }),
   });
 }

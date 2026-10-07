@@ -28,6 +28,7 @@ describe("UI hook server discovery", () => {
     expect(Object.isFrozen(record)).toBe(true);
     expect(resolveUiServerDiscovery(record)).toEqual({
       port: 7799,
+      pid: 42,
       hook_origin: "http://127.0.0.1:8123",
     });
     expect(resolveUiServerDiscovery({ port: 7799 })).toEqual({
