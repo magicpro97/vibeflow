@@ -21,14 +21,16 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { bannerLine, type UpdateStatusView } from "../update-banner-model.js";
 import { fetchUpdateStatus, runUpdate } from "../update-api.js";
+import { type UpdateStatusView, bannerLine } from "../update-banner-model.js";
 
 const status = ref<UpdateStatusView | null>(null);
 const busy = ref(false);
 const started = ref("");
 const dismissed = ref(false);
-const line = computed(() => (dismissed.value || status.value === null ? null : bannerLine(status.value)));
+const line = computed(() =>
+  dismissed.value || status.value === null ? null : bannerLine(status.value),
+);
 
 onMounted(async () => {
   try {
@@ -46,7 +48,9 @@ async function run(action: "update" | "rollback"): Promise<void> {
     // user to look in the terminal. The UI picks the new version up on drain
     // (PR #827); vf doctor shows the update state if it does not.
     started.value =
-      action === "rollback" ? "Rollback started in the background" : "Update started in the background";
+      action === "rollback"
+        ? "Rollback started in the background"
+        : "Update started in the background";
   } catch {
     started.value = "Could not start the update — run vf update in your terminal";
   } finally {
