@@ -23,6 +23,7 @@ import {
   panel,
   preflightAll,
   preflightAllAsync,
+  printDoctorUpdate,
   readFileSync,
   resolve,
   statSync,
@@ -313,6 +314,9 @@ export async function doctor(
     readiness = preflightAll([...ENGINES], { probe: false, skipCache: refresh });
   }
   printReadiness(probe, readiness);
+
+  out("vf");
+  printDoctorUpdate();
 
   if (missingRequired > 0) {
     out("vf");

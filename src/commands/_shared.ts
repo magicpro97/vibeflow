@@ -119,6 +119,10 @@ export { liveGuardrailArmed, guardrailOffNote } from "./doctor.js";
 // re-export resolveRepo through this barrel.
 export { resolveRepo } from "./doctor.js";
 
+// `doctor.ts` needs the Auto-update section printer; the cycle rule forbids
+// the sibling import, so it goes through this barrel.
+export { printDoctorUpdate } from "./doctor-update.js";
+
 // === init Phase 1.5 (claude-mem) re-exported from init-memory.ts ===
 // The `init` subcommand runs the memory opt-in between the deterministic
 // baseline and AI enrichment. The cycle rule forbids init.ts from importing
