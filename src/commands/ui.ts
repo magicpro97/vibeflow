@@ -292,10 +292,7 @@ export async function uiCommand(flags: Record<string, string | boolean>): Promis
   // --- Auto mode: when settings say so, install + hand off without a terminal ---
   startAutoUpdateWatcher({
     intervalMs: AUTO_UPDATE.INTERVAL_MS,
-    // Interim cast until Task 6 lands (`VibeSettings.update` is added there; the
-    // cast + its Task 6 removal keep this task independently type-checkable).
-    mode: () =>
-      (readSettings(cwd()) as { update?: { mode?: "notify" | "auto" } }).update?.mode ?? "notify",
+    mode: () => readSettings(cwd()).update?.mode ?? "notify",
     refresh: refreshCacheInBackground,
     readLatest: () => readCache()?.latest ?? null,
     currentVersion: VERSION,

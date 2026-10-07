@@ -11,6 +11,8 @@ import {
 } from "./skills/skills-settings.js";
 export type { SkillsConfig } from "./skills/skills-settings.js";
 import { type MemoryMode, coerceMemory } from "./settings-memory.js";
+import { UPDATE_DEFAULTS, type UpdateSettings, coerceUpdateSettings } from "./settings-update.js";
+export type { UpdateSettings } from "./settings-update.js";
 import * as curator from "./skills/curator-settings.js";
 import type { UserMcpServer } from "./tools/index.js";
 import * as typesafeSettings from "./typesafe-settings.js";
@@ -75,6 +77,8 @@ export interface VibeSettings {
   projectClassification?: projectClassification.ProjectClassificationSettings;
   curator?: curator.CuratorSettings;
   typesafe?: typesafeSettings.TypesafeSettings;
+  /** Auto-update policy: notify (default) or a running vf ui applies it. */
+  update: UpdateSettings;
   /** ISO timestamp stamped by the writer. */
   updatedAt: string;
 }
@@ -102,6 +106,7 @@ export const DEFAULT_SETTINGS: VibeSettings = {
   skills: { ...DEFAULT_SKILLS_CONFIG, targetEngines: [...DEFAULT_SKILLS_CONFIG.targetEngines] },
   projectClassification: projectClassification.DEFAULT_PROJECT_CLASSIFICATION_SETTINGS,
   curator: { ...curator.DEFAULT_CURATOR_SETTINGS },
+  update: { ...UPDATE_DEFAULTS },
   updatedAt: "",
 };
 
@@ -289,6 +294,8 @@ function coerce(raw: unknown): VibeSettings {
   projectClassification.applyProjectClassificationSettings(out, obj.projectClassification);
   curator.applyCuratorSettings(out, obj.curator);
   typesafeSettings.applyTypesafeSettings(out, obj.typesafe);
+  // Always materialized from defaults (like skills): the UI watcher reads it live.
+  out.update = coerceUpdateSettings(obj.update);
   return out;
 }
 
@@ -326,6 +333,7 @@ export function writeSettings(
     }),
     memory: next.memory ?? current.memory,
     notifications: next.notifications ?? current.notifications,
+    update: coerceUpdateSettings(next.update ?? current.update),
     updatedAt: now(),
   };
   // `hooks` is replace-on-write (the menu hands a complete policy), not a deep
