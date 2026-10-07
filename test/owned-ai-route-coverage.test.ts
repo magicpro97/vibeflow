@@ -22,7 +22,6 @@ type BoundaryClass =
  */
 const DIRECT_PROCESS_BOUNDARIES: Readonly<Record<string, BoundaryClass>> = {
   "src/bun-shim.mjs": "compatibility-runtime",
-  "src/cli.ts": "git-or-system-command",
   "src/commands/_shared.ts": "compatibility-runtime",
   "src/commands/dispatch-diff.ts": "git-or-system-command",
   "src/commands/dispatch-reviewer-llm.ts": "git-or-system-command",
@@ -32,7 +31,9 @@ const DIRECT_PROCESS_BOUNDARIES: Readonly<Record<string, BoundaryClass>> = {
   "src/commands/pr-merge-when-green.ts": "git-or-system-command",
   "src/commands/protection.ts": "git-or-system-command",
   "src/commands/tools-detect.ts": "git-or-system-command",
+  "src/commands/ui.ts": "git-or-system-command",
   "src/commands/units-ingest.ts": "git-or-system-command",
+  "src/commands/update.ts": "tool-extension",
   "src/commands/waiver-gate.ts": "git-or-system-command",
   "src/dispatch/isolation.ts": "git-or-system-command",
   "src/dispatch/owned-process-launch-runtime.ts": "canonical-owned-runtime",
