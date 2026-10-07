@@ -29,6 +29,7 @@ ${c.bold("Options:")}
   --port <n>    bind to a specific port (default: ${DEFAULT_UI_PORT}; ${EPHEMERAL_UI_PORT} selects a free port)
   --host <addr> bind to a specific host (default: 127.0.0.1)
   --no-open     start the server without launching a browser
+  --takeover    internal: bind retry for the vf update handoff (spawned by a predecessor)
 
 ${c.bold("LAN boundary:")}
   Any non-loopback --host exposes the server. The owner browser receives a single-use

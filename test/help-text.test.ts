@@ -134,7 +134,7 @@ describe("help text", () => {
 
   test("production UI launch consumers share the dependency-neutral port authority", () => {
     for (const relativePath of [
-      "src/cli.ts",
+      "src/commands/ui.ts",
       "src/commands/help.ts",
       "src/commands/help-commands.ts",
       "src/ui/vite.config.ts",

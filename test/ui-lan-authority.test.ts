@@ -41,7 +41,7 @@ const EXPECTED_CONSUMERS = Object.freeze({
     "src/ui/src/api.ts",
     "src/ui/src/browser-ui-token.ts",
   ]),
-  UI_LAN_BOOTSTRAP_QUERY: Object.freeze(["src/cli.ts", "src/server/ui-lan-authority.ts"]),
+  UI_LAN_BOOTSTRAP_QUERY: Object.freeze(["src/commands/ui.ts", "src/server/ui-lan-authority.ts"]),
   UI_LAN_SESSION_COOKIE: Object.freeze(["src/server/ui-lan-authority.ts"]),
   UI_LAN_EXPOSURE_WARNING: Object.freeze(["src/server.ts"]),
   UI_HOOK_ROUTE: Object.freeze([
@@ -53,8 +53,8 @@ const EXPECTED_CONSUMERS = Object.freeze({
   ]),
   UI_HOOK_APPROVAL: Object.freeze(["src/server.ts", "src/server/hook-approval-bridge.ts"]),
   UI_SERVER_DISCOVERY: Object.freeze(["src/server/hook-approval-bridge.ts"]),
-  createUiServerDiscovery: Object.freeze(["src/cli.ts"]),
-  resolveUiServerDiscovery: Object.freeze(["src/commands/hook-ui-client.ts"]),
+  createUiServerDiscovery: Object.freeze(["src/commands/ui.ts"]),
+  resolveUiServerDiscovery: Object.freeze(["src/commands/hook-ui-client.ts", "src/commands/ui.ts"]),
   withUiEventSourceToken: Object.freeze([
     "src/ui/src/browser-ui-token.ts",
     "src/ui/src/composables/useSSE.ts",

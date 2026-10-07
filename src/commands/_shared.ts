@@ -105,6 +105,10 @@ export * from "../logbus.js";
 // that sibling directly, so the helper is routed through this barrel.
 export { requestUiHookApproval } from "./hook-ui-client.js";
 
+// `ui.ts` needs the conversation HTTP authority; the cycle rule forbids the
+// sibling import, so it goes through this barrel.
+export { buildConversationHttpAuthority } from "./conversation-http.js";
+
 // ponytail: liveGuardrailArmed/guardrailOffNote inlined into doctor.ts (#391)
 export { liveGuardrailArmed, guardrailOffNote } from "./doctor.js";
 
