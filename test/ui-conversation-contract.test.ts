@@ -43,6 +43,8 @@ const state = read("../src/ui/src/conversation-home-state.ts");
 const types = read("../src/ui/src/conversation-home-types.ts");
 const rootStore = read("../src/ui/src/store.ts");
 const workUnitDetails = read("../src/ui/src/components/WorkUnitExpandedDetails.vue");
+const controlCenter = read("../src/ui/src/components/HomeControlCenterDrawer.vue");
+const updateBanner = read("../src/ui/src/components/HomeUpdateBanner.vue");
 
 const BACKEND_RUNTIME_IMPORT = /(?:^node:|(?:^|\/)server(?:\/|\.|$)|orchestrator\/conversation)/u;
 
@@ -262,6 +264,14 @@ describe("AI-first Home source contract", () => {
     expect(preferences).toContain('aria-label="Conversation settings"');
     expect(preferences).not.toContain("api.settings.set");
     expect(preferences).not.toContain('role="dialog"');
+  });
+
+  test("update banner and update settings stay wired into the shell", () => {
+    expect(app).toContain("<HomeUpdateBanner");
+    expect(controlCenter).toContain("UpdateSettingsSection");
+    expect(updateBanner).toContain("Update now");
+    expect(updateBanner).toContain("Rollback");
+    expect(updateBanner).toContain('aria-label="Dismiss update notice"');
   });
 
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {

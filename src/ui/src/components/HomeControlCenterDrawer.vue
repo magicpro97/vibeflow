@@ -33,6 +33,7 @@
         <label class="home-control-toggle"><input v-model="settingsForm.tools.lsp" type="checkbox" /><span><strong>LSP Bridge</strong><small>Definitions, references, and diagnostics.</small></span></label>
         <button class="home-control-save" type="button" :disabled="saving" @click="saveSettings">{{ saving ? "Saving…" : "Save configuration" }}</button>
       </section>
+      <UpdateSettingsSection />
 
       <section class="home-control-section" aria-labelledby="typesafe-title">
         <div class="home-control-section__heading"><span><small>Optional decision judge</small><strong id="typesafe-title">System One (Jev)</strong></span><button type="button" :disabled="typesafeTesting || typesafeStatus !== 'ready' || !typesafeView?.configured || typesafeView?.probeState === 'open' || typesafeView?.probeState === 'half-open'" @click="testConnection">{{ typesafeTesting ? "Testing…" : "Test connection" }}</button></div>
@@ -102,6 +103,7 @@ import type { ControlCenterCapability } from "../conversation-home-types.js";
 // biome-ignore format: one line keeps the drawer under its line pin
 import { type TypesafeSettingsView, type VibeSettings, emptyTypesafeForm, typesafeNeedsReload, typesafeSaveDisabled, typesafeThresholdError } from "../types-settings.js";
 import type { RepoDetection, SafeSkill } from "../types.js";
+import UpdateSettingsSection from "./UpdateSettingsSection.vue";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
