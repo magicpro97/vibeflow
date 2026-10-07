@@ -50,4 +50,17 @@ describe("cmpVersionPrecedence", () => {
     // valid numeric identifiers still compare numerically
     expect(cmpVersionPrecedence("1.0.0-rc.10", "1.0.0-rc.2")).toBe(1);
   });
+  test("numeric identifiers above Number.MAX_SAFE_INTEGER keep §11 ordering", () => {
+    // Number() collapses these two to the same double; the digit-string
+    // comparison (length, then lexical) must not.
+    expect(cmpVersionPrecedence("1.0.0-9007199254740993", "1.0.0-9007199254740992")).toBe(1);
+    expect(cmpVersionPrecedence("1.0.0-9007199254740992", "1.0.0-9007199254740993")).toBe(-1);
+    // length dominates before lexical: 10 > 9, 100 > 99, 128 > 12
+    expect(cmpVersionPrecedence("1.0.0-10", "1.0.0-9")).toBe(1);
+    expect(cmpVersionPrecedence("1.0.0-100", "1.0.0-99")).toBe(1);
+    expect(cmpVersionPrecedence("1.0.0-128", "1.0.0-12")).toBe(1);
+    // equal-length compares lexically
+    expect(cmpVersionPrecedence("1.0.0-12", "1.0.0-13")).toBe(-1);
+    expect(cmpVersionPrecedence("1.0.0-10000000000000000000", "1.0.0-9999999999999999999")).toBe(1);
+  });
 });

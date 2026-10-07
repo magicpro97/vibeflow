@@ -213,8 +213,17 @@ describe("vf update", () => {
     const seams = { fetchLatest: async () => "0.20.0", readInstalled: () => "0.20.0" };
     expect(await update([], {}, seams)).toBe(0);
   });
-  test("defaultSpawnInstall runs a real (trivial) command and reports its status", () => {
-    expect(defaultSpawnInstall(process.execPath, ["-e", "0"]).status).toBe(0);
+  test("defaultSpawnInstall runs a real (trivial) command and reports its status", async () => {
+    expect((await defaultSpawnInstall(process.execPath, ["-e", "0"])).status).toBe(0);
+  });
+  test("defaultSpawnInstall resolves non-zero exits and spawn errors without rejecting", async () => {
+    expect((await defaultSpawnInstall(process.execPath, ["-e", "process.exit(3)"])).status).toBe(3);
+    expect((await defaultSpawnInstall("definitely-not-a-command-vf-test", [])).status).toBeNull();
+  });
+  test("an async install spawner is awaited", async () => {
+    const h = harness({ spawner: async () => ({ status: 0 }) });
+    // Un-awaited, the promise has no `.status` → `(undefined ?? 1) !== 0` → rc 1.
+    expect(await update([], {}, h.seams)).toBe(0);
   });
   test("the real install runner routes through the canonical shim predicate (win32 layouts)", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src", "commands", "update.ts"), "utf8");
@@ -228,6 +237,18 @@ describe("vf update", () => {
     expect(states).toEqual([
       expect.objectContaining({ schema_version: 1, previous_version: "0.20.0", manager: "npm" }),
     ]);
+  });
+  test("a failing auto-marker refresh warns instead of aborting the handoff", async () => {
+    const states: UpdateStateV1[] = [];
+    const h = harness({
+      writeState: (s: UpdateStateV1) => states.push(s),
+      writeAutoMarker: () => {
+        throw new Error("EISDIR: marker path is a directory");
+      },
+    });
+    expect(await update([], {}, h.seams)).toBe(0);
+    expect(states.length).toBe(1); // rollback record still lands
+    expect(h.lines.some((l) => l.includes("could not refresh the auto-update marker"))).toBe(true);
   });
   test("--rollback reinstalls the recorded version without --force (downgrade is a change)", async () => {
     const states: UpdateStateV1[] = [];

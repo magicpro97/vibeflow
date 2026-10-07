@@ -44,8 +44,12 @@ function comparePrerelease(a: string, b: string): number {
     const na = /^(?:0|[1-9]\d*)$/u.test(ia);
     const nb = /^(?:0|[1-9]\d*)$/u.test(ib);
     if (na && nb) {
-      const d = Number(ia) - Number(ib);
-      if (d !== 0) return d > 0 ? 1 : -1;
+      // Numeric identifiers are unbounded (§11): Number() would collapse
+      // values above Number.MAX_SAFE_INTEGER, so compare the canonical digit
+      // strings by length first, then lexically.
+      if (ia !== ib) {
+        return ia.length !== ib.length ? (ia.length > ib.length ? 1 : -1) : ia > ib ? 1 : -1;
+      }
       continue;
     }
     if (na !== nb) return na ? -1 : 1;

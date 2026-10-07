@@ -5,7 +5,7 @@
 // (see src/update/ui-handoff.ts). The target is the version that lands on
 // disk (re-read after the install), not merely the registry's `latest`.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { resolveCommand, shellLaunchArgv, shouldUseWindowsShell } from "../core/command-runtime.js";
 import { cmpVersionPrecedence } from "../core/version-format.js";
@@ -50,7 +50,10 @@ type OutFn = (channel: "vf", ...parts: unknown[]) => void;
 export interface UpdateCommandSeams {
   fetchLatest?: () => Promise<string | null>;
   readInstalled?: () => string;
-  spawner?: (cmd: string, args: readonly string[]) => { status: number | null };
+  spawner?: (
+    cmd: string,
+    args: readonly string[],
+  ) => { status: number | null } | Promise<{ status: number | null }>;
   enumerate?: () => LiveUiServer[];
   writeRequest?: (base: string, request: UpdateRequestV1) => void;
   readHandoff?: (base: string) => HandoffStateV1 | null;
@@ -71,11 +74,15 @@ const defaultSleep = (ms: number): Promise<void> =>
 /** Real install runner; exported so tests can cover it without a fake.
  *  npm/pnpm resolve to `.cmd` shims on Windows, which node:child_process cannot
  *  execute directly — route those through the canonical launcher helpers so the
- *  install does not fail before running (same policy as src/dispatch/spawners). */
+ *  install does not fail before running (same policy as src/dispatch/spawners).
+ *  ASYNC on purpose: a spawnSync install blocks the event loop, which would
+ *  also stall the update lock's mtime heartbeat (proper-lockfile refreshes it
+ *  on a timer) and let a long install outlive the stale window — another
+ *  updater could then steal the lock mid-install. */
 export function defaultSpawnInstall(
   cmd: string,
   args: readonly string[],
-): { status: number | null } {
+): Promise<{ status: number | null }> {
   let argv: string[] = [cmd, ...args];
   try {
     const resolved = resolveCommand(cmd) ?? cmd;
@@ -83,7 +90,11 @@ export function defaultSpawnInstall(
   } catch {
     /* platform lookup unavailable (e.g. node without the Bun shim) — direct spawn */
   }
-  return spawnSync(argv[0] as string, argv.slice(1), { stdio: "inherit" });
+  return new Promise((resolvePromise) => {
+    const child = spawn(argv[0] as string, argv.slice(1), { stdio: "inherit" });
+    child.on("error", () => resolvePromise({ status: null }));
+    child.on("close", (code) => resolvePromise({ status: code }));
+  });
 }
 
 /** Settings carry the typed block from Task 6; the cast keeps this task
@@ -246,7 +257,7 @@ export async function update(
     ): Promise<number> {
       const spawner = seams.spawner ?? defaultSpawnInstall;
       const install = installArgv(mgr, installSpec);
-      const result = spawner(install.cmd, install.args);
+      const result = await spawner(install.cmd, install.args);
       if ((result.status ?? 1) !== 0) {
         outFn("vf", c.red(`Install failed (${mgr} exited ${String(result.status)}).`), {
           level: "error",
@@ -282,10 +293,25 @@ export async function update(
         });
         // Keep auto mode honest: the watcher's crash-loop marker must name the
         // version now on disk, or it re-spawns no-op updates every interval.
-        (seams.writeAutoMarker ?? writeAutoUpdateMarker)(
-          { version: installed, attempted_at: now() },
-          AUTO_UPDATE.MARKER_PATH,
-        );
+        // Best-effort: the install already swapped the package and the rollback
+        // record, so a marker write failure must only warn — never abort the
+        // handoff or reject the command.
+        try {
+          (seams.writeAutoMarker ?? writeAutoUpdateMarker)(
+            { version: installed, attempted_at: now() },
+            AUTO_UPDATE.MARKER_PATH,
+          );
+        } catch (error) {
+          outFn(
+            "vf",
+            c.yellow(
+              `Warning: could not refresh the auto-update marker (${
+                error instanceof Error ? error.message : String(error)
+              }); the next auto-check may re-attempt sooner.`,
+            ),
+            { level: "warn" },
+          );
+        }
       }
       if (flags["no-restart"] === true) return 0;
 
