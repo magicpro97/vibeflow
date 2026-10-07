@@ -96,7 +96,7 @@ describe("startAutoUpdateWatcher", () => {
       },
     });
     const watcher = startAutoUpdateWatcher({ ...h.seams, intervalMs: 5 });
-    await Bun.sleep(30);
+    await Bun.sleep(100);
     watcher.stop();
     release?.();
     await Bun.sleep(1);

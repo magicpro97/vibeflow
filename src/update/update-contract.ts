@@ -139,9 +139,19 @@ export function readUpdateRequest(
 
 export function clearUpdateRequest(
   base: string,
-  inject: { unlinkSync?: (path: string) => void } = {},
+  requestId: string,
+  inject: {
+    readFileSync?: (path: string, enc: string) => string;
+    unlinkSync?: (path: string) => void;
+  } = {},
 ): void {
   try {
+    // Identity-guarded clear: a NEWER request written while a handoff was in
+    // flight must survive — clearing by path alone would delete a request the
+    // successor/next tick has not processed yet (its updater would then wait
+    // for a state keyed to an id that can never exist).
+    const current = readUpdateRequest(base, inject);
+    if (current !== null && current.request_id !== requestId) return;
     (inject.unlinkSync ?? unlinkSync)(updateRequestPath(base));
   } catch {
     /* already gone */

@@ -27,6 +27,7 @@ import {
   startAutoUpdateWatcher,
   writeAutoUpdateMarker,
 } from "../update/auto-update.js";
+import { lanAdoptEnv } from "../update/lan-adopt.js";
 import { startServerWithBindRetry, startUpdateHandoffWatcher } from "../update/ui-handoff.js";
 import {
   clearUpdateRequest,
@@ -134,7 +135,7 @@ export async function uiCommand(flags: Record<string, string | boolean>): Promis
   const uiPort = Number.isFinite(port) ? port : DEFAULT_UI_PORT;
   // A takeover replacement retries the bind while the predecessor still owns
   // the port; the normal path keeps the interactive EADDRINUSE prompt.
-  let { server, url, hookOrigin } = takeover
+  let { server, url, hookOrigin, lanAuthority } = takeover
     ? await startServerWithBindRetry(() => startServer(uiPort, { host, conversation }))
     : await startServerResilient(
         Number.isFinite(port) ? port : DEFAULT_UI_PORT,
@@ -145,8 +146,8 @@ export async function uiCommand(flags: Record<string, string | boolean>): Promis
   else openBrowser(url);
   /** The actually-bound port (resolves the `--port 0` / EPHEMERAL_UI_PORT mode):
    *  the replacement spawn and any handoff recovery must target THIS port, not
-   *  the requested one. */
-  const boundPort = Number(new URL(url).port);
+   *  the requested one. Refreshed on every rebind (restart/recover). */
+  let boundPort = Number(new URL(url).port);
 
   // --- .ui-port: cross-process port discovery for the "watch live" tip ---
   const uiPortFile = join(cwd(), CTX_DIR, ".ui-port");
@@ -216,7 +217,8 @@ export async function uiCommand(flags: Record<string, string | boolean>): Promis
             });
           })
           .then((next) => {
-            ({ server, url, hookOrigin } = next);
+            ({ server, url, hookOrigin, lanAuthority } = next);
+            boundPort = Number(new URL(url).port);
             if (flags["no-open"]) revealLanBootstrapForNoOpen(url);
             else if (new URL(url).searchParams.has(UI_LAN_BOOTSTRAP_QUERY)) openBrowser(url);
             writeUiPort(url, hookOrigin);
@@ -241,14 +243,16 @@ export async function uiCommand(flags: Record<string, string | boolean>): Promis
     base: cwd(),
     currentVersion: VERSION,
     readRequest: () => readUpdateRequest(cwd()),
-    clearRequest: () => clearUpdateRequest(cwd()),
+    clearRequest: (requestId) => clearUpdateRequest(cwd(), requestId),
     spawnReplacement: () => {
       const args = [process.argv[1] ?? "", "ui", "--no-open", "--port", String(boundPort)];
       if (host) args.push("--host", host);
       args.push("--takeover");
       const child = spawn(process.execPath, args, {
         cwd: cwd(),
-        env: process.env,
+        // LAN continuity: hand the predecessor's authority digests (never the
+        // raw values) to the replacement so issued cookies/tokens stay valid.
+        env: { ...process.env, ...lanAdoptEnv(lanAuthority?.digestSnapshot() ?? null) },
         detached: true,
         stdio: "ignore",
         windowsHide: true,
@@ -257,7 +261,24 @@ export async function uiCommand(flags: Record<string, string | boolean>): Promis
       return {
         pid: child.pid,
         onExit: (cb: () => void) => {
+          // A replacement that already exited must still report: the "exit"
+          // event fires only for listeners attached before the exit.
+          if (child.exitCode !== null) {
+            cb();
+            return;
+          }
           child.once("exit", cb);
+        },
+        // OS truth, not event delivery: kill(pid, 0) reports whether the
+        // process still exists even when its exit event is still queued.
+        isAlive: () => {
+          try {
+            if (child.pid === undefined) return false;
+            process.kill(child.pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
         },
       };
     },
@@ -265,7 +286,12 @@ export async function uiCommand(flags: Record<string, string | boolean>): Promis
       await server.stop(true);
     },
     recoverServer: async () => {
-      ({ server, url, hookOrigin } = await startServerResilient(boundPort, host, conversation));
+      ({ server, url, hookOrigin, lanAuthority } = await startServerResilient(
+        boundPort,
+        host,
+        conversation,
+      ));
+      boundPort = Number(new URL(url).port);
       writeUiPort(url, hookOrigin);
     },
     readDiscovery: () => {

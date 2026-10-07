@@ -18,7 +18,12 @@ import {
 export interface HandoffSeams {
   base: string;
   currentVersion: string;
-  spawnReplacement: () => { pid: number | undefined; onExit: (cb: () => void) => void };
+  spawnReplacement: () => {
+    pid: number | undefined;
+    onExit: (cb: () => void) => void;
+    /** OS-level liveness (e.g. kill(pid, 0)) — independent of exit-event delivery. */
+    isAlive: () => boolean;
+  };
   stopServer: () => Promise<void>;
   recoverServer: () => Promise<void>;
   readDiscovery: () => { pid: number; app_version?: string } | null;
@@ -149,10 +154,19 @@ export async function performHandoff(
     for (;;) {
       if (exited) break;
       if (takeoverConfirmed(seams.readDiscovery(), spawn.pid, request.target_version)) {
-        seams.writeState({
-          ...stateBase(seams, request, UPDATE_HANDOFF_STATE.DRAINED),
-          replacement_pid: spawn.pid,
-        });
+        // OS-truth liveness right before committing: the exit EVENT can be
+        // delivered late, so a replacement that already died must not drain us
+        // into a port nobody serves. A dead replacement frees the port, so the
+        // fail path's recoverServer can rebind it.
+        if (!spawn.isAlive()) break;
+        try {
+          seams.writeState({
+            ...stateBase(seams, request, UPDATE_HANDOFF_STATE.DRAINED),
+            replacement_pid: spawn.pid,
+          });
+        } catch {
+          /* the state file is advisory — a write error must not sink a drained swap */
+        }
         return "drained";
       }
       if ((seams.now ?? Date.now)() >= deadline) break;
@@ -166,7 +180,8 @@ export async function performHandoff(
 
 export interface HandoffWatcherSeams extends HandoffSeams {
   readRequest: () => UpdateRequestV1 | null;
-  clearRequest: () => void;
+  /** Clear only the request that was actually consumed (identity-guarded). */
+  clearRequest: (requestId: string) => void;
   onOutcome?: (outcome: "drained" | "failed") => void;
   outFn?: (message: string) => void;
   pollMs?: number;
@@ -189,7 +204,7 @@ export function startUpdateHandoffWatcher(seams: HandoffWatcherSeams): {
       if (!request) return;
       if (!requestIsActionable(request, seams.currentVersion)) {
         seams.outFn?.(`update request for v${request.target_version} ignored — not newer`);
-        seams.clearRequest();
+        seams.clearRequest(request.request_id);
         return;
       }
       const outcome = await performHandoff(seams, request);
@@ -200,7 +215,7 @@ export function startUpdateHandoffWatcher(seams: HandoffWatcherSeams): {
       );
       // Clear BEFORE onOutcome: onOutcome("drained") calls process.exit(0), and
       // an unclear request would be re-consumed by the successor's first tick.
-      seams.clearRequest();
+      seams.clearRequest(request.request_id);
       seams.onOutcome?.(outcome);
     } catch (error) {
       // Belt-and-braces: performHandoff never rejects, but a throwing seam

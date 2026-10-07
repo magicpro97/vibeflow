@@ -73,6 +73,7 @@ import { discoverSkills } from "./skills/registry.js";
 import { resolveSkillNeeds } from "./skills/resolver.js";
 import { recordSkillResolution } from "./skills/telemetry.js";
 import { validateSkillRoots } from "./skills/validator.js";
+import { readLanAdoptEnv } from "./update/lan-adopt.js";
 
 // Re-export the 4 test seams so the 5 importers don't change
 export { repoLanguages, toolViews, settingsView, replayFromLog };
@@ -138,11 +139,15 @@ export async function startServer(
   server: { stop: (closeActiveConnections?: boolean) => Promise<void> };
   url: string;
   hookOrigin: string;
+  /** Live LAN page authority (null on loopback); takeover spawns snapshot its digests. */
+  lanAuthority: UiLanPageAuthority | null;
 }> {
   const host = _opts.host ?? "127.0.0.1";
   const conversationLoopback = isConversationLoopbackHost(host);
   const lanExposed = !conversationLoopback;
-  const lanAuthority = lanExposed ? new UiLanPageAuthority() : null;
+  const lanAuthority = lanExposed
+    ? new UiLanPageAuthority(randomUUID, readLanAdoptEnv(process.env))
+    : null;
   const token = lanAuthority?.pageTokenForHtml() ?? randomUUID();
   const conversation = _opts.conversation;
   if (conversation && conversation.sessions.loopback !== conversationLoopback) {
@@ -1110,5 +1115,6 @@ export async function startServer(
     },
     url: lanAuthority ? lanAuthority.ownerUrl(baseUrl) : baseUrl,
     hookOrigin,
+    lanAuthority,
   };
 }

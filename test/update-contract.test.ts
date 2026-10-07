@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -112,11 +112,36 @@ describe("files", () => {
       writeUpdateRequest(dir, request);
       expect(readUpdateRequest(dir)).toEqual(request);
       expect(readFileSync(updateRequestPath(dir), "utf8")).toContain("req-1");
-      clearUpdateRequest(dir);
-      clearUpdateRequest(dir); // second rm must not throw
+      clearUpdateRequest(dir, request.request_id);
+      clearUpdateRequest(dir, request.request_id); // second rm must not throw
       expect(readUpdateRequest(dir)).toBeNull();
       writeHandoffState(dir, state);
       expect(readHandoffState(dir)?.state).toBe("drained");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("clear is identity-guarded: a newer request written mid-flight survives", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-update-contract-"));
+    try {
+      const newer = { ...request, request_id: "req-2", target_version: "0.22.0" };
+      writeUpdateRequest(dir, request);
+      writeUpdateRequest(dir, newer); // updater-2 overwrote while a handoff was in flight
+      clearUpdateRequest(dir, request.request_id); // clear of req-1 must not delete req-2
+      expect(readUpdateRequest(dir)).toEqual(newer);
+      clearUpdateRequest(dir, newer.request_id);
+      expect(readUpdateRequest(dir)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("clear still removes an unreadable/leftover file (no id to compare)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-update-contract-"));
+    try {
+      writeUpdateRequest(dir, request); // creates the context dir
+      writeFileSync(updateRequestPath(dir), "{not json");
+      clearUpdateRequest(dir, request.request_id);
+      expect(existsSync(updateRequestPath(dir))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -130,6 +155,18 @@ describe("files", () => {
       }),
     ).toBeNull();
     expect(readHandoffState("/nope", { readFileSync: () => "{not json" })).toBeNull();
+  });
+});
+
+describe("timing constants are normative (mutation guard)", () => {
+  test("handoff timing contract values", () => {
+    expect(UPDATE_HANDOFF.SCHEMA_VERSION).toBe("1.0");
+    expect(UPDATE_HANDOFF.POLL_MS).toBe(2_000);
+    expect(UPDATE_HANDOFF.BIND_RETRY_MS).toBe(250);
+    expect(UPDATE_HANDOFF.BIND_DEADLINE_MS).toBe(30_000);
+    expect(UPDATE_HANDOFF.REPLACEMENT_GRACE_MS).toBe(1_000);
+    expect(UPDATE_HANDOFF.DRAIN_WAIT_MS).toBe(90_000);
+    expect(UPDATE_HANDOFF.STALE_MS).toBe(5 * 60_000);
   });
 });
 
