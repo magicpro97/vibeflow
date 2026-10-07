@@ -79,6 +79,7 @@ SPEC-FIRST questions until the spec is concrete — then map it to a Flow above.
 - **`references/grill.md`** — bare `/vf` context-grill protocol: infer intents, interview to a spec, route to a Flow.
 - **`references/hooks.md`** — guardrail hooks: arming, the live PreToolUse gate, per-engine block-vs-detect semantics.
 - **`references/pitfalls.md`** — the anti-patterns learned the hard way; read before improvising.
+- **`references/review-evidence-and-thread-gates.md`** — evidence-recorder invariants (exact-HEAD clean review, JS-canonical digest, docs-only path-token fallback) + the `review-thread-gate` runbook.
 
 ## 3. Skills and external docs (before inventing steps)
 
