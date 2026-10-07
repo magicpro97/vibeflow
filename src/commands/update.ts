@@ -165,8 +165,7 @@ export async function update(
     // have been installed by a different manager than the one selected now,
     // and a second global copy is the failure this avoids. An explicit
     // --manager still wins.
-    const rollbackManager =
-      manager as UpdateManager;
+    const rollbackManager = manager as UpdateManager;
     return await apply(`@magicpro97/vibeflow@${state.previous_version}`, rollbackManager);
   }
   const spec = typeof flags.spec === "string" ? flags.spec : null;
