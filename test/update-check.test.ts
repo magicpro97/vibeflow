@@ -164,7 +164,7 @@ describe("updateAvailableLine", () => {
     const line = updateAvailableLine("0.12.1", "0.13.0");
     expect(line).toContain("0.12.1");
     expect(line).toContain("0.13.0");
-    expect(line).toContain("npm i -g @magicpro97/vibeflow");
+    expect(line).toContain("vf update");
   });
 });
 

@@ -163,7 +163,7 @@ export async function updateCheck(
 export function updateAvailableLine(current: string, latest: string): string {
   return `${c.yellow("Update available:")} ${c.dim(`v${current}`)} → ${c.green(
     `v${latest}`,
-  )}  ·  run ${c.cyan(`npm i -g ${PKG}`)}`;
+  )}  ·  run ${c.cyan("vf update")}`;
 }
 
 /** Is the passive check allowed to run? Off in CI, non-interactive shells, or
