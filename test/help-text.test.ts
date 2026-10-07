@@ -180,6 +180,17 @@ describe("help text", () => {
     expect(printCommandHelp("update-check")).toBe(0);
   });
 
+  test("update has a per-command help block naming the seamless handoff", () => {
+    expect(hasCommandHelp("update")).toBe(true);
+    expect(printCommandHelp("update")).toBe(0);
+    const help = COMMAND_HELP.update?.() ?? "";
+    expect(help).toContain("--check");
+    expect(help).toContain("--spec <spec>");
+    expect(help).toContain("--manager <m>");
+    expect(help).toContain("--no-restart");
+    expect(help).toContain("never interrupted");
+  });
+
   test("superpowers has dry-default sync help", () => {
     expect(hasCommandHelp("superpowers")).toBe(true);
     expect(printCommandHelp("superpowers")).toBe(0);

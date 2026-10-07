@@ -358,3 +358,5 @@ export type { QueueEntry } from "./commands/pr-queue.js";
 // `vf eval` reads verdict/verify telemetry, aggregates a pass-rate report, and
 // exits 1 below the expected threshold — a passive CLI/CI regression gate.
 export { evalCmd } from "./commands/eval.js";
+// `vf update` installs a new release and hands off live `vf ui` servers.
+export { update } from "./commands/update.js";

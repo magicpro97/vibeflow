@@ -1,4 +1,5 @@
 import { skillsCommandHelp } from "../help/skills-command-help.js";
+import { updateHelpText } from "../update/update-help.js";
 import {
   ASK_HELP,
   BRAINSTORM_HELP,
@@ -392,4 +393,6 @@ Set ${c.cyan("VIBEFLOW_NO_UPDATE_CHECK=1")} to silence daily interactive-shell n
 
 ${c.bold("Examples:")}
   vf update-check`,
+
+  update: () => updateHelpText(),
 };

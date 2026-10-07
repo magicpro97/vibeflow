@@ -54,7 +54,11 @@ const EXPECTED_CONSUMERS = Object.freeze({
   UI_HOOK_APPROVAL: Object.freeze(["src/server.ts", "src/server/hook-approval-bridge.ts"]),
   UI_SERVER_DISCOVERY: Object.freeze(["src/server/hook-approval-bridge.ts"]),
   createUiServerDiscovery: Object.freeze(["src/commands/ui.ts"]),
-  resolveUiServerDiscovery: Object.freeze(["src/commands/hook-ui-client.ts", "src/commands/ui.ts"]),
+  resolveUiServerDiscovery: Object.freeze([
+    "src/commands/hook-ui-client.ts",
+    "src/commands/ui.ts",
+    "src/update/update-apply.ts",
+  ]),
   withUiEventSourceToken: Object.freeze([
     "src/ui/src/browser-ui-token.ts",
     "src/ui/src/composables/useSSE.ts",

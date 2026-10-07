@@ -24,6 +24,7 @@ import {
   superpowers,
   tools,
   units,
+  update,
   verify,
   workflow,
   worktree,
@@ -73,6 +74,8 @@ async function main(argv: string[]): Promise<number> {
   if (!(flags.json === true && (cmd === "chat" || cmd === "brainstorm"))) notifyUpdate();
 
   switch (cmd) {
+    case "update":
+      return await update(positionals, flags);
     case "pr":
       return await pr(positionals, flags);
     case undefined:

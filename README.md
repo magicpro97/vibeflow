@@ -90,6 +90,7 @@ vf
 | `vf verify` | Run typecheck, lint, test, and confidence/evidence/scope gates |
 | `vf eval` | Report success rate and gate breakdown from telemetry |
 | `vf update-check` | Check npm for a newer VibeFlow release |
+| `vf update` | Update VibeFlow and seamlessly restart running `vf ui` servers |
 | `vf help` / `vf --version` | Show help or version |
 
 ## Install and use
