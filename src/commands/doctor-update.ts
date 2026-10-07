@@ -4,7 +4,8 @@
 // `vf ui` generation from the project registry (Orca's staleness rule), and
 // any stale handoff state file worth reporting/reaping.
 
-import { cmpSemver, readCache } from "../update-check.js";
+import { cmpVersionPrecedence } from "../core/version-format.js";
+import { readCache } from "../update-check.js";
 import { type LiveUiServer, enumerateLiveUiServers } from "../update/update-apply.js";
 import {
   type HandoffStateV1,
@@ -54,7 +55,7 @@ export function printDoctorUpdate(seams: DoctorUpdateSeams = {}): void {
   const latestNote =
     latest === null
       ? ""
-      : cmpSemver(latest, current) > 0
+      : cmpVersionPrecedence(latest, current) > 0
         ? ` · latest: v${latest} (run vf update)`
         : " · latest";
   outFn(`  installed: v${current}${latestNote}`);
@@ -64,7 +65,8 @@ export function printDoctorUpdate(seams: DoctorUpdateSeams = {}): void {
   } else {
     outFn(`  ui servers: ${servers.length} running`);
     for (const server of servers) {
-      const stale = server.app_version === undefined || cmpSemver(current, server.app_version) > 0;
+      const stale =
+        server.app_version === undefined || cmpVersionPrecedence(current, server.app_version) > 0;
       const version =
         server.app_version === undefined ? "version unknown" : `v${server.app_version}`;
       outFn(

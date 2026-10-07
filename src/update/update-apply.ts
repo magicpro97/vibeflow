@@ -12,14 +12,12 @@ import {
   type ResolvedUiServerDiscovery,
   resolveUiServerDiscovery,
 } from "../core/ui-cli-contract.js";
+import { cmpVersionPrecedence } from "../core/version-format.js";
 import { readRegistry } from "../registry.js";
-import { cmpSemver } from "../update-check.js";
+import { UPDATE_MANAGER_ID } from "../settings-update.js";
 
-export const UPDATE_MANAGER = Object.freeze({
-  NPM: "npm",
-  BUN: "bun",
-  PNPM: "pnpm",
-} as const);
+/** Manager vocabulary — the settings authority IS the runtime authority (single source). */
+export const UPDATE_MANAGER = UPDATE_MANAGER_ID;
 export type UpdateManager = (typeof UPDATE_MANAGER)[keyof typeof UPDATE_MANAGER];
 export const UPDATE_MANAGERS = Object.freeze(
   Object.values(UPDATE_MANAGER),
@@ -81,7 +79,7 @@ export function serversNeedingRestart(
   installedVersion: string,
 ): LiveUiServer[] {
   return servers.filter(
-    (s) => s.app_version === undefined || cmpSemver(installedVersion, s.app_version) > 0,
+    (s) => s.app_version === undefined || cmpVersionPrecedence(installedVersion, s.app_version) > 0,
   );
 }
 

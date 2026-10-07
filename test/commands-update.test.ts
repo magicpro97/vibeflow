@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type UpdateCommandSeams, defaultSpawnInstall, update } from "../src/commands/update.js";
 import type { UpdateRequestV1 } from "../src/update/update-contract.js";
 
@@ -104,6 +106,17 @@ describe("vf update", () => {
     expect(await update([], { spec: "./pkg.tgz", force: true }, h.seams)).toBe(0);
     expect(h.requests[0]?.request.target_version).toBe("0.20.0");
   });
+  test("an exact prerelease upgrade counts as changed and hands off (precedence)", async () => {
+    let installedCall = 0;
+    const h = harness({
+      fetchLatest: async () => "0.21.0-rc.2",
+      readInstalled: () => (++installedCall === 1 ? "0.21.0-rc.1" : "0.21.0-rc.2"),
+      enumerate: () => [{ base: "/repo", pid: 111, port: 7799, app_version: "0.21.0-rc.1" }],
+    });
+    expect(await update([], {}, h.seams)).toBe(0); // no --force needed: rc.2 > rc.1
+    expect(h.installs).toEqual([["npm", "install", "-g", "@magicpro97/vibeflow@0.21.0-rc.2"]]);
+    expect(h.requests[0]?.request.target_version).toBe("0.21.0-rc.2");
+  });
   test("--no-restart installs only", async () => {
     const h = harness();
     expect(await update([], { "no-restart": true }, h.seams)).toBe(0);
@@ -198,5 +211,10 @@ describe("vf update", () => {
   });
   test("defaultSpawnInstall runs a real (trivial) command and reports its status", () => {
     expect(defaultSpawnInstall(process.execPath, ["-e", "0"]).status).toBe(0);
+  });
+  test("the real install runner routes through the canonical shell launcher (win32 shims)", () => {
+    const src = readFileSync(join(import.meta.dir, "..", "src", "commands", "update.ts"), "utf8");
+    expect(src).toContain("needsShellForCommand(cmd)");
+    expect(src).toContain("shellLaunchArgv(cmd, args, true)");
   });
 });

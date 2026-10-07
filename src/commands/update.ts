@@ -7,8 +7,10 @@
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { needsShellForCommand, shellLaunchArgv } from "../core/command-runtime.js";
+import { cmpVersionPrecedence } from "../core/version-format.js";
 import { readSettings } from "../settings.js";
-import { cmpSemver, fetchLatest } from "../update-check.js";
+import { fetchLatest } from "../update-check.js";
 import {
   type LiveUiServer,
   UPDATE_MANAGER,
@@ -50,12 +52,21 @@ export interface UpdateCommandSeams {
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Real install runner; exported so tests can cover it without a fake. */
+/** Real install runner; exported so tests can cover it without a fake.
+ *  npm/pnpm resolve to `.cmd` shims on Windows, which node:child_process cannot
+ *  execute directly — route those through the canonical launcher helpers so the
+ *  install does not fail before running (same policy as src/dispatch/spawners). */
 export function defaultSpawnInstall(
   cmd: string,
   args: readonly string[],
 ): { status: number | null } {
-  return spawnSync(cmd, args, { stdio: "inherit" });
+  let argv: string[] = [cmd, ...args];
+  try {
+    if (needsShellForCommand(cmd)) argv = shellLaunchArgv(cmd, args, true);
+  } catch {
+    /* platform lookup unavailable (e.g. node without the Bun shim) — direct spawn */
+  }
+  return spawnSync(argv[0] as string, argv.slice(1), { stdio: "inherit" });
 }
 
 /** Settings carry the typed block from Task 6; the cast keeps this task
@@ -128,7 +139,7 @@ export async function update(
       });
       return 1;
     }
-    if (cmpSemver(latest, current) > 0)
+    if (cmpVersionPrecedence(latest, current) > 0)
       outFn(
         "vf",
         `VibeFlow v${current} installed · v${latest} available (run ${c.cyan("vf update")})`,
@@ -145,7 +156,7 @@ export async function update(
       });
       return 1;
     }
-    if (cmpSemver(latest, current) <= 0) {
+    if (cmpVersionPrecedence(latest, current) <= 0) {
       outFn("vf", c.green(`VibeFlow v${current} is up to date.`));
       return 0;
     }
@@ -166,7 +177,7 @@ export async function update(
       return 1;
     }
     const installed = readInstalled();
-    if (cmpSemver(installed, current) <= 0 && flags.force !== true) {
+    if (cmpVersionPrecedence(installed, current) <= 0 && flags.force !== true) {
       outFn(
         "vf",
         c.yellow(

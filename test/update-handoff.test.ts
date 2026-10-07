@@ -81,6 +81,15 @@ describe("requestIsActionable", () => {
     expect(requestIsActionable(request({ target_version: "0.19.9" }), "0.20.0")).toBe(false);
     expect(requestIsActionable(request(), "0.20.0")).toBe(true);
   });
+  test("prerelease-to-prerelease targets are actionable (precedence, not equality)", () => {
+    expect(requestIsActionable(request({ target_version: "0.21.0-rc.2" }), "0.21.0-rc.1")).toBe(
+      true,
+    );
+    expect(requestIsActionable(request({ target_version: "0.21.0-rc.1" }), "0.21.0-rc.2")).toBe(
+      false,
+    );
+    expect(requestIsActionable(request({ target_version: "0.21.0" }), "0.21.0-rc.2")).toBe(true);
+  });
 });
 
 describe("takeoverConfirmed", () => {

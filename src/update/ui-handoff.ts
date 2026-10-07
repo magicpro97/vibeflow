@@ -7,7 +7,7 @@
 // are detached daemons and are never touched here (Orca's daemon-generation
 // model: the frontend is disposable, the daemons persist).
 
-import { cmpSemver } from "../update-check.js";
+import { cmpVersionPrecedence } from "../core/version-format.js";
 import {
   type HandoffStateV1,
   UPDATE_HANDOFF,
@@ -42,7 +42,7 @@ export function requestIsActionable(
   currentVersion: string,
 ): boolean {
   if (!request) return false;
-  return cmpSemver(request.target_version, currentVersion) > 0;
+  return cmpVersionPrecedence(request.target_version, currentVersion) > 0;
 }
 
 /** The replacement owns the port when the discovery record carries its pid and

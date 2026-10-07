@@ -2,9 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UPDATE_DEFAULTS, coerceUpdateSettings } from "../src/settings-update.js";
+import {
+  UPDATE_DEFAULTS,
+  UPDATE_MANAGER_ID,
+  UPDATE_MODE,
+  coerceUpdateSettings,
+} from "../src/settings-update.js";
 import { type VibeSettings, readSettings, writeSettings } from "../src/settings.js";
-import { UPDATE_MANAGERS } from "../src/update/update-apply.js";
+import { UPDATE_MANAGER, UPDATE_MANAGERS } from "../src/update/update-apply.js";
 
 describe("coerceUpdateSettings", () => {
   test("garbage falls back to defaults", () => {
@@ -32,6 +37,12 @@ describe("coerceUpdateSettings", () => {
     for (const manager of UPDATE_MANAGERS) {
       expect(coerceUpdateSettings({ manager }).manager).toBe(manager);
     }
+  });
+
+  test("the settings authority IS the CLI manager authority (one object, no drift)", () => {
+    expect(UPDATE_MANAGER).toBe(UPDATE_MANAGER_ID);
+    expect(Object.isFrozen(UPDATE_MANAGER_ID)).toBe(true);
+    expect(Object.isFrozen(UPDATE_MODE)).toBe(true);
   });
 });
 

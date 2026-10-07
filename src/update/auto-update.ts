@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeFileSafe } from "../core.js";
-import { cmpSemver } from "../update-check.js";
+import { cmpVersionPrecedence } from "../core/version-format.js";
 
 export const AUTO_UPDATE = Object.freeze({
   /** Re-check cadence for a long-lived UI. */
@@ -56,7 +56,7 @@ export async function maybeAutoUpdate(seams: AutoUpdateSeams): Promise<boolean> 
   if (seams.mode() !== "auto") return false;
   await seams.refresh();
   const latest = seams.readLatest();
-  if (!latest || cmpSemver(latest, seams.currentVersion) <= 0) return false;
+  if (!latest || cmpVersionPrecedence(latest, seams.currentVersion) <= 0) return false;
   const marker = seams.readMarker();
   const now = (seams.now ?? Date.now)();
   if (marker && marker.version === latest && now - marker.attempted_at < AUTO_UPDATE.RETRY_MS)

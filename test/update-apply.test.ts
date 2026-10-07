@@ -77,6 +77,13 @@ describe("serversNeedingRestart", () => {
       serversNeedingRestart([mk("0.20.0"), mk(), mk("0.21.0"), mk("0.22.0")], "0.21.0"),
     ).toHaveLength(2);
   });
+  test("prerelease staleness uses precedence: rc.1 is stale for rc.2, not the reverse", () => {
+    const mk = (app_version: string) => ({ base: "/x", pid: 1, port: 1, app_version });
+    expect(serversNeedingRestart([mk("0.21.0-rc.1"), mk("0.21.0-rc.2")], "0.21.0-rc.2")).toEqual([
+      mk("0.21.0-rc.1"),
+    ]);
+    expect(serversNeedingRestart([mk("0.21.0-rc.2")], "0.21.0-rc.1")).toEqual([]);
+  });
 });
 
 describe("installArgv", () => {
