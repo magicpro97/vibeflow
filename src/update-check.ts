@@ -26,7 +26,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { VERSION, c, writeFileSafe } from "./core.js";
-import { isValidVersion } from "./core/version-format.js";
+import { cmpVersionPrecedence, isValidVersion } from "./core/version-format.js";
 import { out } from "./logbus.js";
 import type { Channel } from "./logbus.js";
 
@@ -151,7 +151,7 @@ export async function updateCheck(
     return 1;
   }
   writeCache({ checkedAt: (inject.now ?? Date.now)(), latest }, inject);
-  if (cmpSemver(latest, current) > 0) {
+  if (cmpVersionPrecedence(latest, current) > 0) {
     outFn("vf", updateAvailableLine(current, latest));
   } else {
     outFn("vf", c.green(`VibeFlow v${current} is up to date.`));
@@ -212,7 +212,7 @@ export function notifyUpdate(
   const current = inject.current ?? VERSION;
   const now = (inject.now ?? Date.now)();
   const cache = (inject.readCache ?? readCache)();
-  if (cache && cmpSemver(cache.latest, current) > 0) {
+  if (cache && cmpVersionPrecedence(cache.latest, current) > 0) {
     outFn("vf", updateAvailableLine(current, cache.latest));
   }
   if (!cache || now - cache.checkedAt > TTL_MS) {

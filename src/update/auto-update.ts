@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeFileSafe } from "../core.js";
 import { cmpVersionPrecedence } from "../core/version-format.js";
+import { UPDATE_MODE, type UpdateMode } from "../settings-update.js";
 
 export const AUTO_UPDATE = Object.freeze({
   /** Re-check cadence for a long-lived UI. */
@@ -26,7 +27,7 @@ export interface AutoUpdateMarker {
 }
 
 export interface AutoUpdateSeams {
-  mode: () => "notify" | "auto";
+  mode: () => UpdateMode;
   refresh: () => Promise<void>;
   readLatest: () => string | null;
   currentVersion: string;
@@ -53,7 +54,7 @@ export function writeAutoUpdateMarker(marker: AutoUpdateMarker, path: string): v
 
 /** One auto-update probe. Returns true when an update command was spawned. */
 export async function maybeAutoUpdate(seams: AutoUpdateSeams): Promise<boolean> {
-  if (seams.mode() !== "auto") return false;
+  if (seams.mode() !== UPDATE_MODE.AUTO) return false;
   await seams.refresh();
   const latest = seams.readLatest();
   if (!latest || cmpVersionPrecedence(latest, seams.currentVersion) <= 0) return false;

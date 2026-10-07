@@ -89,9 +89,10 @@ export interface InstallCommand {
 }
 
 export function installArgv(manager: UpdateManager, spec: string): InstallCommand {
-  if (manager === UPDATE_MANAGER.BUN) return { cmd: "bun", args: ["add", "-g", spec] };
-  if (manager === UPDATE_MANAGER.PNPM) return { cmd: "pnpm", args: ["add", "-g", spec] };
-  return { cmd: "npm", args: ["install", "-g", spec] };
+  if (manager === UPDATE_MANAGER.BUN) return { cmd: UPDATE_MANAGER.BUN, args: ["add", "-g", spec] };
+  if (manager === UPDATE_MANAGER.PNPM)
+    return { cmd: UPDATE_MANAGER.PNPM, args: ["add", "-g", spec] };
+  return { cmd: UPDATE_MANAGER.NPM, args: ["install", "-g", spec] };
 }
 
 export function defaultInstallSpec(version: string): string {

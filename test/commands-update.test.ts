@@ -212,9 +212,9 @@ describe("vf update", () => {
   test("defaultSpawnInstall runs a real (trivial) command and reports its status", () => {
     expect(defaultSpawnInstall(process.execPath, ["-e", "0"]).status).toBe(0);
   });
-  test("the real install runner routes through the canonical shell launcher (win32 shims)", () => {
+  test("the real install runner routes through the canonical shim predicate (win32 layouts)", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src", "commands", "update.ts"), "utf8");
-    expect(src).toContain("needsShellForCommand(cmd)");
+    expect(src).toContain("shouldUseWindowsShell(cmd, resolved)");
     expect(src).toContain("shellLaunchArgv(cmd, args, true)");
   });
 });

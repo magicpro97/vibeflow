@@ -7,7 +7,7 @@
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { needsShellForCommand, shellLaunchArgv } from "../core/command-runtime.js";
+import { resolveCommand, shellLaunchArgv, shouldUseWindowsShell } from "../core/command-runtime.js";
 import { cmpVersionPrecedence } from "../core/version-format.js";
 import { readSettings } from "../settings.js";
 import { fetchLatest } from "../update-check.js";
@@ -62,7 +62,8 @@ export function defaultSpawnInstall(
 ): { status: number | null } {
   let argv: string[] = [cmd, ...args];
   try {
-    if (needsShellForCommand(cmd)) argv = shellLaunchArgv(cmd, args, true);
+    const resolved = resolveCommand(cmd) ?? cmd;
+    if (shouldUseWindowsShell(cmd, resolved)) argv = shellLaunchArgv(cmd, args, true);
   } catch {
     /* platform lookup unavailable (e.g. node without the Bun shim) — direct spawn */
   }

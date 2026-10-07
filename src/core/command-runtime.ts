@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { extname } from "node:path";
 import { RUNTIME_PLATFORM } from "../durability/process-identity-contract.js";
 
 function safeCommandName(cmd: string): boolean {
@@ -24,6 +26,26 @@ const WINDOWS_SHIM_SUFFIX = /\.(?:cmd|bat)$/i;
 export function needsShellForCommand(cmd: string): boolean {
   if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return false;
   return WINDOWS_SHIM_SUFFIX.test(cmd) || WINDOWS_SHIM_SUFFIX.test(resolveCommand(cmd) ?? "");
+}
+
+/** True when `path` has no extension but a `.cmd`/`.bat` sibling exists next to it: some Windows
+ *  install layouts resolve the extensionless bin-stub, and the shim only shows up as the sibling
+ *  (issue #88). */
+export function hasWindowsShimSibling(path: string): boolean {
+  if (extname(path)) return false;
+  return existsSync(`${path}.cmd`) || existsSync(`${path}.bat`);
+}
+
+/**
+ * Superset shim predicate for process launches: the resolved path carries a shim suffix, a shim
+ * sibling sits next to an extensionless resolved path, or the token is the copilot CLI (whose only
+ * Windows install is npm shims; #805/#88). Callers pass the tokenized cmd plus its PATH resolution.
+ */
+export function shouldUseWindowsShell(cmd: string, resolvedCmd: string): boolean {
+  if (process.platform !== RUNTIME_PLATFORM.WINDOWS) return false;
+  if (WINDOWS_SHIM_SUFFIX.test(resolvedCmd)) return true;
+  if (cmd.toLowerCase() === "copilot") return true;
+  return hasWindowsShimSibling(resolvedCmd);
 }
 
 /**

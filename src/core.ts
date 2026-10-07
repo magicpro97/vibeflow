@@ -310,10 +310,12 @@ export function recomputeTotals(s: WorkflowState): WorkflowState {
 
 export {
   hasCommand,
+  hasWindowsShimSibling,
   needsShellForCommand,
   resolveCommand,
   resolveEngineBinary,
   shellLaunchArgv,
+  shouldUseWindowsShell,
   splitCommandLine,
 } from "./core/command-runtime.js";
 

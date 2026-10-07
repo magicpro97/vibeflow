@@ -196,6 +196,17 @@ describe("updateCheck (vf update-check)", () => {
     expect(code).toBe(0);
     expect(lines.join("\n")).toContain("Update available");
   });
+  test("prerelease currents compare by precedence (rc.2 sees the stable release)", async () => {
+    const { lines, outFn } = makeSink();
+    const code = await updateCheck({
+      fetch: async () => res(true, { version: "0.21.0" }),
+      writeFileSafe: () => {},
+      current: "0.21.0-rc.2",
+      outFn,
+    });
+    expect(code).toBe(0);
+    expect(lines.join("\n")).toContain("Update available");
+  });
   test("returns 1 and warns when the registry is unreachable", async () => {
     const { lines, outFn } = makeSink();
     const code = await updateCheck({
