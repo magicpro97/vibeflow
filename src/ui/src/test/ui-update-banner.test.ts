@@ -1,6 +1,7 @@
 /** Pure banner projections: when the banner shows and what it says. */
 const { describe, expect, test } = await import(String("bun:test"));
-import { type UpdateStatusView, bannerLine, bannerVisible } from "../update-banner-model.js";
+import type { UpdateStatusView } from "../../../update/update-status-contract.js";
+import { bannerLine, bannerVisible } from "../update-banner-model.js";
 
 const base: UpdateStatusView = {
   ok: true,

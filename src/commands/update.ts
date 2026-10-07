@@ -29,7 +29,12 @@ import {
   readHandoffState,
   writeUpdateRequest,
 } from "../update/update-contract.js";
-import { type UpdateStateV1, readUpdateState, writeUpdateState } from "../update/update-state.js";
+import {
+  UPDATE_STATE,
+  type UpdateStateV1,
+  readUpdateState,
+  writeUpdateState,
+} from "../update/update-state.js";
 // Import through the commands barrel: `out` is NOT exported by src/core.ts
 // (it lives in src/logbus.ts); `_shared.ts` re-exports core + logbus symbols.
 import { c, cwd, out, readVersion } from "./_shared.js";
@@ -156,7 +161,13 @@ export async function update(
       return 1;
     }
     outFn("vf", `Rolling back v${current} → v${state.previous_version} …`);
-    return await apply(`@magicpro97/vibeflow@${state.previous_version}`);
+    // Default to the manager recorded with the undo point — the update may
+    // have been installed by a different manager than the one selected now,
+    // and a second global copy is the failure this avoids. An explicit
+    // --manager still wins.
+    const rollbackManager =
+      manager as UpdateManager;
+    return await apply(`@magicpro97/vibeflow@${state.previous_version}`, rollbackManager);
   }
   const spec = typeof flags.spec === "string" ? flags.spec : null;
 
@@ -195,12 +206,15 @@ export async function update(
   outFn("vf", `Installing ${spec} …`);
   return await apply(spec);
 
-  async function apply(installSpec: string): Promise<number> {
+  async function apply(
+    installSpec: string,
+    mgr: UpdateManager = manager as UpdateManager,
+  ): Promise<number> {
     const spawner = seams.spawner ?? defaultSpawnInstall;
-    const install = installArgv(manager as UpdateManager, installSpec);
+    const install = installArgv(mgr, installSpec);
     const result = spawner(install.cmd, install.args);
     if ((result.status ?? 1) !== 0) {
-      outFn("vf", c.red(`Install failed (${manager} exited ${String(result.status)}).`), {
+      outFn("vf", c.red(`Install failed (${mgr} exited ${String(result.status)}).`), {
         level: "error",
       });
       return 1;
@@ -224,12 +238,12 @@ export async function update(
     // on disk changed, and that is exactly what rollback undoes.
     if (cmpVersionPrecedence(installed, current) !== 0) {
       (seams.writeState ?? writeUpdateState)({
-        schema_version: 1,
+        schema_version: UPDATE_STATE.SCHEMA_VERSION,
         previous_version: current,
-        // Non-null by construction: apply() is only reached after the
-        // `manager === null` early return; TS flow does not cross into this
-        // nested function, so the assertion is explicit (tsc-verified).
-        manager: manager as UpdateManager,
+        // The manager that actually ran this install: the rollback path may
+        // pass the recorded manager, and the swapped record must stay honest
+        // for the next toggle either way.
+        manager: mgr,
         at: now(),
       });
     }

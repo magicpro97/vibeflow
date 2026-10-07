@@ -261,6 +261,29 @@ describe("vf update", () => {
     expect(await update([], { rollback: true }, h.seams)).toBe(1);
     expect(h.installs).toEqual([]);
   });
+  test("--rollback defaults to the manager recorded with the undo point", async () => {
+    const states: UpdateStateV1[] = [];
+    let installedCall = 0;
+    const h = harness({
+      readState: () => ({ schema_version: 1, previous_version: "0.20.9", manager: "pnpm", at: 1 }),
+      readInstalled: () => (++installedCall === 1 ? "0.21.0" : "0.20.9"),
+      enumerate: () => [{ base: "/repo", pid: 111, port: 7799, app_version: "0.21.0" }],
+      writeState: (s: UpdateStateV1) => states.push(s),
+    });
+    expect(await update([], { rollback: true }, h.seams)).toBe(0);
+    expect(h.installs).toEqual([["pnpm", "add", "-g", "@magicpro97/vibeflow@0.20.9"]]);
+    expect(states[0]?.manager).toBe("pnpm"); // the swap records the manager that ran
+  });
+  test("--rollback honors an explicit --manager over the recorded one", async () => {
+    let installedCall = 0;
+    const h = harness({
+      readState: () => ({ schema_version: 1, previous_version: "0.20.9", manager: "pnpm", at: 1 }),
+      readInstalled: () => (++installedCall === 1 ? "0.21.0" : "0.20.9"),
+      enumerate: () => [{ base: "/repo", pid: 111, port: 7799, app_version: "0.21.0" }],
+    });
+    expect(await update([], { rollback: true, manager: "bun" }, h.seams)).toBe(0);
+    expect(h.installs).toEqual([["bun", "add", "-g", "@magicpro97/vibeflow@0.20.9"]]);
+  });
   test("--rollback without a record exits 2 and names the manual escape hatch", async () => {
     const h = harness({ readState: () => null });
     expect(await update([], { rollback: true }, h.seams)).toBe(2);

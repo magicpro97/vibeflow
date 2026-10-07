@@ -15,17 +15,7 @@ import { readSettings } from "../settings.js";
 import { readCache } from "../update-check.js";
 import { enumerateLiveUiServers, serversNeedingRestart } from "../update/update-apply.js";
 import { type UpdateStateV1, readUpdateState } from "../update/update-state.js";
-
-export interface UpdateStatusView {
-  ok: true;
-  installed: string;
-  latest: string | null;
-  mode: string;
-  manager: string;
-  upgrade_available: boolean;
-  stale_servers: { base: string; pid: number; version: string }[];
-  rollback: { version: string } | null;
-}
+import { UPDATE_RUN_ACTION, type UpdateStatusView } from "../update/update-status-contract.js";
 
 export function updateStatusView(
   repo: string,
@@ -65,14 +55,14 @@ export function handleUpdateStatus(repo: string): Response {
  *  without re-entering the test runner through process.argv[1]. */
 export function defaultSpawnUpdate(
   args: readonly string[],
-  rt: { execPath: string; entry: string } = {
+  rt: { execPath: string; entry: string; cwd?: string } = {
     execPath: process.execPath,
     entry: process.argv[1] ?? "",
   },
 ): boolean {
   try {
     const child = spawn(rt.execPath, [rt.entry, ...args], {
-      cwd: process.cwd(),
+      cwd: rt.cwd ?? process.cwd(),
       env: process.env,
       detached: true,
       stdio: "ignore",
@@ -85,10 +75,26 @@ export function defaultSpawnUpdate(
   }
 }
 
+/** Default spawn arm for handleUpdateRun: the process runtime, spawned in the
+ *  route's authoritative repo (cwd). Exported so tests exercise the composition
+ *  with an injected runtime instead of re-entering a live test runner through
+ *  process.argv[1]. */
+export function spawnUpdateDefault(
+  args: readonly string[],
+  cwd?: string,
+  rt: { execPath: string; entry: string } = {
+    execPath: process.execPath,
+    entry: process.argv[1] ?? "",
+  },
+): boolean {
+  return defaultSpawnUpdate(args, { ...rt, cwd });
+}
+
 export function handleUpdateRun(opts: {
   lanExposed: boolean;
   body: unknown;
-  spawnUpdate?: (args: readonly string[]) => boolean;
+  cwd?: string;
+  spawnUpdate?: (args: readonly string[], cwd?: string) => boolean;
 }): Response {
   if (opts.lanExposed)
     return Response.json({ error: "update runs are local-only" }, { status: 403 });
@@ -96,10 +102,10 @@ export function handleUpdateRun(opts: {
     opts.body !== null && typeof opts.body === "object"
       ? (opts.body as { action?: unknown }).action
       : undefined;
-  if (action !== "update" && action !== "rollback")
+  if (action !== UPDATE_RUN_ACTION.UPDATE && action !== UPDATE_RUN_ACTION.ROLLBACK)
     return Response.json({ error: "action must be update or rollback" }, { status: 400 });
-  const args = action === "rollback" ? ["update", "--rollback"] : ["update"];
-  const started = (opts.spawnUpdate ?? defaultSpawnUpdate)(args);
+  const args = action === UPDATE_RUN_ACTION.ROLLBACK ? ["update", "--rollback"] : ["update"];
+  const started = (opts.spawnUpdate ?? spawnUpdateDefault)(args, opts.cwd);
   if (!started) return Response.json({ error: "could not start vf update" }, { status: 500 });
   return Response.json({ ok: true, started: true, action });
 }

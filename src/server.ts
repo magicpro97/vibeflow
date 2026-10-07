@@ -467,7 +467,7 @@ export async function startServer(
       // --- POST /api/update/run (CSRF + local-only; spawns vf update detached) ---
       if (method === "POST" && path === "/api/update/run") {
         if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
-        return handleUpdateRun({ lanExposed, body: await readJson(req) });
+        return handleUpdateRun({ lanExposed, body: await readJson(req), cwd: activeRepo });
       }
 
       // --- GET /api/typesafe (guarded) — the System One judge view, key source only ---

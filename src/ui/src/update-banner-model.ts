@@ -1,14 +1,6 @@
-/** Browser-safe projections for the update banner (no node:* imports). */
-export interface UpdateStatusView {
-  ok: boolean;
-  installed: string;
-  latest: string | null;
-  mode: string;
-  manager: string;
-  upgrade_available: boolean;
-  stale_servers: { base: string; pid: number; version: string }[];
-  rollback: { version: string } | null;
-}
+/** Pure browser-safe projections for the update banner; the wire shape lives in
+ *  the shared dependency-neutral contract (also imported by the server routes). */
+import type { UpdateStatusView } from "../../update/update-status-contract.js";
 
 export function bannerVisible(s: UpdateStatusView): boolean {
   return s.upgrade_available || s.rollback !== null;

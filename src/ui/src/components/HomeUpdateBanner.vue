@@ -1,10 +1,20 @@
 <template>
   <div v-if="line" class="home-update-banner">
     <span role="status">{{ line }}</span>
-    <button v-if="status?.upgrade_available" type="button" :disabled="busy" @click="run('update')">
+    <button
+      v-if="status?.upgrade_available"
+      type="button"
+      :disabled="busy"
+      @click="run(UPDATE_RUN_ACTION.UPDATE)"
+    >
       {{ busy ? "Starting…" : "Update now" }}
     </button>
-    <button v-if="status?.rollback" type="button" :disabled="busy" @click="run('rollback')">
+    <button
+      v-if="status?.rollback"
+      type="button"
+      :disabled="busy"
+      @click="run(UPDATE_RUN_ACTION.ROLLBACK)"
+    >
       Rollback
     </button>
     <span v-if="started" class="home-update-banner__started" role="status">{{ started }}</span>
@@ -21,6 +31,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { UPDATE_RUN_ACTION, type UpdateRunAction } from "../../../update/update-status-contract.js";
 import { fetchUpdateStatus, runUpdate } from "../update-api.js";
 import { type UpdateStatusView, bannerLine } from "../update-banner-model.js";
 
@@ -40,7 +51,7 @@ onMounted(async () => {
   }
 });
 
-async function run(action: "update" | "rollback"): Promise<void> {
+async function run(action: UpdateRunAction): Promise<void> {
   busy.value = true;
   try {
     await runUpdate(action);
@@ -48,7 +59,7 @@ async function run(action: "update" | "rollback"): Promise<void> {
     // user to look in the terminal. The UI picks the new version up on drain
     // (PR #827); vf doctor shows the update state if it does not.
     started.value =
-      action === "rollback"
+      action === UPDATE_RUN_ACTION.ROLLBACK
         ? "Rollback started in the background"
         : "Update started in the background";
   } catch {

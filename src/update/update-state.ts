@@ -14,8 +14,10 @@ import { UPDATE_MANAGER_ID, type UpdateManagerId } from "../settings-update.js";
 
 export const UPDATE_STATE_PATH = join(homedir(), ".vibeflow", "update-state.json");
 
+export const UPDATE_STATE = Object.freeze({ SCHEMA_VERSION: 1 } as const);
+
 export interface UpdateStateV1 {
-  schema_version: number;
+  schema_version: typeof UPDATE_STATE.SCHEMA_VERSION;
   previous_version: string;
   manager: UpdateManagerId;
   at: number;
@@ -27,13 +29,13 @@ const MANAGER_IDS: readonly string[] = Object.values(UPDATE_MANAGER_ID);
 export function readUpdateState(path: string = UPDATE_STATE_PATH): UpdateStateV1 | null {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<UpdateStateV1>;
-    if (parsed.schema_version !== 1) return null;
+    if (parsed.schema_version !== UPDATE_STATE.SCHEMA_VERSION) return null;
     if (typeof parsed.previous_version !== "string" || !isValidVersion(parsed.previous_version))
       return null;
     if (typeof parsed.manager !== "string" || !MANAGER_IDS.includes(parsed.manager)) return null;
     if (typeof parsed.at !== "number" || !Number.isFinite(parsed.at)) return null;
     return {
-      schema_version: 1,
+      schema_version: UPDATE_STATE.SCHEMA_VERSION,
       previous_version: parsed.previous_version,
       manager: parsed.manager as UpdateManagerId,
       at: parsed.at,

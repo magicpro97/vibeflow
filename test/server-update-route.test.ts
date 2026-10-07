@@ -97,4 +97,18 @@ describe("handleUpdateRun", () => {
     });
     expect(res.status).toBe(500);
   });
+  test("passes the authoritative repo cwd through to the spawn seam", async () => {
+    let seenCwd: string | undefined;
+    const res = handleUpdateRun({
+      lanExposed: false,
+      body: { action: "update" },
+      cwd: "/some/repo",
+      spawnUpdate: (_args, cwd) => {
+        seenCwd = cwd;
+        return true;
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(seenCwd).toBe("/some/repo");
+  });
 });
