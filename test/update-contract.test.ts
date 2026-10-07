@@ -43,12 +43,24 @@ describe("parseUpdateRequest", () => {
       [],
       { ...request, schema_version: "2.0" },
       { ...request, request_id: "" },
+      { ...request, request_id: 7 },
       { ...request, requested_at: Number.NaN },
+      { ...request, requested_at: Number.POSITIVE_INFINITY },
+      { ...request, requested_at: "soon" },
       { ...request, target_version: "0.21.0\u001b[31m" },
+      { ...request, target_version: "v0.21.0" },
       { ...request, requested_by_pid: 0 },
+      { ...request, requested_by_pid: -1 },
       { ...request, requested_by_pid: 1.5 },
+      { ...request, requested_by_pid: Number.NaN },
     ])
       expect(parseUpdateRequest(bad)).toBeNull();
+  });
+  test("accepts the valid side of each gate", () => {
+    // zero is finite; pid 1 is the smallest legal pid; suffixed versions are valid
+    expect(parseUpdateRequest({ ...request, requested_at: 0 })).not.toBeNull();
+    expect(parseUpdateRequest({ ...request, requested_by_pid: 1 })).not.toBeNull();
+    expect(parseUpdateRequest({ ...request, target_version: "0.21.0-rc.1" })).not.toBeNull();
   });
 });
 
@@ -62,12 +74,30 @@ describe("parseHandoffState", () => {
   test("rejects unknown state and malformed optional fields", () => {
     for (const bad of [
       null,
+      { ...state, schema_version: "2.0" },
+      { ...state, request_id: "" },
       { ...state, state: "bogus" },
+      { ...state, from_version: "0.20" },
+      { ...state, target_version: "" },
       { ...state, replacement_pid: -1 },
+      { ...state, replacement_pid: 1.5 },
+      { ...state, replacement_pid: Number.NaN },
       { ...state, failure: 7 },
       { ...state, at: "soon" },
+      { ...state, at: Number.NaN },
+      { ...state, at: Number.POSITIVE_INFINITY },
     ])
       expect(parseHandoffState(bad)).toBeNull();
+  });
+  test("accepts the valid side of each gate", () => {
+    const full = UPDATE_HANDOFF.SCHEMA_VERSION;
+    expect(parseHandoffState({ ...state, schema_version: full })).not.toBeNull();
+    expect(parseHandoffState({ ...state, state: "replacement_started" })?.state).toBe(
+      "replacement_started",
+    );
+    expect(parseHandoffState({ ...state, at: 0 })?.at).toBe(0);
+    expect(parseHandoffState({ ...state, from_version: "0.20.0-rc.1" })).not.toBeNull();
+    expect(parseHandoffState({ ...state, replacement_pid: 1 })?.replacement_pid).toBe(1);
   });
 });
 
@@ -118,5 +148,10 @@ describe("isHandoffStale", () => {
         state.at + UPDATE_HANDOFF.STALE_MS,
       ),
     ).toBe(false);
+  });
+  test("failed ages like any non-drained state: fresh is not stale, past the threshold is", () => {
+    const failed = { ...state, state: "failed" as const, failure: "replacement timed out" };
+    expect(isHandoffStale(failed, failed.at + UPDATE_HANDOFF.STALE_MS)).toBe(false);
+    expect(isHandoffStale(failed, failed.at + UPDATE_HANDOFF.STALE_MS + 1)).toBe(true);
   });
 });
