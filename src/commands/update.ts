@@ -29,6 +29,7 @@ import {
   readHandoffState,
   writeUpdateRequest,
 } from "../update/update-contract.js";
+import { type UpdateStateV1, readUpdateState, writeUpdateState } from "../update/update-state.js";
 // Import through the commands barrel: `out` is NOT exported by src/core.ts
 // (it lives in src/logbus.ts); `_shared.ts` re-exports core + logbus symbols.
 import { c, cwd, out, readVersion } from "./_shared.js";
@@ -42,6 +43,8 @@ export interface UpdateCommandSeams {
   enumerate?: () => LiveUiServer[];
   writeRequest?: (base: string, request: UpdateRequestV1) => void;
   readHandoff?: (base: string) => HandoffStateV1 | null;
+  readState?: () => UpdateStateV1 | null;
+  writeState?: (state: UpdateStateV1) => void;
   readSettings?: (base: string) => { update?: { manager?: UpdateManager } };
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -130,6 +133,31 @@ export async function update(
     return 2;
   }
   const current = readInstalled();
+  if (flags.rollback === true && (typeof flags.spec === "string" || flags.check === true)) {
+    outFn("vf", c.red("--rollback cannot be combined with --spec or --check. Use one at a time."), {
+      level: "error",
+    });
+    return 2;
+  }
+  if (flags.rollback === true) {
+    const state = (seams.readState ?? readUpdateState)();
+    if (state === null) {
+      outFn(
+        "vf",
+        c.red(
+          "No recorded previous version to roll back to. Install one explicitly: vf update --spec @magicpro97/vibeflow@<version>",
+        ),
+        { level: "error" },
+      );
+      return 2;
+    }
+    if (cmpVersionPrecedence(state.previous_version, current) === 0) {
+      outFn("vf", c.yellow(`Already on v${current}; nothing to roll back to.`), { level: "warn" });
+      return 1;
+    }
+    outFn("vf", `Rolling back v${current} → v${state.previous_version} …`);
+    return await apply(`@magicpro97/vibeflow@${state.previous_version}`);
+  }
   const spec = typeof flags.spec === "string" ? flags.spec : null;
 
   if (flags.check === true) {
@@ -178,7 +206,7 @@ export async function update(
       return 1;
     }
     const installed = readInstalled();
-    if (cmpVersionPrecedence(installed, current) <= 0 && flags.force !== true) {
+    if (cmpVersionPrecedence(installed, current) === 0 && flags.force !== true) {
       outFn(
         "vf",
         c.yellow(
@@ -189,6 +217,22 @@ export async function update(
       return 1;
     }
     outFn("vf", c.green(`Installed v${installed}.`));
+    // Record only a real version change: a --force same-version restart (or a
+    // handoff-failed update that DID land) must not produce a same-version
+    // undo point — rolling back to where you already are is a confusing no-op.
+    // A handoff failure AFTER a real install DOES keep the record: the version
+    // on disk changed, and that is exactly what rollback undoes.
+    if (cmpVersionPrecedence(installed, current) !== 0) {
+      (seams.writeState ?? writeUpdateState)({
+        schema_version: 1,
+        previous_version: current,
+        // Non-null by construction: apply() is only reached after the
+        // `manager === null` early return; TS flow does not cross into this
+        // nested function, so the assertion is explicit (tsc-verified).
+        manager: manager as UpdateManager,
+        at: now(),
+      });
+    }
     if (flags["no-restart"] === true) return 0;
 
     const servers = (seams.enumerate ?? enumerateLiveUiServers)();
