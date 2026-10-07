@@ -15,20 +15,32 @@ export const UPDATE_LOCK_PATH = join(homedir(), ".vibeflow", "update.lock");
 /** A wedged holder is stealable after this long (proper-lockfile refreshes mtime while held). */
 export const UPDATE_LOCK_STALE_MS = 10 * 60_000;
 
-/** Acquire the update lock, or return null when another update holds it.
- *  The returned release function is safe to await exactly once. */
-export function acquireUpdateLock(path: string = UPDATE_LOCK_PATH): (() => Promise<void>) | null {
+export type UpdateLockResult =
+  | { ok: true; release: () => Promise<void> }
+  | { ok: false; reason: "held" | "unavailable" };
+
+/** Acquire the update lock. `held` = another update is running (ELOCKED);
+ *  `unavailable` = the lock file/dir pair could not be used at all. */
+export function acquireUpdateLock(path: string = UPDATE_LOCK_PATH): UpdateLockResult {
   try {
     writeFileSafe(path, "");
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+  try {
     const release = lockfile.lockSync(path, {
       realpath: false,
       retries: 0,
       stale: UPDATE_LOCK_STALE_MS,
     });
-    return async () => {
-      await release();
+    return {
+      ok: true,
+      release: async () => {
+        await release();
+      },
     };
-  } catch {
-    return null;
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    return { ok: false, reason: code === "ELOCKED" ? "held" : "unavailable" };
   }
 }

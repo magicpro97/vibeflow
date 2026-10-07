@@ -99,6 +99,22 @@ describe("handleUpdateRun", () => {
     expect(res.status).toBe(400);
     expect(spawned).toBe(0);
   });
+  test("a non-UTF8 body is refused without spawning", async () => {
+    let spawned = 0;
+    const res = await handleUpdateRun({
+      lanExposed: false,
+      request: new Request("http://127.0.0.1:7799/api/update/run", {
+        method: "POST",
+        body: new Uint8Array([0xff, 0xfe]),
+      }),
+      spawnUpdate: () => {
+        spawned++;
+        return true;
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(spawned).toBe(0);
+  });
   test("spawns vf update / vf update --rollback detached and reports started", async () => {
     const calls: string[][] = [];
     for (const [action, expected] of [

@@ -42,7 +42,7 @@ function harness(over: Record<string, unknown> = {}): Harness {
       };
     },
     writeState: () => {},
-    acquireLock: () => async () => {},
+    acquireLock: () => ({ ok: true, release: async () => {} }),
     writeAutoMarker: () => {},
     sleep: async (ms: number) => {
       clock += ms;
@@ -314,17 +314,26 @@ describe("vf update", () => {
     expect(states).toEqual([]);
   });
   test("refuses to start a second update while the machine-global lock is held", async () => {
-    const h = harness({ acquireLock: () => null });
+    const h = harness({ acquireLock: () => ({ ok: false, reason: "held" }) });
     expect(await update([], {}, h.seams)).toBe(1);
     expect(h.installs).toEqual([]);
     expect(h.lines.some((l) => l.includes("already running"))).toBe(true);
   });
+  test("an unavailable lock is a distinct refusal, not 'already running'", async () => {
+    const h = harness({ acquireLock: () => ({ ok: false, reason: "unavailable" }) });
+    expect(await update([], {}, h.seams)).toBe(1);
+    expect(h.installs).toEqual([]);
+    expect(h.lines.some((l) => l.includes("Could not take the update lock"))).toBe(true);
+  });
   test("releases the lock after a successful update", async () => {
     let releases = 0;
     const h = harness({
-      acquireLock: () => async () => {
-        releases += 1;
-      },
+      acquireLock: () => ({
+        ok: true,
+        release: async () => {
+          releases += 1;
+        },
+      }),
     });
     expect(await update([], {}, h.seams)).toBe(0);
     expect(releases).toBe(1);
@@ -333,12 +342,32 @@ describe("vf update", () => {
     let releases = 0;
     const h = harness({
       spawner: () => ({ status: 1 }),
-      acquireLock: () => async () => {
-        releases += 1;
-      },
+      acquireLock: () => ({
+        ok: true,
+        release: async () => {
+          releases += 1;
+        },
+      }),
     });
     expect(await update([], {}, h.seams)).toBe(1);
     expect(releases).toBe(1);
+  });
+  test("releases the lock on the rollback-no-record and registry-unreachable early returns", async () => {
+    for (const over of [{ readState: () => null }, { fetchLatest: async () => null }] as const) {
+      let releases = 0;
+      const h = harness({
+        ...over,
+        acquireLock: () => ({
+          ok: true,
+          release: async () => {
+            releases += 1;
+          },
+        }),
+      });
+      const flags: Record<string, string | boolean> = "readState" in over ? { rollback: true } : {};
+      expect(await update([], flags, h.seams)).toBe("readState" in over ? 2 : 1);
+      expect(releases).toBe(1);
+    }
   });
   test("a version-changing install refreshes the auto-update marker", async () => {
     const markers: { version: string; attempted_at: number }[] = [];

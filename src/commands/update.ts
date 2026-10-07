@@ -34,7 +34,7 @@ import {
   readHandoffState,
   writeUpdateRequest,
 } from "../update/update-contract.js";
-import { acquireUpdateLock } from "../update/update-lock.js";
+import { type UpdateLockResult, acquireUpdateLock } from "../update/update-lock.js";
 import {
   UPDATE_STATE,
   type UpdateStateV1,
@@ -56,7 +56,7 @@ export interface UpdateCommandSeams {
   readHandoff?: (base: string) => HandoffStateV1 | null;
   readState?: () => UpdateStateV1 | null;
   writeState?: (state: UpdateStateV1) => void;
-  acquireLock?: () => (() => Promise<void>) | null;
+  acquireLock?: () => UpdateLockResult;
   writeAutoMarker?: (marker: AutoUpdateMarker, path: string) => void;
   readSettings?: (base: string) => { update?: { manager?: UpdateManager } };
   sleep?: (ms: number) => Promise<void>;
@@ -145,17 +145,23 @@ export async function update(
     });
     return 2;
   }
-  const release = (seams.acquireLock ?? acquireUpdateLock)();
-  if (release === null) {
-    outFn("vf", c.red("Another vf update is already running; not starting a second one."), {
-      level: "error",
-    });
+  const lock = (seams.acquireLock ?? acquireUpdateLock)();
+  if (!lock.ok) {
+    outFn(
+      "vf",
+      c.red(
+        lock.reason === "held"
+          ? "Another vf update is already running; not starting a second one."
+          : "Could not take the update lock (check ~/.vibeflow is writable); not starting.",
+      ),
+      { level: "error" },
+    );
     return 1;
   }
   try {
     return await withLockedUpdate();
   } finally {
-    await release();
+    await lock.release();
   }
 
   async function withLockedUpdate(): Promise<number> {
