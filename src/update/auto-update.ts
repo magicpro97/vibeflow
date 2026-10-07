@@ -62,8 +62,10 @@ export async function maybeAutoUpdate(seams: AutoUpdateSeams): Promise<boolean> 
   const now = (seams.now ?? Date.now)();
   if (marker && marker.version === latest && now - marker.attempted_at < AUTO_UPDATE.RETRY_MS)
     return false;
-  seams.writeMarker({ version: latest, attempted_at: now });
   const spawned = seams.spawnUpdate();
+  // Record the attempt only for a spawn that actually happened: a spawn
+  // failure must not burn the 6h retry window.
+  if (spawned) seams.writeMarker({ version: latest, attempted_at: now });
   seams.outFn?.(
     spawned
       ? `auto-update: installing v${latest}`

@@ -75,10 +75,19 @@ describe("maybeAutoUpdate", () => {
     h.setMarker({ version: "0.21.0", attempted_at: h.now() - AUTO_UPDATE.RETRY_MS - 1 });
     expect(await maybeAutoUpdate(h.seams)).toBe(true);
   });
-  test("reports a failed spawn", async () => {
-    const h = autoHarness({ spawnUpdate: () => false });
-    expect(await maybeAutoUpdate(h.seams)).toBe(false);
+  test("reports a failed spawn without burning the retry window", async () => {
+    let attempts = 0;
+    const h = autoHarness({
+      spawnUpdate: () => {
+        attempts += 1;
+        return attempts > 1;
+      },
+    });
+    expect(await maybeAutoUpdate(h.seams)).toBe(false); // spawn #1 fails
     expect(h.log.some((l) => l.includes("could not spawn"))).toBe(true);
+    expect(h.getMarker()).toBeNull(); // no marker for a spawn that never ran
+    expect(await maybeAutoUpdate(h.seams)).toBe(true); // retry allowed immediately
+    expect(h.getMarker()?.version).toBe("0.21.0");
   });
 });
 

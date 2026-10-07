@@ -16,6 +16,7 @@ import { readCache } from "../update-check.js";
 import { enumerateLiveUiServers, serversNeedingRestart } from "../update/update-apply.js";
 import { type UpdateStateV1, readUpdateState } from "../update/update-state.js";
 import { UPDATE_RUN_ACTION, type UpdateStatusView } from "../update/update-status-contract.js";
+import { readBoundedUtf8Body } from "./bounded-request-body.js";
 
 export function updateStatusView(
   repo: string,
@@ -90,18 +91,25 @@ export function spawnUpdateDefault(
   return defaultSpawnUpdate(args, { ...rt, cwd });
 }
 
-export function handleUpdateRun(opts: {
+/** Body bound: the payload is a tiny `{action}` object; anything larger is abuse. */
+export const UPDATE_RUN_MAX_BODY_BYTES = 64 * 1024;
+
+export async function handleUpdateRun(opts: {
   lanExposed: boolean;
-  body: unknown;
+  request: Request;
   cwd?: string;
   spawnUpdate?: (args: readonly string[], cwd?: string) => boolean;
-}): Response {
+}): Promise<Response> {
   if (opts.lanExposed)
     return Response.json({ error: "update runs are local-only" }, { status: 403 });
+  let body: unknown;
+  try {
+    body = JSON.parse(await readBoundedUtf8Body(opts.request, UPDATE_RUN_MAX_BODY_BYTES));
+  } catch {
+    return Response.json({ error: "invalid request body" }, { status: 400 });
+  }
   const action =
-    opts.body !== null && typeof opts.body === "object"
-      ? (opts.body as { action?: unknown }).action
-      : undefined;
+    body !== null && typeof body === "object" ? (body as { action?: unknown }).action : undefined;
   if (action !== UPDATE_RUN_ACTION.UPDATE && action !== UPDATE_RUN_ACTION.ROLLBACK)
     return Response.json({ error: "action must be update or rollback" }, { status: 400 });
   const args = action === UPDATE_RUN_ACTION.ROLLBACK ? ["update", "--rollback"] : ["update"];

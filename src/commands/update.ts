@@ -12,6 +12,11 @@ import { cmpVersionPrecedence } from "../core/version-format.js";
 import { readSettings } from "../settings.js";
 import { fetchLatest } from "../update-check.js";
 import {
+  AUTO_UPDATE,
+  type AutoUpdateMarker,
+  writeAutoUpdateMarker,
+} from "../update/auto-update.js";
+import {
   type LiveUiServer,
   UPDATE_MANAGER,
   UPDATE_MANAGERS,
@@ -29,6 +34,7 @@ import {
   readHandoffState,
   writeUpdateRequest,
 } from "../update/update-contract.js";
+import { acquireUpdateLock } from "../update/update-lock.js";
 import {
   UPDATE_STATE,
   type UpdateStateV1,
@@ -50,6 +56,8 @@ export interface UpdateCommandSeams {
   readHandoff?: (base: string) => HandoffStateV1 | null;
   readState?: () => UpdateStateV1 | null;
   writeState?: (state: UpdateStateV1) => void;
+  acquireLock?: () => (() => Promise<void>) | null;
+  writeAutoMarker?: (marker: AutoUpdateMarker, path: string) => void;
   readSettings?: (base: string) => { update?: { manager?: UpdateManager } };
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -137,145 +145,172 @@ export async function update(
     });
     return 2;
   }
-  const current = readInstalled();
-  if (flags.rollback === true && (typeof flags.spec === "string" || flags.check === true)) {
-    outFn("vf", c.red("--rollback cannot be combined with --spec or --check. Use one at a time."), {
+  const release = (seams.acquireLock ?? acquireUpdateLock)();
+  if (release === null) {
+    outFn("vf", c.red("Another vf update is already running; not starting a second one."), {
       level: "error",
     });
-    return 2;
+    return 1;
   }
-  if (flags.rollback === true) {
-    const state = (seams.readState ?? readUpdateState)();
-    if (state === null) {
+  try {
+    return await withLockedUpdate();
+  } finally {
+    await release();
+  }
+
+  async function withLockedUpdate(): Promise<number> {
+    const current = readInstalled();
+    if (flags.rollback === true && (typeof flags.spec === "string" || flags.check === true)) {
       outFn(
         "vf",
-        c.red(
-          "No recorded previous version to roll back to. Install one explicitly: vf update --spec @magicpro97/vibeflow@<version>",
-        ),
-        { level: "error" },
+        c.red("--rollback cannot be combined with --spec or --check. Use one at a time."),
+        {
+          level: "error",
+        },
       );
       return 2;
     }
-    if (cmpVersionPrecedence(state.previous_version, current) === 0) {
-      outFn("vf", c.yellow(`Already on v${current}; nothing to roll back to.`), { level: "warn" });
-      return 1;
+    if (flags.rollback === true) {
+      const state = (seams.readState ?? readUpdateState)();
+      if (state === null) {
+        outFn(
+          "vf",
+          c.red(
+            "No recorded previous version to roll back to. Install one explicitly: vf update --spec @magicpro97/vibeflow@<version>",
+          ),
+          { level: "error" },
+        );
+        return 2;
+      }
+      if (cmpVersionPrecedence(state.previous_version, current) === 0) {
+        outFn("vf", c.yellow(`Already on v${current}; nothing to roll back to.`), {
+          level: "warn",
+        });
+        return 1;
+      }
+      outFn("vf", `Rolling back v${current} → v${state.previous_version} …`);
+      // Default to the manager recorded with the undo point — the update may
+      // have been installed by a different manager than the one selected now,
+      // and a second global copy is the failure this avoids. An explicit
+      // --manager still wins.
+      const rollbackManager =
+        typeof flags.manager === "string" ? (manager as UpdateManager) : state.manager;
+      return await apply(`@magicpro97/vibeflow@${state.previous_version}`, rollbackManager);
     }
-    outFn("vf", `Rolling back v${current} → v${state.previous_version} …`);
-    // Default to the manager recorded with the undo point — the update may
-    // have been installed by a different manager than the one selected now,
-    // and a second global copy is the failure this avoids. An explicit
-    // --manager still wins.
-    const rollbackManager =
-      typeof flags.manager === "string" ? (manager as UpdateManager) : state.manager;
-    return await apply(`@magicpro97/vibeflow@${state.previous_version}`, rollbackManager);
-  }
-  const spec = typeof flags.spec === "string" ? flags.spec : null;
+    const spec = typeof flags.spec === "string" ? flags.spec : null;
 
-  if (flags.check === true) {
-    const latest = await (seams.fetchLatest ?? fetchLatest)();
-    if (latest === null) {
-      outFn("vf", c.yellow("Could not reach the npm registry to check for updates."), {
-        level: "warn",
-      });
-      return 1;
-    }
-    if (cmpVersionPrecedence(latest, current) > 0)
-      outFn(
-        "vf",
-        `VibeFlow v${current} installed · v${latest} available (run ${c.cyan("vf update")})`,
-      );
-    else outFn("vf", c.green(`VibeFlow v${current} is up to date.`));
-    return 0;
-  }
-
-  if (!spec) {
-    const latest = await (seams.fetchLatest ?? fetchLatest)();
-    if (latest === null) {
-      outFn("vf", c.yellow("Could not reach the npm registry to check for updates."), {
-        level: "warn",
-      });
-      return 1;
-    }
-    if (cmpVersionPrecedence(latest, current) <= 0) {
-      outFn("vf", c.green(`VibeFlow v${current} is up to date.`));
+    if (flags.check === true) {
+      const latest = await (seams.fetchLatest ?? fetchLatest)();
+      if (latest === null) {
+        outFn("vf", c.yellow("Could not reach the npm registry to check for updates."), {
+          level: "warn",
+        });
+        return 1;
+      }
+      if (cmpVersionPrecedence(latest, current) > 0)
+        outFn(
+          "vf",
+          `VibeFlow v${current} installed · v${latest} available (run ${c.cyan("vf update")})`,
+        );
+      else outFn("vf", c.green(`VibeFlow v${current} is up to date.`));
       return 0;
     }
-    outFn("vf", `Updating v${current} → v${latest} …`);
-    return await apply(defaultInstallSpec(latest));
-  }
-  outFn("vf", `Installing ${spec} …`);
-  return await apply(spec);
 
-  async function apply(
-    installSpec: string,
-    mgr: UpdateManager = manager as UpdateManager,
-  ): Promise<number> {
-    const spawner = seams.spawner ?? defaultSpawnInstall;
-    const install = installArgv(mgr, installSpec);
-    const result = spawner(install.cmd, install.args);
-    if ((result.status ?? 1) !== 0) {
-      outFn("vf", c.red(`Install failed (${mgr} exited ${String(result.status)}).`), {
-        level: "error",
-      });
-      return 1;
+    if (!spec) {
+      const latest = await (seams.fetchLatest ?? fetchLatest)();
+      if (latest === null) {
+        outFn("vf", c.yellow("Could not reach the npm registry to check for updates."), {
+          level: "warn",
+        });
+        return 1;
+      }
+      if (cmpVersionPrecedence(latest, current) <= 0) {
+        outFn("vf", c.green(`VibeFlow v${current} is up to date.`));
+        return 0;
+      }
+      outFn("vf", `Updating v${current} → v${latest} …`);
+      return await apply(defaultInstallSpec(latest));
     }
-    const installed = readInstalled();
-    if (cmpVersionPrecedence(installed, current) === 0 && flags.force !== true) {
-      outFn(
-        "vf",
-        c.yellow(
-          `Install did not change the on-disk version (still v${installed}). Is this the vf install on PATH?`,
-        ),
-        { level: "error" },
-      );
-      return 1;
-    }
-    outFn("vf", c.green(`Installed v${installed}.`));
-    // Record only a real version change: a --force same-version restart (or a
-    // handoff-failed update that DID land) must not produce a same-version
-    // undo point — rolling back to where you already are is a confusing no-op.
-    // A handoff failure AFTER a real install DOES keep the record: the version
-    // on disk changed, and that is exactly what rollback undoes.
-    if (cmpVersionPrecedence(installed, current) !== 0) {
-      (seams.writeState ?? writeUpdateState)({
-        schema_version: UPDATE_STATE.SCHEMA_VERSION,
-        previous_version: current,
-        // The manager that actually ran this install: the rollback path may
-        // pass the recorded manager, and the swapped record must stay honest
-        // for the next toggle either way.
-        manager: mgr,
-        at: now(),
-      });
-    }
-    if (flags["no-restart"] === true) return 0;
+    outFn("vf", `Installing ${spec} …`);
+    return await apply(spec);
 
-    const servers = (seams.enumerate ?? enumerateLiveUiServers)();
-    const targets = serversNeedingRestart(servers, installed);
-    if (targets.length === 0) {
-      outFn("vf", c.dim("No running vf ui server needs a restart."));
-      return 0;
-    }
-    outFn("vf", `Restarting ${targets.length} running vf ui server(s) …`);
-    const waitSeams = {
-      readHandoff: seams.readHandoff ?? readHandoffState,
-      sleep: seams.sleep ?? defaultSleep,
-      now,
-      drainWaitMs: seams.drainWaitMs ?? UPDATE_HANDOFF.DRAIN_WAIT_MS,
-    };
-    const outcomes: string[] = [];
-    for (const target of targets) {
-      const request: UpdateRequestV1 = {
-        schema_version: UPDATE_HANDOFF.SCHEMA_VERSION,
-        request_id: randomUUID(),
-        requested_at: now(),
-        target_version: installed,
-        requested_by_pid: process.pid,
+    async function apply(
+      installSpec: string,
+      mgr: UpdateManager = manager as UpdateManager,
+    ): Promise<number> {
+      const spawner = seams.spawner ?? defaultSpawnInstall;
+      const install = installArgv(mgr, installSpec);
+      const result = spawner(install.cmd, install.args);
+      if ((result.status ?? 1) !== 0) {
+        outFn("vf", c.red(`Install failed (${mgr} exited ${String(result.status)}).`), {
+          level: "error",
+        });
+        return 1;
+      }
+      const installed = readInstalled();
+      if (cmpVersionPrecedence(installed, current) === 0 && flags.force !== true) {
+        outFn(
+          "vf",
+          c.yellow(
+            `Install did not change the on-disk version (still v${installed}). Is this the vf install on PATH?`,
+          ),
+          { level: "error" },
+        );
+        return 1;
+      }
+      outFn("vf", c.green(`Installed v${installed}.`));
+      // Record only a real version change: a --force same-version restart (or a
+      // handoff-failed update that DID land) must not produce a same-version
+      // undo point — rolling back to where you already are is a confusing no-op.
+      // A handoff failure AFTER a real install DOES keep the record: the version
+      // on disk changed, and that is exactly what rollback undoes.
+      if (cmpVersionPrecedence(installed, current) !== 0) {
+        (seams.writeState ?? writeUpdateState)({
+          schema_version: UPDATE_STATE.SCHEMA_VERSION,
+          previous_version: current,
+          // The manager that actually ran this install: the rollback path may
+          // pass the recorded manager, and the swapped record must stay honest
+          // for the next toggle either way.
+          manager: mgr,
+          at: now(),
+        });
+        // Keep auto mode honest: the watcher's crash-loop marker must name the
+        // version now on disk, or it re-spawns no-op updates every interval.
+        (seams.writeAutoMarker ?? writeAutoUpdateMarker)(
+          { version: installed, attempted_at: now() },
+          AUTO_UPDATE.MARKER_PATH,
+        );
+      }
+      if (flags["no-restart"] === true) return 0;
+
+      const servers = (seams.enumerate ?? enumerateLiveUiServers)();
+      const targets = serversNeedingRestart(servers, installed);
+      if (targets.length === 0) {
+        outFn("vf", c.dim("No running vf ui server needs a restart."));
+        return 0;
+      }
+      outFn("vf", `Restarting ${targets.length} running vf ui server(s) …`);
+      const waitSeams = {
+        readHandoff: seams.readHandoff ?? readHandoffState,
+        sleep: seams.sleep ?? defaultSleep,
+        now,
+        drainWaitMs: seams.drainWaitMs ?? UPDATE_HANDOFF.DRAIN_WAIT_MS,
       };
-      (seams.writeRequest ?? writeUpdateRequest)(target.base, request);
-      const outcome = await waitForHandoff(target.base, request, waitSeams);
-      outFn("vf", `  ${target.base}: ${outcome}`);
-      outcomes.push(outcome);
+      const outcomes: string[] = [];
+      for (const target of targets) {
+        const request: UpdateRequestV1 = {
+          schema_version: UPDATE_HANDOFF.SCHEMA_VERSION,
+          request_id: randomUUID(),
+          requested_at: now(),
+          target_version: installed,
+          requested_by_pid: process.pid,
+        };
+        (seams.writeRequest ?? writeUpdateRequest)(target.base, request);
+        const outcome = await waitForHandoff(target.base, request, waitSeams);
+        outFn("vf", `  ${target.base}: ${outcome}`);
+        outcomes.push(outcome);
+      }
+      return outcomes.every((o) => o === "drained") ? 0 : 1;
     }
-    return outcomes.every((o) => o === "drained") ? 0 : 1;
   }
 }

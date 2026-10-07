@@ -42,4 +42,12 @@ describe("cmpVersionPrecedence", () => {
     expect(cmpVersionPrecedence("garbage", "0.0.0")).toBe(0); // parseInt("garbage") → NaN → 0
     expect(cmpVersionPrecedence("1.x.3", "1.0.3")).toBe(0);
   });
+  test("leading-zero numeric identifiers are invalid per §11 and compare deterministically", () => {
+    // `rc.01` is not a valid NUMERIC identifier (leading zero is forbidden), so
+    // it must not compare equal to `rc.1`; it takes the alphanumeric branch.
+    expect(cmpVersionPrecedence("1.0.0-rc.01", "1.0.0-rc.1")).toBe(1);
+    expect(cmpVersionPrecedence("1.0.0-rc.1", "1.0.0-rc.01")).toBe(-1);
+    // valid numeric identifiers still compare numerically
+    expect(cmpVersionPrecedence("1.0.0-rc.10", "1.0.0-rc.2")).toBe(1);
+  });
 });

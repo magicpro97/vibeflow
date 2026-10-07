@@ -42,6 +42,8 @@ function harness(over: Record<string, unknown> = {}): Harness {
       };
     },
     writeState: () => {},
+    acquireLock: () => async () => {},
+    writeAutoMarker: () => {},
     sleep: async (ms: number) => {
       clock += ms;
     },
@@ -310,5 +312,50 @@ describe("vf update", () => {
     expect(await update([], { force: true }, h.seams)).toBe(0);
     expect(h.installs).toEqual([["npm", "install", "-g", "@magicpro97/vibeflow@0.22.0"]]);
     expect(states).toEqual([]);
+  });
+  test("refuses to start a second update while the machine-global lock is held", async () => {
+    const h = harness({ acquireLock: () => null });
+    expect(await update([], {}, h.seams)).toBe(1);
+    expect(h.installs).toEqual([]);
+    expect(h.lines.some((l) => l.includes("already running"))).toBe(true);
+  });
+  test("releases the lock after a successful update", async () => {
+    let releases = 0;
+    const h = harness({
+      acquireLock: () => async () => {
+        releases += 1;
+      },
+    });
+    expect(await update([], {}, h.seams)).toBe(0);
+    expect(releases).toBe(1);
+  });
+  test("releases the lock when the install fails", async () => {
+    let releases = 0;
+    const h = harness({
+      spawner: () => ({ status: 1 }),
+      acquireLock: () => async () => {
+        releases += 1;
+      },
+    });
+    expect(await update([], {}, h.seams)).toBe(1);
+    expect(releases).toBe(1);
+  });
+  test("a version-changing install refreshes the auto-update marker", async () => {
+    const markers: { version: string; attempted_at: number }[] = [];
+    const h = harness({
+      writeAutoMarker: (m: { version: string; attempted_at: number }) => markers.push(m),
+    });
+    expect(await update([], {}, h.seams)).toBe(0);
+    expect(markers).toEqual([expect.objectContaining({ version: "0.21.0" })]);
+  });
+  test("a same-version --force install writes no auto-update marker", async () => {
+    const markers: { version: string }[] = [];
+    const h = harness({
+      fetchLatest: async () => "0.22.0",
+      readInstalled: () => "0.21.0",
+      writeAutoMarker: (m: { version: string }) => markers.push(m),
+    });
+    expect(await update([], { force: true }, h.seams)).toBe(0);
+    expect(markers).toEqual([]);
   });
 });

@@ -39,8 +39,10 @@ function comparePrerelease(a: string, b: string): number {
     const ib = xb[i];
     if (ia === undefined) return -1;
     if (ib === undefined) return 1;
-    const na = /^\d+$/u.test(ia);
-    const nb = /^\d+$/u.test(ib);
+    // §11: a NUMERIC identifier must not carry a leading zero; `01` is not a
+    // number here — it falls to the alphanumeric (ASCII) branch.
+    const na = /^(?:0|[1-9]\d*)$/u.test(ia);
+    const nb = /^(?:0|[1-9]\d*)$/u.test(ib);
     if (na && nb) {
       const d = Number(ia) - Number(ib);
       if (d !== 0) return d > 0 ? 1 : -1;
