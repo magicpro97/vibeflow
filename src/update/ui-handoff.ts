@@ -177,10 +177,10 @@ export function startUpdateHandoffWatcher(seams: HandoffWatcherSeams): {
   let handling = false;
   const tick = async (): Promise<void> => {
     if (handling) return;
-    const request = seams.readRequest();
-    if (!request) return;
     handling = true;
     try {
+      const request = seams.readRequest();
+      if (!request) return;
       if (!requestIsActionable(request, seams.currentVersion)) {
         seams.outFn?.(`update request for v${request.target_version} ignored — not newer`);
         seams.clearRequest();

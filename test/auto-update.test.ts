@@ -103,6 +103,28 @@ describe("startAutoUpdateWatcher", () => {
     expect(calls).toBe(1); // overlapping ticks were skipped while one was in flight
   });
 
+  test("single-flight re-arms: a later tick after a completed probe runs again", async () => {
+    let latest = "0.21.0";
+    let spawns = 0;
+    const h = autoHarness({
+      readLatest: () => latest,
+      spawnUpdate: () => {
+        spawns += 1;
+        return true;
+      },
+    });
+    const watcher = startAutoUpdateWatcher({ ...h.seams, intervalMs: 5 });
+    try {
+      for (let i = 0; i < 200 && spawns < 1; i += 1) await Bun.sleep(5);
+      expect(spawns).toBe(1); // first completed cycle spawned the update
+      latest = "0.22.0"; // differs from the recorded marker → the next tick must act
+      for (let i = 0; i < 200 && spawns < 2; i += 1) await Bun.sleep(5);
+      expect(spawns).toBe(2); // must not be blocked by the first tick's flag
+    } finally {
+      watcher.stop();
+    }
+  });
+
   test("a throwing probe never crashes the watcher", async () => {
     const h = autoHarness({
       refresh: async () => {

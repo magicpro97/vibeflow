@@ -254,9 +254,10 @@ describe("startUpdateHandoffWatcher", () => {
     const outcomes: string[] = [];
     const messages: string[] = [];
     let pending: UpdateRequestV1 | null = null;
-    // The watcher shares the harness seams object: a post-construction
-    // `w.h.seams.readDiscovery = …` mutation must be visible to the running
-    // watcher, mirroring production where the ws server extends its own seams.
+    // Shared seams object, not a spread copy: the watcher holds the reference
+    // it is given and reads properties live at tick time. Only `runs one
+    // handoff and clears the request` depends on its post-construction
+    // `w.h.seams.readDiscovery = …` stub reaching the running watcher.
     const watcher = startUpdateHandoffWatcher(
       Object.assign(
         h.seams,
@@ -328,6 +329,18 @@ describe("startUpdateHandoffWatcher", () => {
     expect(w.outcomes).toEqual([]); // onOutcome unreachable when the clear throws
     expect(w.messages.some((m) => m.includes("clear boom"))).toBe(true);
   });
+  test("a throwing readRequest is contained: tick resolves, no state, no outcome", async () => {
+    const w = watcherHarness({
+      readRequest: () => {
+        throw new Error("read boom");
+      },
+    });
+    await w.watcher.tick(); // must resolve, never reject
+    expect(w.h.states.length).toBe(0);
+    expect(w.outcomes).toEqual([]);
+    expect(w.cleared.length).toBe(0);
+    expect(w.messages.some((m) => m.includes("read boom"))).toBe(true);
+  });
   test("runs one handoff and clears the request", async () => {
     const w = watcherHarness();
     let reads = 0;
@@ -361,6 +374,16 @@ describe("startUpdateHandoffWatcher", () => {
     await first;
     expect(w.cleared.length).toBe(1);
     expect(w.outcomes).toEqual([UPDATE_HANDOFF_STATE.FAILED]);
+  });
+  test("single-flight re-arms: a second request is handled after a completed handoff", async () => {
+    const w = watcherHarness();
+    w.setRequest(request({ target_version: "0.21.0" }));
+    await w.watcher.tick(); // first swap fails (no takeover) but completes
+    w.setRequest(request({ request_id: "req-2", target_version: "0.22.0" }));
+    await w.watcher.tick(); // must not be blocked by the first tick's flag
+    expect(w.outcomes).toEqual([UPDATE_HANDOFF_STATE.FAILED, UPDATE_HANDOFF_STATE.FAILED]);
+    expect(w.cleared.length).toBe(2);
+    expect(w.h.states.at(-1)?.target_version).toBe("0.22.0");
   });
   test("the interval fires the tick", async () => {
     const w = watcherHarness({ pollMs: 5 });
