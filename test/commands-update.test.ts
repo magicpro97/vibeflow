@@ -174,6 +174,24 @@ describe("vf update", () => {
     expect(await update([], {}, h.seams)).toBe(1);
     expect(h.lines.some((l) => l.includes("boom"))).toBe(true);
   });
+  test("drain wait: the real sleep runs once, then times out", async () => {
+    // No `sleep`/`now` injection: the drain loop must execute the REAL
+    // `defaultSleep(500)` once (src/commands/update.ts:50). A drain window
+    // narrower than that sleep makes the first deadline check miss and the
+    // check after the 500ms trip the timeout. (`drainWaitMs` must stay well
+    // above a couple of milliseconds: a window of 1-2ms could racily be
+    // crossed between the two adjacent clock reads and skip the sleep.)
+    const h = harness({
+      sleep: undefined,
+      now: undefined,
+      drainWaitMs: 400,
+      readHandoff: () => null,
+    });
+    const started = Date.now();
+    expect(await update([], {}, h.seams)).toBe(1);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+    expect(h.lines.some((l) => l.includes("timed out"))).toBe(true);
+  });
   test("default outFn covers the up-to-date path (no injection)", async () => {
     const seams = { fetchLatest: async () => "0.20.0", readInstalled: () => "0.20.0" };
     expect(await update([], {}, seams)).toBe(0);
