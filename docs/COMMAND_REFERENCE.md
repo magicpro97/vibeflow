@@ -2,7 +2,7 @@
 title: Command Reference
 description: Complete reference of all shipped `vf` CLI commands and their flags, including conversations, orchestration, skills, hooks, and verification.
 category: reference
-last_updated: 2026-10-06
+last_updated: 2026-10-07
 ---
 
 # Command Reference
@@ -724,6 +724,7 @@ vf update                      # install the latest release + hand off every run
 vf update --check              # report installed vs latest (no install)
 vf update --spec <spec>        # exact npm spec (tarball or @version) — no registry lookup
 vf update --manager bun        # npm (default) | bun | pnpm; or settings update.manager
+vf update --rollback           # reinstall the last recorded previous version
 vf update --no-restart         # install only; running servers pick the new code on next start
 vf update --force              # restart stale servers even when the install kept the version
 ```
@@ -734,6 +735,14 @@ listener, and exits once the replacement is healthy. Running agent CLIs are owne
 detached supervisors and are never interrupted; a failed handoff keeps the original server
 serving. Set `update.mode: "auto"` in `.vibeflow/SETTINGS.json` to let a running UI apply
 updates itself. `vf doctor` reports installed vs latest and every live UI generation.
+
+`vf update --rollback` reinstalls the recorded previous version from
+`~/.vibeflow/update-state.json` — a machine-global record, because the package install is
+global, written automatically by every install that changes the on-disk version. Each
+rollback swaps the record, so running `--rollback` again toggles back to the version you
+left. The web UI surfaces the same state as an update banner with Update and Rollback
+buttons, and both are local-only: a LAN-exposed session is refused. `update.mode` and
+`update.manager` are editable from the web settings panel.
 
 ## Help / Version
 

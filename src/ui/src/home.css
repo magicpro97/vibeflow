@@ -257,7 +257,8 @@ button:disabled {
 }
 .home-app {
   display: grid;
-  grid-template-rows: var(--home-topbar-height) minmax(0, 1fr);
+  /* topbar | banner (auto, collapses when absent) | conversation */
+  grid-template-rows: var(--home-topbar-height) auto minmax(0, 1fr);
   height: 100%;
   background: var(--home-canvas);
 }

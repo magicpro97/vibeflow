@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type UpdateCommandSeams, defaultSpawnInstall, update } from "../src/commands/update.js";
 import type { UpdateRequestV1 } from "../src/update/update-contract.js";
+import type { UpdateStateV1 } from "../src/update/update-state.js";
 
 interface Harness {
   seams: UpdateCommandSeams;
@@ -40,6 +41,7 @@ function harness(over: Record<string, unknown> = {}): Harness {
         at: clock,
       };
     },
+    writeState: () => {},
     sleep: async (ms: number) => {
       clock += ms;
     },
@@ -216,5 +218,97 @@ describe("vf update", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src", "commands", "update.ts"), "utf8");
     expect(src).toContain("shouldUseWindowsShell(cmd, resolved)");
     expect(src).toContain("shellLaunchArgv(cmd, args, true)");
+  });
+  test("a successful update records the previous version for rollback", async () => {
+    const states: UpdateStateV1[] = [];
+    const h = harness({ writeState: (s: UpdateStateV1) => states.push(s) });
+    expect(await update([], {}, h.seams)).toBe(0);
+    expect(states).toEqual([
+      expect.objectContaining({ schema_version: 1, previous_version: "0.20.0", manager: "npm" }),
+    ]);
+  });
+  test("--rollback reinstalls the recorded version without --force (downgrade is a change)", async () => {
+    const states: UpdateStateV1[] = [];
+    let installedCall = 0;
+    const h = harness({
+      readState: () => ({ schema_version: 1, previous_version: "0.20.9", manager: "npm", at: 1 }),
+      readInstalled: () => (++installedCall === 1 ? "0.21.0" : "0.20.9"),
+      // A server on OLDER code than the rollback target is stale and MUST be swapped.
+      enumerate: () => [{ base: "/repo", pid: 111, port: 7799, app_version: "0.20.0" }],
+      writeState: (s: UpdateStateV1) => states.push(s),
+    });
+    expect(await update([], { rollback: true }, h.seams)).toBe(0);
+    expect(h.installs).toEqual([["npm", "install", "-g", "@magicpro97/vibeflow@0.20.9"]]);
+    expect(states[0]?.previous_version).toBe("0.21.0"); // record swaps → toggle semantics
+    expect(h.requests[0]?.request.target_version).toBe("0.20.9");
+  });
+  test("a running server NEWER than the rollback target is left alone (no live downgrade)", async () => {
+    let installedCall = 0;
+    const h = harness({
+      readState: () => ({ schema_version: 1, previous_version: "0.20.9", manager: "npm", at: 1 }),
+      readInstalled: () => (++installedCall === 1 ? "0.21.0" : "0.20.9"),
+      enumerate: () => [{ base: "/repo", pid: 111, port: 7799, app_version: "0.21.0" }],
+    });
+    expect(await update([], { rollback: true }, h.seams)).toBe(0);
+    expect(h.installs).toHaveLength(1); // the install happened…
+    expect(h.requests).toEqual([]); // …and the newer live frontend keeps serving
+  });
+  test("--rollback when already on the recorded version exits 1 without installing", async () => {
+    const h = harness({
+      readState: () => ({ schema_version: 1, previous_version: "0.21.0", manager: "npm", at: 1 }),
+      readInstalled: () => "0.21.0",
+    });
+    expect(await update([], { rollback: true }, h.seams)).toBe(1);
+    expect(h.installs).toEqual([]);
+  });
+  test("--rollback defaults to the manager recorded with the undo point", async () => {
+    const states: UpdateStateV1[] = [];
+    let installedCall = 0;
+    const h = harness({
+      readState: () => ({ schema_version: 1, previous_version: "0.20.9", manager: "pnpm", at: 1 }),
+      readInstalled: () => (++installedCall === 1 ? "0.21.0" : "0.20.9"),
+      enumerate: () => [{ base: "/repo", pid: 111, port: 7799, app_version: "0.21.0" }],
+      writeState: (s: UpdateStateV1) => states.push(s),
+    });
+    expect(await update([], { rollback: true }, h.seams)).toBe(0);
+    expect(h.installs).toEqual([["pnpm", "add", "-g", "@magicpro97/vibeflow@0.20.9"]]);
+    expect(states[0]?.manager).toBe("pnpm"); // the swap records the manager that ran
+  });
+  test("--rollback honors an explicit --manager over the recorded one", async () => {
+    let installedCall = 0;
+    const h = harness({
+      readState: () => ({ schema_version: 1, previous_version: "0.20.9", manager: "pnpm", at: 1 }),
+      readInstalled: () => (++installedCall === 1 ? "0.21.0" : "0.20.9"),
+      enumerate: () => [{ base: "/repo", pid: 111, port: 7799, app_version: "0.21.0" }],
+    });
+    expect(await update([], { rollback: true, manager: "bun" }, h.seams)).toBe(0);
+    expect(h.installs).toEqual([["bun", "add", "-g", "@magicpro97/vibeflow@0.20.9"]]);
+  });
+  test("--rollback without a record exits 2 and names the manual escape hatch", async () => {
+    const h = harness({ readState: () => null });
+    expect(await update([], { rollback: true }, h.seams)).toBe(2);
+    expect(h.installs).toEqual([]);
+  });
+  test("--rollback combined with --spec or --check is refused before any install", async () => {
+    const flagSets: Record<string, string | boolean>[] = [
+      { rollback: true, spec: "./pkg.tgz" },
+      { rollback: true, check: true },
+    ];
+    for (const flags of flagSets) {
+      const h = harness();
+      expect(await update([], flags, h.seams)).toBe(2);
+      expect(h.installs).toEqual([]);
+    }
+  });
+  test("--force with an unchanged version writes no record (no same-version undo point)", async () => {
+    const states: UpdateStateV1[] = [];
+    const h = harness({
+      fetchLatest: async () => "0.22.0", // newer than installed → apply() really runs
+      readInstalled: () => "0.21.0", // …and the install keeps the version
+      writeState: (s: UpdateStateV1) => states.push(s),
+    });
+    expect(await update([], { force: true }, h.seams)).toBe(0);
+    expect(h.installs).toEqual([["npm", "install", "-g", "@magicpro97/vibeflow@0.22.0"]]);
+    expect(states).toEqual([]);
   });
 });

@@ -43,6 +43,9 @@ const state = read("../src/ui/src/conversation-home-state.ts");
 const types = read("../src/ui/src/conversation-home-types.ts");
 const rootStore = read("../src/ui/src/store.ts");
 const workUnitDetails = read("../src/ui/src/components/WorkUnitExpandedDetails.vue");
+const controlCenter = read("../src/ui/src/components/HomeControlCenterDrawer.vue");
+const updateBanner = read("../src/ui/src/components/HomeUpdateBanner.vue");
+const updateSettings = read("../src/ui/src/components/UpdateSettingsSection.vue");
 
 const BACKEND_RUNTIME_IMPORT = /(?:^node:|(?:^|\/)server(?:\/|\.|$)|orchestrator\/conversation)/u;
 
@@ -262,6 +265,22 @@ describe("AI-first Home source contract", () => {
     expect(preferences).toContain('aria-label="Conversation settings"');
     expect(preferences).not.toContain("api.settings.set");
     expect(preferences).not.toContain('role="dialog"');
+  });
+
+  test("update banner and update settings stay wired into the shell", () => {
+    expect(app).toContain("<HomeUpdateBanner");
+    expect(controlCenter).toContain("UpdateSettingsSection");
+    expect(updateBanner).toContain("Update now");
+    expect(updateBanner).toContain("Rollback");
+    expect(updateBanner).toContain('aria-label="Dismiss update notice"');
+    // The home grid must reserve an auto-sized row for the banner; a bare
+    // minmax(0, 1fr) second row would give the banner the whole viewport.
+    expect(homeCss).toContain("var(--home-topbar-height) auto minmax(0, 1fr)");
+    // Saving is refused until the seed GET resolved: a click before the stored
+    // values arrive would persist the hard-coded defaults.
+    expect(updateSettings).toContain("saving || !ready");
+    expect(updateSettings.match(/:disabled="!ready"/g)).toHaveLength(2);
+    expect(updateSettings).toContain("ready.value = true");
   });
 
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {

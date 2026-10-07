@@ -55,6 +55,7 @@ import {
 } from "./server/pending-hooks.js";
 import { clearPendingSkillAcquisitions } from "./server/pending-skill-acquisitions.js";
 import { handlePlanReviewCommentsGet, handlePlanReviewGet } from "./server/plan-review.js";
+import { readJson } from "./server/policy-route.js";
 import { handleRaceRoute, readRaceBody } from "./server/race-route.js";
 import {
   handleReleaseProposalView,
@@ -62,6 +63,7 @@ import {
 } from "./server/registry-release-route.js";
 import { handleRegistryView } from "./server/registry-route.js";
 import { handleTypesafeReadRoute } from "./server/routes-typesafe.js";
+import { handleUpdateRun, handleUpdateStatus } from "./server/routes-update.js";
 import { handleMutationRoute, handleProjectsRoute } from "./server/routes.js";
 import { handleSkillAcquisitionPending } from "./server/skill-acquisition-route.js";
 import { UI_LAN_PAGE_ACCESS, UiLanPageAuthority } from "./server/ui-lan-authority.js";
@@ -453,6 +455,19 @@ export async function startServer(
         if (lanExposed && !guarded(req))
           return Response.json({ error: "forbidden" }, { status: 403 });
         return Response.json({ ok: true, ...settingsView(activeRepo) });
+      }
+
+      // --- GET /api/update/status (cache-only; guarded like /api/settings) ---
+      if (method === "GET" && path === "/api/update/status") {
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleUpdateStatus(activeRepo);
+      }
+
+      // --- POST /api/update/run (CSRF + local-only; spawns vf update detached) ---
+      if (method === "POST" && path === "/api/update/run") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleUpdateRun({ lanExposed, body: await readJson(req), cwd: activeRepo });
       }
 
       // --- GET /api/typesafe (guarded) — the System One judge view, key source only ---

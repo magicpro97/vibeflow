@@ -6,6 +6,7 @@
       @open-settings="openSettings"
       @open-control-center="openControlCenter"
     />
+    <HomeUpdateBanner />
     <ConversationHome
       :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen"
       @open-capabilities="openCapabilities"
@@ -26,6 +27,7 @@ import HomeCapabilityDrawer from "./components/HomeCapabilityDrawer.vue";
 import HomeControlCenterDrawer from "./components/HomeControlCenterDrawer.vue";
 import HomePreferencesDrawer from "./components/HomePreferencesDrawer.vue";
 import HomeTraceDrawer from "./components/HomeTraceDrawer.vue";
+import HomeUpdateBanner from "./components/HomeUpdateBanner.vue";
 import TopBar from "./components/TopBar.vue";
 import { useConversationHomeStore } from "./conversation-home-store.js";
 import "./home.css";

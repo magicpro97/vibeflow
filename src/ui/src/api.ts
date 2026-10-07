@@ -29,7 +29,7 @@ if (!CSRF) {
   console.warn("[vibeflow] vf-token meta tag not found — write requests will fail with 403");
 }
 
-async function req<T>(
+export async function req<T>(
   method: string,
   path: string,
   body?: unknown,
