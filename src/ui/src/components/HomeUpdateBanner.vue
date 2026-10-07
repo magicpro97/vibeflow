@@ -31,9 +31,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { UPDATE_RUN_ACTION, type UpdateRunAction } from "../../../update/update-status-contract.js";
+import {
+  UPDATE_RUN_ACTION,
+  type UpdateRunAction,
+  type UpdateStatusView,
+} from "../../../update/update-status-contract.js";
 import { fetchUpdateStatus, runUpdate } from "../update-api.js";
-import { type UpdateStatusView, bannerLine } from "../update-banner-model.js";
+import { bannerLine } from "../update-banner-model.js";
 
 const status = ref<UpdateStatusView | null>(null);
 const busy = ref(false);
