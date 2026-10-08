@@ -666,6 +666,18 @@ button:disabled {
   background: var(--home-amber);
   box-shadow: 0 0 0 3px rgb(181 126 54 / 0.12);
 }
+.home-session__attention {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: var(--home-accent, #2563eb);
+  vertical-align: middle;
+}
+.home-session--attention .home-session__title {
+  font-weight: 650;
+}
 .home-degraded {
   margin-left: auto;
   color: var(--home-amber);

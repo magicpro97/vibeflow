@@ -143,12 +143,14 @@
               type="button"
               class="home-session"
               :data-root-session="session.root_session_id"
-              :class="{ 'home-session--active': session.root_session_id === store.activeRootId }"
+              :class="{ 'home-session--active': session.root_session_id === store.activeRootId, 'home-session--attention': attention[session.root_session_id] }"
               :aria-current="session.root_session_id === store.activeRootId ? 'page' : undefined"
               :tabindex="rovingTabIndex(session.root_session_id)"
               @click="select(session.root_session_id)"
             >
               <span class="home-session__row">
+                <span v-if="attention[session.root_session_id]" class="home-session__attention" aria-hidden="true" />
+                <span v-if="attention[session.root_session_id]" class="sr-only">New completion since your last visit</span>
                 <span class="home-session__title">{{ (session.active ?? session.root).topic }}</span>
                 <span class="home-session__time">{{ relativeTime(session.sort_updated_at) }}</span>
               </span>
@@ -182,6 +184,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useSessionAttention } from "../composables/use-session-attention.js";
 import { describeHomeCatalogLoading } from "../conversation-home-loading.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import type { HomeSessionSummary } from "../conversation-home-types.js";
@@ -195,6 +198,15 @@ import {
 
 const store = useConversationHomeStore();
 const projectStore = useProjectClassificationStore();
+/** Unread dots: a background conversation that just reached a terminal lifecycle gets marked. */
+const { attention } = useSessionAttention({
+  sessions: () =>
+    store.sessions.map((session) => ({
+      root_session_id: session.root_session_id,
+      lifecycle: (session.active ?? session.root).lifecycle ?? null,
+    })),
+  activeRootId: () => store.activeRootId,
+});
 const railRoot = ref<HTMLElement | null>(null);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let mobileQuery: MediaQueryList | null = null;
