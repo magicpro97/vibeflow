@@ -130,7 +130,7 @@ describe("AI-first Home source contract", () => {
 
   test("timeline and composer are natural, IME-safe, and memory-only", () => {
     expect(timeline).toContain('aria-label="Conversation timeline"');
-    expect(timeline).toContain("projectHomeTimeline");
+    expect(home).toContain("projectHomeTimeline(store.timeline");
     expect(timeline).toContain("describeHomeActivationLoading");
     expect(timeline).toContain("describeHomeWelcomeLoading");
     expect(composer).toContain('@compositionstart="composing = true"');

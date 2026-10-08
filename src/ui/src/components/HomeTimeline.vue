@@ -195,8 +195,8 @@ import HomePromptRail from "./HomePromptRail.vue";
 import HomeToolGroup from "./HomeToolGroup.vue";
 import HomeTurnStatus from "./HomeTurnStatus.vue";
 const store = useConversationHomeStore();
-// Timeline rows are pre-projected by the parent (projectHomeTimeline in ConversationHome.vue,
-// the single projection authority) and arrive here as the `items` prop.
+// Timeline rows are pre-projected by the parent (the single projection authority in
+// ConversationHome.vue) and arrive here as the `items` prop.
 const props = withDefaults(defineProps<{ items: RenderedHomeTimelineItem[] }>(), {
   items: () => [],
 });

@@ -4486,8 +4486,10 @@ button:disabled {
 .home-agent-panel {
   width: min(24rem, 100%);
   grid-row: 2;
-  justify-self: center;
-  margin: 0.75rem 0 0;
+  /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 52rem) centered,
+     so its left edge sits at max(1rem, (100% - 52rem) / 2) inside this pane. */
+  justify-self: start;
+  margin: 0.75rem 0 0 max(1rem, calc((100% - 52rem) / 2));
   overflow: hidden;
   border: 1px solid var(--home-line);
   border-radius: 0.75rem;
