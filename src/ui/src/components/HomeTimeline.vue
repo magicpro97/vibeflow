@@ -13,21 +13,15 @@
       <p class="home-welcome__copy">
         Start naturally. VibeFlow will connect the right AI CLIs, preserve the conversation, and bring every reviewable action back here.
       </p>
-      <div
+      <HomeLoadingPanel
         v-if="store.submitting"
-        class="home-loading-panel home-loading-panel--welcome"
-        role="status"
-        aria-live="polite"
-      >
-        <header class="home-loading-panel__header">
-          <span>{{ welcomeLoading.eyebrow }}</span>
-          <strong>{{ welcomeLoading.title }}</strong>
-        </header>
-        <p class="home-loading-panel__copy">{{ welcomeLoading.detail }}</p>
-        <ul class="home-loading-panel__checkpoints" aria-label="Conversation creation progress">
-          <li v-for="checkpoint in welcomeLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
-        </ul>
-      </div>
+        variant="welcome"
+        :eyebrow="welcomeLoading.eyebrow"
+        :title="welcomeLoading.title"
+        :detail="welcomeLoading.detail"
+        :checkpoints="welcomeLoading.checkpoints"
+        list-label="Conversation creation progress"
+      />
       <div class="home-starters" aria-label="Conversation starters">
         <button v-for="starter in starters" :key="starter.title" type="button" @click="useStarter(starter.prompt)">
           <span aria-hidden="true">{{ starter.glyph }}</span>
@@ -38,50 +32,15 @@
       <p class="home-welcome__hint">No setup form. Describe the outcome; refine the team and tools in the conversation.</p>
     </section>
     <section v-else class="home-thread" aria-label="Conversation timeline" aria-live="polite" aria-relevant="additions text">
-      <div
+      <HomeLoadingPanel
         v-if="store.activationLoading && !store.timeline"
-        class="home-loading-panel home-loading-panel--thread"
-        aria-label="Loading conversation"
-        role="status"
-        aria-live="polite"
-      >
-        <header class="home-loading-panel__header">
-          <span>{{ activationLoading.eyebrow }}</span>
-          <strong>{{ activationLoading.title }}</strong>
-        </header>
-        <p class="home-loading-panel__copy">{{ activationLoading.detail }}</p>
-        <ul class="home-loading-panel__checkpoints" aria-label="Conversation restore progress">
-          <li v-for="checkpoint in activationLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
-        </ul>
-        <div class="home-loading-thread" aria-hidden="true">
-          <article data-tone="human">
-            <span class="home-loading-thread__avatar">Y</span>
-            <div class="home-loading-thread__copy">
-              <strong />
-              <small />
-              <span class="home-loading-thread__line" />
-              <span class="home-loading-thread__line home-loading-thread__line--short" />
-            </div>
-          </article>
-          <article data-tone="assistant">
-            <span class="home-loading-thread__avatar">AI</span>
-            <div class="home-loading-thread__copy">
-              <strong />
-              <small />
-              <span class="home-loading-thread__line" />
-              <span class="home-loading-thread__line home-loading-thread__line--medium" />
-            </div>
-          </article>
-          <article data-tone="system">
-            <span class="home-loading-thread__avatar">+</span>
-            <div class="home-loading-thread__copy">
-              <strong />
-              <small />
-              <span class="home-loading-thread__line home-loading-thread__line--medium" />
-            </div>
-          </article>
-        </div>
-      </div>
+        variant="thread"
+        :eyebrow="activationLoading.eyebrow"
+        :title="activationLoading.title"
+        :detail="activationLoading.detail"
+        :checkpoints="activationLoading.checkpoints"
+        list-label="Conversation restore progress"
+      />
       <div v-else-if="!rendered.length && !store.pendingActions.length" class="home-empty-thread">
         <span aria-hidden="true">✦</span>
         <strong>The room is ready.</strong>
@@ -220,6 +179,7 @@ import type {
 } from "../conversation-home-types.js";
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
+import HomeLoadingPanel from "./HomeLoadingPanel.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
 import HomeMessageQuotes from "./HomeMessageQuotes.vue";
 const store = useConversationHomeStore();
