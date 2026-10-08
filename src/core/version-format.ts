@@ -39,11 +39,17 @@ function comparePrerelease(a: string, b: string): number {
     const ib = xb[i];
     if (ia === undefined) return -1;
     if (ib === undefined) return 1;
-    const na = /^\d+$/u.test(ia);
-    const nb = /^\d+$/u.test(ib);
+    // §11: a NUMERIC identifier must not carry a leading zero; `01` is not a
+    // number here — it falls to the alphanumeric (ASCII) branch.
+    const na = /^(?:0|[1-9]\d*)$/u.test(ia);
+    const nb = /^(?:0|[1-9]\d*)$/u.test(ib);
     if (na && nb) {
-      const d = Number(ia) - Number(ib);
-      if (d !== 0) return d > 0 ? 1 : -1;
+      // Numeric identifiers are unbounded (§11): Number() would collapse
+      // values above Number.MAX_SAFE_INTEGER, so compare the canonical digit
+      // strings by length first, then lexically.
+      if (ia !== ib) {
+        return ia.length !== ib.length ? (ia.length > ib.length ? 1 : -1) : ia > ib ? 1 : -1;
+      }
       continue;
     }
     if (na !== nb) return na ? -1 : 1;

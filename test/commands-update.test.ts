@@ -42,6 +42,8 @@ function harness(over: Record<string, unknown> = {}): Harness {
       };
     },
     writeState: () => {},
+    acquireLock: () => ({ ok: true, release: async () => {} }),
+    writeAutoMarker: () => {},
     sleep: async (ms: number) => {
       clock += ms;
     },
@@ -211,8 +213,17 @@ describe("vf update", () => {
     const seams = { fetchLatest: async () => "0.20.0", readInstalled: () => "0.20.0" };
     expect(await update([], {}, seams)).toBe(0);
   });
-  test("defaultSpawnInstall runs a real (trivial) command and reports its status", () => {
-    expect(defaultSpawnInstall(process.execPath, ["-e", "0"]).status).toBe(0);
+  test("defaultSpawnInstall runs a real (trivial) command and reports its status", async () => {
+    expect((await defaultSpawnInstall(process.execPath, ["-e", "0"])).status).toBe(0);
+  });
+  test("defaultSpawnInstall resolves non-zero exits and spawn errors without rejecting", async () => {
+    expect((await defaultSpawnInstall(process.execPath, ["-e", "process.exit(3)"])).status).toBe(3);
+    expect((await defaultSpawnInstall("definitely-not-a-command-vf-test", [])).status).toBeNull();
+  });
+  test("an async install spawner is awaited", async () => {
+    const h = harness({ spawner: async () => ({ status: 0 }) });
+    // Un-awaited, the promise has no `.status` → `(undefined ?? 1) !== 0` → rc 1.
+    expect(await update([], {}, h.seams)).toBe(0);
   });
   test("the real install runner routes through the canonical shim predicate (win32 layouts)", () => {
     const src = readFileSync(join(import.meta.dir, "..", "src", "commands", "update.ts"), "utf8");
@@ -226,6 +237,18 @@ describe("vf update", () => {
     expect(states).toEqual([
       expect.objectContaining({ schema_version: 1, previous_version: "0.20.0", manager: "npm" }),
     ]);
+  });
+  test("a failing auto-marker refresh warns instead of aborting the handoff", async () => {
+    const states: UpdateStateV1[] = [];
+    const h = harness({
+      writeState: (s: UpdateStateV1) => states.push(s),
+      writeAutoMarker: () => {
+        throw new Error("EISDIR: marker path is a directory");
+      },
+    });
+    expect(await update([], {}, h.seams)).toBe(0);
+    expect(states.length).toBe(1); // rollback record still lands
+    expect(h.lines.some((l) => l.includes("could not refresh the auto-update marker"))).toBe(true);
   });
   test("--rollback reinstalls the recorded version without --force (downgrade is a change)", async () => {
     const states: UpdateStateV1[] = [];
@@ -310,5 +333,79 @@ describe("vf update", () => {
     expect(await update([], { force: true }, h.seams)).toBe(0);
     expect(h.installs).toEqual([["npm", "install", "-g", "@magicpro97/vibeflow@0.22.0"]]);
     expect(states).toEqual([]);
+  });
+  test("refuses to start a second update while the machine-global lock is held", async () => {
+    const h = harness({ acquireLock: () => ({ ok: false, reason: "held" }) });
+    expect(await update([], {}, h.seams)).toBe(1);
+    expect(h.installs).toEqual([]);
+    expect(h.lines.some((l) => l.includes("already running"))).toBe(true);
+  });
+  test("an unavailable lock is a distinct refusal, not 'already running'", async () => {
+    const h = harness({ acquireLock: () => ({ ok: false, reason: "unavailable" }) });
+    expect(await update([], {}, h.seams)).toBe(1);
+    expect(h.installs).toEqual([]);
+    expect(h.lines.some((l) => l.includes("Could not take the update lock"))).toBe(true);
+  });
+  test("releases the lock after a successful update", async () => {
+    let releases = 0;
+    const h = harness({
+      acquireLock: () => ({
+        ok: true,
+        release: async () => {
+          releases += 1;
+        },
+      }),
+    });
+    expect(await update([], {}, h.seams)).toBe(0);
+    expect(releases).toBe(1);
+  });
+  test("releases the lock when the install fails", async () => {
+    let releases = 0;
+    const h = harness({
+      spawner: () => ({ status: 1 }),
+      acquireLock: () => ({
+        ok: true,
+        release: async () => {
+          releases += 1;
+        },
+      }),
+    });
+    expect(await update([], {}, h.seams)).toBe(1);
+    expect(releases).toBe(1);
+  });
+  test("releases the lock on the rollback-no-record and registry-unreachable early returns", async () => {
+    for (const over of [{ readState: () => null }, { fetchLatest: async () => null }] as const) {
+      let releases = 0;
+      const h = harness({
+        ...over,
+        acquireLock: () => ({
+          ok: true,
+          release: async () => {
+            releases += 1;
+          },
+        }),
+      });
+      const flags: Record<string, string | boolean> = "readState" in over ? { rollback: true } : {};
+      expect(await update([], flags, h.seams)).toBe("readState" in over ? 2 : 1);
+      expect(releases).toBe(1);
+    }
+  });
+  test("a version-changing install refreshes the auto-update marker", async () => {
+    const markers: { version: string; attempted_at: number }[] = [];
+    const h = harness({
+      writeAutoMarker: (m: { version: string; attempted_at: number }) => markers.push(m),
+    });
+    expect(await update([], {}, h.seams)).toBe(0);
+    expect(markers).toEqual([expect.objectContaining({ version: "0.21.0" })]);
+  });
+  test("a same-version --force install writes no auto-update marker", async () => {
+    const markers: { version: string }[] = [];
+    const h = harness({
+      fetchLatest: async () => "0.22.0",
+      readInstalled: () => "0.21.0",
+      writeAutoMarker: (m: { version: string }) => markers.push(m),
+    });
+    expect(await update([], { force: true }, h.seams)).toBe(0);
+    expect(markers).toEqual([]);
   });
 });

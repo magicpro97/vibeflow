@@ -51,16 +51,23 @@ describe("updateStatusView", () => {
 });
 
 describe("handleUpdateRun", () => {
-  test("refuses when LAN-exposed", async () => {
-    const res = handleUpdateRun({ lanExposed: true, body: { action: "update" } });
+  const post = (body: string): Request =>
+    new Request("http://127.0.0.1:7799/api/update/run", { method: "POST", body });
+  const postJson = (body: unknown): Request => post(JSON.stringify(body));
+
+  test("refuses when LAN-exposed (before reading the body)", async () => {
+    const res = await handleUpdateRun({
+      lanExposed: true,
+      request: postJson({ action: "update" }),
+    });
     expect(res.status).toBe(403);
   });
-  test("rejects non-object and unknown-action bodies before spawning", async () => {
+  test("rejects non-object, unknown-action, and non-JSON bodies before spawning", async () => {
     let spawned = 0;
     for (const body of [null, "x", [1], { action: "nuke" }]) {
-      const res = handleUpdateRun({
+      const res = await handleUpdateRun({
         lanExposed: false,
-        body,
+        request: postJson(body),
         spawnUpdate: () => {
           spawned++;
           return true;
@@ -68,6 +75,44 @@ describe("handleUpdateRun", () => {
       });
       expect(res.status).toBe(400);
     }
+    const raw = await handleUpdateRun({
+      lanExposed: false,
+      request: post("not json"),
+      spawnUpdate: () => {
+        spawned++;
+        return true;
+      },
+    });
+    expect(raw.status).toBe(400);
+    expect(spawned).toBe(0);
+  });
+  test("an oversized body is refused without spawning", async () => {
+    let spawned = 0;
+    const res = await handleUpdateRun({
+      lanExposed: false,
+      request: post("x".repeat(70_000)),
+      spawnUpdate: () => {
+        spawned++;
+        return true;
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(spawned).toBe(0);
+  });
+  test("a non-UTF8 body is refused without spawning", async () => {
+    let spawned = 0;
+    const res = await handleUpdateRun({
+      lanExposed: false,
+      request: new Request("http://127.0.0.1:7799/api/update/run", {
+        method: "POST",
+        body: new Uint8Array([0xff, 0xfe]),
+      }),
+      spawnUpdate: () => {
+        spawned++;
+        return true;
+      },
+    });
+    expect(res.status).toBe(400);
     expect(spawned).toBe(0);
   });
   test("spawns vf update / vf update --rollback detached and reports started", async () => {
@@ -76,9 +121,9 @@ describe("handleUpdateRun", () => {
       ["update", ["update"]],
       ["rollback", ["update", "--rollback"]],
     ] as const) {
-      const res = handleUpdateRun({
+      const res = await handleUpdateRun({
         lanExposed: false,
-        body: { action },
+        request: postJson({ action }),
         spawnUpdate: (args) => {
           calls.push([...args]);
           return true;
@@ -90,18 +135,18 @@ describe("handleUpdateRun", () => {
     }
   });
   test("a failed spawn answers 500, not a silent ok", async () => {
-    const res = handleUpdateRun({
+    const res = await handleUpdateRun({
       lanExposed: false,
-      body: { action: "update" },
+      request: postJson({ action: "update" }),
       spawnUpdate: () => false,
     });
     expect(res.status).toBe(500);
   });
   test("passes the authoritative repo cwd through to the spawn seam", async () => {
     let seenCwd: string | undefined;
-    const res = handleUpdateRun({
+    const res = await handleUpdateRun({
       lanExposed: false,
-      body: { action: "update" },
+      request: postJson({ action: "update" }),
       cwd: "/some/repo",
       spawnUpdate: (_args, cwd) => {
         seenCwd = cwd;
