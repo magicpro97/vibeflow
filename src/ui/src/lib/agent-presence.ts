@@ -2,9 +2,10 @@
 //
 // Only assistant rows carry `publicAuthorId`; tool / tool-group rows follow a cursor of
 // the latest non-"human" author. Status: idle → failed (last item failed tool / tool-group
-// whose LAST entry failed) → working (last item incomplete) → complete. `startedAt` is
-// the nearest preceding user/boundary row; when null, `elapsedMs` is null (no clock).
-// v1 limit (R1): interleaved concurrent agents mis-attribute stray tool events.
+// whose LAST entry failed) → working (a `started` tool signal, or last item incomplete) →
+// complete. `startedAt` is the nearest preceding user/boundary row; when null, `elapsedMs`
+// is null (no clock). v1 limit (R1): interleaved concurrent agents mis-attribute stray tool
+// events.
 import { homeParticipantDisplayLabel } from "../conversation-home-participant-label.js";
 import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
 import type { HomeParticipant } from "../conversation-home-types.js";
@@ -48,6 +49,7 @@ interface PresenceSignal {
   readonly body: string;
   readonly complete: boolean;
   readonly failed: boolean;
+  readonly started: boolean;
 }
 
 const truncateLatestAction = (body: string): string =>
@@ -66,14 +68,20 @@ export function buildAgentPresence(
     if (typeof author === "string" && author !== "human") currentAuthor = author;
     if (item.kind !== "assistant" && item.kind !== "tool" && item.kind !== "tool-group") continue;
     if (!currentAuthor) continue;
-    // Tool-group status counts as its LAST member (a tool row is a single-entry group).
+    // Tool-group status counts as its LAST member (a tool row is a single-entry group);
+    // `started` is true for a started tool, or a group with ANY started member.
     const member = item.kind === "tool" ? item.tool : item.tools?.[item.tools.length - 1];
+    const started =
+      item.kind === "tool"
+        ? item.tool?.status === "started"
+        : (item.tools?.some((entry) => entry.status === "started") ?? false);
     signals.set(currentAuthor, {
       lastIndex: index,
       at: item.at,
       body: item.body,
       complete: item.complete,
       failed: member?.status === "failed",
+      started,
     });
   }
   const nowMs = Date.now();
@@ -82,9 +90,9 @@ export function buildAgentPresence(
     const status: AgentPresenceStatus = signal
       ? signal.failed
         ? AGENT_PRESENCE_STATUS.FAILED
-        : signal.complete
-          ? AGENT_PRESENCE_STATUS.COMPLETE
-          : AGENT_PRESENCE_STATUS.WORKING
+        : signal.started || !signal.complete
+          ? AGENT_PRESENCE_STATUS.WORKING
+          : AGENT_PRESENCE_STATUS.COMPLETE
       : AGENT_PRESENCE_STATUS.IDLE;
     const startedAt = signal ? turnStartAt(items, signal.lastIndex) : null;
     const finishedAt = status === AGENT_PRESENCE_STATUS.COMPLETE && signal ? signal.at : null;
