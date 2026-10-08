@@ -1,5 +1,6 @@
 <template>
   <main id="conversation-main" ref="scroller" class="home-timeline" aria-label="Conversation" tabindex="0" @scroll="trackScroll">
+    <HomePromptRail :entries="promptRail" @jump="jumpToAnchor" />
     <div v-if="store.activationError" class="home-inline-state home-inline-state--error" role="alert">
       <span><strong>Couldn’t refresh this conversation.</strong>{{ store.activationError }}</span>
       <button v-if="store.activeRootId" type="button" @click="store.selectSession(store.activeRootId)">Try again</button>
@@ -162,7 +163,6 @@
       </section>
       <div ref="endMarker" class="home-thread-end" aria-hidden="true" />
     </section>
-    <HomePromptRail :entries="promptRail" @jump="jumpToAnchor" />
     <button v-if="showJump" class="home-jump-latest" type="button" @click="scrollLatest">Jump to latest <span aria-hidden="true">↓</span></button>
   </main>
 </template>
@@ -319,6 +319,7 @@ function jumpToAnchor(anchorKey: string): void {
   const element = document.getElementById(homeTimelineMessageDomId(anchorKey));
   if (!(element instanceof HTMLElement)) return;
   element.scrollIntoView({ block: "center", behavior: "smooth" });
+  element.focus({ preventScroll: true });
   followLatest.value = false; // let the user stay where they jumped
   showJump.value = true;
 }
