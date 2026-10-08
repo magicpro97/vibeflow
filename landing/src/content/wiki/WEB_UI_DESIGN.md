@@ -331,12 +331,13 @@ Conversation Home keeps the transcript calm with five Orca-native affordances:
 
 **Tool groups**: consecutive `tool_action` items in a transcript collapse into a
 single `<details>` batch instead of one row per action. A lone tool action stays
-an ordinary row, unchanged. The collapsed summary reports the distinct tool count
-and the statuses present in the run, so a folded batch still says what ran and
-whether it succeeded.
+an ordinary row, unchanged. The collapsed summary reports how many tool actions
+ran and the statuses present, with the distinct tool names listed in the group
+body, so a folded batch still says what ran and whether it succeeded.
 
-**Turn timers**: while an assistant turn streams, a live `Working · m:ss` timer
-sits at the turn's foot; on completion it freezes to `Worked for m:ss`. Both are
+**Turn timers**: while an assistant turn streams, a live `Working · 0m 05s`
+timer renders in the assistant message header; on completion it freezes to
+`Worked for 0m 05s` (durations past an hour render as `1h 05m`). Both are
 computed from the item timestamps the transcript already carries, so a reload
 reconstructs the same durations.
 

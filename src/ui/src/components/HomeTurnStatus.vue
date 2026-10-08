@@ -1,7 +1,8 @@
 <template>
   <span v-if="elapsed === null && !complete" class="home-thinking"><i /><i /><i /><span class="sr-only">Thinking</span></span>
-  <span v-else-if="elapsed !== null" class="home-turn-status" role="status">
-    {{ complete ? `Worked for ${formatted}` : `Working · ${formatted}` }}
+  <span v-else-if="elapsed !== null" class="home-turn-status">
+    <span class="sr-only" role="status">{{ complete ? "Turn complete" : "Turn in progress" }}</span>
+    <span aria-hidden="true">{{ complete ? `Worked for ${formatted}` : `Working · ${formatted}` }}</span>
   </span>
 </template>
 

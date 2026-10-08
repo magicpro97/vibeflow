@@ -110,6 +110,7 @@ export function projectHomeTimeline(
 ): RenderedHomeTimelineItem[] {
   const output: RenderedHomeTimelineItem[] = [];
   const streamed = new Map<string, RenderedHomeTimelineItem>();
+  const precommits = new Map<string, RenderedHomeTimelineItem>();
   const participantById = new Map(
     participants.map((participant) => [participant.participant_id, participant] as const),
   );
@@ -187,9 +188,12 @@ export function projectHomeTimeline(
         const roundId = text(payload.round_id, "round");
         const key = `${item.revision_ordinal}:${roundId}:${participantId}`;
         const existing = streamed.get(key);
+        const precommit = precommits.get(key);
+        if (precommit) precommit.complete = true; // its response landed; stop ticking
         if (existing) {
           existing.body += text(payload.content_delta);
           existing.complete ||= payload.completes_response === true;
+          if (payload.completes_response === true) existing.at = event.ts; // freeze at the completing ts
           if (Array.isArray(payload.final_evidence))
             existing.evidence = payload.final_evidence.filter(
               (value): value is string => typeof value === "string",
@@ -259,7 +263,8 @@ export function projectHomeTimeline(
         break;
       case CONVERSATION_TRACE_EVENT_KIND.PRECOMMIT: {
         const participantId = text(payload.participant_id, event.participant_id ?? "AI");
-        output.push({
+        const round = text(payload.round_id, "round");
+        const rendered: RenderedHomeTimelineItem = {
           id: event.event_id,
           kind: "assistant",
           title: participantTitle(participantId, event),
@@ -282,7 +287,9 @@ export function projectHomeTimeline(
           reactions,
           diagnosticCode: interaction.diagnostic_code,
           operations,
-        });
+        };
+        output.push(rendered);
+        precommits.set(`${item.revision_ordinal}:${round}:${participantId}`, rendered);
         break;
       }
       case CONVERSATION_TRACE_EVENT_KIND.ERROR:

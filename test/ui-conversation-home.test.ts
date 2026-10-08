@@ -43,6 +43,7 @@ import type {
   HomeTimelineResponse,
 } from "../src/ui/src/conversation-home-types.js";
 import { matchHomeComposerSuggestions } from "../src/ui/src/home-composer-suggestions.js";
+import { formatTurnElapsed, turnElapsedMs, turnStartAt } from "../src/ui/src/lib/turn-timing.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -311,6 +312,209 @@ describe("AI-first conversation Home", () => {
       evidence: ["tests"],
       publicAuthorId: "reviewer",
     });
+  });
+
+  test("streamed deltas keep the first timestamp live and freeze at the completing delta", () => {
+    const start = "2026-08-25T00:00:00.000Z";
+    const firstDelta = "2026-08-25T00:00:10.000Z";
+    const completingDelta = "2026-08-25T00:01:45.000Z"; // first delta + 95s
+    const base = {
+      workflow_id: "workflow",
+      conversation_id: "conversation",
+      revision_id: "revision",
+      run_id: "run",
+      turn_id: "turn",
+      operation_id: "operation",
+      attempt_id: "attempt",
+      public_session_ref: null,
+    };
+    const timeline = [
+      {
+        kind: "conversation-event",
+        revision_ordinal: 0,
+        action_operations: { items: [] },
+        event: {
+          ...base,
+          event_id: "event-user",
+          seq: 1,
+          ts: start,
+          participant_id: null,
+          event: { type: "user_message", payload: { content: "Start the turn." } },
+        },
+        interaction: degradedHomeTimelineInteraction(),
+      },
+      {
+        kind: "conversation-event",
+        revision_ordinal: 0,
+        action_operations: { items: [] },
+        event: {
+          ...base,
+          event_id: "event-delta-1",
+          seq: 2,
+          ts: firstDelta,
+          participant_id: "reviewer",
+          event: {
+            type: "agent_response_delta",
+            payload: {
+              round_id: "round-1",
+              participant_id: "reviewer",
+              content_delta: "Ship ",
+              final_claim: null,
+              final_evidence: [],
+              completes_response: false,
+            },
+          },
+        },
+        interaction: degradedHomeTimelineInteraction(),
+      },
+      {
+        kind: "conversation-event",
+        revision_ordinal: 0,
+        action_operations: { items: [] },
+        event: {
+          ...base,
+          event_id: "event-delta-2",
+          seq: 3,
+          ts: completingDelta,
+          participant_id: "reviewer",
+          event: {
+            type: "agent_response_delta",
+            payload: {
+              round_id: "round-1",
+              participant_id: "reviewer",
+              content_delta: "it.",
+              final_claim: "Ship it.",
+              final_evidence: [],
+              completes_response: true,
+            },
+          },
+        },
+        interaction: degradedHomeTimelineInteraction(),
+      },
+    ] as HomeTimelineItem[];
+    const items = projectHomeTimeline(timeline);
+    expect(items).toHaveLength(2);
+    const turn = items[1];
+    expect(turn).toMatchObject({ id: "0:round-1:reviewer", kind: "assistant", complete: true });
+    expect(turn?.at).toBe(completingDelta);
+    const startedAt = turnStartAt(items, 1);
+    expect(startedAt).toBe(start);
+    const frozen = turnElapsedMs({ startedAt, finishedAt: turn?.at ?? null }, 0);
+    expect(frozen).toBe(105_000); // user msg -> completing delta = 105s (10s to first delta + 95s of streaming)
+    expect(formatTurnElapsed(frozen ?? 0)).toBe("1m 45s");
+  });
+
+  test("precommit rows freeze once the participant response folds in while the tail keeps ticking", () => {
+    const start = "2026-08-25T00:00:00.000Z";
+    const precommitAt = "2026-08-25T00:00:30.000Z";
+    const responseAt = "2026-08-25T00:01:00.000Z";
+    const streamingAt = "2026-08-25T00:01:05.000Z";
+    const base = {
+      workflow_id: "workflow",
+      conversation_id: "conversation",
+      revision_id: "revision",
+      run_id: "run",
+      turn_id: "turn",
+      operation_id: "operation",
+      attempt_id: "attempt",
+      public_session_ref: null,
+    };
+    const timeline = [
+      {
+        kind: "conversation-event",
+        revision_ordinal: 0,
+        action_operations: { items: [] },
+        event: {
+          ...base,
+          event_id: "event-user",
+          seq: 1,
+          ts: start,
+          participant_id: null,
+          event: { type: "user_message", payload: { content: "Debate this." } },
+        },
+        interaction: degradedHomeTimelineInteraction(),
+      },
+      {
+        kind: "conversation-event",
+        revision_ordinal: 0,
+        action_operations: { items: [] },
+        event: {
+          ...base,
+          event_id: "event-precommit-a",
+          seq: 2,
+          ts: precommitAt,
+          participant_id: "agent-a",
+          event: {
+            type: "precommit",
+            payload: {
+              round_id: "round-1",
+              participant_id: "agent-a",
+              answer: "Plan A",
+              evidence: [],
+            },
+          },
+        },
+        interaction: degradedHomeTimelineInteraction(),
+      },
+      {
+        kind: "conversation-event",
+        revision_ordinal: 0,
+        action_operations: { items: [] },
+        event: {
+          ...base,
+          event_id: "event-response-a",
+          seq: 3,
+          ts: responseAt,
+          participant_id: "agent-a",
+          event: {
+            type: "agent_response_delta",
+            payload: {
+              round_id: "round-1",
+              participant_id: "agent-a",
+              content_delta: "Final plan A.",
+              final_claim: "Final plan A.",
+              final_evidence: [],
+              completes_response: true,
+            },
+          },
+        },
+        interaction: degradedHomeTimelineInteraction(),
+      },
+      {
+        kind: "conversation-event",
+        revision_ordinal: 0,
+        action_operations: { items: [] },
+        event: {
+          ...base,
+          event_id: "event-delta-b",
+          seq: 4,
+          ts: streamingAt,
+          participant_id: "agent-b",
+          event: {
+            type: "agent_response_delta",
+            payload: {
+              round_id: "round-1",
+              participant_id: "agent-b",
+              content_delta: "Still writing",
+              final_claim: null,
+              final_evidence: [],
+              completes_response: false,
+            },
+          },
+        },
+        interaction: degradedHomeTimelineInteraction(),
+      },
+    ] as HomeTimelineItem[];
+    const items = projectHomeTimeline(timeline);
+    const precommit = items.find((entry) => entry.id === "event-precommit-a");
+    expect(precommit?.complete).toBeTrue();
+    const frozen = turnElapsedMs(
+      { startedAt: turnStartAt(items, 1), finishedAt: precommit?.at ?? null },
+      Date.parse("2026-08-25T09:00:00.000Z"),
+    );
+    expect(frozen).toBe(30_000);
+    const tail = items.at(-1);
+    expect(tail).toMatchObject({ id: "0:round-1:agent-b", complete: false });
   });
 
   test("participant labels prefer configured role and engine without exposing raw ids", () => {
