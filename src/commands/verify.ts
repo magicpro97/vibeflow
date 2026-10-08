@@ -87,6 +87,7 @@ export function verify(
         stdio: "pipe",
         cwd: sandbox?.ok ? sandbox.spec.target : dir,
         timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
+        maxBuffer: VERIFY_RUNTIME_AUTHORITY.gateMaxBufferBytes,
       });
       if (sandbox?.ok && r.status === null)
         sandboxRuntime.run(["rm", "-f", sandbox.spec.containerName], base);
