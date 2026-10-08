@@ -781,7 +781,7 @@ test.describe("AI-first conversation Home", () => {
       });
     await page.getByRole("button", { name: /Session A/ }).click();
     await expect(page.getByRole("heading", { name: "Session A" })).toBeVisible();
-    await expect(page.getByText("Session A initial")).toBeVisible();
+    await expect(page.locator(".home-thread").getByText("Session A initial")).toBeVisible();
     await expect(actionCard("Action A initial")).toBeVisible();
 
     await page.getByRole("button", { name: "Load older timeline" }).click();
@@ -3393,5 +3393,385 @@ test.describe("AI-first conversation Home", () => {
     await ticks.nth(1).click();
     const anchor = page.locator(`[id="${homeTimelineMessageDomId("rail-user-2")}"]`);
     await expect(anchor).toBeInViewport();
+  });
+
+  test("lists the working agent first in the agent panel with a ticking clock", async ({ page }) => {
+    const session = homeSession(
+      "root-apanel",
+      "Session Panel",
+      [homeParticipant("worker", "builder"), homeParticipant("reviewer", "auditor")],
+      CONVERSATION_LIFECYCLE.ACTIVE,
+    );
+    const liveStartedAt = new Date(Date.now() - 5_000).toISOString();
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeTimeline("root-apanel", [
+          homeUserEvent("root-apanel", "panel-user-1", "Build the migration.", liveStartedAt),
+          homeAssistantEvent(
+            "root-apanel",
+            "panel-assistant-1",
+            "Drafting the migration plan.",
+            [],
+            "worker",
+            liveStartedAt,
+            false,
+          ),
+          homeToolEvent(
+            "root-apanel",
+            "panel-tool-1",
+            "claude",
+            CONVERSATION_TOOL_ACTION_STATUS.STARTED,
+          ),
+          homeAssistantEvent("root-apanel", "panel-assistant-2", "Reviewed the plan.", [], "reviewer"),
+        ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+    await page.route("**/api/conversations/root-apanel-conversation/stream-token", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { stream_token: "panel-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+      });
+    });
+    await page.route("**/api/conversations/root-apanel-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT),
+      });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Session Panel/ }).click();
+    await expect(page.getByRole("heading", { name: "Session Panel" })).toBeVisible();
+
+    const panel = page.locator(".home-agent-panel");
+    await expect(panel).toBeVisible();
+    const rows = panel.locator(".home-agent-row");
+    await expect(rows).toHaveCount(2);
+
+    const workerRow = rows.first();
+    await expect(workerRow).toHaveClass(/home-agent-row--working/);
+    await expect(workerRow.locator(".home-agent-row__label")).toHaveText("Builder / Codex");
+    await expect(workerRow.locator(".home-agent-row__action")).toHaveText("claude activity");
+    const clock = workerRow.locator(".home-agent-row__clock");
+    await expect(clock).toHaveText(/\d+m \d+s/);
+    const firstClock = await clock.textContent();
+    await expect.poll(async () => clock.textContent()).not.toBe(firstClock);
+
+    await expect(rows.nth(1)).toHaveClass(/home-agent-row--complete/);
+    await expect(rows.nth(1).locator(".home-agent-row__label")).toHaveText("Auditor / Codex");
+  });
+
+  test("flips an agent row from working to complete when the completing delta arrives", async ({
+    page,
+  }) => {
+    const session = homeSession(
+      "root-aflip",
+      "Session Flip",
+      [homeParticipant("worker", "builder")],
+      CONVERSATION_LIFECYCLE.ACTIVE,
+    );
+    const liveAt = new Date().toISOString();
+    const completingGate = deferred<void>();
+    let completed = false;
+    const completingRecord = {
+      workflow_id: "workflow",
+      conversation_id: "root-aflip-conversation",
+      revision_id: "root-aflip-revision",
+      run_id: "run",
+      turn_id: "turn",
+      operation_id: "operation-flip-assistant-1",
+      attempt_id: "attempt-flip-assistant-1",
+      event_id: "flip-assistant-1",
+      seq: 2,
+      ts: liveAt,
+      public_session_ref: null,
+      participant_id: "worker",
+      event: {
+        type: CONVERSATION_TRACE_EVENT_KIND.AGENT_RESPONSE_DELTA,
+        payload: {
+          round_id: "round-1",
+          participant_id: "worker",
+          content_delta: " Done.",
+          final_claim: "Drafting the plan. Done.",
+          final_evidence: [],
+          completes_response: true,
+        },
+      },
+    };
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeTimeline("root-aflip", [
+          homeUserEvent("root-aflip", "flip-user-1", "Start the flip.", liveAt),
+          homeAssistantEvent(
+            "root-aflip",
+            "flip-assistant-1",
+            "Drafting the plan.",
+            [],
+            "worker",
+            liveAt,
+            completed,
+          ),
+        ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+    await page.route("**/api/conversations/root-aflip-conversation/stream-token", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { stream_token: "flip-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+      });
+    });
+    let served = false;
+    await page.route("**/api/conversations/root-aflip-conversation/events?**", async (route) => {
+      if (!served) {
+        await completingGate.promise;
+        served = true;
+        completed = true;
+        await route.fulfill({
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+          body: [
+            `event: ${CONVERSATION_SSE_EVENT.TRACE}`,
+            `data: ${JSON.stringify(completingRecord)}`,
+            "",
+            "",
+          ].join("\n"),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT),
+      });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Session Flip/ }).click();
+    await expect(page.getByRole("heading", { name: "Session Flip" })).toBeVisible();
+
+    const row = page.locator(".home-agent-panel .home-agent-row").first();
+    await expect(row).toHaveClass(/home-agent-row--working/);
+    await expect(page.locator('.home-agent-panel__count[role="status"]')).toHaveText("1 running");
+
+    completingGate.resolve();
+    await expect(row).toHaveClass(/home-agent-row--complete/);
+    await expect(page.locator('.home-agent-panel__count[role="status"]')).toHaveText("1 done");
+  });
+
+  test("opens the agent drawer with only the selected agent's public items", async ({ page }) => {
+    const session = homeSession(
+      "root-adrawer",
+      "Session Drawer",
+      [homeParticipant("worker", "builder"), homeParticipant("reviewer", "auditor")],
+      CONVERSATION_LIFECYCLE.ACTIVE,
+    );
+    const liveAt = new Date().toISOString();
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeTimeline("root-adrawer", [
+          homeUserEvent("root-adrawer", "drawer-user-1", "Ship the drawer.", liveAt),
+          homeAssistantEvent(
+            "root-adrawer",
+            "drawer-assistant-worker",
+            "Worker drafting the notes.",
+            [],
+            "worker",
+            liveAt,
+            false,
+          ),
+          homeToolEvent(
+            "root-adrawer",
+            "drawer-tool-1",
+            "claude",
+            CONVERSATION_TOOL_ACTION_STATUS.COMPLETED,
+          ),
+          homeToolEvent(
+            "root-adrawer",
+            "drawer-tool-2",
+            "git",
+            CONVERSATION_TOOL_ACTION_STATUS.COMPLETED,
+          ),
+          homeAssistantEvent(
+            "root-adrawer",
+            "drawer-assistant-reviewer",
+            "Reviewer signed off.",
+            [],
+            "reviewer",
+          ),
+        ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+    await page.route("**/api/conversations/root-adrawer-conversation/stream-token", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { stream_token: "drawer-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+      });
+    });
+    await page.route("**/api/conversations/root-adrawer-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT),
+      });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Session Drawer/ }).click();
+    await expect(page.getByRole("heading", { name: "Session Drawer" })).toBeVisible();
+
+    const panel = page.locator(".home-agent-panel");
+    await expect(panel).toBeVisible();
+    await panel.locator(".home-agent-row", { hasText: "Builder / Codex" }).click();
+
+    const drawer = page.locator(".home-agent-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toHaveAttribute("aria-label", "Agent activity");
+    const list = drawer.locator(".home-agent-list");
+    await expect(drawer.locator(".home-agent-list > li")).toHaveCount(2);
+    await expect(list).toContainText("Worker drafting the notes.");
+    await expect(list.locator(".home-agent-list__pill")).toHaveText("2 tool actions · 2 completed");
+    await expect(list).not.toContainText("Reviewer signed off.");
+  });
+
+  test("keeps the agent panel and drawer free of accessibility violations and closes the drawer on Escape", async ({
+    page,
+  }) => {
+    // Axe must read the drawer at rest: sampled mid enter-fade it blends the muted
+    // text with the surface and reports contrast the settled drawer does not have.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const session = homeSession(
+      "root-aaxe",
+      "Session Axe",
+      [homeParticipant("worker", "builder")],
+      CONVERSATION_LIFECYCLE.ACTIVE,
+    );
+    const liveStartedAt = new Date(Date.now() - 5_000).toISOString();
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeTimeline("root-aaxe", [
+          homeUserEvent("root-aaxe", "axe-user-1", "Run the audit.", liveStartedAt),
+          homeAssistantEvent(
+            "root-aaxe",
+            "axe-assistant-1",
+            "Auditing the surface.",
+            [],
+            "worker",
+            liveStartedAt,
+            false,
+          ),
+          homeToolEvent(
+            "root-aaxe",
+            "axe-tool-1",
+            "claude",
+            CONVERSATION_TOOL_ACTION_STATUS.STARTED,
+          ),
+        ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+    await page.route("**/api/conversations/root-aaxe-conversation/stream-token", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { stream_token: "axe-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+      });
+    });
+    await page.route("**/api/conversations/root-aaxe-conversation/events?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: serializeSseEmptyEvent(CONVERSATION_SSE_EVENT.HEARTBEAT),
+      });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Session Axe/ }).click();
+    await expect(page.getByRole("heading", { name: "Session Axe" })).toBeVisible();
+
+    const panel = page.locator(".home-agent-panel");
+    await expect(panel).toBeVisible();
+    await panel.locator(".home-agent-row", { hasText: "Builder / Codex" }).click();
+    await expect(page.locator(".home-agent-drawer")).toBeVisible();
+
+    await expectAxeClean(page, "agent drawer");
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".home-agent-drawer")).toBeHidden();
+    await expect(panel).toBeVisible();
   });
 });
