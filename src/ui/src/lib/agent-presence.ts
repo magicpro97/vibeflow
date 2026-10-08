@@ -14,7 +14,8 @@ export const AGENT_PRESENCE_STATUS = Object.freeze({
   FAILED: "failed",
   COMPLETE: "complete",
 } as const);
-export type AgentPresenceStatus = (typeof AGENT_PRESENCE_STATUS)[keyof typeof AGENT_PRESENCE_STATUS];
+export type AgentPresenceStatus =
+  (typeof AGENT_PRESENCE_STATUS)[keyof typeof AGENT_PRESENCE_STATUS];
 export interface AgentPresenceRow {
   readonly participantId: string;
   readonly label: string;
@@ -123,8 +124,7 @@ export function buildAgentPresence(
   });
   return rows.sort(
     (left, right) =>
-      STATUS_RANK[left.status] - STATUS_RANK[right.status] ||
-      left.label.localeCompare(right.label),
+      STATUS_RANK[left.status] - STATUS_RANK[right.status] || left.label.localeCompare(right.label),
   );
 }
 

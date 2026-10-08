@@ -126,9 +126,7 @@ function openAgentDrawer(participantId: string) {
 
 function closeAgents() {
   agentsOpen.value = false;
-  nextTick(() =>
-    document.querySelector<HTMLElement>(".home-agent-panel .home-agent-row")?.focus(),
-  );
+  nextTick(() => document.querySelector<HTMLElement>(".home-agent-panel .home-agent-row")?.focus());
 }
 
 function closeActiveDrawer(event: KeyboardEvent) {

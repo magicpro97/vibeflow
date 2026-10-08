@@ -6,26 +6,73 @@ import { buildAgentActivity } from "../lib/agent-activity.js";
 import { attributeItemsToParticipants } from "../lib/agent-presence.js";
 
 const item = (partial: Partial<RenderedHomeTimelineItem>): RenderedHomeTimelineItem =>
-  ({ id: "i", kind: "user", title: "", body: "", at: null, anchorKey: null, sourceKey: null,
-     sourceEventIds: [], conversationId: null, revisionId: null, publicSessionRef: null,
-     publicAuthorId: null, messageRef: null, revisionOrdinal: 0, complete: true, evidence: [],
-     quoteRefs: [], reactions: [], diagnosticCode: null, operations: [], ...partial } as RenderedHomeTimelineItem);
+  ({
+    id: "i",
+    kind: "user",
+    title: "",
+    body: "",
+    at: null,
+    anchorKey: null,
+    sourceKey: null,
+    sourceEventIds: [],
+    conversationId: null,
+    revisionId: null,
+    publicSessionRef: null,
+    publicAuthorId: null,
+    messageRef: null,
+    revisionOrdinal: 0,
+    complete: true,
+    evidence: [],
+    quoteRefs: [],
+    reactions: [],
+    diagnosticCode: null,
+    operations: [],
+    ...partial,
+  }) as RenderedHomeTimelineItem;
 
-const assistant = (publicAuthorId: string, id: string, at: string | null = null, complete = false) =>
-  item({ id, kind: "assistant", publicAuthorId, at, complete, title: `${publicAuthorId} / engine`, body: `${publicAuthorId}…` });
+const assistant = (
+  publicAuthorId: string,
+  id: string,
+  at: string | null = null,
+  complete = false,
+) =>
+  item({
+    id,
+    kind: "assistant",
+    publicAuthorId,
+    at,
+    complete,
+    title: `${publicAuthorId} / engine`,
+    body: `${publicAuthorId}…`,
+  });
 
 const tool = (id: string, at: string | null = null) =>
-  item({ id, kind: "tool", at, tool: { id, tool: "bun", action: "bun test", status: "completed", at } });
+  item({
+    id,
+    kind: "tool",
+    at,
+    tool: { id, tool: "bun", action: "bun test", status: "completed", at },
+  });
 
 describe("agent activity", () => {
   test("assistant run owns its following tool items, original order", () => {
     const items = [assistant("builder", "a1"), tool("t1"), tool("t2")];
-    expect(buildAgentActivity(items, "builder").map((entry) => entry.item.id)).toEqual(["a1", "t1", "t2"]);
+    expect(buildAgentActivity(items, "builder").map((entry) => entry.item.id)).toEqual([
+      "a1",
+      "t1",
+      "t2",
+    ]);
   });
   test("each participant owns only the tools after its own assistant row", () => {
     const items = [assistant("builder", "a1"), tool("t1"), assistant("reviewer", "a2"), tool("t2")];
-    expect(buildAgentActivity(items, "builder").map((entry) => entry.item.id)).toEqual(["a1", "t1"]);
-    expect(buildAgentActivity(items, "reviewer").map((entry) => entry.item.id)).toEqual(["a2", "t2"]);
+    expect(buildAgentActivity(items, "builder").map((entry) => entry.item.id)).toEqual([
+      "a1",
+      "t1",
+    ]);
+    expect(buildAgentActivity(items, "reviewer").map((entry) => entry.item.id)).toEqual([
+      "a2",
+      "t2",
+    ]);
   });
   test("empty items yield an empty feed", () => {
     expect(buildAgentActivity([], "builder")).toEqual([]);
@@ -35,8 +82,15 @@ describe("agent activity", () => {
     expect(buildAgentActivity(items, "builder").map((entry) => entry.item.id)).toEqual(["a1"]);
   });
   test("user rows are excluded even mid-run and never steal the cursor", () => {
-    const items = [assistant("builder", "a1"), item({ id: "h1", kind: "user", publicAuthorId: "human" }), tool("t1")];
-    expect(buildAgentActivity(items, "builder").map((entry) => entry.item.id)).toEqual(["a1", "t1"]);
+    const items = [
+      assistant("builder", "a1"),
+      item({ id: "h1", kind: "user", publicAuthorId: "human" }),
+      tool("t1"),
+    ];
+    expect(buildAgentActivity(items, "builder").map((entry) => entry.item.id)).toEqual([
+      "a1",
+      "t1",
+    ]);
   });
   test("at mirrors the item's own at", () => {
     const items = [

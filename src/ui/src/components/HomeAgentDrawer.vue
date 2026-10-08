@@ -26,7 +26,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { homeParticipantDisplayLabel } from "../conversation-home-participant-label.js";
 import { projectHomeTimeline } from "../conversation-home-projection.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
-import { buildAgentActivity, type AgentActivityEntry } from "../lib/agent-activity.js";
+import { type AgentActivityEntry, buildAgentActivity } from "../lib/agent-activity.js";
 import { AGENT_PRESENCE_STATUS, buildAgentPresence } from "../lib/agent-presence.js";
 import { toolGroupSummary } from "../lib/tool-groups.js";
 

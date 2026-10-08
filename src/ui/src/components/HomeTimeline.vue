@@ -204,9 +204,7 @@ const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);
 const followLatest = ref(true);
 const showJump = ref(false);
-const turnStarts = computed(() =>
-  props.items.map((_, index) => turnStartAt(props.items, index)),
-);
+const turnStarts = computed(() => props.items.map((_, index) => turnStartAt(props.items, index)));
 /** Finality for answer collapse: the last assistant/user row, even with trailing tool/boundary rows. */
 const lastAnswerIndex = computed(() => finalAnswerIndex(props.items));
 const promptRail = computed(() => buildPromptRail(props.items));
