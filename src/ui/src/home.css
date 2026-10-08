@@ -4489,7 +4489,7 @@ button:disabled {
   /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 52rem) centered,
      so its left edge sits at max(1rem, (100% - 52rem) / 2) inside this pane. */
   justify-self: start;
-  margin: 0.75rem 0 0 max(1rem, calc((100% - 52rem) / 2));
+  margin: 0.75rem 0 1rem max(1rem, calc((100% - 52rem) / 2));
   overflow: hidden;
   border: 1px solid var(--home-line);
   border-radius: 0.75rem;
@@ -4500,11 +4500,13 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  margin: 0;
   padding: 0.4rem 0.75rem;
   border-bottom: 1px solid var(--home-line);
   color: var(--home-faint);
   font-size: 0.6875rem;
   font-weight: 600;
+  line-height: 1.2;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -4521,6 +4523,9 @@ button:disabled {
   /* Long rosters scroll inside the panel instead of crowding the transcript. */
   max-height: 8.5rem;
   overflow-y: auto;
+}
+.home-agent-panel li {
+  margin: 0;
 }
 .home-agent-row {
   display: grid;
@@ -4548,6 +4553,12 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+.home-agent-row__dot {
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--home-muted) 78%, transparent);
 }
 .home-agent-row__label {
   overflow: hidden;
@@ -4589,6 +4600,11 @@ button:disabled {
   color: color-mix(in srgb, var(--home-muted) 35%, transparent);
 }
 @media (max-width: 480px) {
+  /* Phones: the pane's fixed stack is brittle under text zoom; the 1rem desktop
+     gap below the panel would push the composer below the fold at 200%. */
+  .home-agent-panel {
+    margin-bottom: 0;
+  }
   .home-agent-row {
     grid-template-columns: 1rem minmax(0, 1fr) auto;
   }

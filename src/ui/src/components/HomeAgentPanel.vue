@@ -12,7 +12,7 @@
             <span v-if="row.status === 'working'" class="home-busy-signal"><i /><i /><i /></span>
             <template v-else-if="row.status === 'complete'">✓</template>
             <template v-else-if="row.status === 'failed'">✕</template>
-            <template v-else>·</template>
+            <span v-else class="home-agent-row__dot" aria-hidden="true" />
           </span>
           <span class="home-agent-row__label">{{ row.label }}</span>
           <span class="home-agent-row__action">{{ row.latestAction ?? "" }}</span>
