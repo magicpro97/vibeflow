@@ -1503,7 +1503,7 @@ describe("post-freeze UI Home projections and pure helpers", () => {
       "system",
       "system",
       "system",
-      "system",
+      "tool",
       "system",
       "system",
       "system",

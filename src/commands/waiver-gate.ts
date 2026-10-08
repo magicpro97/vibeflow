@@ -14,6 +14,7 @@ export function runWaiverGate(base: string, inject?: { spawner?: typeof spawnSyn
     stdio: "pipe",
     cwd: base,
     timeout: VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs,
+    maxBuffer: VERIFY_RUNTIME_AUTHORITY.gateMaxBufferBytes,
   });
   if (w.status !== 0) {
     out("vf", c.red("✗ waiver policy gate failed"));

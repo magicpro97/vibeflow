@@ -1,5 +1,6 @@
 <template>
   <main id="conversation-main" ref="scroller" class="home-timeline" aria-label="Conversation" tabindex="0" @scroll="trackScroll">
+    <HomePromptRail :entries="promptRail" @jump="jumpToAnchor" />
     <div v-if="store.activationError" class="home-inline-state home-inline-state--error" role="alert">
       <span><strong>Couldn’t refresh this conversation.</strong>{{ store.activationError }}</span>
       <button v-if="store.activeRootId" type="button" @click="store.selectSession(store.activeRootId)">Try again</button>
@@ -13,21 +14,15 @@
       <p class="home-welcome__copy">
         Start naturally. VibeFlow will connect the right AI CLIs, preserve the conversation, and bring every reviewable action back here.
       </p>
-      <div
+      <HomeLoadingPanel
         v-if="store.submitting"
-        class="home-loading-panel home-loading-panel--welcome"
-        role="status"
-        aria-live="polite"
-      >
-        <header class="home-loading-panel__header">
-          <span>{{ welcomeLoading.eyebrow }}</span>
-          <strong>{{ welcomeLoading.title }}</strong>
-        </header>
-        <p class="home-loading-panel__copy">{{ welcomeLoading.detail }}</p>
-        <ul class="home-loading-panel__checkpoints" aria-label="Conversation creation progress">
-          <li v-for="checkpoint in welcomeLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
-        </ul>
-      </div>
+        variant="welcome"
+        :eyebrow="welcomeLoading.eyebrow"
+        :title="welcomeLoading.title"
+        :detail="welcomeLoading.detail"
+        :checkpoints="welcomeLoading.checkpoints"
+        list-label="Conversation creation progress"
+      />
       <div class="home-starters" aria-label="Conversation starters">
         <button v-for="starter in starters" :key="starter.title" type="button" @click="useStarter(starter.prompt)">
           <span aria-hidden="true">{{ starter.glyph }}</span>
@@ -38,56 +33,21 @@
       <p class="home-welcome__hint">No setup form. Describe the outcome; refine the team and tools in the conversation.</p>
     </section>
     <section v-else class="home-thread" aria-label="Conversation timeline" aria-live="polite" aria-relevant="additions text">
-      <div
+      <HomeLoadingPanel
         v-if="store.activationLoading && !store.timeline"
-        class="home-loading-panel home-loading-panel--thread"
-        aria-label="Loading conversation"
-        role="status"
-        aria-live="polite"
-      >
-        <header class="home-loading-panel__header">
-          <span>{{ activationLoading.eyebrow }}</span>
-          <strong>{{ activationLoading.title }}</strong>
-        </header>
-        <p class="home-loading-panel__copy">{{ activationLoading.detail }}</p>
-        <ul class="home-loading-panel__checkpoints" aria-label="Conversation restore progress">
-          <li v-for="checkpoint in activationLoading.checkpoints" :key="checkpoint">{{ checkpoint }}</li>
-        </ul>
-        <div class="home-loading-thread" aria-hidden="true">
-          <article data-tone="human">
-            <span class="home-loading-thread__avatar">Y</span>
-            <div class="home-loading-thread__copy">
-              <strong />
-              <small />
-              <span class="home-loading-thread__line" />
-              <span class="home-loading-thread__line home-loading-thread__line--short" />
-            </div>
-          </article>
-          <article data-tone="assistant">
-            <span class="home-loading-thread__avatar">AI</span>
-            <div class="home-loading-thread__copy">
-              <strong />
-              <small />
-              <span class="home-loading-thread__line" />
-              <span class="home-loading-thread__line home-loading-thread__line--medium" />
-            </div>
-          </article>
-          <article data-tone="system">
-            <span class="home-loading-thread__avatar">+</span>
-            <div class="home-loading-thread__copy">
-              <strong />
-              <small />
-              <span class="home-loading-thread__line home-loading-thread__line--medium" />
-            </div>
-          </article>
-        </div>
-      </div>
+        variant="thread"
+        :eyebrow="activationLoading.eyebrow"
+        :title="activationLoading.title"
+        :detail="activationLoading.detail"
+        :checkpoints="activationLoading.checkpoints"
+        list-label="Conversation restore progress"
+      />
       <div v-else-if="!rendered.length && !store.pendingActions.length" class="home-empty-thread">
         <span aria-hidden="true">✦</span>
         <strong>The room is ready.</strong>
         <p>Send the first message, mention an agent, or add one with <kbd>+</kbd>.</p>
       </div>
-      <template v-for="item in rendered" :key="item.id">
+      <template v-for="(item, index) in rendered" :key="item.id">
         <div v-if="item.kind === 'boundary'" class="home-revision-boundary" role="separator">
           <span />
           <strong>{{ item.title }}</strong>
@@ -103,18 +63,12 @@
           >
             <header><strong>{{ item.title }}</strong><time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time></header>
             <p>{{ item.body }}</p>
-            <div v-if="item.quoteRefs.length" class="home-message-quotes" aria-label="Persisted quoted sources">
-              <article v-for="quote in item.quoteRefs" :key="`${item.id}-${quote.quoteOrder}-${quote.target.target_event_id}`" class="home-message-quote">
-                <header>
-                  <strong>Quote {{ quote.quoteOrder }}</strong>
-                  <small>{{ quoteAuthor(quote.target) }}</small>
-                </header>
-                <p>{{ quote.target.preview_text }}</p>
-                <button type="button" class="home-button" @click="jumpToQuoteTarget(quote.target.target_event_id)">
-                  Jump to source
-                </button>
-              </article>
-            </div>
+            <HomeMessageQuotes
+              v-if="item.quoteRefs.length"
+              :quote-refs="item.quoteRefs"
+              :author="quoteAuthor"
+              @jump="jumpToQuoteTarget"
+            />
             <p v-else-if="showInteractionPending(item)" class="home-interaction-hint">{{ interactionHint(item) }}</p>
             <HomeMessageInteractions
               v-if="item.messageRef"
@@ -136,22 +90,20 @@
           >
             <header>
               <strong>{{ item.title }}</strong>
-              <span v-if="!item.complete" class="home-thinking"><i /><i /><i /><span class="sr-only">Thinking</span></span>
+              <HomeTurnStatus :started-at="turnStarts[index] ?? null" :finished-at="item.at" :complete="item.complete" />
               <time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time>
             </header>
-            <p>{{ item.body }}</p>
-            <div v-if="item.quoteRefs.length" class="home-message-quotes" aria-label="Persisted quoted sources">
-              <article v-for="quote in item.quoteRefs" :key="`${item.id}-${quote.quoteOrder}-${quote.target.target_event_id}`" class="home-message-quote">
-                <header>
-                  <strong>Quote {{ quote.quoteOrder }}</strong>
-                  <small>{{ quoteAuthor(quote.target) }}</small>
-                </header>
-                <p>{{ quote.target.preview_text }}</p>
-                <button type="button" class="home-button" @click="jumpToQuoteTarget(quote.target.target_event_id)">
-                  Jump to source
-                </button>
-              </article>
-            </div>
+            <HomeCollapsibleAnswer
+              v-if="shouldCollapseAnswer({ kind: item.kind, complete: item.complete, body: item.body, isLast: index === lastAnswerIndex })"
+              :body="item.body"
+            />
+            <p v-else>{{ item.body }}</p>
+            <HomeMessageQuotes
+              v-if="item.quoteRefs.length"
+              :quote-refs="item.quoteRefs"
+              :author="quoteAuthor"
+              @jump="jumpToQuoteTarget"
+            />
             <p v-else-if="showInteractionPending(item)" class="home-interaction-hint">{{ interactionHint(item) }}</p>
             <details v-if="item.evidence.length" class="home-evidence">
               <summary>{{ item.evidence.length }} evidence reference{{ item.evidence.length === 1 ? '' : 's' }}</summary>
@@ -168,6 +120,7 @@
             />
           </div>
         </article>
+        <HomeToolGroup v-else-if="item.kind === 'tool-group'" :item="item" />
         <div v-else class="home-system-event" :class="{ 'home-system-event--error': item.kind === 'error' }">
           <span aria-hidden="true">{{ item.kind === 'error' ? '!' : '·' }}</span>
           <div
@@ -230,9 +183,18 @@ import type {
   HomeQuoteReference,
   HomeReactionSummary,
 } from "../conversation-home-types.js";
+import { finalAnswerIndex, shouldCollapseAnswer } from "../lib/message-collapse.js";
+import { buildPromptRail } from "../lib/prompt-rail.js";
+import { turnStartAt } from "../lib/turn-timing.js";
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
+import HomeCollapsibleAnswer from "./HomeCollapsibleAnswer.vue";
+import HomeLoadingPanel from "./HomeLoadingPanel.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
+import HomeMessageQuotes from "./HomeMessageQuotes.vue";
+import HomePromptRail from "./HomePromptRail.vue";
+import HomeToolGroup from "./HomeToolGroup.vue";
+import HomeTurnStatus from "./HomeTurnStatus.vue";
 const store = useConversationHomeStore();
 const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);
@@ -241,6 +203,12 @@ const showJump = ref(false);
 const rendered = computed(() =>
   projectHomeTimeline(store.timeline?.items ?? [], store.activeRevision?.participants ?? []),
 );
+const turnStarts = computed(() =>
+  rendered.value.map((_, index) => turnStartAt(rendered.value, index)),
+);
+/** Finality for answer collapse: the last assistant/user row, even with trailing tool/boundary rows. */
+const lastAnswerIndex = computed(() => finalAnswerIndex(rendered.value));
+const promptRail = computed(() => buildPromptRail(rendered.value));
 const activationLoading = computed(() =>
   describeHomeActivationLoading({
     topic: store.activeSession?.active?.topic ?? store.activeSession?.root.topic ?? null,
@@ -347,6 +315,15 @@ function jumpToQuoteTarget(targetEventId: string): void {
   if (!(element instanceof HTMLElement)) return;
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   element.focus({ preventScroll: true });
+}
+
+function jumpToAnchor(anchorKey: string): void {
+  const element = document.getElementById(homeTimelineMessageDomId(anchorKey));
+  if (!(element instanceof HTMLElement)) return;
+  element.scrollIntoView({ block: "center", behavior: "smooth" });
+  element.focus({ preventScroll: true });
+  followLatest.value = false; // let the user stay where they jumped
+  showJump.value = true;
 }
 
 const quoteAuthor = (target: HomeQuoteProjection) => {

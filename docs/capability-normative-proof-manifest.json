@@ -551,8 +551,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "d4434090988c906fd6afcd4506d78ecf8de958794162a454d4c61061689ecffb",
-      "production_sha256": "796f3f0acfc61818a492a3f5a5d21a68fb4569ef9e5bdc96cd302a4d5bf61039"
+      "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
+      "production_sha256": "c70e247d6d8bf18a1acea4ebb5fa51c30fee1929161a6e51b9ca18b440c4091c"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
@@ -564,8 +564,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "d4434090988c906fd6afcd4506d78ecf8de958794162a454d4c61061689ecffb",
-      "production_sha256": "796f3f0acfc61818a492a3f5a5d21a68fb4569ef9e5bdc96cd302a4d5bf61039"
+      "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
+      "production_sha256": "c70e247d6d8bf18a1acea4ebb5fa51c30fee1929161a6e51b9ca18b440c4091c"
     },
     {
       "id": "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
@@ -578,7 +578,7 @@
         "src/ui/src"
       ],
       "test_sha256": "8e62143168f8ee72c165cff055c48cbb2a2dbde178653a2dd2cb32f886cd3e61",
-      "production_sha256": "796f3f0acfc61818a492a3f5a5d21a68fb4569ef9e5bdc96cd302a4d5bf61039"
+      "production_sha256": "c70e247d6d8bf18a1acea4ebb5fa51c30fee1929161a6e51b9ca18b440c4091c"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
@@ -590,8 +590,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "d4434090988c906fd6afcd4506d78ecf8de958794162a454d4c61061689ecffb",
-      "production_sha256": "796f3f0acfc61818a492a3f5a5d21a68fb4569ef9e5bdc96cd302a4d5bf61039"
+      "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
+      "production_sha256": "c70e247d6d8bf18a1acea4ebb5fa51c30fee1929161a6e51b9ca18b440c4091c"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
@@ -603,8 +603,8 @@
       "production_paths": [
         "src/ui/src"
       ],
-      "test_sha256": "d4434090988c906fd6afcd4506d78ecf8de958794162a454d4c61061689ecffb",
-      "production_sha256": "796f3f0acfc61818a492a3f5a5d21a68fb4569ef9e5bdc96cd302a4d5bf61039"
+      "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
+      "production_sha256": "c70e247d6d8bf18a1acea4ebb5fa51c30fee1929161a6e51b9ca18b440c4091c"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
@@ -618,8 +618,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
@@ -633,8 +633,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
@@ -648,8 +648,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
@@ -663,8 +663,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
@@ -678,8 +678,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
@@ -693,8 +693,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
@@ -709,8 +709,8 @@
         "src/server",
         "src/actions"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "69f8e5aaa74402ecf4da406850d33e1f02297d113250ea143377d34f2c0c264e"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "da49f8334f360eae4fdc12a3e706399337bc75348f3ac5012dfc91ed476092d1"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
@@ -724,8 +724,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
@@ -739,8 +739,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
@@ -754,8 +754,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
@@ -769,8 +769,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
@@ -784,8 +784,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "1e7fcd6d9b04b8b1b7c5c53adb6f072acf67102d08597fc6065e1607f30a569a",
-      "production_sha256": "571d7d7af45c0b53d396de8fe63521d045524abf25f9076259d52401a39337b5"
+      "test_sha256": "beb6d20e0f96287292f711522d69bdcba3a2bac6fa1b5bec0c1fe513821b0f73",
+      "production_sha256": "98f285809ca2e3095b0b662210bc50e9f170a19c8479ef25d02fe53075144736"
     },
     {
       "id": "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
@@ -2575,6 +2575,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "b994297c27a119e33555b30692a53181c4382e33ab531777beab26c2ea745da9"
+    "reviewed_payload_sha256": "5ba28958611b8e89b071c8651f193539cad6787a599787f441e11605caf8dd90"
   }
 }

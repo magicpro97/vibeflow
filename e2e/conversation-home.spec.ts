@@ -51,12 +51,14 @@ import {
 import {
   CONVERSATION_HEALTH,
   CONVERSATION_LIFECYCLE,
+  CONVERSATION_TOOL_ACTION_STATUS,
   CONVERSATION_TRACE_EVENT_KIND,
 } from "../src/orchestrator/conversation/conversation-public-wire-contract.js";
 import {
   CONVERSATION_SSE_EVENT,
   serializeSseEmptyEvent,
 } from "../src/orchestrator/conversation/conversation-sse-contract.js";
+import { homeTimelineMessageDomId } from "../src/ui/src/conversation-home-authoring.js";
 import {
   HOME_EXPIRED_TS,
   HOME_FUTURE_TS,
@@ -125,7 +127,13 @@ function homeParticipant(
   return { participant_id, role_ref, engine, model: null };
 }
 
-function homeSession(rootSessionId: string, topic: string, participants = [homeParticipant()]) {
+function homeSession(
+  rootSessionId: string,
+  topic: string,
+  participants = [homeParticipant()],
+  lifecycle: (typeof CONVERSATION_LIFECYCLE)[keyof typeof CONVERSATION_LIFECYCLE] =
+    CONVERSATION_LIFECYCLE.COMPLETED,
+) {
   const revision = {
     schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
     conversation_id: `${rootSessionId}-conversation`,
@@ -136,7 +144,7 @@ function homeSession(rootSessionId: string, topic: string, participants = [homeP
     lineage_status: CONVERSATION_LINEAGE_STATUS.VERIFIED,
     topic,
     policy: "direct",
-    lifecycle: CONVERSATION_LIFECYCLE.COMPLETED,
+    lifecycle,
     health: CONVERSATION_HEALTH.HEALTHY,
     participants,
     created_at: HOME_TS,
@@ -161,13 +169,18 @@ function homeSession(rootSessionId: string, topic: string, participants = [homeP
   };
 }
 
-function homeLocator(rootSessionId: string, eventId: string) {
+function homeLocator(
+  rootSessionId: string,
+  eventId: string,
+  targetKind: (typeof CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND)[keyof typeof CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND] =
+    CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
+) {
   return {
     root_session_id: rootSessionId,
     conversation_id: `${rootSessionId}-conversation`,
     revision_id: `${rootSessionId}-revision`,
     target_event_id: eventId,
-    target_kind: CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
+    target_kind: targetKind,
     content_digest: homeDigest(eventId),
   };
 }
@@ -185,6 +198,8 @@ function homeAssistantEvent(
   body: string,
   reactions: Array<Record<string, unknown>> = [],
   participantId = "reviewer",
+  ts: string = HOME_TS,
+  complete = true,
 ) {
   return {
     kind: CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT,
@@ -200,7 +215,7 @@ function homeAssistantEvent(
       attempt_id: `attempt-${eventId}`,
       event_id: eventId,
       seq: 1,
-      ts: HOME_TS,
+      ts,
       public_session_ref: null,
       participant_id: participantId,
       event: {
@@ -211,7 +226,7 @@ function homeAssistantEvent(
           content_delta: body,
           final_claim: body,
           final_evidence: [],
-          completes_response: true,
+          completes_response: complete,
         },
       },
     },
@@ -252,6 +267,94 @@ function homeTimeline(
       },
       ...items,
     ],
+  };
+}
+
+function homeUserEvent(
+  rootSessionId: string,
+  eventId: string,
+  content: string,
+  ts: string = HOME_TS,
+) {
+  return {
+    kind: CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT,
+    revision_ordinal: 0,
+    action_operations: homeActionOperations(),
+    event: {
+      workflow_id: "workflow",
+      conversation_id: `${rootSessionId}-conversation`,
+      revision_id: `${rootSessionId}-revision`,
+      run_id: "run",
+      turn_id: "turn",
+      operation_id: `operation-${eventId}`,
+      attempt_id: `attempt-${eventId}`,
+      event_id: eventId,
+      seq: 1,
+      ts,
+      public_session_ref: null,
+      participant_id: "human",
+      event: {
+        type: CONVERSATION_TRACE_EVENT_KIND.USER_MESSAGE,
+        payload: {
+          content,
+          target_participants: CONVERSATION_MESSAGE_QUEUE_TARGET_PARTICIPANT_MODE.ALL,
+        },
+      },
+    },
+    interaction: {
+      state: CONVERSATION_INTERACTION_STATE.READY,
+      message_locator: homeLocator(
+        rootSessionId,
+        eventId,
+        CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.USER_MESSAGE,
+      ),
+      quote_refs: [],
+      reactions: [],
+      diagnostic_code: null,
+    },
+  };
+}
+
+function homeToolEvent(
+  rootSessionId: string,
+  eventId: string,
+  tool: string,
+  status: (typeof CONVERSATION_TOOL_ACTION_STATUS)[keyof typeof CONVERSATION_TOOL_ACTION_STATUS],
+  ts: string = HOME_TS,
+) {
+  return {
+    kind: CONVERSATION_TIMELINE_ITEM_KIND.CONVERSATION_EVENT,
+    revision_ordinal: 0,
+    action_operations: homeActionOperations(),
+    event: {
+      workflow_id: "workflow",
+      conversation_id: `${rootSessionId}-conversation`,
+      revision_id: `${rootSessionId}-revision`,
+      run_id: "run",
+      turn_id: "turn",
+      operation_id: `operation-${eventId}`,
+      attempt_id: `attempt-${eventId}`,
+      event_id: eventId,
+      seq: 1,
+      ts,
+      public_session_ref: null,
+      participant_id: "worker",
+      event: {
+        type: CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION,
+        payload: {
+          tool,
+          action: `${tool} activity`,
+          status,
+        },
+      },
+    },
+    interaction: {
+      state: CONVERSATION_INTERACTION_STATE.READY,
+      message_locator: null,
+      quote_refs: [],
+      reactions: [],
+      diagnostic_code: null,
+    },
   };
 }
 
@@ -3053,5 +3156,242 @@ test.describe("AI-first conversation Home", () => {
     await page.goto("/");
     await waitForPage(page);
     await expectAxeClean(page, "primary Home");
+  });
+
+  test("groups consecutive tool actions into one expandable summary", async ({ page }) => {
+    const session = homeSession("root-g", "Session G");
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeTimeline("root-g", [
+          homeUserEvent("root-g", "group-user-1", "Run both tools."),
+          homeToolEvent(
+            "root-g",
+            "group-tool-1",
+            "claude",
+            CONVERSATION_TOOL_ACTION_STATUS.COMPLETED,
+          ),
+          homeToolEvent("root-g", "group-tool-2", "git", CONVERSATION_TOOL_ACTION_STATUS.COMPLETED),
+          homeUserEvent("root-g", "group-user-2", "Thanks."),
+        ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Session G/ }).click();
+    await expect(page.getByRole("heading", { name: "Session G" })).toBeVisible();
+
+    const group = page.locator(".home-tool-group");
+    await expect(group.getByText("2 tool actions · 2 completed")).toBeVisible();
+    const firstTool = group.locator(".home-tool-group__list li", { hasText: "claude" });
+    await expect(firstTool).toBeHidden();
+    await group.locator("summary").click();
+    await expect(firstTool).toBeVisible();
+  });
+
+  test("renders elapsed time for completed turns and keeps live turns ticking", async ({
+    page,
+  }) => {
+    const session = homeSession("root-t", "Session T");
+    const completedAt = new Date(Date.parse(HOME_TS) + 95_000).toISOString();
+    const liveStartedAt = new Date(Date.now() - 5_000).toISOString();
+    const liveAt = new Date().toISOString();
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeTimeline("root-t", [
+          homeUserEvent("root-t", "turn-user-1", "Start the first turn.", HOME_TS),
+          homeAssistantEvent(
+            "root-t",
+            "turn-assistant-1",
+            "First turn done.",
+            [],
+            "reviewer",
+            completedAt,
+          ),
+          homeUserEvent("root-t", "turn-user-2", "Start the live turn.", liveStartedAt),
+          homeAssistantEvent(
+            "root-t",
+            "turn-assistant-2",
+            "Still working.",
+            [],
+            "worker",
+            liveAt,
+            false,
+          ),
+        ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Session T/ }).click();
+    await expect(page.getByRole("heading", { name: "Session T" })).toBeVisible();
+
+    await expect(page.getByText("Worked for 1m 35s")).toBeVisible();
+    await expect(page.getByText(/^Working · \d+m \d+s$/)).toBeVisible();
+    const firstText = await page.getByText(/^Working · /).textContent();
+    await expect
+      .poll(async () => page.getByText(/^Working · /).textContent())
+      .not.toBe(firstText);
+  });
+
+  test("collapses long answers and flags a session completed after the first fetch", async ({
+    page,
+  }) => {
+    let catalogFetches = 0;
+    const sessionA = homeSession("root-a", "Session A");
+    const sessionBCompleted = homeSession("root-b", "Session B");
+    const sessionBActive = homeSession(
+      "root-b",
+      "Session B",
+      [homeParticipant()],
+      CONVERSATION_LIFECYCLE.ACTIVE,
+    );
+    const longBody = `${"word ".repeat(140)}TAIL-MARKER`;
+    const catalogGet = () =>
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/conversations" &&
+          response.request().method() === "GET",
+      );
+    await page.route("**/api/conversations?**", async (route) => {
+      catalogFetches += 1;
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [sessionA, catalogFetches === 1 ? sessionBActive : sessionBCompleted],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [sessionA, sessionBCompleted]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      const rootSessionId = new URL(route.request().url()).pathname.split("/")[3] ?? "";
+      await route.fulfill({
+        status: 200,
+        json:
+          rootSessionId === "root-a"
+            ? homeTimeline("root-a", [
+                homeUserEvent("root-a", "collapse-user-1", "Explain everything."),
+                homeAssistantEvent("root-a", "collapse-assistant-1", longBody),
+                homeUserEvent("root-a", "collapse-user-2", "Continue."),
+              ])
+            : homeTimeline(rootSessionId, [
+                homeAssistantEvent(rootSessionId, "collapse-event-b", "Session B done."),
+              ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+
+    const search = page.getByPlaceholder("Search conversations");
+    const firstFetch = catalogGet();
+    await page.goto("/");
+    await waitForPage(page);
+    await firstFetch;
+
+    await page.getByRole("button", { name: /Session A/ }).click();
+    await expect(page.getByRole("heading", { name: "Session A" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show full answer" })).toBeVisible();
+    await page.getByRole("button", { name: "Show full answer" }).click();
+    await expect(page.getByText("TAIL-MARKER")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
+
+    const secondFetch = catalogGet();
+    await search.fill("b");
+    await secondFetch;
+    const thirdFetch = catalogGet();
+    await search.fill("");
+    await thirdFetch;
+
+    const sessionBRow = page.locator(`[data-root-session="root-b"]`);
+    await expect(sessionBRow.locator(".home-session__attention")).toBeVisible();
+    await expect(page.getByText("New completion since your last visit")).toBeAttached();
+    await sessionBRow.click();
+    await expect(sessionBRow.locator(".home-session__attention")).toHaveCount(0);
+  });
+
+  test("jumps to a prompt from the prompt rail", async ({ page }) => {
+    const session = homeSession("root-r", "Session R");
+    const firstBody = `First prompt: ${"detail ".repeat(90)}`;
+    await page.route("**/api/conversations?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "catalog",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.READY,
+        },
+      });
+    });
+    await routeHomeHeads(page, [session]);
+    await page.route("**/api/conversation-sessions/*/timeline?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeTimeline("root-r", [
+          homeUserEvent("root-r", "rail-user-1", firstBody),
+          homeUserEvent("root-r", "rail-user-2", "Second prompt body."),
+          homeUserEvent("root-r", "rail-user-3", "Third prompt body."),
+        ]),
+      });
+    });
+    await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
+      await route.fulfill({ status: 200, json: homePending([]) });
+    });
+
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: /Session R/ }).click();
+    await expect(page.getByRole("heading", { name: "Session R" })).toBeVisible();
+
+    const ticks = page.getByRole("button", { name: /Jump to prompt: / });
+    await expect(ticks).toHaveCount(3);
+    await ticks.nth(1).click();
+    const anchor = page.locator(`[id="${homeTimelineMessageDomId("rail-user-2")}"]`);
+    await expect(anchor).toBeInViewport();
   });
 });

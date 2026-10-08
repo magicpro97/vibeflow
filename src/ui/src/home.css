@@ -666,6 +666,18 @@ button:disabled {
   background: var(--home-amber);
   box-shadow: 0 0 0 3px rgb(181 126 54 / 0.12);
 }
+.home-session__attention {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: var(--home-accent, #2563eb);
+  vertical-align: middle;
+}
+.home-session--attention .home-session__title {
+  font-weight: 650;
+}
 .home-degraded {
   margin-left: auto;
   color: var(--home-amber);
@@ -1315,6 +1327,10 @@ button:disabled {
 .home-thinking i:nth-child(3) {
   animation-delay: 240ms;
 }
+.home-turn-status {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
 .home-evidence {
   margin-top: 0.8rem;
   color: var(--home-muted);
@@ -1373,6 +1389,22 @@ button:disabled {
 .home-evidence li {
   margin: 0.25rem 0;
   overflow-wrap: anywhere;
+}
+.home-tool-group summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.home-tool-group__list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.home-tool-group__list li[data-status="failed"] {
+  color: var(--home-danger, #b3261e);
+}
+.home-tool-group__action {
+  margin-left: 8px;
 }
 .home-system-event {
   display: flex;
@@ -1482,6 +1514,42 @@ button:disabled {
   cursor: pointer;
   transform: translateX(-50%);
   font-size: 0.7rem;
+}
+
+.home-prompt-rail {
+  position: sticky;
+  top: 8px;
+  width: 24px;
+  margin-left: auto;
+  margin-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 2;
+}
+.home-prompt-rail__tick {
+  /* 24×24 CSS-pixel minimum target (WCAG 2.5.8); the visual tick is the
+     ::before sliver, so the enlarged hit area stays invisible. */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-prompt-rail__tick::before {
+  content: "";
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 35%, transparent);
+}
+.home-prompt-rail__tick:hover::before,
+.home-prompt-rail__tick:focus-visible::before {
+  background: var(--home-accent, #2563eb);
 }
 
 /* Composer */
@@ -4408,4 +4476,7 @@ button:disabled {
   margin: 0;
   color: var(--home-muted);
   font-size: 0.68rem;
+}
+.home-collapsible button {
+  margin-top: 6px;
 }

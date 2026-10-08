@@ -45,18 +45,24 @@ describe("verify runtime authority", () => {
   test("uses the frozen 15-minute timeout for sync toolchain gates", () => {
     const base = project({ test: "bun test" });
     addWaiverGate(base);
-    const calls: Array<{ options?: { timeout?: number } }> = [];
+    const calls: Array<{ options?: { timeout?: number; maxBuffer?: number } }> = [];
     const spawner = ((_command, _args, options) => {
-      calls.push({ options: options as { timeout?: number } });
+      calls.push({ options: options as { timeout?: number; maxBuffer?: number } });
       return { status: 0, stdout: Buffer.from(""), stderr: Buffer.from("") };
     }) as typeof spawnSync;
     try {
       expect(Object.isFrozen(VERIFY_RUNTIME_AUTHORITY)).toBe(true);
       expect(VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs).toBe(900_000);
+      expect(VERIFY_RUNTIME_AUTHORITY.gateMaxBufferBytes).toBe(64 * 1024 * 1024);
       expect(verify({ projectDir: base, requireReviewEvidence: false, spawner })).toBe(0);
       expect(calls).toHaveLength(2);
       expect(
         calls.every((call) => call.options?.timeout === VERIFY_RUNTIME_AUTHORITY.gateTimeoutMs),
+      ).toBe(true);
+      expect(
+        calls.every(
+          (call) => call.options?.maxBuffer === VERIFY_RUNTIME_AUTHORITY.gateMaxBufferBytes,
+        ),
       ).toBe(true);
     } finally {
       rmSync(base, { recursive: true, force: true });
