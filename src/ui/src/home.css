@@ -1315,6 +1315,10 @@ button:disabled {
 .home-thinking i:nth-child(3) {
   animation-delay: 240ms;
 }
+.home-turn-status {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
 .home-evidence {
   margin-top: 0.8rem;
   color: var(--home-muted);

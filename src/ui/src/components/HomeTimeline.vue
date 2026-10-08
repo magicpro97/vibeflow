@@ -46,7 +46,7 @@
         <strong>The room is ready.</strong>
         <p>Send the first message, mention an agent, or add one with <kbd>+</kbd>.</p>
       </div>
-      <template v-for="item in rendered" :key="item.id">
+      <template v-for="(item, index) in rendered" :key="item.id">
         <div v-if="item.kind === 'boundary'" class="home-revision-boundary" role="separator">
           <span />
           <strong>{{ item.title }}</strong>
@@ -89,7 +89,7 @@
           >
             <header>
               <strong>{{ item.title }}</strong>
-              <span v-if="!item.complete" class="home-thinking"><i /><i /><i /><span class="sr-only">Thinking</span></span>
+              <HomeTurnStatus :started-at="turnStarts[index] ?? null" :finished-at="item.at" :complete="item.complete" />
               <time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time>
             </header>
             <p>{{ item.body }}</p>
@@ -178,12 +178,14 @@ import type {
   HomeQuoteReference,
   HomeReactionSummary,
 } from "../conversation-home-types.js";
+import { turnStartAt } from "../lib/turn-timing.js";
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
 import HomeLoadingPanel from "./HomeLoadingPanel.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
 import HomeMessageQuotes from "./HomeMessageQuotes.vue";
 import HomeToolGroup from "./HomeToolGroup.vue";
+import HomeTurnStatus from "./HomeTurnStatus.vue";
 const store = useConversationHomeStore();
 const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);
@@ -191,6 +193,9 @@ const followLatest = ref(true);
 const showJump = ref(false);
 const rendered = computed(() =>
   projectHomeTimeline(store.timeline?.items ?? [], store.activeRevision?.participants ?? []),
+);
+const turnStarts = computed(() =>
+  rendered.value.map((_, index) => turnStartAt(rendered.value, index)),
 );
 const activationLoading = computed(() =>
   describeHomeActivationLoading({
