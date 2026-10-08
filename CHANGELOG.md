@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.21.0](https://github.com/magicpro97/vibeflow/compare/v0.20.0...v0.21.0) (2026-10-08)
+
+
+### Features
+
+* **cli:** add vf update with seamless ui handoff ([752a33b](https://github.com/magicpro97/vibeflow/commit/752a33b861447e12a0ff6e418ddc3be0f7fe7478))
+* **cli:** seamless auto-update with zero-downtime vf ui handoff ([79e4b29](https://github.com/magicpro97/vibeflow/commit/79e4b298be1d5d963e53f510239590b2ee15c237))
+* **doctor:** report update and ui generation status ([9e93690](https://github.com/magicpro97/vibeflow/commit/9e93690b3ea670debd243c1f2990d79ea93e6269))
+* **settings:** add update.mode and update.manager ([7300d33](https://github.com/magicpro97/vibeflow/commit/7300d33a6cde38112208081c9804d6bb13b03476))
+* **ui:** add guarded update status/run routes (local-only trigger) ([31106cf](https://github.com/magicpro97/vibeflow/commit/31106cfb2f6cef9ec676d9b02e6ae27045fef62a))
+* **ui:** update banner and update settings in the web UI ([e9d6e50](https://github.com/magicpro97/vibeflow/commit/e9d6e505b568692a66f9382254f1f317cf38295a))
+* **ui:** update banner model and API client ([d48eda6](https://github.com/magicpro97/vibeflow/commit/d48eda6ff867219f5fbdb97683e5a3e42ae174e3))
+* **ui:** wire update routes and classify the new spawn boundary ([a4bf3b2](https://github.com/magicpro97/vibeflow/commit/a4bf3b26ffba34a240174689589b63a84f3354fe))
+* **update:** add --rollback and record the previous version on every change ([c55a814](https://github.com/magicpro97/vibeflow/commit/c55a814e8a2398b21bd67dc69a6634bcf8c68a2e))
+* **update:** add handoff orchestration and auto-mode watchers ([50371e6](https://github.com/magicpro97/vibeflow/commit/50371e60f06e8cd759dacc3b0ea4f02968cce8da))
+* **update:** add handoff wire contract files ([686bd8a](https://github.com/magicpro97/vibeflow/commit/686bd8a4f5f2b732525019684271fda1ec37e0b9))
+* **update:** add machine-global update-state record for rollback ([0bd3e85](https://github.com/magicpro97/vibeflow/commit/0bd3e858f276fdcf69a3fbf68c22398a3fb10cca))
+* **update:** point the update nudge at vf update ([9581a9d](https://github.com/magicpro97/vibeflow/commit/9581a9d3e70519433e63de6fc6d5220f57308631))
+* **update:** record ui server version in discovery file ([21d1f3b](https://github.com/magicpro97/vibeflow/commit/21d1f3bf697b23500f7692d912e6e356d2276593))
+* **update:** rollback + update visibility in the web UI ([84bc74e](https://github.com/magicpro97/vibeflow/commit/84bc74e0efe3f6f9f93baf5eb9f0f59852db47ca))
+
+
+### Bug Fixes
+
+* **ci:** re-pin process boundaries, refresh normative proofs, sync landing mirror ([e755409](https://github.com/magicpro97/vibeflow/commit/e755409ca9d58302623be834d9fb8d191dc08190))
+* **skills:** restore claude-api unstated-provider triggers; add TOCs to oversize references ([9916a59](https://github.com/magicpro97/vibeflow/commit/9916a59f1d3fc1a5f18fd1a73fb24d03469776fc))
+* **skills:** restore section separators dropped at image-to-code-skill reference seams ([2e53184](https://github.com/magicpro97/vibeflow/commit/2e53184c330171178f62fa1ecec4f5648bb38455))
+* **ui:** import the banner status type from the shared update contract ([8de974d](https://github.com/magicpro97/vibeflow/commit/8de974d0bd2df438ffd20f39ad278007d6e6b78b))
+* **update:** async install keeps the lock heartbeat alive, best-effort marker, big-int §11 ids (Copilot round) ([a0aa9ba](https://github.com/magicpro97/vibeflow/commit/a0aa9baebf799466af421038b2d6485f5baebd40))
+* **update:** close adversarial-review findings in the handoff core ([6405b17](https://github.com/magicpro97/vibeflow/commit/6405b1796f782616909b1529b37dc4432c5287d4))
+* **update:** close copilot review threads ([c85ef4c](https://github.com/magicpro97/vibeflow/commit/c85ef4ca716c89f5c83f05faafd6c5ca6b9f5a48))
+* **update:** cover the bind-retry default sleep path ([fa6b1a7](https://github.com/magicpro97/vibeflow/commit/fa6b1a75f2c8b9174b31763627604a1d6d0ddfe9))
+* **update:** distinguish lock-held from lock-unavailable; cover early-return release and non-UTF8 bodies ([de715cb](https://github.com/magicpro97/vibeflow/commit/de715cb251d55b8fa081e4faa3f6ae307725a3c0))
+* **update:** harden copilot-thread follow-ups ([2a19100](https://github.com/magicpro97/vibeflow/commit/2a1910041618739723261e38468487d5650fab72))
+* **update:** keep ui cli contract browser-bundleable ([45f092e](https://github.com/magicpro97/vibeflow/commit/45f092ed42635b68c1f6576f8b1049b8148451f7))
+* **update:** post-merge adversarial-review findings — lock, bounded body, marker honesty, §11 ids ([cb680c2](https://github.com/magicpro97/vibeflow/commit/cb680c2aaeda8fc40ef0b5805366dc74edeed18a))
+* **update:** resolve review threads — recorded-manager rollback, spawn cwd, banner grid row, load-gated settings save, shared status contract, schema authority ([e9570b7](https://github.com/magicpro97/vibeflow/commit/e9570b71b77c0f7801150eae4bd4e935942bedde))
+* **update:** restore the recorded-manager rollback fallback (mutation probe left it flipped) ([9c9f910](https://github.com/magicpro97/vibeflow/commit/9c9f910fa38352ac671d597dd97982b0758fe22a))
+* **update:** single-flight lock, bounded run body, honest retry marker, §11 leading-zero ids ([968478e](https://github.com/magicpro97/vibeflow/commit/968478eb7544b0887a19e371e9bdb0862b4ed266))
+
+
+### Refactors
+
+* **ui:** extract vf ui into its own command with takeover support ([a597a06](https://github.com/magicpro97/vibeflow/commit/a597a06744dfc01e571ebbb21cb6f022e3057610))
+
+
+### Documentation
+
+* **update:** document --rollback in the command help ([e9f739c](https://github.com/magicpro97/vibeflow/commit/e9f739c6a7887ea97714f7f14fd83d189abe0a96))
+* **update:** document rollback and the update UI ([f50ae10](https://github.com/magicpro97/vibeflow/commit/f50ae10c292d6dd1fded504a9965fd136e8e3b5e))
+
+
+### Tests
+
+* **doctor:** fix vacuous handoff assertion; pin latest-equality and dedup ([9d3c8d7](https://github.com/magicpro97/vibeflow/commit/9d3c8d78114f73ec639adbc33b3aa6dff6c2558b))
+* **settings:** pin update-block replace-on-write semantics ([d8ea8bd](https://github.com/magicpro97/vibeflow/commit/d8ea8bdc73cffcaebc991105f5c94a26ba850ae9))
+* **update:** cover the command drain loop's real sleep default ([738d463](https://github.com/magicpro97/vibeflow/commit/738d463d9d966a5fc2908a4d2c61647cb34c5eae))
+* **update:** cover the lock-unavailable arm (per-file 100% gate) ([277c74a](https://github.com/magicpro97/vibeflow/commit/277c74a6b4fe392e4581e8779ea8b62946c849e0))
+* **update:** pin handoff contract rejection branches ([6eee05b](https://github.com/magicpro97/vibeflow/commit/6eee05b901857db37c01ab9d0890428d80a18b34))
+* **update:** pin watcher re-arm; harden tick against throwing request reads ([79b1959](https://github.com/magicpro97/vibeflow/commit/79b195985f3f45da386bc49c372bce54f154ca44))
+
 ## [0.20.0](https://github.com/magicpro97/vibeflow/compare/v0.19.0...v0.20.0) (2026-10-04)
 
 
