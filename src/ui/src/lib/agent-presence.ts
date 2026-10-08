@@ -1,11 +1,8 @@
-// Per-agent presence rows for the Home agent panel ("who is working now" panel).
-//
-// Only assistant rows carry `publicAuthorId`; tool / tool-group rows follow a cursor of
-// the latest non-"human" author. Status: idle → failed (last item failed tool / tool-group
-// whose LAST entry failed) → working (a `started` tool signal, or last item incomplete) →
-// complete. `startedAt` is the nearest preceding user/boundary row; when null, `elapsedMs`
-// is null (no clock). v1 limit (R1): interleaved concurrent agents mis-attribute stray tool
-// events.
+// Per-agent presence rows for the Home agent panel ("who is working now" panel). Only
+// assistant rows carry `publicAuthorId`; tool / tool-group rows follow a cursor of the latest
+// non-"human" author (shared walk: `attributeItemsToParticipants`). Status: idle → failed (a
+// failed tool / tool-group whose LAST entry failed) → working (a `started` tool signal, or
+// last item incomplete) → complete. v1 limit (R1): interleaved agents mis-attribute tools.
 import { homeParticipantDisplayLabel } from "../conversation-home-participant-label.js";
 import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
 import type { HomeParticipant } from "../conversation-home-types.js";
@@ -18,7 +15,6 @@ export const AGENT_PRESENCE_STATUS = Object.freeze({
   COMPLETE: "complete",
 } as const);
 export type AgentPresenceStatus = (typeof AGENT_PRESENCE_STATUS)[keyof typeof AGENT_PRESENCE_STATUS];
-
 export interface AgentPresenceRow {
   readonly participantId: string;
   readonly label: string;
@@ -42,7 +38,6 @@ const STATUS_RANK = {
 
 /** Max characters kept from a latest-action body, ellipsis included. */
 const LATEST_ACTION_MAX = 140;
-
 interface PresenceSignal {
   readonly lastIndex: number;
   readonly at: string | null;
@@ -51,15 +46,14 @@ interface PresenceSignal {
   readonly failed: boolean;
   readonly started: boolean;
 }
-
 const truncateLatestAction = (body: string): string =>
   body.length <= LATEST_ACTION_MAX ? body : `${body.slice(0, LATEST_ACTION_MAX - 1)}…`;
 
-export function buildAgentPresence(
+/** Shared attribution walk (agent drawer reuses it); index lists keep timeline order. */
+export function attributeItemsToParticipants(
   items: readonly RenderedHomeTimelineItem[],
-  participants: readonly HomeParticipant[],
-): AgentPresenceRow[] {
-  const signals = new Map<string, PresenceSignal>();
+): Map<string, number[]> {
+  const attribution = new Map<string, number[]>();
   let currentAuthor: string | null = null;
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
@@ -68,15 +62,29 @@ export function buildAgentPresence(
     if (typeof author === "string" && author !== "human") currentAuthor = author;
     if (item.kind !== "assistant" && item.kind !== "tool" && item.kind !== "tool-group") continue;
     if (!currentAuthor) continue;
-    // Tool-group status counts as its LAST member (a tool row is a single-entry group);
-    // `started` is true for a started tool, or a group with ANY started member.
+    const indexes = attribution.get(currentAuthor);
+    if (indexes) indexes.push(index);
+    else attribution.set(currentAuthor, [index]);
+  }
+  return attribution;
+}
+export function buildAgentPresence(
+  items: readonly RenderedHomeTimelineItem[],
+  participants: readonly HomeParticipant[],
+): AgentPresenceRow[] {
+  const signals = new Map<string, PresenceSignal>();
+  for (const [participantId, indexes] of attributeItemsToParticipants(items)) {
+    const lastIndex = indexes[indexes.length - 1] ?? -1;
+    const item = items[lastIndex];
+    if (!item) continue;
+    // Tool-group status counts as its LAST member (a tool row is a single-entry group).
     const member = item.kind === "tool" ? item.tool : item.tools?.[item.tools.length - 1];
     const started =
       item.kind === "tool"
         ? item.tool?.status === "started"
         : (item.tools?.some((entry) => entry.status === "started") ?? false);
-    signals.set(currentAuthor, {
-      lastIndex: index,
+    signals.set(participantId, {
+      lastIndex,
       at: item.at,
       body: item.body,
       complete: item.complete,
