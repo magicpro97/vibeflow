@@ -52,7 +52,8 @@
         </div>
       </header>
 
-      <HomeTimeline />
+      <HomeAgentPanel :rows="agentRows" @select="selectAgent" />
+      <HomeTimeline :items="rendered" />
       <HomeComposer
         :transient-ui-open="transientUiOpen || detailsOpen"
         @open-capabilities="$emit('open-capabilities')"
@@ -118,15 +119,29 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { CONVERSATION_LIFECYCLE } from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
+import { projectHomeTimeline } from "../conversation-home-projection.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { homeConversationLifecycleLabel } from "../conversation-lifecycle-presentation.js";
+import { buildAgentPresence } from "../lib/agent-presence.js";
+import HomeAgentPanel from "./HomeAgentPanel.vue";
 import HomeComposer from "./HomeComposer.vue";
 import HomeSessionRail from "./HomeSessionRail.vue";
 import HomeTimeline from "./HomeTimeline.vue";
 
-const emit = defineEmits<{ "open-capabilities": []; "open-trace": [] }>();
+const emit = defineEmits<{
+  "open-capabilities": [];
+  "open-trace": [];
+  "select-agent": [participantId: string];
+}>();
 defineProps<{ transientUiOpen: boolean }>();
 const store = useConversationHomeStore();
+const participants = computed(() => store.activeRevision?.participants ?? []);
+// The single projection authority: both the timeline and the agent panel render these rows.
+const rendered = computed(() =>
+  projectHomeTimeline(store.timeline?.items ?? [], participants.value),
+);
+const agentRows = computed(() => buildAgentPresence(rendered.value, participants.value));
+const selectedAgentId = ref<string | null>(null);
 const detailsOpen = ref(false);
 const detailsTrigger = ref<HTMLButtonElement | null>(null);
 const detailsPanel = ref<HTMLElement | null>(null);
@@ -152,6 +167,11 @@ const initials = (value: string) =>
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || "AI";
+
+function selectAgent(participantId: string) {
+  selectedAgentId.value = participantId;
+  emit("select-agent", participantId);
+}
 
 function mention(participantId: string) {
   if (store.queuedMessageEdit) return;
