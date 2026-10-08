@@ -4518,6 +4518,9 @@ button:disabled {
   list-style: none;
   margin: 0;
   padding: 0;
+  /* Long rosters scroll inside the panel instead of crowding the transcript. */
+  max-height: 8.5rem;
+  overflow-y: auto;
 }
 .home-agent-row {
   display: grid;
@@ -4591,6 +4594,12 @@ button:disabled {
   }
   .home-agent-row__action {
     display: none;
+  }
+}
+@media (max-height: 820px) {
+  /* Short viewports: the transcript and composer win; the roster shows its first rows and scrolls. */
+  .home-agent-panel ul {
+    max-height: 4rem;
   }
 }
 
