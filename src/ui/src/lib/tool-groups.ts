@@ -1,3 +1,9 @@
+// Status vocabulary: the published wire contract is the single authority — a
+// handwritten copy here would drift silently when the protocol evolves.
+import {
+  CONVERSATION_TOOL_ACTION_STATUSES,
+  type ConversationToolActionStatusV1,
+} from "../../../orchestrator/conversation/conversation-public-wire-contract.js";
 // Tool-call grouping for the Home transcript (Orca 1.4.196 "grouped activity rows" port).
 import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
 
@@ -5,13 +11,15 @@ export interface ToolGroupEntry {
   id: string;
   tool: string;
   action: string;
-  status: "started" | "completed" | "failed";
+  status: ConversationToolActionStatusV1;
   at: string | null;
 }
 
-/** Narrow an unknown tool-action status to the three published statuses. */
-export function toolActionStatus(value: unknown): ToolGroupEntry["status"] {
-  return value === "completed" || value === "failed" ? value : "started";
+/** Narrow an unknown tool-action status to the published statuses. */
+export function toolActionStatus(value: unknown): ConversationToolActionStatusV1 {
+  return (CONVERSATION_TOOL_ACTION_STATUSES as readonly unknown[]).includes(value)
+    ? (value as ConversationToolActionStatusV1)
+    : "started";
 }
 
 /** Build the single-event tool row; `tool` carries the structured entry for later grouping. */
@@ -69,6 +77,7 @@ export function groupToolItems(
   const output: RenderedHomeTimelineItem[] = [];
   let seed: RenderedHomeTimelineItem | null = null;
   let entries: ToolGroupEntry[] = [];
+  let operations: RenderedHomeTimelineItem["operations"] = [];
   const flush = () => {
     if (!seed) return;
     if (entries.length === 1) {
@@ -81,15 +90,20 @@ export function groupToolItems(
         title: toolGroupSummary(entries),
         body: toolGroupDetail(entries),
         tools: entries,
+        // The grouped row stands in for every member on the timeline, so it must
+        // carry the union of their durable actions — not just the first item's.
+        operations,
       });
     }
     seed = null;
     entries = [];
+    operations = [];
   };
   for (const item of items) {
     if (item.kind === "tool" && item.tool) {
       if (!seed) seed = item;
       entries.push(item.tool);
+      operations = [...operations, ...item.operations];
       continue;
     }
     flush();

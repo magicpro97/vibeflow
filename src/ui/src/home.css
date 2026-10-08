@@ -1519,7 +1519,7 @@ button:disabled {
 .home-prompt-rail {
   position: sticky;
   top: 8px;
-  width: 18px;
+  width: 24px;
   margin-left: auto;
   margin-right: 4px;
   display: flex;
@@ -1528,16 +1528,27 @@ button:disabled {
   z-index: 2;
 }
 .home-prompt-rail__tick {
-  width: 18px;
-  height: 3px;
+  /* 24×24 CSS-pixel minimum target (WCAG 2.5.8); the visual tick is the
+     ::before sliver, so the enlarged hit area stays invisible. */
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-prompt-rail__tick::before {
+  content: "";
+  width: 18px;
+  height: 3px;
   border-radius: 2px;
   background: color-mix(in srgb, currentColor 35%, transparent);
-  cursor: pointer;
 }
-.home-prompt-rail__tick:hover,
-.home-prompt-rail__tick:focus-visible {
+.home-prompt-rail__tick:hover::before,
+.home-prompt-rail__tick:focus-visible::before {
   background: var(--home-accent, #2563eb);
 }
 

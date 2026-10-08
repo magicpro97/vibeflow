@@ -3,6 +3,7 @@
 // never sees the module dependency — repo pattern, same as ui-use-home-engines.test.ts.
 const { describe, expect, test } = await import(String("bun:test"));
 import { projectHomeTimeline } from "../conversation-home-projection.js";
+import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
 import { degradedHomeTimelineInteraction } from "../conversation-home-stream.js";
 import type { HomeTimelineItem } from "../conversation-home-types.js";
 import {
@@ -46,6 +47,22 @@ describe("tool groups", () => {
     expect(out[0]?.id).toBe("tool-group:e1");
     expect(out[0]?.tools?.map((t) => t.id)).toEqual(["e1", "e2"]);
     expect(out[2]?.tool?.tool).toBe("claude");
+  });
+
+  test("a group accumulates operations from every member, not just the first", () => {
+    const op = (id: string) =>
+      ({ operation_id: id }) as unknown as RenderedHomeTimelineItem["operations"][number];
+    const a = toolActionItem("e1", entry("e1", "claude", "completed"), 1, [op("op-1")]);
+    const b = toolActionItem("e2", entry("e2", "git", "completed"), 1, [op("op-2"), op("op-3")]);
+    const out = groupToolItems([a, b]);
+    expect(out[0]?.operations.map((operation) => operation.operation_id)).toEqual([
+      "op-1",
+      "op-2",
+      "op-3",
+    ]);
+    // A lone tool item keeps its own operations untouched.
+    const single = groupToolItems([a]);
+    expect(single[0]?.operations.map((operation) => operation.operation_id)).toEqual(["op-1"]);
   });
 
   test("a lone tool item stays a plain tool item", () => {

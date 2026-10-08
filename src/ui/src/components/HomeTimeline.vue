@@ -94,7 +94,7 @@
               <time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time>
             </header>
             <HomeCollapsibleAnswer
-              v-if="shouldCollapseAnswer({ kind: item.kind, complete: item.complete, body: item.body, isLast: index === rendered.length - 1 })"
+              v-if="shouldCollapseAnswer({ kind: item.kind, complete: item.complete, body: item.body, isLast: index === lastAnswerIndex })"
               :body="item.body"
             />
             <p v-else>{{ item.body }}</p>
@@ -183,7 +183,7 @@ import type {
   HomeQuoteReference,
   HomeReactionSummary,
 } from "../conversation-home-types.js";
-import { shouldCollapseAnswer } from "../lib/message-collapse.js";
+import { finalAnswerIndex, shouldCollapseAnswer } from "../lib/message-collapse.js";
 import { buildPromptRail } from "../lib/prompt-rail.js";
 import { turnStartAt } from "../lib/turn-timing.js";
 import HomeActionCard from "./HomeActionCard.vue";
@@ -206,6 +206,8 @@ const rendered = computed(() =>
 const turnStarts = computed(() =>
   rendered.value.map((_, index) => turnStartAt(rendered.value, index)),
 );
+/** Finality for answer collapse: the last assistant/user row, even with trailing tool/boundary rows. */
+const lastAnswerIndex = computed(() => finalAnswerIndex(rendered.value));
 const promptRail = computed(() => buildPromptRail(rendered.value));
 const activationLoading = computed(() =>
   describeHomeActivationLoading({

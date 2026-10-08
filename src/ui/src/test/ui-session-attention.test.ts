@@ -23,11 +23,16 @@ describe("session attention", () => {
     expect(mergeAttention({}, [], [fact("a", "COMPLETED")], null)).toEqual({});
   });
 
-  test("keeps previously held attention and drops vanished sessions", () => {
+  test("keeps previously held attention; a filtered view never erases absent marks", () => {
     expect(
       mergeAttention({ a: true }, [fact("a", "COMPLETED")], [fact("a", "COMPLETED")], null),
     ).toEqual({ a: true });
-    expect(mergeAttention({ gone: true }, [], [], null)).toEqual({});
+    // The rail's `sessions` is a search/pagination SUBSET; marks for sessions the
+    // current view omits persist until that session is opened (clearAttention).
+    expect(mergeAttention({ gone: true }, [], [], null)).toEqual({ gone: true });
+    expect(
+      mergeAttention({ gone: true }, [fact("other", "ACTIVE")], [fact("other", "ACTIVE")], null),
+    ).toEqual({ gone: true });
   });
 
   test("clears on selection and validates lifecycle membership", () => {

@@ -4,6 +4,7 @@ const { describe, expect, test } = await import(String("bun:test"));
 import {
   COLLAPSE_MIN_CHARS,
   collapsePreview,
+  finalAnswerIndex,
   shouldCollapseAnswer,
 } from "../lib/message-collapse.js";
 
@@ -34,5 +35,14 @@ describe("message collapse", () => {
     expect(preview.endsWith("…")).toBe(true);
     expect(preview.includes("wo…")).toBe(false);
     expect(collapsePreview("tiny")).toBe("tiny");
+  });
+
+  test("finality is relative to later assistant/user rows, not tool noise", () => {
+    expect(finalAnswerIndex([{ kind: "assistant" }, { kind: "tool" }])).toBe(0);
+    expect(finalAnswerIndex([{ kind: "tool" }, { kind: "assistant" }, { kind: "tool" }])).toBe(1);
+    // A later user message supersedes the answer: the tail is the user row.
+    expect(finalAnswerIndex([{ kind: "assistant" }, { kind: "user" }])).toBe(1);
+    expect(finalAnswerIndex([{ kind: "tool" }])).toBe(-1);
+    expect(finalAnswerIndex([])).toBe(-1);
   });
 });

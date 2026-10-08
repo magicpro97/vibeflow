@@ -342,9 +342,10 @@ computed from the item timestamps the transcript already carries, so a reload
 reconstructs the same durations.
 
 **Collapsed answers**: a completed assistant answer of at least 600 characters
-that is not the last item collapses behind a `Show full answer` / `Show less`
-toggle with the opening excerpt visible. Short answers, the streaming turn, and
-the final answer render in full.
+that is not the conversation tail — an answer a later user message has already
+superseded, with tool or boundary rows ignored — collapses behind a
+`Show full answer` / `Show less` toggle with the opening excerpt visible. Short
+answers, the streaming turn, and the tail answer render in full.
 
 **Attention dots**: a session that transitions into a terminal lifecycle state
 while it is not the active session gets a dot in the session rail. Dots are

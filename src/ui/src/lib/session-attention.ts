@@ -23,7 +23,14 @@ export function mergeAttention(
   activeRootId: string | null,
 ): Record<string, true> {
   const before = new Map(previous.map((session) => [session.root_session_id, session.lifecycle]));
+  const visible = new Set(sessions.map((session) => session.root_session_id));
   const next: Record<string, true> = {};
+  // `sessions` is the rail's CURRENT view (search/pagination subset). Marks whose
+  // sessions this view omits persist until the session is opened — pruning here
+  // would erase them whenever a filter hides their session.
+  for (const key of Object.keys(attention)) {
+    if (!visible.has(key) && key !== activeRootId) next[key] = true;
+  }
   for (const session of sessions) {
     if (session.root_session_id === activeRootId) continue;
     const held = attention[session.root_session_id] === true;
