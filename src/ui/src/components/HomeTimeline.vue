@@ -103,18 +103,12 @@
           >
             <header><strong>{{ item.title }}</strong><time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time></header>
             <p>{{ item.body }}</p>
-            <div v-if="item.quoteRefs.length" class="home-message-quotes" aria-label="Persisted quoted sources">
-              <article v-for="quote in item.quoteRefs" :key="`${item.id}-${quote.quoteOrder}-${quote.target.target_event_id}`" class="home-message-quote">
-                <header>
-                  <strong>Quote {{ quote.quoteOrder }}</strong>
-                  <small>{{ quoteAuthor(quote.target) }}</small>
-                </header>
-                <p>{{ quote.target.preview_text }}</p>
-                <button type="button" class="home-button" @click="jumpToQuoteTarget(quote.target.target_event_id)">
-                  Jump to source
-                </button>
-              </article>
-            </div>
+            <HomeMessageQuotes
+              v-if="item.quoteRefs.length"
+              :quote-refs="item.quoteRefs"
+              :author="quoteAuthor"
+              @jump="jumpToQuoteTarget"
+            />
             <p v-else-if="showInteractionPending(item)" class="home-interaction-hint">{{ interactionHint(item) }}</p>
             <HomeMessageInteractions
               v-if="item.messageRef"
@@ -140,18 +134,12 @@
               <time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time>
             </header>
             <p>{{ item.body }}</p>
-            <div v-if="item.quoteRefs.length" class="home-message-quotes" aria-label="Persisted quoted sources">
-              <article v-for="quote in item.quoteRefs" :key="`${item.id}-${quote.quoteOrder}-${quote.target.target_event_id}`" class="home-message-quote">
-                <header>
-                  <strong>Quote {{ quote.quoteOrder }}</strong>
-                  <small>{{ quoteAuthor(quote.target) }}</small>
-                </header>
-                <p>{{ quote.target.preview_text }}</p>
-                <button type="button" class="home-button" @click="jumpToQuoteTarget(quote.target.target_event_id)">
-                  Jump to source
-                </button>
-              </article>
-            </div>
+            <HomeMessageQuotes
+              v-if="item.quoteRefs.length"
+              :quote-refs="item.quoteRefs"
+              :author="quoteAuthor"
+              @jump="jumpToQuoteTarget"
+            />
             <p v-else-if="showInteractionPending(item)" class="home-interaction-hint">{{ interactionHint(item) }}</p>
             <details v-if="item.evidence.length" class="home-evidence">
               <summary>{{ item.evidence.length }} evidence reference{{ item.evidence.length === 1 ? '' : 's' }}</summary>
@@ -233,6 +221,7 @@ import type {
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
+import HomeMessageQuotes from "./HomeMessageQuotes.vue";
 const store = useConversationHomeStore();
 const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);
