@@ -4484,7 +4484,7 @@ button:disabled {
 
 /* Agent panel */
 .home-agent-panel {
-  width: min(24rem, 100%);
+  width: min(24rem, calc(100% - 2rem));
   grid-row: 2;
   /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 52rem) centered,
      so its left edge sits at max(1rem, (100% - 52rem) / 2) inside this pane. */
@@ -4592,4 +4592,109 @@ button:disabled {
   .home-agent-row__action {
     display: none;
   }
+}
+
+/* Agent drawer */
+.home-agent-drawer {
+  z-index: 25;
+  flex: 0 0 min(24rem, 36vw);
+  width: min(24rem, 36vw);
+  overflow-y: auto;
+  border-left: 1px solid var(--home-line);
+  background: var(--home-paper);
+  box-shadow: -14px 0 35px rgb(65 51 34 / 0.08);
+}
+.home-agent-drawer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.6rem;
+  padding: 0 1.15rem;
+  border-bottom: 1px solid var(--home-line);
+}
+.home-agent-drawer > header button {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  color: var(--home-muted);
+  cursor: pointer;
+  font-size: 1.3rem;
+}
+.home-agent-drawer > header button:hover {
+  background: var(--home-panel);
+}
+.home-agent-drawer > header small {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: var(--home-faint);
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.home-agent-drawer > header span strong {
+  display: block;
+  margin-top: -0.6rem;
+  font-family: Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+.home-agent-drawer {
+  position: fixed;
+  top: var(--home-topbar-height);
+  right: 0;
+  bottom: 0;
+  width: min(28rem, 92vw);
+}
+.home-agent-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 1rem 1.15rem 2rem;
+  list-style: none;
+}
+.home-agent-list > li {
+  padding: 0.8rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.7rem;
+  background: var(--home-tone-card);
+}
+.home-agent-list > li > header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.home-agent-list__icon {
+  color: var(--home-amber);
+  font-size: 0.7rem;
+}
+.home-agent-list time {
+  color: var(--home-faint);
+  font-size: 0.57rem;
+}
+.home-agent-list__pill {
+  padding: 0.2rem 0.4rem;
+  border-radius: 2rem;
+  background: var(--home-panel);
+  color: var(--home-muted);
+  font-size: 0.58rem;
+}
+.home-agent-list__state {
+  margin-left: auto;
+  color: var(--home-muted);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.home-agent-list > li > p {
+  margin: 0.55rem 0 0;
+  color: var(--home-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
