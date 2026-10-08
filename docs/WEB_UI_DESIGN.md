@@ -325,6 +325,35 @@ product language: the judge can only reject a change sooner or raise a risk tier
 opens a gate or skips a review, and it can only suggest an engine from the pool preflight
 already admitted.
 
+## 12. Orca-native transcript affordances (#830)
+
+Conversation Home keeps the transcript calm with five Orca-native affordances:
+
+**Tool groups**: consecutive `tool_action` items in a transcript collapse into a
+single `<details>` batch instead of one row per action. A lone tool action stays
+an ordinary row, unchanged. The collapsed summary reports the distinct tool count
+and the statuses present in the run, so a folded batch still says what ran and
+whether it succeeded.
+
+**Turn timers**: while an assistant turn streams, a live `Working · m:ss` timer
+sits at the turn's foot; on completion it freezes to `Worked for m:ss`. Both are
+computed from the item timestamps the transcript already carries, so a reload
+reconstructs the same durations.
+
+**Collapsed answers**: a completed assistant answer of at least 600 characters
+that is not the last item collapses behind a `Show full answer` / `Show less`
+toggle with the opening excerpt visible. Short answers, the streaming turn, and
+the final answer render in full.
+
+**Attention dots**: a session that transitions into a terminal lifecycle state
+while it is not the active session gets a dot in the session rail. Dots are
+persisted by session id under the `vf-attention` localStorage key and clear when
+the session is opened.
+
+**Prompt rail**: when a transcript holds at least two anchored user prompts, jump
+ticks render at the top of the transcript, one per prompt. Clicking a tick scrolls
+the prompt into view and moves focus to it.
+
 ---
 
 **Related:** [Architecture](./ARCHITECTURE.md) · [Workflow](./WORKFLOW.md)
