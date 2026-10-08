@@ -4429,3 +4429,6 @@ button:disabled {
   color: var(--home-muted);
   font-size: 0.68rem;
 }
+.home-collapsible button {
+  margin-top: 6px;
+}

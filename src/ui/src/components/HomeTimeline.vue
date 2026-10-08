@@ -92,7 +92,11 @@
               <HomeTurnStatus :started-at="turnStarts[index] ?? null" :finished-at="item.at" :complete="item.complete" />
               <time v-if="item.at" :datetime="item.at">{{ clock(item.at) }}</time>
             </header>
-            <p>{{ item.body }}</p>
+            <HomeCollapsibleAnswer
+              v-if="shouldCollapseAnswer({ kind: item.kind, complete: item.complete, body: item.body, isLast: index === rendered.length - 1 })"
+              :body="item.body"
+            />
+            <p v-else>{{ item.body }}</p>
             <HomeMessageQuotes
               v-if="item.quoteRefs.length"
               :quote-refs="item.quoteRefs"
@@ -178,9 +182,11 @@ import type {
   HomeQuoteReference,
   HomeReactionSummary,
 } from "../conversation-home-types.js";
+import { shouldCollapseAnswer } from "../lib/message-collapse.js";
 import { turnStartAt } from "../lib/turn-timing.js";
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
+import HomeCollapsibleAnswer from "./HomeCollapsibleAnswer.vue";
 import HomeLoadingPanel from "./HomeLoadingPanel.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
 import HomeMessageQuotes from "./HomeMessageQuotes.vue";
