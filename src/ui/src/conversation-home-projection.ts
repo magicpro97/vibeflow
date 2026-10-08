@@ -5,6 +5,8 @@ import {
   homeConversationLifecycleLabel,
   homeConversationTerminalDetail,
 } from "./conversation-lifecycle-presentation.js";
+import { groupToolItems, toolActionItem, toolActionStatus } from "./lib/tool-groups.js";
+import type { ToolGroupEntry } from "./lib/tool-groups.js";
 export type { RenderedHomeTraceEntry } from "./conversation-home-trace-projection.js";
 export { projectHomeTrace } from "./conversation-home-trace-projection.js";
 import type {
@@ -18,7 +20,7 @@ import type {
 
 export interface RenderedHomeTimelineItem {
   id: string;
-  kind: "user" | "assistant" | "system" | "boundary" | "error";
+  kind: "user" | "assistant" | "system" | "boundary" | "error" | "tool" | "tool-group";
   title: string;
   body: string;
   at: string | null;
@@ -41,6 +43,8 @@ export interface RenderedHomeTimelineItem {
   reactions: HomeReactionSummary[];
   diagnosticCode: string | null;
   operations: HomeActionOperation[];
+  tool?: ToolGroupEntry;
+  tools?: ToolGroupEntry[];
 }
 
 const text = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
@@ -324,12 +328,16 @@ export function projectHomeTimeline(
         break;
       case CONVERSATION_TRACE_EVENT_KIND.TOOL_ACTION:
         output.push(
-          systemItem(
+          toolActionItem(
             event.event_id,
-            `${text(payload.tool, "Tool")} · ${text(payload.status, "updated")}`,
-            text(payload.action, "Tool activity"),
+            {
+              id: event.event_id,
+              tool: text(payload.tool, "Tool"),
+              action: text(payload.action, "Tool activity"),
+              status: toolActionStatus(payload.status),
+              at: event.ts,
+            },
             item.revision_ordinal,
-            event.ts,
             operations,
           ),
         );
@@ -379,5 +387,5 @@ export function projectHomeTimeline(
           );
     }
   }
-  return output;
+  return groupToolItems(output);
 }

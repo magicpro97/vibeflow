@@ -115,6 +115,7 @@
             />
           </div>
         </article>
+        <HomeToolGroup v-else-if="item.kind === 'tool-group'" :item="item" />
         <div v-else class="home-system-event" :class="{ 'home-system-event--error': item.kind === 'error' }">
           <span aria-hidden="true">{{ item.kind === 'error' ? '!' : '·' }}</span>
           <div
@@ -182,6 +183,7 @@ import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
 import HomeLoadingPanel from "./HomeLoadingPanel.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
 import HomeMessageQuotes from "./HomeMessageQuotes.vue";
+import HomeToolGroup from "./HomeToolGroup.vue";
 const store = useConversationHomeStore();
 const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);

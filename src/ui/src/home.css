@@ -1374,6 +1374,22 @@ button:disabled {
   margin: 0.25rem 0;
   overflow-wrap: anywhere;
 }
+.home-tool-group summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.home-tool-group__list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.home-tool-group__list li[data-status="failed"] {
+  color: var(--home-danger, #b3261e);
+}
+.home-tool-group__action {
+  margin-left: 8px;
+}
 .home-system-event {
   display: flex;
   align-items: center;
