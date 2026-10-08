@@ -1516,6 +1516,31 @@ button:disabled {
   font-size: 0.7rem;
 }
 
+.home-prompt-rail {
+  position: sticky;
+  top: 8px;
+  width: 18px;
+  margin-left: auto;
+  margin-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 2;
+}
+.home-prompt-rail__tick {
+  width: 18px;
+  height: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 35%, transparent);
+  cursor: pointer;
+}
+.home-prompt-rail__tick:hover,
+.home-prompt-rail__tick:focus-visible {
+  background: var(--home-accent, #2563eb);
+}
+
 /* Composer */
 .home-composer-wrap {
   position: relative;

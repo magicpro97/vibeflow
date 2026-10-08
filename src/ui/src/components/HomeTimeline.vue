@@ -162,6 +162,7 @@
       </section>
       <div ref="endMarker" class="home-thread-end" aria-hidden="true" />
     </section>
+    <HomePromptRail :entries="promptRail" @jump="jumpToAnchor" />
     <button v-if="showJump" class="home-jump-latest" type="button" @click="scrollLatest">Jump to latest <span aria-hidden="true">↓</span></button>
   </main>
 </template>
@@ -183,6 +184,7 @@ import type {
   HomeReactionSummary,
 } from "../conversation-home-types.js";
 import { shouldCollapseAnswer } from "../lib/message-collapse.js";
+import { buildPromptRail } from "../lib/prompt-rail.js";
 import { turnStartAt } from "../lib/turn-timing.js";
 import HomeActionCard from "./HomeActionCard.vue";
 import HomeAnchoredOperations from "./HomeAnchoredOperations.vue";
@@ -190,6 +192,7 @@ import HomeCollapsibleAnswer from "./HomeCollapsibleAnswer.vue";
 import HomeLoadingPanel from "./HomeLoadingPanel.vue";
 import HomeMessageInteractions from "./HomeMessageInteractions.vue";
 import HomeMessageQuotes from "./HomeMessageQuotes.vue";
+import HomePromptRail from "./HomePromptRail.vue";
 import HomeToolGroup from "./HomeToolGroup.vue";
 import HomeTurnStatus from "./HomeTurnStatus.vue";
 const store = useConversationHomeStore();
@@ -203,6 +206,7 @@ const rendered = computed(() =>
 const turnStarts = computed(() =>
   rendered.value.map((_, index) => turnStartAt(rendered.value, index)),
 );
+const promptRail = computed(() => buildPromptRail(rendered.value));
 const activationLoading = computed(() =>
   describeHomeActivationLoading({
     topic: store.activeSession?.active?.topic ?? store.activeSession?.root.topic ?? null,
@@ -309,6 +313,14 @@ function jumpToQuoteTarget(targetEventId: string): void {
   if (!(element instanceof HTMLElement)) return;
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   element.focus({ preventScroll: true });
+}
+
+function jumpToAnchor(anchorKey: string): void {
+  const element = document.getElementById(homeTimelineMessageDomId(anchorKey));
+  if (!(element instanceof HTMLElement)) return;
+  element.scrollIntoView({ block: "center", behavior: "smooth" });
+  followLatest.value = false; // let the user stay where they jumped
+  showJump.value = true;
 }
 
 const quoteAuthor = (target: HomeQuoteProjection) => {
