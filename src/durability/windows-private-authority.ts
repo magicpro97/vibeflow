@@ -191,15 +191,21 @@ function securityBindings(native: WindowsSecurityNativeRuntime): WindowsPrivateA
     return Buffer.from(sid);
   };
   const tokenSid = (token: bigint, kind: number): unknown => {
+    // The classes queried here — TOKEN_USER (SID_AND_ATTRIBUTES + the widest SECURITY_MAX_SID)
+    // and TOKEN_OWNER (a bare PSID + SID) — are statically bounded well under 128 bytes, so the
+    // call is sized by the class bound and the NULL-buffer size probe is gone: the CI runner
+    // answered that probe with FALSE while GetLastError read 0 (#824), which this fail-closed
+    // path cannot distinguish from a real refusal. A class that ever outgrows the bound still
+    // reports ERROR_INSUFFICIENT_BUFFER and gets exactly one right-sized retry.
     const needed = [0];
-    if (
-      native.tokenInfo(token, kind, null, 0, needed) ||
-      native.lastError() !== WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER
-    )
-      failed("GetTokenInformation(size)");
-    const output = Buffer.alloc(needed[0] ?? 0);
-    if (!native.tokenInfo(token, kind, output, output.length, needed))
-      failed("GetTokenInformation");
+    let output = Buffer.alloc(WINDOWS_PRIVATE_SECURITY.TOKEN_SID_CLASS_BOUND_BYTES);
+    if (!native.tokenInfo(token, kind, output, output.length, needed)) {
+      if (native.lastError() !== WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER)
+        failed("GetTokenInformation");
+      output = Buffer.alloc(needed[0] ?? 0);
+      if (!native.tokenInfo(token, kind, output, output.length, needed))
+        failed("GetTokenInformation");
+    }
     // TOKEN_USER and TOKEN_OWNER both begin with the SID pointer, and the reader takes that
     // pointer rather than a struct, so one read serves both classes.
     return native.tokenUserSid(output);

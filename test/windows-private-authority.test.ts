@@ -555,6 +555,125 @@ describe("Windows private authority", () => {
     expect(() => bindings.currentUser()).toThrow("OpenProcessToken failed");
   });
 
+  test("sizes each token class without a zero-length probe the runner can answer with error 0 (#824)", () => {
+    const calls: { bytes: number; buffer: boolean }[] = [];
+    // The CI runner answered the NULL-buffer size probe (length 0) with FALSE + Windows error 0
+    // (#824), which this fail-closed path cannot tell from a real refusal. The classes queried
+    // here have statically bounded sizes, so the probe is not needed at all: one class-bound call
+    // per class must succeed even while GetLastError reads 0 throughout.
+    const dispatch: Record<string, (...args: any[]) => unknown> = {
+      GetCurrentProcess: () => 1n,
+      CloseHandle: () => 1,
+      LocalFree: () => undefined,
+      GetLastError: () => 0,
+      OpenProcessToken: (_process, _access, token) => {
+        token[0] = 2n;
+        return 1;
+      },
+      GetTokenInformation: (_token, _kind, output, bytes, needed) => {
+        calls.push({ bytes, buffer: Boolean(output) });
+        if (!output) return 0;
+        needed[0] = bytes;
+        return 1;
+      },
+      IsValidSid: () => 1,
+      GetLengthSid: () => USER_SID.length,
+      ConvertSidToStringSidW: (_sid, output) => {
+        output[0] = { text: USER_SDDL };
+        return 1;
+      },
+    };
+    const bindings = loadWindowsPrivateAuthorityBindings({
+      requireModule: () => fakeSecurityKoffi(dispatch),
+      isBun: false,
+    });
+    expect(bindings.currentUser().sddl).toBe(USER_SDDL);
+    // Exactly one buffer-bearing call per token class (TOKEN_USER, then TOKEN_OWNER); none with a
+    // NULL buffer and a zero length.
+    expect(calls.map((call) => call.buffer)).toEqual([true, true]);
+  });
+
+  test("retries once at the reported size when a token class outgrows the class bound", () => {
+    const calls: number[] = [];
+    const dispatch: Record<string, (...args: any[]) => unknown> = {
+      GetCurrentProcess: () => 1n,
+      CloseHandle: () => 1,
+      LocalFree: () => undefined,
+      GetLastError: () => WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER,
+      OpenProcessToken: (_process, _access, token) => {
+        token[0] = 2n;
+        return 1;
+      },
+      GetTokenInformation: (_token, _kind, _output, bytes, needed) => {
+        calls.push(bytes);
+        if (bytes <= 128) {
+          needed[0] = 256;
+          return 0;
+        }
+        return 1;
+      },
+      IsValidSid: () => 1,
+      GetLengthSid: () => USER_SID.length,
+      ConvertSidToStringSidW: (_sid, output) => {
+        output[0] = { text: USER_SDDL };
+        return 1;
+      },
+    };
+    const bindings = loadWindowsPrivateAuthorityBindings({
+      requireModule: () => fakeSecurityKoffi(dispatch),
+      isBun: false,
+    });
+    expect(bindings.currentUser().sddl).toBe(USER_SDDL);
+    // Per class: one call at the class bound, one at the size the failure reported.
+    expect(calls).toEqual([128, 256, 128, 256]);
+  });
+
+  test("keeps a size query failure fail-closed with the real error it reported", () => {
+    const dispatch: Record<string, (...args: any[]) => unknown> = {
+      GetCurrentProcess: () => 1n,
+      CloseHandle: () => 1,
+      LocalFree: () => undefined,
+      GetLastError: () => 5,
+      OpenProcessToken: (_process, _access, token) => {
+        token[0] = 2n;
+        return 1;
+      },
+      GetTokenInformation: () => 0,
+    };
+    const bindings = loadWindowsPrivateAuthorityBindings({
+      requireModule: () => fakeSecurityKoffi(dispatch),
+      isBun: false,
+    });
+    expect(() => bindings.currentUser()).toThrow("GetTokenInformation failed with Windows error 5");
+  });
+
+  test("fails closed when the retry at the reported size also fails", () => {
+    const calls: number[] = [];
+    const dispatch: Record<string, (...args: any[]) => unknown> = {
+      GetCurrentProcess: () => 1n,
+      CloseHandle: () => 1,
+      LocalFree: () => undefined,
+      GetLastError: () => WINDOWS_PRIVATE_SECURITY.ERROR_INSUFFICIENT_BUFFER,
+      OpenProcessToken: (_process, _access, token) => {
+        token[0] = 2n;
+        return 1;
+      },
+      GetTokenInformation: (_token, _kind, _output, bytes, needed) => {
+        calls.push(bytes);
+        if (bytes <= 128) needed[0] = 256;
+        return 0;
+      },
+    };
+    const bindings = loadWindowsPrivateAuthorityBindings({
+      requireModule: () => fakeSecurityKoffi(dispatch),
+      isBun: false,
+    });
+    expect(() => bindings.currentUser()).toThrow(
+      "GetTokenInformation failed with Windows error 122",
+    );
+    expect(calls).toEqual([128, 256]);
+  });
+
   test("writes the owner a strict verdict reads, so a group-owned creation reaches the policy", () => {
     // Windows records the Administrators group as the owner of every object a process started from an
     // elevated token creates, and SetSecurityInfo applies exactly the components the caller asks for.
