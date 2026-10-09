@@ -387,11 +387,12 @@ Sections, in order:
 - **Quota** — one row per probed engine. Appears **only when probe data is present**
   (`vf resources --probe`); a plain snapshot carries an empty `quota` array, so the
   section is absent rather than empty.
-- **Warnings** — units with no recorded resources plus warning-level quota states;
+- **Warnings** — units with no recorded resources plus quota states at the warning,
+  exhausted, or rate-limited level;
   hidden when the list is empty.
 
-Until a snapshot arrives the drawer shows `No workflow state yet.` — the same condition
-under which `vf resources` prints `No workflow state — run vf init`.
+Until a snapshot arrives the drawer shows `No workflow state yet.` — shown when the repo
+has no workflow state (and until the first successful fetch).
 
 ---
 

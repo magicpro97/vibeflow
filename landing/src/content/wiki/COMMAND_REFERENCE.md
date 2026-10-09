@@ -389,7 +389,9 @@ vf resources --json   # the full ResourceSnapshot as JSON
 vf resources --probe  # also run the best-effort engine quota probe
 ```
 
-The snapshot is built from `.vibeflow/workflow-state.json` (#523): counts and durations
+`vf resources` supersedes the older `vf units resources`, which remains for compatibility.
+
+The snapshot is built from `.vibeflow/WORKFLOW_STATE.json` (#523): counts and durations
 come straight from the ledger, while tokens and cost are best-effort engine-envelope
 estimates. Units with no recorded resources surface as warnings; a missing workflow state
 prints `No workflow state — run vf init` and exits 0.
@@ -406,7 +408,7 @@ prints `No workflow state — run vf init` and exits 0.
 | `units` | per-unit rows: `name`, `status`, `engine`, `tokens`, `cost_usd`, `wall_seconds` |
 | `quota` | probed engine quota states — empty unless `--probe` ran |
 | `provenance` | `exact`, `estimated`, and `unavailable` field lists |
-| `warnings` | units with no recorded resources, plus warning-level quota states |
+| `warnings` | units with no recorded resources, plus quota states at the warning, exhausted, or rate-limited level |
 
 `--probe` shells each probed engine's stable headless quota command (best-effort; engines
 without one are not probed). Without it, `quota` is `[]` and `provenance.unavailable`
