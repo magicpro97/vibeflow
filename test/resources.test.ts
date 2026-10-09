@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { WorkflowState, WorkUnit } from "../src/core.js";
+import type { WorkUnit, WorkflowState } from "../src/core.js";
 import { RESOURCE_SNAPSHOT_SCHEMA_VERSION, buildResourceSnapshot } from "../src/resources.js";
 
 const NOW = new Date("2026-10-09T05:00:00.000Z");
@@ -26,7 +26,10 @@ const twoUnitState = (): WorkflowState => ({
       engine: "claude",
       resources: { agents: 1, tokens: 1200, cost_usd: 0.5, wall_seconds: 30 },
     }),
-    { ...unit({ name: "beta", status: "running", engine: "codex" }), resources: undefined } as never,
+    {
+      ...unit({ name: "beta", status: "running", engine: "codex" }),
+      resources: undefined,
+    } as never,
   ],
 });
 
@@ -37,7 +40,13 @@ describe("buildResourceSnapshot", () => {
     expect(snap.schemaVersion).toBe(1);
     expect(snap.source).toBe("workflow-state");
     expect(snap.sampledAt).toBe(NOW.toISOString());
-    expect(snap.totals).toEqual({ units: 2, done: 1, tokens: 1200, cost_usd: 0.5, wall_seconds: 30 });
+    expect(snap.totals).toEqual({
+      units: 2,
+      done: 1,
+      tokens: 1200,
+      cost_usd: 0.5,
+      wall_seconds: 30,
+    });
     expect(snap.perEngine).toEqual([
       { engine: "claude", units: 1, done: 1, tokens: 1200, cost_usd: 0.5, wall_seconds: 30 },
       { engine: "codex", units: 1, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
@@ -47,7 +56,14 @@ describe("buildResourceSnapshot", () => {
   test("lists units missing resources as zeros and still includes them", () => {
     const snap = buildResourceSnapshot(twoUnitState(), { now: NOW });
     expect(snap.units).toEqual([
-      { name: "alpha", status: "done", engine: "claude", tokens: 1200, cost_usd: 0.5, wall_seconds: 30 },
+      {
+        name: "alpha",
+        status: "done",
+        engine: "claude",
+        tokens: 1200,
+        cost_usd: 0.5,
+        wall_seconds: 30,
+      },
       { name: "beta", status: "running", engine: "codex", tokens: 0, cost_usd: 0, wall_seconds: 0 },
     ]);
     expect(snap.warnings).toEqual(["1 units on codex have no recorded resources"]);
@@ -65,7 +81,12 @@ describe("buildResourceSnapshot", () => {
   test("buckets units without an engine under unknown", () => {
     const state: WorkflowState = {
       ...twoUnitState(),
-      work_units: [unit({ name: "solo", resources: { agents: 1, tokens: 5, cost_usd: 0.01, wall_seconds: 2 } })],
+      work_units: [
+        unit({
+          name: "solo",
+          resources: { agents: 1, tokens: 5, cost_usd: 0.01, wall_seconds: 2 },
+        }),
+      ],
     };
     const snap = buildResourceSnapshot(state, { now: NOW });
     expect(snap.perEngine).toEqual([
@@ -81,17 +102,31 @@ describe("buildResourceSnapshot", () => {
     const snap = buildResourceSnapshot(twoUnitState(), {
       now: NOW,
       quota: [
-        { engine: "claude", status: { level: "warning", percentRemaining: 12.4, resetAt: "2026-10-09T06:00:00.000Z" } },
+        {
+          engine: "claude",
+          status: { level: "warning", percentRemaining: 12.4, resetAt: "2026-10-09T06:00:00.000Z" },
+        },
         { engine: "codex", status: { level: "ready" } },
         { engine: "opencode", status: { level: "exhausted" } },
         { engine: "copilot", status: { level: "rate-limited", percentRemaining: 0 } },
       ],
     });
     expect(snap.quota).toEqual([
-      { engine: "claude", sampledAt: NOW.toISOString(), level: "warning", percentRemaining: 12.4, resetAt: "2026-10-09T06:00:00.000Z" },
+      {
+        engine: "claude",
+        sampledAt: NOW.toISOString(),
+        level: "warning",
+        percentRemaining: 12.4,
+        resetAt: "2026-10-09T06:00:00.000Z",
+      },
       { engine: "codex", sampledAt: NOW.toISOString(), level: "ready" },
       { engine: "opencode", sampledAt: NOW.toISOString(), level: "exhausted" },
-      { engine: "copilot", sampledAt: NOW.toISOString(), level: "rate-limited", percentRemaining: 0 },
+      {
+        engine: "copilot",
+        sampledAt: NOW.toISOString(),
+        level: "rate-limited",
+        percentRemaining: 0,
+      },
     ]);
     expect(snap.warnings).toEqual([
       "1 units on codex have no recorded resources",
