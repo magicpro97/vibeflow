@@ -57,7 +57,7 @@ watch(
 // A conversation switch must not leave the agent drawer bound to a stale
 // participant; close it without stealing focus (no closeAgents call here).
 watch(
-  () => store.activeRevision,
+  () => store.selectedConversationId,
   () => {
     agentsOpen.value = false;
     selectedAgentId.value = null;
