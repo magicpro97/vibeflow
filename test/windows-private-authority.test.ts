@@ -606,8 +606,8 @@ describe("Windows private authority", () => {
       },
       GetTokenInformation: (_token, _kind, _output, bytes, needed) => {
         calls.push(bytes);
-        if (bytes > 64) {
-          needed[0] = 32;
+        if (bytes <= 128) {
+          needed[0] = 256;
           return 0;
         }
         return 1;
@@ -625,7 +625,7 @@ describe("Windows private authority", () => {
     });
     expect(bindings.currentUser().sddl).toBe(USER_SDDL);
     // Per class: one call at the class bound, one at the size the failure reported.
-    expect(calls).toEqual([128, 32, 128, 32]);
+    expect(calls).toEqual([128, 256, 128, 256]);
   });
 
   test("keeps a size query failure fail-closed with the real error it reported", () => {
@@ -660,7 +660,7 @@ describe("Windows private authority", () => {
       },
       GetTokenInformation: (_token, _kind, _output, bytes, needed) => {
         calls.push(bytes);
-        if (bytes > 64) needed[0] = 32;
+        if (bytes <= 128) needed[0] = 256;
         return 0;
       },
     };
@@ -671,7 +671,7 @@ describe("Windows private authority", () => {
     expect(() => bindings.currentUser()).toThrow(
       "GetTokenInformation failed with Windows error 122",
     );
-    expect(calls).toEqual([128, 32]);
+    expect(calls).toEqual([128, 256]);
   });
 
   test("writes the owner a strict verdict reads, so a group-owned creation reaches the policy", () => {
