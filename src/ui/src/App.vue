@@ -5,10 +5,11 @@
       @open-capabilities="openCapabilities"
       @open-settings="openSettings"
       @open-control-center="openControlCenter"
+      @open-resources="openResources"
     />
     <HomeUpdateBanner />
     <ConversationHome
-      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen || agentsOpen"
+      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen || agentsOpen || resourcesOpen"
       @open-capabilities="openCapabilities"
       @open-trace="openTrace"
       @select-agent="openAgentDrawer"
@@ -18,6 +19,7 @@
     <HomeControlCenterDrawer :open="controlCenterOpen" @close="closeControlCenter" />
     <HomeTraceDrawer :open="traceOpen" @close="closeTrace" />
     <HomeAgentDrawer :open="agentsOpen" :participant-id="selectedAgentId" @close="closeAgents" />
+    <HomeResourcesDrawer :open="resourcesOpen" @close="closeResources" />
     <div class="sr-only" role="status" aria-live="polite">{{ announcement }}</div>
   </div>
 </template>
@@ -29,6 +31,7 @@ import HomeAgentDrawer from "./components/HomeAgentDrawer.vue";
 import HomeCapabilityDrawer from "./components/HomeCapabilityDrawer.vue";
 import HomeControlCenterDrawer from "./components/HomeControlCenterDrawer.vue";
 import HomePreferencesDrawer from "./components/HomePreferencesDrawer.vue";
+import HomeResourcesDrawer from "./components/HomeResourcesDrawer.vue";
 import HomeTraceDrawer from "./components/HomeTraceDrawer.vue";
 import HomeUpdateBanner from "./components/HomeUpdateBanner.vue";
 import TopBar from "./components/TopBar.vue";
@@ -41,6 +44,7 @@ const settingsOpen = ref(false);
 const controlCenterOpen = ref(false);
 const traceOpen = ref(false);
 const agentsOpen = ref(false);
+const resourcesOpen = ref(false);
 const selectedAgentId = ref<string | null>(null);
 const agentDrawerTrigger = ref<HTMLElement | null>(null);
 const announcement = ref("");
@@ -56,6 +60,7 @@ watch(
 
 // A conversation switch must not leave the agent drawer bound to a stale
 // participant; close it without stealing focus (no closeAgents call here).
+// The resources drawer is repo-scoped, not conversation-scoped — it stays open.
 watch(
   () => store.selectedConversationId,
   () => {
@@ -76,6 +81,7 @@ function openCapabilities() {
   controlCenterOpen.value = false;
   traceOpen.value = false;
   agentsOpen.value = false;
+  resourcesOpen.value = false;
   capabilitiesOpen.value = true;
 }
 
@@ -89,6 +95,7 @@ function openSettings() {
   controlCenterOpen.value = false;
   traceOpen.value = false;
   agentsOpen.value = false;
+  resourcesOpen.value = false;
   settingsOpen.value = true;
 }
 
@@ -104,7 +111,22 @@ function openControlCenter() {
   settingsOpen.value = false;
   traceOpen.value = false;
   agentsOpen.value = false;
+  resourcesOpen.value = false;
   controlCenterOpen.value = true;
+}
+
+function closeResources() {
+  resourcesOpen.value = false;
+  nextTick(() => document.querySelector<HTMLElement>('[aria-label="Open resources"]')?.focus());
+}
+
+function openResources() {
+  capabilitiesOpen.value = false;
+  settingsOpen.value = false;
+  controlCenterOpen.value = false;
+  traceOpen.value = false;
+  agentsOpen.value = false;
+  resourcesOpen.value = true;
 }
 
 function openTrace() {
@@ -112,6 +134,7 @@ function openTrace() {
   settingsOpen.value = false;
   controlCenterOpen.value = false;
   agentsOpen.value = false;
+  resourcesOpen.value = false;
   traceOpen.value = true;
 }
 
@@ -131,6 +154,7 @@ function openAgentDrawer(participantId: string) {
   settingsOpen.value = false;
   controlCenterOpen.value = false;
   traceOpen.value = false;
+  resourcesOpen.value = false;
   selectedAgentId.value = participantId;
   agentDrawerTrigger.value =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -156,6 +180,7 @@ function closeActiveDrawer(event: KeyboardEvent) {
   else if (controlCenterOpen.value) closeControlCenter();
   else if (traceOpen.value) closeTrace();
   else if (agentsOpen.value) closeAgents();
+  else if (resourcesOpen.value) closeResources();
 }
 
 onMounted(() => window.addEventListener("keydown", closeActiveDrawer));
