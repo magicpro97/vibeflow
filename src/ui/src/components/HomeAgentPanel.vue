@@ -56,9 +56,14 @@ const clock = (row: AgentPresenceRow) => {
   return ms == null ? "" : formatTurnElapsed(ms);
 };
 const countSummary = computed(() => {
-  const working = props.rows.filter((row) => row.status === "working").length;
-  const done = props.rows.filter((row) => row.status === "complete").length;
-  return [working ? `${working} running` : "", done ? `${done} done` : ""]
+  const tally = { working: 0, failed: 0, idle: 0, complete: 0 };
+  for (const row of props.rows) tally[row.status] += 1;
+  return [
+    tally.working ? `${tally.working} running` : "",
+    tally.failed ? `${tally.failed} failed` : "",
+    tally.idle ? `${tally.idle} idle` : "",
+    tally.complete ? `${tally.complete} done` : "",
+  ]
     .filter(Boolean)
     .join(" · ");
 });
