@@ -2,7 +2,7 @@
 title: Command Reference
 description: Complete reference of all shipped `vf` CLI commands and their flags, including conversations, orchestration, skills, hooks, and verification.
 category: reference
-last_updated: 2026-10-07
+last_updated: 2026-10-09
 ---
 
 # Command Reference
@@ -17,6 +17,7 @@ last_updated: 2026-10-07
 - [Orchestrate](#orchestrate)
 - [Race (head-to-head)](#race-head-to-head)
 - [Work Units (Ledger)](#work-units-ledger)
+- [Resources](#resources)
 - [Settings (Config)](#settings-config)
 - [TypeSafe System One (Jev) judge](#typesafe-system-one-jev-judge)
 - [Skills (Demand-Driven)](#skills-demand-driven)
@@ -379,6 +380,37 @@ vf units show <name>       # one unit as JSON
 vf units resources         # token / cost / wall-time totals
 vf units evidence <name>   # recorded evidence paths
 ```
+
+## Resources
+
+```bash
+vf resources          # repo-scoped snapshot: totals, per-engine breakdown, warnings
+vf resources --json   # the full ResourceSnapshot as JSON
+vf resources --probe  # also run the best-effort engine quota probe
+```
+
+The snapshot is built from `.vibeflow/workflow-state.json` (#523): counts and durations
+come straight from the ledger, while tokens and cost are best-effort engine-envelope
+estimates. Units with no recorded resources surface as warnings; a missing workflow state
+prints `No workflow state — run vf init` and exits 0.
+
+`--json` prints the snapshot verbatim:
+
+| Field | Meaning |
+|------|-----------|
+| `schemaVersion` | snapshot schema version (currently `1`) |
+| `sampledAt` | ISO timestamp the snapshot was built |
+| `source` | always `workflow-state` |
+| `totals` | ledger totals: `units`, `done`, `tokens`, `cost_usd`, `wall_seconds` |
+| `perEngine` | per-engine rollups (`engine`, `units`, `done`, `tokens`, `cost_usd`, `wall_seconds`), most expensive first |
+| `units` | per-unit rows: `name`, `status`, `engine`, `tokens`, `cost_usd`, `wall_seconds` |
+| `quota` | probed engine quota states — empty unless `--probe` ran |
+| `provenance` | `exact`, `estimated`, and `unavailable` field lists |
+| `warnings` | units with no recorded resources, plus warning-level quota states |
+
+`--probe` shells each probed engine's stable headless quota command (best-effort; engines
+without one are not probed). Without it, `quota` is `[]` and `provenance.unavailable`
+records `quota (run with --probe)`.
 
 ## Settings (config)
 
