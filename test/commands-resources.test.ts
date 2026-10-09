@@ -109,4 +109,20 @@ describe("vf resources", () => {
     expect(await resources()).toBe(0);
     expect(lines).toEqual(["No workflow state — run vf init"]);
   });
+
+  test("--probe: renders the Quota section with unknown-level degradation", async () => {
+    writeFixture();
+    const inject = { probe: async () => ({ level: "unknown" as const, error: "probe failed" }) };
+    expect(await resources({ probe: true }, inject)).toBe(0);
+    expect(lines).toContain("Quota:");
+    expect(lines).toContain("  copilot: unknown (probe failed)");
+  });
+
+  test("--probe: warning level renders the percent remaining", async () => {
+    writeFixture();
+    const inject = { probe: async () => ({ level: "warning" as const, percentRemaining: 12 }) };
+    expect(await resources({ probe: true }, inject)).toBe(0);
+    expect(lines).toContain("Quota:");
+    expect(lines).toContain("  copilot: warning (12% remaining)");
+  });
 });

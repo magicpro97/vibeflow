@@ -12,6 +12,9 @@
 //    noise); callers iterate the table keys, not ENGINES.
 //  - `gh` unauthenticated is a non-zero exit → "probe failed" → unknown
 //    level. That degradation is the expected outcome, not a bug.
+//  - The process seam is `createProbeRunner(rt)`: tests inject a fake runtime
+//    (no real spawn), and `createProbeRunner(undefined)` reproduces the old
+//    no-Bun/Node degradation by construction.
 
 import { type QuotaStatus, parseQuotaOutput } from "./engine-quota.js";
 
@@ -34,35 +37,84 @@ export type ProbeRunner = (
   argv: readonly string[],
 ) => Promise<{ stdout: string; exitCode: number }>;
 
+/**
+ * The `which`/`spawn` pair the runner needs, structurally. `kill` names only
+ * the two signals the runner sends, which keeps Bun's `Subprocess` assignable
+ * to this seam without casts.
+ */
+export type ProbeRuntime = {
+  which: (bin: string) => string | null;
+  spawn: (argv: readonly string[]) => {
+    exited: Promise<number>;
+    stdout: ReadableStream<Uint8Array> | null;
+    kill: (signal?: "SIGTERM" | "SIGKILL") => void;
+  };
+};
+
 /** Kill a hung probe after this long — quota is best-effort, never blocking. */
 const PROBE_TIMEOUT_MS = 5000;
 
+/** Grace period between the timeout SIGTERM and the SIGKILL escalation. */
+const KILL_GRACE_MS = 250;
+
 /**
  * Exit code mirroring the shell's command-not-found convention (127). The
- * default runner returns it when `Bun.which` cannot resolve the binary (e.g.
- * no `gh` on a Windows CI runner), so probeQuota can report the distinct
- * "command not found" degradation instead of the generic "probe failed".
+ * runner returns it when `which` cannot resolve the binary (e.g. no `gh` on a
+ * Windows CI runner), so probeQuota can report the distinct "command not
+ * found" degradation instead of the generic "probe failed".
  */
 const COMMAND_NOT_FOUND_EXIT = 127;
 
-/** Default runner: resolve via `Bun.which`, spawn argv-only, kill after 5s. */
-const defaultProbeRunner: ProbeRunner = async (argv) => {
-  // Guard for Node-run contexts (built dist has no `Bun`): degrade, never crash.
-  if (typeof Bun === "undefined") throw new Error("Bun unavailable");
-  const [bin, ...rest] = argv;
-  const resolved = bin ? Bun.which(bin) : null;
-  if (!resolved) return { stdout: "", exitCode: COMMAND_NOT_FOUND_EXIT };
-  // stderr is ignored: it is neither parsed nor allowed to leak to the TTY.
-  const proc = Bun.spawn([resolved, ...rest], { stdout: "pipe", stderr: "ignore" });
-  const timer = setTimeout(() => proc.kill(), PROBE_TIMEOUT_MS);
-  try {
-    const stdout = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    return { stdout, exitCode };
-  } finally {
-    clearTimeout(timer);
-  }
+/**
+ * Build a `ProbeRunner` over a runtime seam. `rt === undefined` (no Bun /
+ * Node-run dist) resolves a non-zero exit — the exact equivalent of the old
+ * `typeof Bun === "undefined"` throw-guard, which probeQuota maps to
+ * "probe failed" by construction. With a runtime: resolve via `rt.which`;
+ * missing binary → exit 127 ("command not found"); otherwise spawn argv-only
+ * and race the exit against `timeoutMs`, escalating SIGTERM → SIGKILL so a
+ * signal-ignoring child cannot keep the probe hanging.
+ */
+export function createProbeRunner(
+  rt: ProbeRuntime | undefined,
+  timeoutMs: number = PROBE_TIMEOUT_MS,
+): ProbeRunner {
+  if (!rt) return async () => ({ stdout: "", exitCode: -1 });
+  return async (argv) => {
+    const [bin, ...rest] = argv;
+    const resolved = rt.which(bin ?? "");
+    if (!resolved) return { stdout: "", exitCode: COMMAND_NOT_FOUND_EXIT };
+    const proc = rt.spawn([resolved, ...rest]);
+    const stdoutText = new Response(proc.stdout).text();
+    const timedOut = Symbol("probe timeout");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<typeof timedOut>((resolve) => {
+      timer = setTimeout(() => {
+        proc.kill("SIGTERM");
+        setTimeout(() => proc.kill("SIGKILL"), KILL_GRACE_MS);
+        resolve(timedOut);
+      }, timeoutMs);
+    });
+    try {
+      const outcome = await Promise.race([proc.exited, timeout]);
+      if (outcome === timedOut) return { stdout: "", exitCode: -1 };
+      return { stdout: await stdoutText, exitCode: outcome };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+/** Real runtime binding from the global Bun object; undefined outside Bun. */
+const bunRuntime = (): ProbeRuntime | undefined => {
+  if (typeof Bun === "undefined") return undefined;
+  return {
+    which: (bin) => Bun.which(bin),
+    spawn: (argv) => Bun.spawn([...argv], { stdout: "pipe", stderr: "ignore" }),
+  };
 };
+
+/** Default runner: the real Bun process seam. */
+const defaultProbeRunner: ProbeRunner = createProbeRunner(bunRuntime());
 
 /**
  * Probe one engine's quota, best-effort. Unknown engine → no command entry →
