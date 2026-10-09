@@ -73,9 +73,9 @@ function writeFixture(): void {
 }
 
 describe("vf resources", () => {
-  test("text mode: header, totals, per-engine rollups, warnings — in order", () => {
+  test("text mode: header, totals, per-engine rollups, warnings — in order", async () => {
     writeFixture();
-    expect(resources()).toBe(0);
+    expect(await resources()).toBe(0);
     expect(lines).toHaveLength(6);
     const header = lines[0] ?? "";
     expect(header.startsWith("Resources · sampled ")).toBe(true);
@@ -88,9 +88,9 @@ describe("vf resources", () => {
     expect(lines[5]).toBe("  ! 1 units on claude have no recorded resources");
   });
 
-  test("--json emits the parseable snapshot with schemaVersion and sampledAt", () => {
+  test("--json emits the parseable snapshot with schemaVersion and sampledAt", async () => {
     writeFixture();
-    expect(resources({ json: true })).toBe(0);
+    expect(await resources({ json: true })).toBe(0);
     expect(lines).toHaveLength(1);
     const snap = JSON.parse(lines[0] ?? "");
     expect(snap.schemaVersion).toBe(1);
@@ -105,8 +105,8 @@ describe("vf resources", () => {
     expect(snap.perEngine).toHaveLength(2);
   });
 
-  test("missing state: exit 0 and the vf status degradation line", () => {
-    expect(resources()).toBe(0);
+  test("missing state: exit 0 and the vf status degradation line", async () => {
+    expect(await resources()).toBe(0);
     expect(lines).toEqual(["No workflow state — run vf init"]);
   });
 });

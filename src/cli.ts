@@ -108,7 +108,7 @@ async function main(argv: string[]): Promise<number> {
     case "units":
       return units(positionals[0], positionals.slice(1), flags);
     case "resources":
-      return resources(flags);
+      return await resources(flags);
     case "worktree":
       return worktree(positionals, flags);
     case "status":
