@@ -16,6 +16,7 @@ import {
   printCommandHelp,
   printHelp,
   printVersion,
+  resources,
   reviewEvidence,
   reviewerFromResult,
   run,
@@ -106,6 +107,8 @@ async function main(argv: string[]): Promise<number> {
       return canary(positionals[0], positionals.slice(1), flags);
     case "units":
       return units(positionals[0], positionals.slice(1), flags);
+    case "resources":
+      return resources(flags);
     case "worktree":
       return worktree(positionals, flags);
     case "status":
