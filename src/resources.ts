@@ -4,6 +4,15 @@ import type { QuotaStatus } from "./engine-quota.js";
 
 export const RESOURCE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
+/** Zeroed totals for legacy states that predate the totals field. */
+const EMPTY_TOTALS: WorkflowState["totals"] = Object.freeze({
+  units: 0,
+  done: 0,
+  tokens: 0,
+  cost_usd: 0,
+  wall_seconds: 0,
+});
+
 export interface ResourceEngineRollup {
   engine: string;
   units: number;
@@ -93,7 +102,7 @@ export function buildResourceSnapshot(
     schemaVersion: RESOURCE_SNAPSHOT_SCHEMA_VERSION,
     sampledAt,
     source: "workflow-state",
-    totals: state.totals,
+    totals: state.totals ?? EMPTY_TOTALS,
     perEngine: [...rollup.values()].sort((a, b) => b.cost_usd - a.cost_usd),
     units: workUnits.map((u) => ({
       name: u.name,
@@ -107,7 +116,7 @@ export function buildResourceSnapshot(
     provenance: {
       exact: ["units", "done", "wall_seconds"],
       estimated: ["tokens", "cost_usd"],
-      unavailable: opts.quota?.length ? [] : ["quota (run with --probe)"],
+      unavailable: opts.quota?.length ? [] : ["quota (no verified probe command)"],
     },
     warnings,
   };

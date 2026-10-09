@@ -417,7 +417,7 @@ has such a command today — the probed roster is empty, kept behind a frozen
 `RESOURCE_PROBE_COMMANDS` table that gains entries only after a command is verified live
 (#355/#50926; candidates trialled on 2026-10-09 all failed: `gh api user/copilot_billing`
 and friends answer 404, `claude usage --json` and `codex doctor --usage` do not exist). So
-`quota` stays `[]` and `provenance.unavailable` records `quota (run with --probe)` until a
+`quota` stays `[]` and `provenance.unavailable` records `quota (no verified probe command)` until a
 verified command lands.
 
 ## Settings (config)

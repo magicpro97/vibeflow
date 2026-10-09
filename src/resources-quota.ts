@@ -94,6 +94,9 @@ export function createProbeRunner(
     if (!resolved) return { stdout: "", exitCode: COMMAND_NOT_FOUND_EXIT };
     const proc = rt.spawn([resolved, ...rest]);
     const stdoutText = new Response(proc.stdout).text();
+    // The timeout path never reads stdout; contain a stream error so the
+    // unawaited promise can never surface as an unhandled rejection.
+    void stdoutText.catch(() => "");
     const timedOut = Symbol("probe timeout");
     let timer: ReturnType<typeof setTimeout> | undefined;
     let grace: ReturnType<typeof setTimeout> | undefined;

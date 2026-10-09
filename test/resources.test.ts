@@ -141,7 +141,7 @@ describe("buildResourceSnapshot", () => {
     expect(snap.provenance).toEqual({
       exact: ["units", "done", "wall_seconds"],
       estimated: ["tokens", "cost_usd"],
-      unavailable: ["quota (run with --probe)"],
+      unavailable: ["quota (no verified probe command)"],
     });
     const { exact, estimated, unavailable } = snap.provenance;
     const overlap = (a: string[], b: string[]) => a.filter((x) => b.includes(x));
@@ -152,7 +152,7 @@ describe("buildResourceSnapshot", () => {
 
     // An empty probe list never ran a probe — still unavailable.
     const emptyProbe = buildResourceSnapshot(twoUnitState(), { now: NOW, quota: [] });
-    expect(emptyProbe.provenance.unavailable).toEqual(["quota (run with --probe)"]);
+    expect(emptyProbe.provenance.unavailable).toEqual(["quota (no verified probe command)"]);
 
     const probed = buildResourceSnapshot(twoUnitState(), {
       now: NOW,
@@ -173,6 +173,24 @@ describe("buildResourceSnapshot", () => {
     expect(snap.units).toEqual([]);
     expect(snap.perEngine).toEqual([]);
     expect(snap.warnings).toEqual([]);
+    expect(snap.totals).toEqual({
+      units: 0,
+      done: 0,
+      tokens: 0,
+      cost_usd: 0,
+      wall_seconds: 0,
+    });
+  });
+
+  test("legacy state missing both work_units and totals projects as an empty ledger", () => {
+    const legacy = {
+      task_id: "T-legacy",
+      goal: "g",
+      success_criteria: [],
+    } as unknown as WorkflowState;
+    const snap = buildResourceSnapshot(legacy, { now: NOW });
+    expect(snap.units).toEqual([]);
+    expect(snap.perEngine).toEqual([]);
     expect(snap.totals).toEqual({
       units: 0,
       done: 0,

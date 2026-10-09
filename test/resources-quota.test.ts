@@ -195,4 +195,38 @@ describe("createProbeRunner", () => {
       error: "probe failed",
     });
   });
+
+  test("timeout: an erroring stdout stream is contained (no unhandled rejection)", async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (cause: unknown) => rejections.push(cause);
+    const events = process as unknown as {
+      on: (event: string, listener: (cause: unknown) => void) => void;
+      off: (event: string, listener: (cause: unknown) => void) => void;
+    };
+    events.on("unhandledRejection", onRejection);
+    try {
+      const run = createProbeRunner(
+        fakeRuntime({
+          spawn: () => ({
+            exited: new Promise<number>(() => {}),
+            stdout: new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.error(new Error("stream boom"));
+              },
+            }),
+            kill: () => {},
+          }),
+        }),
+        10,
+      );
+      expect(await probeQuota("demo", run, DEMO_TABLE)).toEqual({
+        level: "unknown",
+        error: "probe failed",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(rejections).toEqual([]);
+    } finally {
+      events.off("unhandledRejection", onRejection);
+    }
+  });
 });
