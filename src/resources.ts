@@ -1,4 +1,5 @@
 import type { WorkflowState } from "./core.js";
+import { WORK_UNIT_STATUS } from "./core/workflow-contract.js";
 import type { QuotaStatus } from "./engine-quota.js";
 
 export const RESOURCE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
@@ -62,7 +63,7 @@ export function buildResourceSnapshot(
       wall_seconds: 0,
     };
     row.units += 1;
-    if (unit.status === "done") row.done += 1;
+    if (unit.status === WORK_UNIT_STATUS.DONE) row.done += 1;
     const r = unit.resources;
     // tokens/cost are never negative, so a zero sum means nothing was recorded.
     if (!r || r.tokens + r.cost_usd === 0) {
