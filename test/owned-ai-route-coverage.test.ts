@@ -54,6 +54,7 @@ const DIRECT_PROCESS_BOUNDARIES: Readonly<Record<string, BoundaryClass>> = {
   "src/orchestrator/publish-unit.ts": "git-or-system-command",
   "src/orchestrator/scoped-gate.ts": "git-or-system-command",
   "src/preflight/probe.ts": "presence-or-auth-probe",
+  "src/resources-quota.ts": "presence-or-auth-probe",
   "src/safety/checkpoint.ts": "git-or-system-command",
   "src/sandbox.ts": "tool-extension",
   "src/server/dashboard-diff.ts": "git-or-system-command",

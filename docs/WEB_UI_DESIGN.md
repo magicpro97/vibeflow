@@ -2,7 +2,7 @@
 title: Web UI Design
 description: Design specification for the web UI — AI-first Home surfaces, UX principles, approval flow, and real-time updates.
 category: explanation
-last_updated: 2026-08-27
+last_updated: 2026-10-09
 ---
 
 # Web UI Design
@@ -368,6 +368,33 @@ assistant answers in timeline order. Each row carries its time, a kind icon, a t
 body of at most 200 characters, and a status pill for tool rows. The last row also
 reports the agent's state — `Working`, `Complete`, or `Failed` — so the drawer and the
 panel agree; × or Escape closes it and returns focus to the panel.
+
+## 13. Resources drawer
+
+The TopBar `Open resources` button opens a repo-scoped drawer — an
+`<aside aria-label="Resources">`, not conversation-scoped — that reads
+`GET /api/resources`, the same `ResourceSnapshot` that `vf resources --json` prints.
+The drawer refetches when it opens and then polls every 10 seconds while open; a
+transient fetch failure keeps the last snapshot on screen instead of blanking the
+drawer.
+
+Sections, in order:
+
+- **Totals** — one summary line over the ledger totals (`done/units` done, tokens, cost,
+  wall seconds).
+- **Per engine** — one row per engine rollup: units, tokens, cost.
+- **Top units** — the eight most expensive units by cost, each with tokens and cost.
+- **Quota** — one row per probed engine. Appears **only when the snapshot carries probe
+  data**. The server endpoint always serves a snapshot without quota (the CLI `--probe` is
+  opt-in and not persisted), and no engine currently exposes a verified headless quota
+  command (#355/#50926), so the section is absent in the Home UI today; it renders whenever
+  a producer supplies quota (covered by the e2e fixture).
+- **Warnings** — units with no recorded resources plus quota states at the warning,
+  exhausted, or rate-limited level;
+  hidden when the list is empty.
+
+Until a snapshot arrives the drawer shows `No workflow state yet.` — shown when the repo
+has no workflow state (and until the first successful fetch).
 
 ---
 

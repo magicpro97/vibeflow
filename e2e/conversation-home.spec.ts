@@ -58,6 +58,7 @@ import {
   CONVERSATION_SSE_EVENT,
   serializeSseEmptyEvent,
 } from "../src/orchestrator/conversation/conversation-sse-contract.js";
+import { RESOURCE_SNAPSHOT_SCHEMA_VERSION } from "../src/resources.js";
 import { homeTimelineMessageDomId } from "../src/ui/src/conversation-home-authoring.js";
 import {
   HOME_EXPIRED_TS,
@@ -673,6 +674,62 @@ test.describe("AI-first conversation Home", () => {
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
+  });
+
+  const resourcesSnapshotFixture = () => ({
+    schemaVersion: RESOURCE_SNAPSHOT_SCHEMA_VERSION,
+    sampledAt: "2026-10-09T00:00:00.000Z",
+    source: "workflow-state",
+    totals: { units: 2, done: 1, tokens: 1_200, cost_usd: 1.25, wall_seconds: 40 },
+    perEngine: [
+      { engine: "claude", units: 2, done: 1, tokens: 1_200, cost_usd: 1.25, wall_seconds: 40 },
+    ],
+    units: [
+      {
+        name: "unit-a",
+        status: "done",
+        engine: "claude",
+        tokens: 1_200,
+        cost_usd: 1.25,
+        wall_seconds: 40,
+      },
+    ],
+    quota: [],
+    provenance: { exact: ["units"], estimated: ["tokens"], unavailable: [] },
+    warnings: ["1 units on claude have no recorded resources"],
+  });
+
+  async function openResourcesDrawer(page: Page) {
+    await page.route("**/api/resources", (route) =>
+      route.fulfill({ status: 200, json: resourcesSnapshotFixture() }),
+    );
+    await page.goto("/");
+    await waitForPage(page);
+    await page.getByRole("button", { name: "Open resources" }).click();
+    return page.getByRole("complementary", { name: "Resources" });
+  }
+
+  test("opens the resources drawer from the TopBar with a repo-scoped snapshot", async ({
+    page,
+  }) => {
+    const drawer = await openResourcesDrawer(page);
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByText("Totals: 1/2 done · 1200 tokens · $1.25 · 40s")).toBeVisible();
+    await expect(drawer.getByText("claude", { exact: true })).toBeVisible();
+    await expect(drawer.getByText("2 units · 1.2K tokens · $1.25")).toBeVisible();
+    await expect(drawer.getByText("1 units on claude have no recorded resources")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+  });
+
+  test("keeps the open resources drawer axe-clean", async ({ page }) => {
+    // Pin the final transition frame: axe must measure settled colors, not the
+    // 180ms opacity blend of the drawer enter animation (matches :2676/:3752).
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const drawer = await openResourcesDrawer(page);
+    await expect(drawer).toBeVisible();
+    await expect(drawer).not.toHaveClass(/home-drawer-enter-active/);
+    await expectAxeClean(page, "resources drawer");
   });
 
   test("drops stale pages and renders normalized direct output after a rapid session switch", async ({

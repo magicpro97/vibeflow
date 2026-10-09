@@ -35,6 +35,7 @@ export function printHelp(): number {
     ${c.cyan("workflow [sub]")}    delete [--all] | delete-unit <name> | import <src> [--on-collision] (--yes to apply)
     ${c.cyan("canary [sub]")}      list | link <unit> <file> | check — human-authored canary tests (ADR-005)
     ${c.cyan("units [sub]")}       status | show <name> | resources | evidence <name> | add <name> | update <name> [--status s] [--confidence n] | delete <name>
+    ${c.cyan("resources")}         run resource snapshot: totals, per-engine breakdown, warnings (--json | --probe best-effort quota)
     ${c.cyan("status")}             crash-recovery view of per-unit markers after a crash (--timeline <unit> | --json)
     ${c.cyan("config [sub]")}      memory <builtin|claude-mem|off|status> — read/toggle per-repo settings
     ${c.cyan("capability [sub]")}  search | list | status | install | update | configure | retarget | remove | rollback | repair | adopt | private-input bind

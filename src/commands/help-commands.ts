@@ -203,6 +203,8 @@ ${c.bold("Examples:")}
   vf units status
   vf units update auth --status done --confidence 1`,
 
+  resources: () =>
+    `${c.bold("vf resources")} ${c.dim("[--json] [--probe]")} — the run's resource snapshot.`,
   status: () =>
     `${c.bold("vf status")} ${c.dim("[--timeline <unit>] [--json]")}
 Crash-recovery view of per-unit progress. Reads the persisted markers under

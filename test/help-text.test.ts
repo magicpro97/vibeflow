@@ -211,6 +211,13 @@ describe("help text", () => {
     expect(src).toContain("--timeline <unit>");
   });
 
+  test("resources has a per-command help block (covers the COMMAND_HELP.resources arm)", () => {
+    expect(hasCommandHelp("resources")).toBe(true);
+    expect(printCommandHelp("resources")).toBe(0);
+    const src = readFileSync(join(import.meta.dir, "..", "src/commands/help-commands.ts"), "utf8");
+    expect(src).toContain("[--json] [--probe]");
+  });
+
   test("eval has a per-command help block (covers the COMMAND_HELP.eval arm, #549)", () => {
     expect(hasCommandHelp("eval")).toBe(true);
     expect(printCommandHelp("eval")).toBe(0);

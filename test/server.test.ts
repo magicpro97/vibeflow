@@ -3098,6 +3098,62 @@ test("GET /api/skills omits registry when no lock file", async () => {
   }
 });
 
+describe("GET /api/resources (resource snapshot route)", () => {
+  test("GET /api/resources returns 200 with a schemaVersion:1 snapshot when state exists", async () => {
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const init = await fetch(`${url}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vibeflow-token": token },
+        body: JSON.stringify({ goal: "resources drawer", repoPath: suiteRepoDir }),
+      });
+      expect(init.status).toBe(200);
+      const res = await fetch(`${url}/api/resources`, { headers: { "x-vibeflow-token": token } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      const body = (await res.json()) as { schemaVersion: number; source: string };
+      expect(body.schemaVersion).toBe(1);
+      expect(body.source).toBe("workflow-state");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /api/resources matches /state null semantics when no state exists", async () => {
+    rmSync(join(suiteRepoDir, ".vibeflow", "WORKFLOW_STATE.json"), { force: true });
+    const { server, url } = (await startServer()) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const token = await csrfToken(url);
+      const res = await fetch(`${url}/api/resources`, { headers: { "x-vibeflow-token": token } });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toBeNull();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("GET /api/resources without a token on LAN exposure returns 403 (guarded)", async () => {
+    const s = (await startServer(0, { host: "0.0.0.0" })) as {
+      server: { stop: () => void };
+      url: string;
+    };
+    try {
+      const url = new URL("/", s.url).origin;
+      const res = await fetch(`${url}/api/resources`);
+      expect(res.status).toBe(403);
+    } finally {
+      s.server.stop();
+    }
+  });
+});
+
 test("GET /api/typesafe reports the key SOURCE, never the key", async () => {
   const { server, url } = (await startServer()) as {
     server: { stop: () => void };

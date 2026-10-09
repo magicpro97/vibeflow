@@ -73,6 +73,7 @@ vf
 | `vf workflow [sub]` | Manage workflow files and imported worktrees |
 | `vf canary [sub]` | List, link, or check human-authored canary tests |
 | `vf units [sub]` | Inspect and manage work-unit state |
+| `vf resources` | Run resource snapshot: totals, per-engine breakdown, best-effort quota |
 | `vf status` | Open the crash-recovery view for per-unit markers |
 | `vf config [sub]` | Read or toggle per-repo settings |
 | `vf capability [sub]` | Search, inspect, and mutate the typed capability fabric |
