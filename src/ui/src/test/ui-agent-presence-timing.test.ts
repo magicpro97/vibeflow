@@ -191,4 +191,79 @@ describe("agent presence", () => {
     );
     expect(allCompleted.find((row) => row.participantId === "builder")?.status).toBe("complete");
   });
+  test("failed tool row freezes finishedAt at the failure time", () => {
+    const items = [
+      item({ kind: "user", at: "2026-10-08T00:00:00.000Z" }),
+      item({
+        kind: "assistant",
+        publicAuthorId: "builder",
+        title: "Build / Codex",
+        at: "2026-10-08T00:00:05.000Z",
+        complete: true,
+        body: "done",
+      }),
+      item({
+        kind: "tool",
+        body: "bun test",
+        at: "2026-10-08T00:00:06.000Z",
+        tool: {
+          id: "t1",
+          tool: "bun",
+          action: "bun test",
+          status: "failed",
+          at: "2026-10-08T00:00:06.000Z",
+        },
+      }),
+    ];
+    const row = buildAgentPresence(items, participants).find(
+      (presence) => presence.participantId === "builder",
+    );
+    if (!row) throw new Error("builder presence row expected for the failed tool");
+    expect(row.status).toBe("failed");
+    expect(row.finishedAt).toBe("2026-10-08T00:00:06.000Z");
+    expect(row.elapsedMs).toBe(6_000);
+    expect(liveElapsedMs(row, Date.parse("2026-10-08T09:00:00.000Z"))).toBe(6_000);
+  });
+  test("failed tool-group freezes finishedAt at its failing last member", () => {
+    const items = [
+      item({ kind: "user", at: "2026-10-08T00:00:00.000Z" }),
+      item({
+        kind: "assistant",
+        publicAuthorId: "builder",
+        title: "Build / Codex",
+        at: "2026-10-08T00:00:05.000Z",
+        complete: true,
+        body: "done",
+      }),
+      item({
+        kind: "tool-group",
+        title: "2 tool actions",
+        body: "bun, git",
+        at: "2026-10-08T00:00:06.000Z",
+        tools: [
+          {
+            id: "g1",
+            tool: "bun",
+            action: "bun test",
+            status: "completed",
+            at: "2026-10-08T00:00:06.000Z",
+          },
+          {
+            id: "g2",
+            tool: "git",
+            action: "git status",
+            status: "failed",
+            at: "2026-10-08T00:00:08.000Z",
+          },
+        ],
+      }),
+    ];
+    const row = buildAgentPresence(items, participants).find(
+      (presence) => presence.participantId === "builder",
+    );
+    if (!row) throw new Error("builder presence row expected for the failed tool-group");
+    expect(row.status).toBe("failed");
+    expect(row.finishedAt).toBe("2026-10-08T00:00:08.000Z");
+    expect(row.elapsedMs).toBe(8_000);
+  });
 });

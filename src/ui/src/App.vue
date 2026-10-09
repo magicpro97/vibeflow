@@ -42,6 +42,7 @@ const controlCenterOpen = ref(false);
 const traceOpen = ref(false);
 const agentsOpen = ref(false);
 const selectedAgentId = ref<string | null>(null);
+const agentDrawerTrigger = ref<HTMLElement | null>(null);
 const announcement = ref("");
 
 watch(
@@ -51,6 +52,16 @@ watch(
     if (topic) announcement.value = `Opened conversation: ${topic}`;
   },
   { immediate: true },
+);
+
+// A conversation switch must not leave the agent drawer bound to a stale
+// participant; close it without stealing focus (no closeAgents call here).
+watch(
+  () => store.activeRevision,
+  () => {
+    agentsOpen.value = false;
+    selectedAgentId.value = null;
+  },
 );
 
 function closeCapabilities() {
@@ -121,12 +132,21 @@ function openAgentDrawer(participantId: string) {
   controlCenterOpen.value = false;
   traceOpen.value = false;
   selectedAgentId.value = participantId;
+  agentDrawerTrigger.value =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
   agentsOpen.value = true;
 }
 
 function closeAgents() {
   agentsOpen.value = false;
-  nextTick(() => document.querySelector<HTMLElement>(".home-agent-panel .home-agent-row")?.focus());
+  const trigger = agentDrawerTrigger.value;
+  agentDrawerTrigger.value = null;
+  nextTick(() => {
+    const target = trigger?.isConnected
+      ? trigger
+      : document.querySelector<HTMLElement>(".home-agent-panel .home-agent-row");
+    target?.focus();
+  });
 }
 
 function closeActiveDrawer(event: KeyboardEvent) {

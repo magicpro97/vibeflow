@@ -80,13 +80,17 @@ export function buildAgentPresence(
     if (!item) continue;
     // Tool-group status counts as its LAST member (a tool row is a single-entry group).
     const member = item.kind === "tool" ? item.tool : item.tools?.[item.tools.length - 1];
+    // A tool-group's own `at` is its FIRST member's time; status comes from the LAST
+    // member, so the signal carries the last member's `at` to keep timing consistent.
+    const at =
+      item.kind === "tool-group" ? (item.tools?.[item.tools.length - 1]?.at ?? item.at) : item.at;
     const started =
       item.kind === "tool"
         ? item.tool?.status === "started"
         : (item.tools?.some((entry) => entry.status === "started") ?? false);
     signals.set(participantId, {
       lastIndex,
-      at: item.at,
+      at,
       body: item.body,
       complete: item.complete,
       failed: member?.status === "failed",
@@ -104,7 +108,12 @@ export function buildAgentPresence(
           : AGENT_PRESENCE_STATUS.COMPLETE
       : AGENT_PRESENCE_STATUS.IDLE;
     const startedAt = signal ? turnStartAt(items, signal.lastIndex) : null;
-    const finishedAt = status === AGENT_PRESENCE_STATUS.COMPLETE && signal ? signal.at : null;
+    // Failure is terminal too: the clock freezes at the failing signal's time.
+    const finishedAt =
+      signal &&
+      (status === AGENT_PRESENCE_STATUS.COMPLETE || status === AGENT_PRESENCE_STATUS.FAILED)
+        ? signal.at
+        : null;
     return {
       participantId: participant.participant_id,
       label: homeParticipantDisplayLabel({
