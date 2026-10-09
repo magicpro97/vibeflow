@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.22.0](https://github.com/magicpro97/vibeflow/compare/v0.21.0...v0.22.0) (2026-10-09)
+
+
+### Features
+
+* **resources:** resource snapshot CLI, API, and Home drawer ([#835](https://github.com/magicpro97/vibeflow/issues/835)) ([eb9e76c](https://github.com/magicpro97/vibeflow/commit/eb9e76c5abf21a6e04620c5f70138fbcc9c8bd55))
+* **ui:** add a prompt navigation rail to long Home conversations ([e27f6a4](https://github.com/magicpro97/vibeflow/commit/e27f6a411ab0d34228fde93ca1154d846e685bd9))
+* **ui:** collapse long completed answers behind a show-full toggle ([7a7a81b](https://github.com/magicpro97/vibeflow/commit/7a7a81bb35f86bf3827441c89147c28654f55029))
+* **ui:** group consecutive tool calls into collapsible batches in the Home transcript ([5fb1c86](https://github.com/magicpro97/vibeflow/commit/5fb1c863b43f5008b0d98be160342a3da58a6d38))
+* **ui:** live Agents activity panel + per-agent drawer on Home ([#833](https://github.com/magicpro97/vibeflow/issues/833)) ([5047ad3](https://github.com/magicpro97/vibeflow/commit/5047ad3f0def1a527086f780e9036fc06b9cf885))
+* **ui:** mark finished background conversations with attention dots in the rail ([b1c083a](https://github.com/magicpro97/vibeflow/commit/b1c083a7f4f2a8830048947bbcd9726ce7ec8277))
+* **ui:** Orca-native Home — tool groups, turn timers, collapsed answers + attention, prompt rail ([b7b1292](https://github.com/magicpro97/vibeflow/commit/b7b1292b98d96a719b1dfbf68fb2ed4c5749b546))
+* **ui:** show live working/worked per-turn timers in the Home transcript ([5585473](https://github.com/magicpro97/vibeflow/commit/5585473fa877690963cc2546cef48b38dd4a87d9))
+
+
+### Bug Fixes
+
+* **durability:** size the token SID query by its class bound, not a NULL-buffer probe ([#824](https://github.com/magicpro97/vibeflow/issues/824)) ([#834](https://github.com/magicpro97/vibeflow/issues/834)) ([9c15e03](https://github.com/magicpro97/vibeflow/commit/9c15e038d6819e219ee6620417df8cbcff00e995))
+* **ui:** address Copilot review findings on the Home waves ([1687c54](https://github.com/magicpro97/vibeflow/commit/1687c5437b48ea573a98102ccc195b0cc9e7faa0))
+* **ui:** freeze turn timers at completion and stop precommit ticks ([aaac745](https://github.com/magicpro97/vibeflow/commit/aaac745232deeda06228f2aa685fda78ca51b090))
+* **ui:** keep the prompt rail sticky and focus the jump target ([d32afd8](https://github.com/magicpro97/vibeflow/commit/d32afd8c0c0f0002e2d1558182345d9eb2528e69))
+* **verify:** size sync gate pipe for suite-sized stdout ([db4aa08](https://github.com/magicpro97/vibeflow/commit/db4aa084685c4a96c8bc601ed2413f6a8010f023))
+
+
+### Refactors
+
+* **ui:** extract HomeMessageQuotes from duplicated timeline markup ([1511a40](https://github.com/magicpro97/vibeflow/commit/1511a40aacc45b742fdefdbeae85f05ce1697a9e))
+* **ui:** extract the Home loading panels into HomeLoadingPanel ([3a542a1](https://github.com/magicpro97/vibeflow/commit/3a542a15096cb9019a12a24e188ee4299a5c0ae4))
+
+
+### Documentation
+
+* **ui:** specify the Orca-native transcript affordances ([7263c1d](https://github.com/magicpro97/vibeflow/commit/7263c1de3bf789610c6a870901ff84375859e50d))
+
+
+### Tests
+
+* **e2e:** cover tool groups, turn timers, collapsed answers with attention, and the prompt rail ([22e20a5](https://github.com/magicpro97/vibeflow/commit/22e20a527a20f124aef31d79a1a6e97b4d432d85))
+
 ## [0.21.0](https://github.com/magicpro97/vibeflow/compare/v0.20.0...v0.21.0) (2026-10-08)
 
 
