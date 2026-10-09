@@ -161,6 +161,27 @@ describe("buildResourceSnapshot", () => {
     expect(probed.provenance.unavailable).toEqual([]);
   });
 
+  test("legacy state without work_units decodes as an empty ledger — no throw, empty projections", () => {
+    const legacy = {
+      task_id: "T-legacy",
+      goal: "g",
+      success_criteria: [],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    } as unknown as WorkflowState;
+    expect(legacy.work_units).toBeUndefined();
+    const snap = buildResourceSnapshot(legacy, { now: NOW });
+    expect(snap.units).toEqual([]);
+    expect(snap.perEngine).toEqual([]);
+    expect(snap.warnings).toEqual([]);
+    expect(snap.totals).toEqual({
+      units: 0,
+      done: 0,
+      tokens: 0,
+      cost_usd: 0,
+      wall_seconds: 0,
+    });
+  });
+
   test("sampledAt falls back to the current time when no now is injected", () => {
     const before = Date.now();
     const snap = buildResourceSnapshot(twoUnitState());

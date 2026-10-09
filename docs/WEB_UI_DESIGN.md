@@ -384,9 +384,11 @@ Sections, in order:
   wall seconds).
 - **Per engine** — one row per engine rollup: units, tokens, cost.
 - **Top units** — the eight most expensive units by cost, each with tokens and cost.
-- **Quota** — one row per probed engine. Appears **only when probe data is present**
-  (`vf resources --probe`); a plain snapshot carries an empty `quota` array, so the
-  section is absent rather than empty.
+- **Quota** — one row per probed engine. Appears **only when the snapshot carries probe
+  data**. The server endpoint always serves a snapshot without quota (the CLI `--probe` is
+  opt-in and not persisted), and no engine currently exposes a verified headless quota
+  command (#355/#50926), so the section is absent in the Home UI today; it renders whenever
+  a producer supplies quota (covered by the e2e fixture).
 - **Warnings** — units with no recorded resources plus quota states at the warning,
   exhausted, or rate-limited level;
   hidden when the list is empty.

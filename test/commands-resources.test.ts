@@ -7,7 +7,7 @@
 // that the command renders buildResourceSnapshot faithfully.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resources } from "../src/commands/resources.js";
@@ -110,18 +110,58 @@ describe("vf resources", () => {
     expect(lines).toEqual(["No workflow state — run vf init"]);
   });
 
-  test("--probe: renders the Quota section with unknown-level degradation", async () => {
+  test("missing state + --json: exit 0 and machine-readable `null`", async () => {
+    expect(await resources({ json: true })).toBe(0);
+    expect(lines).toEqual(["null"]);
+    expect(JSON.parse(lines[0] ?? "")).toBeNull();
+  });
+
+  test("legacy state without work_units: renders an empty snapshot instead of throwing", async () => {
+    mkdirSync(join(dir, ".vibeflow"), { recursive: true });
+    writeFileSync(
+      join(dir, ".vibeflow", "WORKFLOW_STATE.json"),
+      JSON.stringify({
+        task_id: "T-legacy",
+        goal: "g",
+        success_criteria: [],
+        totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+      }),
+    );
+    expect(await resources()).toBe(0);
+    expect(lines[1]).toBe("Totals: 0/0 done · 0 tokens · $0 · 0s");
+  });
+
+  test("--probe with the empty production table: no probes run, no quota section", async () => {
     writeFixture();
-    const inject = { probe: async () => ({ level: "unknown" as const, error: "probe failed" }) };
+    let called = 0;
+    const inject = {
+      probe: async () => {
+        called += 1;
+        return { level: "unknown" as const };
+      },
+    };
+    expect(await resources({ probe: true }, inject)).toBe(0);
+    expect(called).toBe(0);
+    expect(lines).not.toContain("Quota:");
+  });
+
+  test("--probe renders the Quota section for a probed engine (engines seam)", async () => {
+    writeFixture();
+    const inject = {
+      probeEngines: ["copilot"] as readonly string[],
+      probe: async () => ({ level: "unknown" as const, error: "probe failed" }),
+    };
     expect(await resources({ probe: true }, inject)).toBe(0);
     expect(lines).toContain("Quota:");
     expect(lines).toContain("  copilot: unknown (probe failed)");
   });
 
-  test("--probe: warning level renders the percent remaining", async () => {
+  test("Quota rendering: warning level prints the percent remaining", async () => {
     writeFixture();
-    const inject = { probe: async () => ({ level: "warning" as const, percentRemaining: 12 }) };
-    expect(await resources({ probe: true }, inject)).toBe(0);
+    const inject = {
+      quota: [{ engine: "copilot", status: { level: "warning" as const, percentRemaining: 12 } }],
+    };
+    expect(await resources({}, inject)).toBe(0);
     expect(lines).toContain("Quota:");
     expect(lines).toContain("  copilot: warning (12% remaining)");
   });

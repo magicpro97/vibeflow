@@ -52,7 +52,10 @@ export function buildResourceSnapshot(
   const engineOf = (u: WorkflowState["work_units"][number]) => u.engine ?? null;
   const rollup = new Map<string, ResourceEngineRollup>();
   const missingByEngine = new Map<string, number>();
-  for (const unit of state.work_units) {
+  // Legacy state files may omit work_units entirely (decodeWorkflowState keeps that
+  // read compatibility); an absent ledger projects as empty, never a throw.
+  const workUnits = state.work_units ?? [];
+  for (const unit of workUnits) {
     const key = engineOf(unit) ?? "unknown";
     const row = rollup.get(key) ?? {
       engine: key,
@@ -92,7 +95,7 @@ export function buildResourceSnapshot(
     source: "workflow-state",
     totals: state.totals,
     perEngine: [...rollup.values()].sort((a, b) => b.cost_usd - a.cost_usd),
-    units: state.work_units.map((u) => ({
+    units: workUnits.map((u) => ({
       name: u.name,
       status: u.status,
       engine: engineOf(u),

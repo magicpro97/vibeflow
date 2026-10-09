@@ -4,13 +4,15 @@
 // resource-management plan). The aggregation lives in ../resources.ts
 // (buildResourceSnapshot); this module is only the CLI surface: text
 // table + `--json` passthrough + exit-0 degradation when the workflow
-// state is missing (matches `vf status`).
+// state is missing (matches `vf status`; `--json` prints `null` so the
+// stream stays machine-readable).
 //
 // `--probe` (Task 3) runs the best-effort engine quota probe. The probed
 // roster is the keys of RESOURCE_PROBE_COMMANDS — engines without a stable
-// headless quota command are not probed, so the quota section stays clean.
-// The probe is injectable (`inject.probe`) so tests never spawn real
-// processes.
+// headless quota command are not probed, so the quota section stays clean
+// (the table is EMPTY today, tracked in #355/#50926). Both the probe and the
+// roster are injectable (`inject.probe`, `inject.probeEngines`) so tests
+// never spawn real processes.
 
 import type { QuotaStatus } from "../engine-quota.js";
 import { RESOURCE_PROBE_COMMANDS, probeQuota } from "../resources-quota.js";
@@ -25,10 +27,15 @@ export async function resources(
     now?: Date;
     quota?: Array<{ engine: string; status: QuotaStatus }>;
     probe?: QuotaProbe;
+    probeEngines?: readonly string[];
   } = {},
 ): Promise<number> {
   const state = readState();
   if (!state) {
+    if (flags.json) {
+      out("vf", JSON.stringify(null));
+      return 0;
+    }
     out("vf", c.yellow("No workflow state — run vf init"));
     return 0;
   }
@@ -37,7 +44,7 @@ export async function resources(
     inject.quota ??
     (flags.probe
       ? await Promise.all(
-          Object.keys(RESOURCE_PROBE_COMMANDS).map(async (engine) => ({
+          (inject.probeEngines ?? Object.keys(RESOURCE_PROBE_COMMANDS)).map(async (engine) => ({
             engine,
             status: await probe(engine),
           })),

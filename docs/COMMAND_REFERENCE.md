@@ -394,7 +394,9 @@ vf resources --probe  # also run the best-effort engine quota probe
 The snapshot is built from `.vibeflow/WORKFLOW_STATE.json` (#523): counts and durations
 come straight from the ledger, while tokens and cost are best-effort engine-envelope
 estimates. Units with no recorded resources surface as warnings; a missing workflow state
-prints `No workflow state — run vf init` and exits 0.
+prints `No workflow state — run vf init` and exits 0 (`--json` prints `null` instead, so the
+stream stays machine-readable). A legacy state file without `work_units` projects as an
+empty ledger instead of failing.
 
 `--json` prints the snapshot verbatim:
 
@@ -406,13 +408,17 @@ prints `No workflow state — run vf init` and exits 0.
 | `totals` | ledger totals: `units`, `done`, `tokens`, `cost_usd`, `wall_seconds` |
 | `perEngine` | per-engine rollups (`engine`, `units`, `done`, `tokens`, `cost_usd`, `wall_seconds`), most expensive first |
 | `units` | per-unit rows: `name`, `status`, `engine`, `tokens`, `cost_usd`, `wall_seconds` |
-| `quota` | probed engine quota states — empty unless `--probe` ran |
+| `quota` | probed engine quota states — empty until a verified probe command exists and `--probe` runs (no engine has one today, tracked in #355/#50926) |
 | `provenance` | `exact`, `estimated`, and `unavailable` field lists |
 | `warnings` | units with no recorded resources, plus quota states at the warning, exhausted, or rate-limited level |
 
-`--probe` shells each probed engine's stable headless quota command (best-effort; engines
-without one are not probed). Without it, `quota` is `[]` and `provenance.unavailable`
-records `quota (run with --probe)`.
+`--probe` shells each probed engine's stable headless quota command (best-effort). No engine
+has such a command today — the probed roster is empty, kept behind a frozen
+`RESOURCE_PROBE_COMMANDS` table that gains entries only after a command is verified live
+(#355/#50926; candidates trialled on 2026-10-09 all failed: `gh api user/copilot_billing`
+and friends answer 404, `claude usage --json` and `codex doctor --usage` do not exist). So
+`quota` stays `[]` and `provenance.unavailable` records `quota (run with --probe)` until a
+verified command lands.
 
 ## Settings (config)
 

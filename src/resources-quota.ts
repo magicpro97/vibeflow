@@ -7,31 +7,33 @@
 //    throw, missing binary, non-zero exit, timeout) degrades to
 //    `{ level: "unknown", error }`.
 //  - The roster of probed engines is exactly the keys of
-//    RESOURCE_PROBE_COMMANDS. Engines WITHOUT a stable headless command are
-//    not probed so the quota section stays clean (no "no probe command"
-//    noise); callers iterate the table keys, not ENGINES.
+//    RESOURCE_PROBE_COMMANDS. That table is EMPTY today: no engine exposes
+//    a stable, VERIFIED headless quota command (verified live 2026-10-09 —
+//    candidates against `gh api ...` answer 404; `claude usage --json` /
+//    `codex doctor --usage` do not exist; tracked in #355/#50926). Add an
+//    entry ONLY after running the command for real, and keep the payload
+//    fixture representative of the verified shape.
 //  - `gh` unauthenticated is a non-zero exit → "probe failed" → unknown
 //    level. That degradation is the expected outcome, not a bug.
 //  - The process seam is `createProbeRunner(rt)`: tests inject a fake runtime
 //    (no real spawn), and `createProbeRunner(undefined)` reproduces the old
-//    no-Bun/Node degradation by construction.
+//    no-Bun/Node degradation by construction. `probeQuota` takes the command
+//    table as a seam so every runner path stays covered while the production
+//    table is empty.
 
 import { type QuotaStatus, parseQuotaOutput } from "./engine-quota.js";
 
 /**
  * Engines with a stable, headless quota command. argv arrays (no shell), so
- * they are portable across platforms. Add an entry only when such a command
- * exists.
- * TODO(#355/#50926): claude/codex probes once headless quota commands exist.
+ * they are portable across platforms. EMPTY today: add an entry only when
+ * such a command EXISTS AND has been run successfully (see header).
+ * TODO(#355/#50926): add claude/codex/copilot probes once stable headless
+ * quota commands exist.
  */
-export const RESOURCE_PROBE_COMMANDS = Object.freeze({
-  copilot: ["gh", "api", "user/copilot_billing"],
-} as const);
+export const RESOURCE_PROBE_COMMANDS = Object.freeze({} as const);
 
-export type ProbeEngine = keyof typeof RESOURCE_PROBE_COMMANDS;
-
-const isProbeEngine = (engine: string): engine is ProbeEngine =>
-  Object.hasOwn(RESOURCE_PROBE_COMMANDS, engine);
+/** The table shape `probeQuota` accepts; defaults to the production table. */
+export type ProbeCommandTable = Readonly<Record<string, readonly string[]>>;
 
 export type ProbeRunner = (
   argv: readonly string[],
@@ -57,6 +59,9 @@ const PROBE_TIMEOUT_MS = 5000;
 /** Grace period between the timeout SIGTERM and the SIGKILL escalation. */
 const KILL_GRACE_MS = 250;
 
+/** Bound on the post-SIGKILL join so an unkillable child can never block. */
+const KILL_JOIN_MS = KILL_GRACE_MS * 4;
+
 /**
  * Exit code mirroring the shell's command-not-found convention (127). The
  * runner returns it when `which` cannot resolve the binary (e.g. no `gh` on a
@@ -72,7 +77,11 @@ const COMMAND_NOT_FOUND_EXIT = 127;
  * "probe failed" by construction. With a runtime: resolve via `rt.which`;
  * missing binary → exit 127 ("command not found"); otherwise spawn argv-only
  * and race the exit against `timeoutMs`, escalating SIGTERM → SIGKILL so a
- * signal-ignoring child cannot keep the probe hanging.
+ * signal-ignoring child cannot keep the probe hanging. Termination is
+ * idempotent and exception-safe: both kills are contained (a dead child must
+ * not crash the timer callback), the grace timer is retained and cleared, and
+ * the timeout path joins a bounded process exit before resolving so no child
+ * or stream is left pending after return.
  */
 export function createProbeRunner(
   rt: ProbeRuntime | undefined,
@@ -87,19 +96,39 @@ export function createProbeRunner(
     const stdoutText = new Response(proc.stdout).text();
     const timedOut = Symbol("probe timeout");
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let grace: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<typeof timedOut>((resolve) => {
       timer = setTimeout(() => {
-        proc.kill("SIGTERM");
-        setTimeout(() => proc.kill("SIGKILL"), KILL_GRACE_MS);
+        try {
+          proc.kill("SIGTERM");
+        } catch {
+          // A dead child cannot be killed; the bounded join below settles.
+        }
+        grace = setTimeout(() => {
+          try {
+            proc.kill("SIGKILL");
+          } catch {
+            // Same contract as the SIGTERM catch.
+          }
+        }, KILL_GRACE_MS);
         resolve(timedOut);
       }, timeoutMs);
     });
     try {
       const outcome = await Promise.race([proc.exited, timeout]);
-      if (outcome === timedOut) return { stdout: "", exitCode: -1 };
+      if (outcome === timedOut) {
+        // Join a bounded exit (the SIGKILL above, or an already-dead child);
+        // `exited` may reject on a racing kill, which is a settled result.
+        await Promise.race([
+          proc.exited.catch(() => -1),
+          new Promise((resolve) => setTimeout(resolve, KILL_JOIN_MS)),
+        ]);
+        return { stdout: "", exitCode: -1 };
+      }
       return { stdout: await stdoutText, exitCode: outcome };
     } finally {
       clearTimeout(timer);
+      clearTimeout(grace);
     }
   };
 }
@@ -117,16 +146,19 @@ const bunRuntime = (): ProbeRuntime | undefined => {
 const defaultProbeRunner: ProbeRunner = createProbeRunner(bunRuntime());
 
 /**
- * Probe one engine's quota, best-effort. Unknown engine → no command entry →
- * `unknown` without invoking the runner. Any runner failure → `unknown`.
+ * Probe one engine's quota, best-effort. Unknown engine → no command entry in
+ * `table` → `unknown` without invoking the runner. Any runner failure →
+ * `unknown`.
  */
 export async function probeQuota(
   engine: string,
   run: ProbeRunner = defaultProbeRunner,
+  table: ProbeCommandTable = RESOURCE_PROBE_COMMANDS,
 ): Promise<QuotaStatus> {
-  if (!isProbeEngine(engine)) return { level: "unknown", error: "no probe command" };
+  const argv = table[engine];
+  if (!argv) return { level: "unknown", error: "no probe command" };
   try {
-    const { stdout, exitCode } = await run(RESOURCE_PROBE_COMMANDS[engine]);
+    const { stdout, exitCode } = await run(argv);
     if (exitCode === COMMAND_NOT_FOUND_EXIT) {
       return { level: "unknown", error: "command not found" };
     }
