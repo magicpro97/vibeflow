@@ -877,7 +877,8 @@ button:disabled {
   position: relative;
   display: grid;
   flex: 1;
-  grid-template-rows: auto minmax(0, 1fr) max-content;
+  /* Row 2 is the optional agent panel; it collapses to 0 height when absent. */
+  grid-template-rows: auto auto minmax(0, 1fr) max-content;
   min-width: 0;
   overflow: hidden;
   background: var(--home-canvas);
@@ -1007,7 +1008,7 @@ button:disabled {
   stroke-width: 1.6;
 }
 .home-timeline {
-  grid-row: 2;
+  grid-row: 3;
   position: relative;
   z-index: 0;
   min-height: 0;
@@ -1555,7 +1556,7 @@ button:disabled {
 /* Composer */
 .home-composer-wrap {
   position: relative;
-  grid-row: 3;
+  grid-row: 4;
   z-index: 10;
   isolation: isolate;
   display: grid;
@@ -4479,4 +4480,246 @@ button:disabled {
 }
 .home-collapsible button {
   margin-top: 6px;
+}
+
+/* Agent panel */
+.home-agent-panel {
+  width: min(24rem, calc(100% - 2rem));
+  grid-row: 2;
+  /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 52rem) centered,
+     so its left edge sits at max(1rem, (100% - 52rem) / 2) inside this pane. */
+  justify-self: start;
+  margin: 0.75rem 0 1rem max(1rem, calc((100% - 52rem) / 2));
+  overflow: hidden;
+  border: 1px solid var(--home-line);
+  border-radius: 0.75rem;
+  background: var(--home-paper);
+  box-shadow: 0 10px 28px rgb(58 47 33 / 0.08);
+}
+.home-agent-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--home-line);
+  color: var(--home-faint);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.home-agent-panel__count {
+  margin-left: auto;
+  color: var(--home-muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.home-agent-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Long rosters scroll inside the panel instead of crowding the transcript. */
+  max-height: 8.5rem;
+  overflow-y: auto;
+}
+.home-agent-panel li {
+  margin: 0;
+}
+.home-agent-row {
+  display: grid;
+  grid-template-columns: 1rem 7.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  height: 28px;
+  padding: 0 0.75rem;
+  border: 0;
+  border-top: 1px solid rgb(217 211 200 / 0.5);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.home-agent-panel li:first-child .home-agent-row {
+  border-top: 0;
+}
+.home-agent-row:hover {
+  background: rgb(255 255 255 / 0.55);
+}
+.home-agent-row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-agent-row__dot {
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--home-muted) 78%, transparent);
+}
+.home-agent-row__label {
+  overflow: hidden;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-agent-row__action {
+  overflow: hidden;
+  color: var(--home-muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-agent-row__clock {
+  color: var(--home-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+}
+.home-agent-row--working .home-agent-row__icon {
+  color: var(--home-amber);
+}
+.home-agent-row--working .home-agent-row__label {
+  color: var(--home-amber);
+}
+.home-agent-row--working .home-agent-row__clock {
+  color: var(--home-amber);
+  font-weight: 600;
+}
+.home-agent-row--failed .home-agent-row__icon,
+.home-agent-row--failed .home-agent-row__label {
+  color: var(--home-red);
+}
+.home-agent-row--complete .home-agent-row__icon {
+  color: var(--home-green);
+}
+.home-agent-row--idle .home-agent-row__icon {
+  color: color-mix(in srgb, var(--home-muted) 35%, transparent);
+}
+@media (max-width: 480px) {
+  /* Phones: the pane's fixed stack is brittle under text zoom; the 1rem desktop
+     gap below the panel would push the composer below the fold at 200%. */
+  .home-agent-panel {
+    margin-bottom: 0;
+  }
+  .home-agent-row {
+    grid-template-columns: 1rem minmax(0, 1fr) auto;
+  }
+  .home-agent-row__action {
+    display: none;
+  }
+}
+@media (max-height: 820px) {
+  /* Short viewports: the transcript and composer win; the roster shows its first rows and scrolls. */
+  .home-agent-panel ul {
+    max-height: 4rem;
+  }
+}
+
+/* Agent drawer */
+.home-agent-drawer {
+  z-index: 25;
+  flex: 0 0 min(24rem, 36vw);
+  width: min(24rem, 36vw);
+  overflow-y: auto;
+  border-left: 1px solid var(--home-line);
+  background: var(--home-paper);
+  box-shadow: -14px 0 35px rgb(65 51 34 / 0.08);
+}
+.home-agent-drawer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.6rem;
+  padding: 0 1.15rem;
+  border-bottom: 1px solid var(--home-line);
+}
+.home-agent-drawer > header button {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  color: var(--home-muted);
+  cursor: pointer;
+  font-size: 1.3rem;
+}
+.home-agent-drawer > header button:hover {
+  background: var(--home-panel);
+}
+.home-agent-drawer > header small {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: var(--home-faint);
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.home-agent-drawer > header span strong {
+  display: block;
+  margin-top: -0.6rem;
+  font-family: Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+.home-agent-drawer {
+  position: fixed;
+  top: var(--home-topbar-height);
+  right: 0;
+  bottom: 0;
+  width: min(28rem, 92vw);
+}
+.home-agent-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 1rem 1.15rem 2rem;
+  list-style: none;
+}
+.home-agent-list > li {
+  padding: 0.8rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.7rem;
+  background: var(--home-tone-card);
+}
+.home-agent-list > li > header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.home-agent-list__icon {
+  color: var(--home-amber);
+  font-size: 0.7rem;
+}
+.home-agent-list time {
+  color: var(--home-faint);
+  font-size: 0.57rem;
+}
+.home-agent-list__pill {
+  padding: 0.2rem 0.4rem;
+  border-radius: 2rem;
+  background: var(--home-panel);
+  color: var(--home-muted);
+  font-size: 0.58rem;
+}
+.home-agent-list__state {
+  margin-left: auto;
+  color: var(--home-muted);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.home-agent-list > li > p {
+  margin: 0.55rem 0 0;
+  color: var(--home-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }

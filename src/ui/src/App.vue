@@ -8,14 +8,16 @@
     />
     <HomeUpdateBanner />
     <ConversationHome
-      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen"
+      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen || agentsOpen"
       @open-capabilities="openCapabilities"
       @open-trace="openTrace"
+      @select-agent="openAgentDrawer"
     />
     <HomeCapabilityDrawer :open="capabilitiesOpen" @close="closeCapabilities" />
     <HomePreferencesDrawer :open="settingsOpen" @close="closeSettings" />
     <HomeControlCenterDrawer :open="controlCenterOpen" @close="closeControlCenter" />
     <HomeTraceDrawer :open="traceOpen" @close="closeTrace" />
+    <HomeAgentDrawer :open="agentsOpen" :participant-id="selectedAgentId" @close="closeAgents" />
     <div class="sr-only" role="status" aria-live="polite">{{ announcement }}</div>
   </div>
 </template>
@@ -23,6 +25,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ConversationHome from "./components/ConversationHome.vue";
+import HomeAgentDrawer from "./components/HomeAgentDrawer.vue";
 import HomeCapabilityDrawer from "./components/HomeCapabilityDrawer.vue";
 import HomeControlCenterDrawer from "./components/HomeControlCenterDrawer.vue";
 import HomePreferencesDrawer from "./components/HomePreferencesDrawer.vue";
@@ -37,6 +40,9 @@ const capabilitiesOpen = ref(false);
 const settingsOpen = ref(false);
 const controlCenterOpen = ref(false);
 const traceOpen = ref(false);
+const agentsOpen = ref(false);
+const selectedAgentId = ref<string | null>(null);
+const agentDrawerTrigger = ref<HTMLElement | null>(null);
 const announcement = ref("");
 
 watch(
@@ -46,6 +52,16 @@ watch(
     if (topic) announcement.value = `Opened conversation: ${topic}`;
   },
   { immediate: true },
+);
+
+// A conversation switch must not leave the agent drawer bound to a stale
+// participant; close it without stealing focus (no closeAgents call here).
+watch(
+  () => store.selectedConversationId,
+  () => {
+    agentsOpen.value = false;
+    selectedAgentId.value = null;
+  },
 );
 
 function closeCapabilities() {
@@ -59,6 +75,7 @@ function openCapabilities() {
   settingsOpen.value = false;
   controlCenterOpen.value = false;
   traceOpen.value = false;
+  agentsOpen.value = false;
   capabilitiesOpen.value = true;
 }
 
@@ -71,6 +88,7 @@ function openSettings() {
   capabilitiesOpen.value = false;
   controlCenterOpen.value = false;
   traceOpen.value = false;
+  agentsOpen.value = false;
   settingsOpen.value = true;
 }
 
@@ -85,6 +103,7 @@ function openControlCenter() {
   capabilitiesOpen.value = false;
   settingsOpen.value = false;
   traceOpen.value = false;
+  agentsOpen.value = false;
   controlCenterOpen.value = true;
 }
 
@@ -92,6 +111,7 @@ function openTrace() {
   capabilitiesOpen.value = false;
   settingsOpen.value = false;
   controlCenterOpen.value = false;
+  agentsOpen.value = false;
   traceOpen.value = true;
 }
 
@@ -106,12 +126,36 @@ function closeTrace() {
   );
 }
 
+function openAgentDrawer(participantId: string) {
+  capabilitiesOpen.value = false;
+  settingsOpen.value = false;
+  controlCenterOpen.value = false;
+  traceOpen.value = false;
+  selectedAgentId.value = participantId;
+  agentDrawerTrigger.value =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  agentsOpen.value = true;
+}
+
+function closeAgents() {
+  agentsOpen.value = false;
+  const trigger = agentDrawerTrigger.value;
+  agentDrawerTrigger.value = null;
+  nextTick(() => {
+    const target = trigger?.isConnected
+      ? trigger
+      : document.querySelector<HTMLElement>(".home-agent-panel .home-agent-row");
+    target?.focus();
+  });
+}
+
 function closeActiveDrawer(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
   if (capabilitiesOpen.value) closeCapabilities();
   else if (settingsOpen.value) closeSettings();
   else if (controlCenterOpen.value) closeControlCenter();
   else if (traceOpen.value) closeTrace();
+  else if (agentsOpen.value) closeAgents();
 }
 
 onMounted(() => window.addEventListener("keydown", closeActiveDrawer));

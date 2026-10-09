@@ -1,0 +1,144 @@
+// Per-agent presence rows for the Home agent panel ("who is working now" panel). Only
+// assistant rows carry `publicAuthorId`; tool / tool-group rows follow a cursor of the latest
+// non-"human" author (shared walk: `attributeItemsToParticipants`). Status: idle → failed (a
+// failed tool / tool-group whose LAST entry failed) → working (a `started` tool signal, or
+// last item incomplete) → complete. v1 limit (R1): interleaved agents mis-attribute tools.
+import { homeParticipantDisplayLabel } from "../conversation-home-participant-label.js";
+import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
+import type { HomeParticipant } from "../conversation-home-types.js";
+import { turnElapsedMs, turnStartAt } from "./turn-timing.js";
+
+export const AGENT_PRESENCE_STATUS = Object.freeze({
+  IDLE: "idle",
+  WORKING: "working",
+  FAILED: "failed",
+  COMPLETE: "complete",
+} as const);
+export type AgentPresenceStatus =
+  (typeof AGENT_PRESENCE_STATUS)[keyof typeof AGENT_PRESENCE_STATUS];
+export interface AgentPresenceRow {
+  readonly participantId: string;
+  readonly label: string;
+  readonly engine: string | null;
+  readonly model: string | null;
+  readonly status: AgentPresenceStatus;
+  readonly latestAction: string | null;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+  readonly elapsedMs: number | null;
+  readonly lastItemIndex: number;
+}
+
+/** Panel sort order: working first, complete last; ties break by label ascending. */
+const STATUS_RANK = {
+  [AGENT_PRESENCE_STATUS.WORKING]: 0,
+  [AGENT_PRESENCE_STATUS.FAILED]: 1,
+  [AGENT_PRESENCE_STATUS.IDLE]: 2,
+  [AGENT_PRESENCE_STATUS.COMPLETE]: 3,
+} satisfies Record<AgentPresenceStatus, number>;
+
+/** Max characters kept from a latest-action body, ellipsis included. */
+const LATEST_ACTION_MAX = 140;
+interface PresenceSignal {
+  readonly lastIndex: number;
+  readonly at: string | null;
+  readonly body: string;
+  readonly complete: boolean;
+  readonly failed: boolean;
+  readonly started: boolean;
+}
+const truncateLatestAction = (body: string): string =>
+  body.length <= LATEST_ACTION_MAX ? body : `${body.slice(0, LATEST_ACTION_MAX - 1)}…`;
+
+/** Shared attribution walk (agent drawer reuses it); index lists keep timeline order. */
+export function attributeItemsToParticipants(
+  items: readonly RenderedHomeTimelineItem[],
+): Map<string, number[]> {
+  const attribution = new Map<string, number[]>();
+  let currentAuthor: string | null = null;
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!item) continue;
+    const author = item.publicAuthorId;
+    if (typeof author === "string" && author !== "human") currentAuthor = author;
+    if (item.kind !== "assistant" && item.kind !== "tool" && item.kind !== "tool-group") continue;
+    if (!currentAuthor) continue;
+    const indexes = attribution.get(currentAuthor);
+    if (indexes) indexes.push(index);
+    else attribution.set(currentAuthor, [index]);
+  }
+  return attribution;
+}
+export function buildAgentPresence(
+  items: readonly RenderedHomeTimelineItem[],
+  participants: readonly HomeParticipant[],
+): AgentPresenceRow[] {
+  const signals = new Map<string, PresenceSignal>();
+  for (const [participantId, indexes] of attributeItemsToParticipants(items)) {
+    const lastIndex = indexes[indexes.length - 1] ?? -1;
+    const item = items[lastIndex];
+    if (!item) continue;
+    // Tool-group status counts as its LAST member (a tool row is a single-entry group).
+    const member = item.kind === "tool" ? item.tool : item.tools?.[item.tools.length - 1];
+    // A tool-group's own `at` is its FIRST member's time; status comes from the LAST
+    // member, so the signal carries the last member's `at` to keep timing consistent.
+    const at =
+      item.kind === "tool-group" ? (item.tools?.[item.tools.length - 1]?.at ?? item.at) : item.at;
+    const started =
+      item.kind === "tool"
+        ? item.tool?.status === "started"
+        : (item.tools?.some((entry) => entry.status === "started") ?? false);
+    signals.set(participantId, {
+      lastIndex,
+      at,
+      body: item.body,
+      complete: item.complete,
+      failed: member?.status === "failed",
+      started,
+    });
+  }
+  const nowMs = Date.now();
+  const rows = participants.map((participant): AgentPresenceRow => {
+    const signal = signals.get(participant.participant_id);
+    const status: AgentPresenceStatus = signal
+      ? signal.failed
+        ? AGENT_PRESENCE_STATUS.FAILED
+        : signal.started || !signal.complete
+          ? AGENT_PRESENCE_STATUS.WORKING
+          : AGENT_PRESENCE_STATUS.COMPLETE
+      : AGENT_PRESENCE_STATUS.IDLE;
+    const startedAt = signal ? turnStartAt(items, signal.lastIndex) : null;
+    // Failure is terminal too: the clock freezes at the failing signal's time.
+    const finishedAt =
+      signal &&
+      (status === AGENT_PRESENCE_STATUS.COMPLETE || status === AGENT_PRESENCE_STATUS.FAILED)
+        ? signal.at
+        : null;
+    return {
+      participantId: participant.participant_id,
+      label: homeParticipantDisplayLabel({
+        participantId: participant.participant_id,
+        roleRef: participant.role_ref,
+        engine: participant.engine,
+      }),
+      engine: participant.engine,
+      model: participant.model,
+      status,
+      latestAction: signal ? truncateLatestAction(signal.body) : null,
+      startedAt,
+      finishedAt,
+      elapsedMs: turnElapsedMs({ startedAt, finishedAt }, nowMs),
+      lastItemIndex: signal ? signal.lastIndex : -1,
+    };
+  });
+  return rows.sort(
+    (left, right) =>
+      STATUS_RANK[left.status] - STATUS_RANK[right.status] || left.label.localeCompare(right.label),
+  );
+}
+
+/** Live clock: `working` rows tick; everything else returns the frozen `elapsedMs`. */
+export function liveElapsedMs(row: AgentPresenceRow, nowMs: number): number | null {
+  if (row.status !== AGENT_PRESENCE_STATUS.WORKING) return row.elapsedMs;
+  return turnElapsedMs({ startedAt: row.startedAt, finishedAt: null }, nowMs);
+}

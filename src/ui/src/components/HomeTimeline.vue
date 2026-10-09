@@ -42,12 +42,12 @@
         :checkpoints="activationLoading.checkpoints"
         list-label="Conversation restore progress"
       />
-      <div v-else-if="!rendered.length && !store.pendingActions.length" class="home-empty-thread">
+      <div v-else-if="!items.length && !store.pendingActions.length" class="home-empty-thread">
         <span aria-hidden="true">✦</span>
         <strong>The room is ready.</strong>
         <p>Send the first message, mention an agent, or add one with <kbd>+</kbd>.</p>
       </div>
-      <template v-for="(item, index) in rendered" :key="item.id">
+      <template v-for="(item, index) in items" :key="item.id">
         <div v-if="item.kind === 'boundary'" class="home-revision-boundary" role="separator">
           <span />
           <strong>{{ item.title }}</strong>
@@ -175,7 +175,6 @@ import {
   describeHomeWelcomeLoading,
 } from "../conversation-home-loading.js";
 import { homeParticipantDisplayLabel } from "../conversation-home-participant-label.js";
-import { projectHomeTimeline } from "../conversation-home-projection.js";
 import type { RenderedHomeTimelineItem } from "../conversation-home-projection.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import type {
@@ -196,19 +195,19 @@ import HomePromptRail from "./HomePromptRail.vue";
 import HomeToolGroup from "./HomeToolGroup.vue";
 import HomeTurnStatus from "./HomeTurnStatus.vue";
 const store = useConversationHomeStore();
+// Timeline rows are pre-projected by the parent (the single projection authority in
+// ConversationHome.vue) and arrive here as the `items` prop.
+const props = withDefaults(defineProps<{ items: RenderedHomeTimelineItem[] }>(), {
+  items: () => [],
+});
 const scroller = ref<HTMLElement | null>(null);
 const endMarker = ref<HTMLElement | null>(null);
 const followLatest = ref(true);
 const showJump = ref(false);
-const rendered = computed(() =>
-  projectHomeTimeline(store.timeline?.items ?? [], store.activeRevision?.participants ?? []),
-);
-const turnStarts = computed(() =>
-  rendered.value.map((_, index) => turnStartAt(rendered.value, index)),
-);
+const turnStarts = computed(() => props.items.map((_, index) => turnStartAt(props.items, index)));
 /** Finality for answer collapse: the last assistant/user row, even with trailing tool/boundary rows. */
-const lastAnswerIndex = computed(() => finalAnswerIndex(rendered.value));
-const promptRail = computed(() => buildPromptRail(rendered.value));
+const lastAnswerIndex = computed(() => finalAnswerIndex(props.items));
+const promptRail = computed(() => buildPromptRail(props.items));
 const activationLoading = computed(() =>
   describeHomeActivationLoading({
     topic: store.activeSession?.active?.topic ?? store.activeSession?.root.topic ?? null,
@@ -328,7 +327,7 @@ function jumpToAnchor(anchorKey: string): void {
 
 const quoteAuthor = (target: HomeQuoteProjection) => {
   if (target.author_public_id === "human") return "You";
-  const visibleSource = rendered.value.find((item) =>
+  const visibleSource = props.items.find((item) =>
     item.sourceEventIds.includes(target.target_event_id),
   );
   if (visibleSource) return visibleSource.title;
@@ -356,7 +355,7 @@ function scrollLatest() {
 }
 
 watch(
-  () => [store.activeRootId, rendered.value.length, store.pendingActions.length],
+  () => [store.activeRootId, props.items.length, store.pendingActions.length],
   async ([root], previous) => {
     await nextTick();
     if (root !== previous?.[0] || followLatest.value)

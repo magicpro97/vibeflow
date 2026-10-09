@@ -327,7 +327,7 @@ already admitted.
 
 ## 12. Orca-native transcript affordances (#830)
 
-Conversation Home keeps the transcript calm with five Orca-native affordances:
+Conversation Home keeps the transcript calm with seven Orca-native affordances:
 
 **Tool groups**: consecutive `tool_action` items in a transcript collapse into a
 single `<details>` batch instead of one row per action. A lone tool action stays
@@ -355,6 +355,19 @@ the session is opened.
 **Prompt rail**: when a transcript holds at least two anchored user prompts, jump
 ticks render at the top of the transcript, one per prompt. Clicking a tick scrolls
 the prompt into view and moves focus to it.
+
+**Agent panel**: the panel above the transcript lists every AI participant with its live
+state from the same rendered projection as the transcript, sorted working agents first
+and completed agents last, with a count line that summarizes running and done agents.
+Each row carries the agent's latest action and a ticking clock while that agent works,
+and the clock freezes when the agent completes. Clicking a row opens the agent drawer
+for that participant.
+
+**Agent drawer**: the drawer lists one agent's public activity — its tool actions and
+assistant answers in timeline order. Each row carries its time, a kind icon, a truncated
+body of at most 200 characters, and a status pill for tool rows. The last row also
+reports the agent's state — `Working`, `Complete`, or `Failed` — so the drawer and the
+panel agree; × or Escape closes it and returns focus to the panel.
 
 ---
 
