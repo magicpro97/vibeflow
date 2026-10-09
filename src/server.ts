@@ -25,6 +25,7 @@ import {
   serializeSseJsonEvent,
 } from "./orchestrator/conversation/conversation-sse-contract.js";
 import { checkEngineAsync, getCachedProbe, preflightAll, setCachedProbe } from "./preflight.js";
+import { buildResourceSnapshot } from "./resources.js";
 import { scanRepo } from "./scanner.js";
 import { BoundedRequestBodyError, readBoundedUtf8Body } from "./server/bounded-request-body.js";
 import { handleCapabilityRoute } from "./server/capability-route.js";
@@ -345,6 +346,14 @@ export async function startServer(
           return Response.json({ error: "forbidden" }, { status: 403 });
         const m = await import("./orchestrator/marker.js");
         return Response.json({ markers: m.listMarkers() });
+      }
+
+      // --- GET /api/resources — run resource snapshot (state-backed, no probes) ---
+      if (method === "GET" && path === "/api/resources") {
+        if (lanExposed && !guarded(req))
+          return Response.json({ error: "forbidden" }, { status: 403 });
+        const state = readState(activeRepo);
+        return Response.json(state ? buildResourceSnapshot(state) : null);
       }
 
       // --- GET /api/units/:name/timeline — token+loopback guarded (#557 / #561) ---
