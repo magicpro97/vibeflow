@@ -30,6 +30,10 @@ export const WINDOWS_PRIVATE_SECURITY = Object.freeze({
   FILE_ALL_ACCESS: 0x001f_01ff,
   ACL_SIZE_INFORMATION_CLASS: 2,
   ERROR_INSUFFICIENT_BUFFER: 122,
+  // TOKEN_USER (SID_AND_ATTRIBUTES + the widest SID, SECURITY_MAX_SID_SIZE = 68) and TOKEN_OWNER
+  // (a bare PSID + SID) both fit far below this, so the token query is sized by the class bound
+  // instead of a NULL-buffer size probe (see tokenSid in windows-private-authority.ts, #824).
+  TOKEN_SID_CLASS_BOUND_BYTES: 128,
   SDDL_REVISION: 1,
   ACL_INFORMATION_BYTES: 12,
   ACL_HEADER_BYTES: 8,

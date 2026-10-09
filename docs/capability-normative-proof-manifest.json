@@ -18,7 +18,7 @@
         "src/durability"
       ],
       "test_sha256": "2af5cdd495f03c0e0171fcc0cd4b29512a7d94a0160ec04ded260d9acb05372c",
-      "production_sha256": "98db5ed1850f0cc2d01fd59d9c25fae387cba042d9c9be4f43d222c5bd147210"
+      "production_sha256": "e18e74671920559e2824fef8eba1069569b17664a6b13845ce719a4d26b10c44"
     },
     {
       "id": "proof:bun:test/actions/package-preview-hardening.test.ts#public-secret-scanner",
@@ -44,7 +44,7 @@
         "src/durability"
       ],
       "test_sha256": "a6e690df8f1f535905552e31429b911d6aec32996e0ab7810ae37790028747f5",
-      "production_sha256": "a5ded9db60357a8701a62e094ad80b6fe3df6ddd4cc0e0d8bd29712fd0bd4e64"
+      "production_sha256": "abdbdb33b9347f84583080257ecef5f43e0fb64d3a8236af666ccfd1d4d1042b"
     },
     {
       "id": "proof:bun:test/durability/frame.test.ts#vffr-chain-tamper",
@@ -57,7 +57,7 @@
         "src/durability"
       ],
       "test_sha256": "fe61f4c5936fa4bbe186b22a310beda838c57c5d7818350dfda3368c36a8d918",
-      "production_sha256": "a5ded9db60357a8701a62e094ad80b6fe3df6ddd4cc0e0d8bd29712fd0bd4e64"
+      "production_sha256": "abdbdb33b9347f84583080257ecef5f43e0fb64d3a8236af666ccfd1d4d1042b"
     },
     {
       "id": "proof:bun:test/durability/windows-acl-identity.test.ts#owner-only-vs-foreign-write",
@@ -70,7 +70,7 @@
         "src/durability"
       ],
       "test_sha256": "a003fe5511b90f81375ade4216b7126cd35fcd0f5d06d82bb544d7505e154cac",
-      "production_sha256": "a5ded9db60357a8701a62e094ad80b6fe3df6ddd4cc0e0d8bd29712fd0bd4e64"
+      "production_sha256": "abdbdb33b9347f84583080257ecef5f43e0fb64d3a8236af666ccfd1d4d1042b"
     },
     {
       "id": "proof:bun:test/durability/windows-acl-identity.test.ts#inherited-dacl-migrated",
@@ -83,7 +83,7 @@
         "src/durability"
       ],
       "test_sha256": "a003fe5511b90f81375ade4216b7126cd35fcd0f5d06d82bb544d7505e154cac",
-      "production_sha256": "a5ded9db60357a8701a62e094ad80b6fe3df6ddd4cc0e0d8bd29712fd0bd4e64"
+      "production_sha256": "abdbdb33b9347f84583080257ecef5f43e0fb64d3a8236af666ccfd1d4d1042b"
     },
     {
       "id": "proof:bun:test/durability/windows-acl-identity.test.ts#substituted-object-refused",
@@ -96,7 +96,7 @@
         "src/durability"
       ],
       "test_sha256": "a003fe5511b90f81375ade4216b7126cd35fcd0f5d06d82bb544d7505e154cac",
-      "production_sha256": "a5ded9db60357a8701a62e094ad80b6fe3df6ddd4cc0e0d8bd29712fd0bd4e64"
+      "production_sha256": "abdbdb33b9347f84583080257ecef5f43e0fb64d3a8236af666ccfd1d4d1042b"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-catalog.test.ts#degraded-read-only",
@@ -201,7 +201,7 @@
         "src/durability"
       ],
       "test_sha256": "8355f07c58b791316f317a8042119269ae897aaeb6f59b0c20c0dadab818cc86",
-      "production_sha256": "d0fe7b448404d71ac9119a7de3c6cc8fa84a1ddaa2e3ecb7f14991bf64a33f80"
+      "production_sha256": "c97a5ba620635814bed142ec74b868252c9eb4434eb93593f7878ab317ca3ac7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-action-terminal-retry",
@@ -216,7 +216,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "016eafe01ee529556e4fe457323a5ce1a0fcdb0e7b030f08c4604f37286d725f"
+      "production_sha256": "784d1da75f0d3d568bf6b315be68de5dcecfa8770eafa0e0f88f3c3ad80fd5c7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-fresh-terminal-reconcile",
@@ -231,7 +231,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "016eafe01ee529556e4fe457323a5ce1a0fcdb0e7b030f08c4604f37286d725f"
+      "production_sha256": "784d1da75f0d3d568bf6b315be68de5dcecfa8770eafa0e0f88f3c3ad80fd5c7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-runtime.test.ts#revision-failed-idempotency",
@@ -246,7 +246,7 @@
         "src/durability"
       ],
       "test_sha256": "f8178bb0ff1a940c1d3e5045e175233c23e39d93dc6881f28e955509496932a4",
-      "production_sha256": "016eafe01ee529556e4fe457323a5ce1a0fcdb0e7b030f08c4604f37286d725f"
+      "production_sha256": "784d1da75f0d3d568bf6b315be68de5dcecfa8770eafa0e0f88f3c3ad80fd5c7"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-turn-delivery.test.ts#exact-resume-delta",
@@ -826,7 +826,7 @@
         "src/durability"
       ],
       "test_sha256": "1cb1ae6f66fff3ddb1a4eb37a978c7a1cee8dfd7b1f20e90c50e6b3432e33bff",
-      "production_sha256": "9c4691a6046d72e9201f4c3ba4db61bf7f60f3dd7858ac44283014d1433b8e53"
+      "production_sha256": "848f29aa003121dfdefc8bcab0b0cd2e8706c03ef22311284d775cb931d3242a"
     }
   ],
   "section_dispositions": [
@@ -2575,6 +2575,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "5ba28958611b8e89b071c8651f193539cad6787a599787f441e11605caf8dd90"
+    "reviewed_payload_sha256": "df8745b05a476a06413ac5becfdb61f7b4feb15249db37f8099e03c83fa2b07b"
   }
 }
