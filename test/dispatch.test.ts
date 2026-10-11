@@ -1017,6 +1017,29 @@ describe("parseEngineSummary copilot JSONL stream (T8)", () => {
     expect(s?.confidence).toBe(0.9);
     expect(s?.files_changed).toEqual(["src/x.ts"]);
   });
+
+  test("assistant.message with non-string or absent data.content is skipped without crashing", () => {
+    // Covers the fall-through close of the content-type guard (prompt.ts line 212):
+    // copilot streams can carry assistant.message frames whose data.content is not a
+    // string (or data itself is absent) — the scanner must skip them, never throw.
+    const raw = [
+      '{"type":"assistant.message","data":{"content":42}}',
+      '{"type":"assistant.message"}',
+      "not json at all",
+    ].join("\n");
+    const skipped = parseEngineSummary(raw); // must not throw
+    // The malformed frames are never parsed as native content summaries. (The
+    // pre-existing bare-object fallback may surface an event frame itself; pin only
+    // that no confidence-bearing summary was extracted FROM the frames.)
+    expect(skipped?.confidence).toBeUndefined();
+    // A durable message whose content carries no summary lets a LATER parseable
+    // message win — the non-string frames above must not short-circuit scanning.
+    const mixed = [
+      '{"type":"assistant.message","data":{"content":"plain prose, no json"}}',
+      '{"type":"assistant.message","data":{"content":"```json\\n{\\"confidence\\":0.7}\\n```"}}',
+    ].join("\n");
+    expect(parseEngineSummary(mixed)?.confidence).toBe(0.7);
+  });
 });
 
 describe("parseSessionId copilot (#618 / T8)", () => {
