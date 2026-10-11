@@ -30,8 +30,15 @@ the engines expose.
 | copilot  | `copilot -p <prompt> --output-format json --allow-all` | JSONL events | `test/fixtures/native/copilot-json.jsonl`  |
 
 The copilot argv order is load-bearing: the prompt is the **value of `-p`**
-(`copilot -p <prompt> …`). `copilot -p --output-format json … <prompt>` is
-rejected by the CLI parser (exit 1) — flags only follow the prompt value.
+(`copilot -p <prompt> …`). The form `copilot -p --output-format json … <prompt>`
+is rejected by the CLI parser (exit 1): a flag immediately after `-p` leaves it
+valueless, and the CLI does not steal the trailing `<prompt>`. What IS valid
+(verified live on copilot 1.0.94, exit 0 with valid JSONL): `-p <prompt>` with
+flags before `-p` or after the prompt value — e.g.
+`copilot -p <prompt> --output-format json --allow-all` (this repo's fresh-dispatch
+order) and `copilot --output-format json --allow-all -p <prompt>` both work.
+vibeflow keeps the prompt-value form because materializePrompt() splices the
+prompt right after `-p` and the session path repositions `-p` last.
 
 ## Field paths per engine
 
