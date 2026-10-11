@@ -1,5 +1,5 @@
 {"type":"thread.started","thread_id":"01a12b0c-dc30-73a1-92d0-962cef0acd45"}
-{"type":"item.completed","item":{"id":"item_0","type":"error","message":"failed to parse hooks config /Users/linhn/vibeflow/.codex/hooks.json: unknown field `detectionOnly`, expected `description` or `hooks` at line 2 column 17"}}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"failed to parse hooks config ~/vibeflow/.codex/hooks.json: unknown field `detectionOnly`, expected `description` or `hooks` at line 2 column 17"}}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"reasoning","text":"The user wants me to reply with exactly \"ok\".\nI should follow this instruction precisely."}}
 {"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"ok"}}
