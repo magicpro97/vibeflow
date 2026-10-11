@@ -80,18 +80,33 @@ describe("parseEngineResources (native engine JSON per engine)", () => {
   });
 
   describe("copilot (JSONL stream)", () => {
-    test("sessionDurationMs → wall_seconds; premiumRequests 0 survives", () => {
+    test("sessionDurationMs → wall_seconds; premiumRequests is a count, not cost_usd", () => {
       const r = parseEngineResources("copilot", fixture("copilot-json.jsonl"));
-      expect(r).toEqual({ wall_seconds: 79.965, cost_usd: 0 });
+      expect(r).toEqual({ wall_seconds: 79.965 });
+      // Hazard: the fixture's usage.premiumRequests:0 is a request COUNT — it must
+      // never surface as USD ("$0.00"); the key must be absent, not undefined-valued.
+      expect(Object.hasOwn(r ?? {}, "cost_usd")).toBe(false);
     });
 
-    test("skips ephemeral events and does not count events", () => {
+    test("skips ephemeral events; only the durable result event yields measurements", () => {
       const raw = [
         '{"type":"assistant.reasoning_delta","ephemeral":true,"data":{"deltaContent":"thinking"}}',
         '{"type":"assistant.message","ephemeral":true,"data":{"content":"streamed-not-durable"}}',
         '{"type":"result","sessionId":"s","exitCode":0,"usage":{"premiumRequests":0,"sessionDurationMs":1000,"totalApiDurationMs":900}}',
       ].join("\n");
-      expect(parseEngineResources("copilot", raw)).toEqual({ wall_seconds: 1, cost_usd: 0 });
+      const r = parseEngineResources("copilot", raw);
+      expect(r).toEqual({ wall_seconds: 1 });
+      expect(Object.hasOwn(r ?? {}, "cost_usd")).toBe(false);
+    });
+
+    test("ephemeral:true result is skipped by the guard — only-ephemeral stream → undefined", () => {
+      // The guard is the only difference between these two streams; if it stops
+      // skipping ephemeral results, the first assertion flips to { wall_seconds: 0.5 }.
+      const ephemeralResult =
+        '{"type":"result","ephemeral":true,"sessionId":"s","usage":{"sessionDurationMs":500}}';
+      const durableResult = '{"type":"result","sessionId":"s","usage":{"sessionDurationMs":500}}';
+      expect(parseEngineResources("copilot", ephemeralResult)).toBeUndefined();
+      expect(parseEngineResources("copilot", durableResult)).toEqual({ wall_seconds: 0.5 });
     });
 
     test("stream without a result event → undefined", () => {

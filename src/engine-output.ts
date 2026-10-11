@@ -3,7 +3,9 @@ import type { Engine } from "./core/agent-contract.js";
 /**
  * Engine-reported resource measurements parsed from an engine's native JSON output.
  * A field is absent (not zero) when the engine did not report it — the engines differ:
- * claude reports tokens+cost+duration, codex tokens only, copilot duration+premiumRequests,
+ * claude reports tokens+cost+duration, codex tokens only, copilot duration only
+ * (its premiumRequests is a request count, not USD — deliberately unmapped; a
+ * distinctly-named field belongs in the WorkUnit resources contract if wanted),
  * opencode tokens+cost. Field paths verified against committed fixtures in test/fixtures/native/.
  */
 export interface NativeResources {
@@ -74,17 +76,17 @@ const codex = (raw: string): NativeResources | undefined => {
 
 // copilot --output-format json: JSONL. Measurements live on the final result event;
 // streaming deltas/session notices are ephemeral:true and must not be read as results.
-// premiumRequests is the (premium-request) cost unit; sessionDurationMs is wall time.
+// sessionDurationMs is wall time. premiumRequests is a REQUEST COUNT, not USD —
+// deliberately not mapped to cost_usd (consumers render $); a distinctly-named field
+// belongs in the WorkUnit resources contract if wanted later, not a fake dollar value.
 const copilot = (raw: string): NativeResources | undefined => {
   let found: NativeResources | undefined;
   for (const event of jsonLines(raw)) {
     const line = record(event);
     if (line.ephemeral === true || line.type !== "result") continue;
     const usage = record(line.usage);
-    const cost = num(usage.premiumRequests);
     const sessionMs = num(usage.sessionDurationMs);
     found = defined({
-      ...(cost !== undefined ? { cost_usd: cost } : {}),
       ...(sessionMs !== undefined ? { wall_seconds: sessionMs / 1000 } : {}),
     });
   }
@@ -94,6 +96,9 @@ const copilot = (raw: string): NativeResources | undefined => {
 // opencode run --format json: JSONL. step_finish.part carries tokens.total (total, not
 // input+output — output can be 0 while reasoning counts) and cost (0 is a real value).
 // Wall time = span from the first event timestamp to the step_finish timestamp.
+// Multi-step runs emit one step_finish per step; the reader keeps the LAST event. Whether
+// per-step values are cumulative is unverified, so summing across steps is deliberately
+// not attempted — last-step reporting is the honest choice until that is established.
 const opencode = (raw: string): NativeResources | undefined => {
   let first: number | undefined;
   let tokens: number | undefined;
