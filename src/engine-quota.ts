@@ -39,8 +39,10 @@ export function parseQuotaOutput(engine: string, out: string): QuotaStatus {
   const text = out.trim();
   if (!text) return { level: "unknown", error: "empty output" };
 
-  // JSON variants (claude; `gh api user/copilot_billing` for individual copilot quota;
-  // `gh api copilot` is the Copilot Business admin endpoint and is NOT per-user quota)
+  // JSON variants (claude). No verified quota command exists to feed this
+  // parser: `gh api user/copilot_billing` answers 404 (verified live
+  // 2026-10-09) and `claude usage --json` / `codex doctor --usage` do not
+  // exist; tracked in #355/#50926.
   if (text.startsWith("{")) {
     try {
       const j = JSON.parse(text) as Record<string, unknown>;
