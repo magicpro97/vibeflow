@@ -169,9 +169,12 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
   // docs lookup, MCP server handshakes). The individual
   // --allow-all-* flags are still listed in the help text but
   // --allow-all is the supported umbrella as of copilot 0.3+.
+  // `--output-format json` requests copilot's native JSONL (one JSON object per
+  // line). Task 3 verified the working argv order: `copilot -p <prompt>
+  // --output-format json --allow-all` (exit 0).
   return {
     cmd: "copilot",
-    args: ["-p", "--allow-all"],
+    args: ["-p", "--output-format", "json", "--allow-all"],
     promptMode: ENGINE_PROMPT_MODE.ARG,
     warning,
   };
@@ -183,7 +186,7 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
  *   claude (resume) -> claude -p -r <id> --output-format json   (#618 PR2a)
  *   codex           -> codex exec -                              (stdin prompt)
  *   opencode        -> opencode run [--session <id>] --format json --auto
- *   copilot         -> copilot -p <prompt> --allow-all-tools
+ *   copilot         -> copilot -p <prompt> --output-format json --allow-all
  * Claude and Codex receive the prompt on stdin; Copilot's current CLI requires it as the
  * `-p/--prompt` option value, so we pass it as a single argv element without a shell.
  * `gh -p` is NOT a valid fallback (gh has no global -p flag) so copilot resolves to an explicit

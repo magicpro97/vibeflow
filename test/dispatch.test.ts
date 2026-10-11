@@ -52,11 +52,26 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
       // Without --allow-all-urls the engine hits "Permission
       // denied and could not request permission from user" when
       // it tries to fetch any URL.
-      expect(r.args).toEqual(["-p", "--allow-all"]);
+      // --output-format json: native JSONL (T3-verified order).
+      expect(r.args).toEqual(["-p", "--output-format", "json", "--allow-all"]);
       expect(r.promptMode).toBe("arg");
       expect(r.cmd).not.toBe("gh");
       expect(r.warning).toBeUndefined();
     }
+  });
+
+  test("copilot dispatch requests native JSON output (piece contract)", () => {
+    // Task 3 verified argv contract: copilot -p <prompt> --output-format json --allow-all
+    // (exit 0, JSONL). The prompt is spliced right after -p by materializePrompt, so
+    // --output-format json must be in the static args. Injected probe keeps this
+    // deterministic regardless of whether copilot is installed.
+    const probe: EngineProbe = { has: () => true, version: () => "copilot 1.2.3" };
+    const r = engineCommand("copilot", probe);
+    expect(isUnavailable(r)).toBe(false);
+    if (isUnavailable(r)) return;
+    const idx = r.args.indexOf("--output-format");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(r.args[idx + 1]).toBe("json");
   });
 
   test("copilot absent → unavailable, NOT a bogus `gh -p`", () => {
@@ -271,10 +286,12 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     const call = calls[0];
     if (!call) throw new Error("expected one spawner call");
     expect(call.cmd).toBe("copilot");
-    // argv carries the POINTER, never the raw prompt, and keeps --allow-all after it
+    // argv carries the POINTER, never the raw prompt, and keeps --output-format json + --allow-all after it
     expect(call.args).toEqual([
       "-p",
       "Read /tmp/base/.vibeflow/dispatch/u1.md and follow it",
+      "--output-format",
+      "json",
       "--allow-all",
     ]);
     expect(call.input).toBe("");
@@ -385,6 +402,8 @@ describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () =
     expect(calls[0]?.args).toEqual([
       "-p",
       "Read /b/.vibeflow/dispatch/u2.md and follow it",
+      "--output-format",
+      "json",
       "--allow-all",
     ]);
     expect(written[0]?.content).toBe("async prompt");

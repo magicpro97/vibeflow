@@ -338,7 +338,10 @@ describe("runAiInit", () => {
     expect(capturedArgs[0]).toBe("-p");
     expect(capturedArgs[1]).toContain("You are an AI agent performing project initialization");
     expect(capturedArgs[1]).toContain(".vibeflow/ai-context/project-profile.json");
-    expect(capturedArgs[2]).toBe("--allow-all");
+    // Native JSONL requested (T3-verified order: -p <prompt> --output-format json --allow-all).
+    expect(capturedArgs[2]).toBe("--output-format");
+    expect(capturedArgs[3]).toBe("json");
+    expect(capturedArgs[4]).toBe("--allow-all");
   });
 
   test("writes AI context instruction files only for the forced engine", async () => {
