@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseEngineResources } from "../src/engine-output.js";
+import { parseEngineFinalText, parseEngineResources } from "../src/engine-output.js";
 
 // Why fixtures on disk: field paths were captured from real engine runs (T1-T4) and are
 // the contract this parser implements. Repo root (not test/) so the import specifier stays
@@ -150,6 +150,120 @@ describe("parseEngineResources (native engine JSON per engine)", () => {
       expect(parseEngineResources("claude", '"just a string"')).toBeUndefined();
       expect(parseEngineResources("codex", "\nnot json\n\n")).toBeUndefined();
       expect(parseEngineResources("opencode", "[1,2,3]")).toBeUndefined();
+    });
+  });
+});
+
+describe("parseEngineFinalText (native engine final text per engine)", () => {
+  const fence = '```json\n{"verdict":"approve","summary":"native answer"}\n```';
+
+  describe("claude (single JSON envelope)", () => {
+    test("fixture: envelope .result is the final text", () => {
+      expect(parseEngineFinalText("claude", fixture("claude-p-json.txt"))).toBe('{"ok":true}');
+    });
+
+    test("envelope without a non-empty string .result → undefined", () => {
+      expect(parseEngineFinalText("claude", JSON.stringify({ type: "result" }))).toBeUndefined();
+      expect(parseEngineFinalText("claude", JSON.stringify({ result: 42 }))).toBeUndefined();
+      expect(parseEngineFinalText("claude", JSON.stringify({ result: "   " }))).toBeUndefined();
+    });
+
+    test("plain prose (no envelope) → undefined, caller keeps its raw fallback", () => {
+      expect(parseEngineFinalText("claude", "just prose")).toBeUndefined();
+    });
+  });
+
+  describe("codex (JSONL stream)", () => {
+    test("LAST agent_message wins; reasoning/error items ignored", () => {
+      const raw = [
+        '{"type":"item.completed","item":{"type":"reasoning","text":"already contains a fence"}}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"first answer"}}',
+        '{"type":"item.completed","item":{"type":"error","message":"boom"}}',
+        `{"type":"item.completed","item":{"type":"agent_message","text":${JSON.stringify(fence)}}}`,
+      ].join("\n");
+      expect(parseEngineFinalText("codex", raw)).toBe(fence);
+    });
+
+    test("fixture: single agent_message text is returned", () => {
+      expect(parseEngineFinalText("codex", fixture("codex-exec-json.jsonl"))).toBe("ok");
+    });
+
+    test("no agent_message, or only empty text → undefined", () => {
+      expect(
+        parseEngineFinalText("codex", '{"type":"thread.started","thread_id":"t"}'),
+      ).toBeUndefined();
+      expect(
+        parseEngineFinalText(
+          "codex",
+          '{"type":"item.completed","item":{"type":"agent_message","text":"   "}}',
+        ),
+      ).toBeUndefined();
+    });
+  });
+
+  describe("copilot (JSONL stream)", () => {
+    test("fixture: durable assistant.message data.content is the final text", () => {
+      expect(parseEngineFinalText("copilot", fixture("copilot-json.jsonl"))).toBe("ok");
+    });
+
+    test("ephemeral:true events skipped; LAST durable assistant.message wins", () => {
+      const raw = [
+        '{"type":"assistant.message","ephemeral":true,"data":{"content":"streamed-not-durable"}}',
+        '{"type":"assistant.message","data":{"content":"first answer"}}',
+        `{"type":"assistant.message","data":{"content":${JSON.stringify(fence)}}}`,
+      ].join("\n");
+      expect(parseEngineFinalText("copilot", raw)).toBe(fence);
+    });
+
+    test("only ephemeral events → undefined", () => {
+      expect(
+        parseEngineFinalText(
+          "copilot",
+          '{"type":"assistant.message","ephemeral":true,"data":{"content":"x"}}',
+        ),
+      ).toBeUndefined();
+    });
+  });
+
+  describe("opencode (JSONL stream)", () => {
+    test("fixture: type:text part.text is the final text", () => {
+      expect(parseEngineFinalText("opencode", fixture("opencode-format-json.jsonl"))).toBe("ok");
+    });
+
+    test("multiple text events are newline-joined", () => {
+      const raw = [
+        '{"type":"text","part":{"type":"text","text":"part one"}}',
+        '{"type":"step_finish","part":{"type":"step-finish"}}',
+        '{"type":"text","part":{"type":"text","text":"part two"}}',
+      ].join("\n");
+      expect(parseEngineFinalText("opencode", raw)).toBe("part one\npart two");
+    });
+
+    test("no text events → undefined", () => {
+      expect(
+        parseEngineFinalText("opencode", '{"type":"step_finish","part":{"type":"step-finish"}}'),
+      ).toBeUndefined();
+    });
+  });
+
+  describe("guards", () => {
+    test("malformed JSON and undefined raw → undefined (never throw)", () => {
+      expect(parseEngineFinalText("claude", "not json")).toBeUndefined();
+      expect(parseEngineFinalText("codex", "not json")).toBeUndefined();
+      expect(parseEngineFinalText("copilot", "not json")).toBeUndefined();
+      expect(parseEngineFinalText("opencode", "not json")).toBeUndefined();
+      expect(parseEngineFinalText("claude", undefined)).toBeUndefined();
+      expect(parseEngineFinalText("codex", "")).toBeUndefined();
+    });
+
+    test("unknown engine → undefined", () => {
+      expect(parseEngineFinalText("gemini" as never, '{"result":"x"}')).toBeUndefined();
+    });
+
+    test("non-object JSON docs are skipped, not thrown on", () => {
+      expect(parseEngineFinalText("copilot", '"just a string"')).toBeUndefined();
+      expect(parseEngineFinalText("opencode", "[1,2,3]")).toBeUndefined();
+      expect(parseEngineFinalText("codex", "\nnot json\n\n")).toBeUndefined();
     });
   });
 });

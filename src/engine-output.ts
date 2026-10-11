@@ -147,3 +147,71 @@ export function parseEngineResources(
   const reader = READERS[engine];
   return reader ? reader(raw) : undefined;
 }
+
+// ---- native final text (#145) ----
+
+/** Non-empty strings only: an empty final text means "nothing native to read", so callers
+ *  keep their raw-scanning fallback — absence of a value, not an empty one. */
+const nonEmpty = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() !== "" ? value : undefined;
+
+// claude -p --output-format json: single envelope; .result is the model's final text.
+const claudeText = (raw: string): string | undefined => nonEmpty(record(parsed(raw)).result);
+
+// codex exec --json: JSONL; the LAST agent_message item is the final answer (earlier ones
+// can be intermediate narration). reasoning/error items are ignored.
+const codexText = (raw: string): string | undefined => {
+  let text: string | undefined;
+  for (const event of jsonLines(raw)) {
+    const line = record(event);
+    if (line.type !== "item.completed") continue;
+    const item = record(line.item);
+    if (item.type !== "agent_message") continue;
+    text = nonEmpty(item.text) ?? text;
+  }
+  return text;
+};
+
+// copilot --output-format json: JSONL; assistant.message carries the model text in
+// data.content. ephemeral:true events are streaming notices, not durable output.
+const copilotText = (raw: string): string | undefined => {
+  let text: string | undefined;
+  for (const event of jsonLines(raw)) {
+    const line = record(event);
+    if (line.ephemeral === true || line.type !== "assistant.message") continue;
+    text = nonEmpty(record(line.data).content) ?? text;
+  }
+  return text;
+};
+
+// opencode run --format json: JSONL; type:text events carry part.text; newline-joined to
+// match extractEngineResponseText in dispatch/prompt.ts.
+const opencodeText = (raw: string): string | undefined => {
+  const parts: string[] = [];
+  for (const event of jsonLines(raw)) {
+    const line = record(event);
+    if (line.type !== "text") continue;
+    const text = nonEmpty(record(line.part).text);
+    if (text !== undefined) parts.push(text);
+  }
+  return parts.length > 0 ? parts.join("\n") : undefined;
+};
+
+const TEXT_READERS: Record<string, (raw: string) => string | undefined> = {
+  claude: claudeText,
+  codex: codexText,
+  copilot: copilotText,
+  opencode: opencodeText,
+};
+
+/**
+ * Parse the engine's native final answer text from its raw stdout — the text the engine
+ * actually produced, free of spinner/JSONL envelope noise. Best-effort: malformed JSON,
+ * absent or empty final text, or an engine with no native reader → undefined (never
+ * throws); callers then keep their raw-scanning fallback.
+ */
+export function parseEngineFinalText(engine: Engine, raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const reader = TEXT_READERS[engine];
+  return reader ? reader(raw) : undefined;
+}

@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AGENT_ENGINE, type Engine } from "../core/agent-contract.js";
 import { DISPATCH_MODE } from "../dispatch/session-contract.js";
+import { parseEngineFinalText } from "../engine-output.js";
 import {
   type ReviewTarget,
   type ReviewVerdict,
@@ -114,7 +115,7 @@ export async function reviewCross(
       prompt: string;
       mode: string;
     }) => Promise<{ ok: boolean; raw: string; reason?: string }>;
-    engines?: readonly [string, string];
+    engines?: readonly [Engine, Engine];
   } = {},
 ): Promise<number> {
   if (flags.cross !== true) {
@@ -232,7 +233,7 @@ export async function reviewCross(
   const secondaryParseFailed = secondaryParsed === null;
   const primaryVerdict: ReviewVerdict = primaryParsed?.verdict ?? "block";
   const secondaryVerdict: ReviewVerdict = secondaryParsed?.verdict ?? "block";
-  const primarySummary = extractSummary(primaryResult.raw);
+  const primarySummary = extractSummary(primary, primaryResult.raw);
   // A true agreement requires BOTH engines to produce a real verdict.
   const agreement =
     primaryVerdict === secondaryVerdict && !primaryParseFailed && !secondaryParseFailed;
@@ -314,11 +315,16 @@ export async function reviewCross(
 }
 
 /** Extract the "summary" field from a reviewer's JSON block, or
- *  fall back to the first non-empty line. */
-function extractSummary(raw: string): string {
-  const blocks = Array.from(raw.matchAll(/```(?:json)?\s*\n([\s\S]*?)\n```/g));
+ *  fall back to the first non-empty line. Native-first (community #145):
+ *  when the raw stdout is a native engine stream (claude envelope, codex/
+ *  copilot JSONL, opencode events), the engine's final TEXT is pulled out
+ *  FIRST so a decoy fenced block riding in spinner/JSONL noise cannot win;
+ *  scanning the raw stdout stays as the fallback when no native shape fits. */
+function extractSummary(engine: Engine, raw: string): string {
+  const text = parseEngineFinalText(engine, raw) ?? raw;
+  const blocks = Array.from(text.matchAll(/```(?:json)?\s*\n([\s\S]*?)\n```/g));
   if (blocks.length === 0) {
-    const firstNonEmpty = raw.split("\n").find((l) => l.trim().length > 0);
+    const firstNonEmpty = text.split("\n").find((l) => l.trim().length > 0);
     return firstNonEmpty?.trim() ?? "";
   }
   const last = blocks[blocks.length - 1];

@@ -1004,6 +1004,36 @@ describe("parseEngineSummary opencode JSONL stream", () => {
   });
 });
 
+describe("parseEngineSummary copilot JSONL stream (T8)", () => {
+  test("assistant.message data.content → fenced summary; ephemeral decoy skipped", () => {
+    // The ephemeral decoy comes FIRST: if the ephemeral guard is dropped, the decoy's
+    // 0.1 is returned by the native branch before the durable 0.9 is ever seen.
+    const raw = [
+      '{"type":"assistant.message","ephemeral":true,"data":{"content":"```json\\n{\\"confidence\\":0.1}\\n```"}}',
+      '{"type":"assistant.message","data":{"content":"```json\\n{\\"confidence\\":0.9,\\"files_changed\\":[\\"src/x.ts\\"]}\\n```"}}',
+    ].join("\n");
+    const s = parseEngineSummary(raw);
+    expect(s).toBeDefined();
+    expect(s?.confidence).toBe(0.9);
+    expect(s?.files_changed).toEqual(["src/x.ts"]);
+  });
+});
+
+describe("parseSessionId copilot (#618 / T8)", () => {
+  test("result event carries sessionId → captured", () => {
+    const raw = [
+      '{"type":"assistant.message","data":{"content":"ok"}}',
+      '{"type":"result","sessionId":"19155765-1b22-4d6e-82b3-3276bff805d8","exitCode":0,"usage":{"sessionDurationMs":1000}}',
+    ].join("\n");
+    expect(parseSessionId(raw)).toBe("19155765-1b22-4d6e-82b3-3276bff805d8");
+  });
+
+  test("fixture: sessionId from the final result event", () => {
+    const stream = readFileSync("test/fixtures/native/copilot-json.jsonl", "utf8");
+    expect(parseSessionId(stream)).toBe("19155765-1b22-4d6e-82b3-3276bff805d8");
+  });
+});
+
 describe("defaultSpawner (test seam)", () => {
   test("defaultSpawner: success path returns status + stdout (line 67-68)", () => {
     // Mock Bun.spawnSync to return success → exercises the function body.

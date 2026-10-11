@@ -16,6 +16,7 @@ import {
   readPilotData,
   reviewCross,
 } from "../src/commands/review-cross.js";
+import type { Engine } from "../src/core/agent-contract.js";
 
 let origCwd: string;
 let dir: string;
@@ -299,7 +300,7 @@ describe("vf review --cross (A5 #171) — auto cross-debate", () => {
     const code = await reviewCross(
       ["plan", "test"],
       { cross: true },
-      { dispatch, engines: [] as unknown as readonly [string, string] },
+      { dispatch, engines: [] as unknown as readonly [Engine, Engine] },
     );
     expect(code).toBe(2);
   });
@@ -366,5 +367,37 @@ describe("vf review --cross (A5 #171) — auto cross-debate", () => {
     expect(last?.agreement).toBe(false);
     expect(last?.verdicts).toEqual(["block", "approve"]);
     expect(last?.parseFailed).toBe(true);
+  });
+
+  test("(dd) native-first: copilot final text beats a DECOY fence in spinner noise", async () => {
+    const plansDir = join(dir, ".vibeflow", "plans");
+    mkdirSync(plansDir, { recursive: true });
+    writeFileSync(join(plansDir, "native.md"), "# plan");
+    const nativeText =
+      '```json\n{ "verdict": "approve", "summary": "native final text wins" }\n```';
+    // Spinner noise carries a decoy fenced block (real newlines → today's raw scan finds
+    // it). The durable copilot assistant.message carries the real final text (newlines
+    // JSON-escaped → invisible to a raw regex scan).
+    const raw = [
+      '[spinner] working...\n```json\n{ "verdict": "block", "summary": "DECOY from spinner noise" }\n```\n[spinner] ...',
+      JSON.stringify({ type: "assistant.message", data: { content: nativeText } }),
+      JSON.stringify({ type: "result", sessionId: "sess-cross", exitCode: 0 }),
+    ].join("\n");
+    const dispatch = mockDispatch({
+      copilot: { ok: true, raw },
+      claude: { ok: true, raw: '```json\n{ "verdict": "approve", "summary": "fine" }\n```' },
+    });
+    const code = await reviewCross(
+      ["plan", "native"],
+      { cross: true },
+      {
+        dispatch,
+        engines: ["copilot", "claude"],
+      },
+    );
+    expect(code).toBe(0);
+    const data = readPilotData();
+    const last = data[data.length - 1];
+    expect(last?.primarySummary).toBe("native final text wins");
   });
 });

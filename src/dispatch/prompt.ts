@@ -167,10 +167,12 @@ function tryParseSummary(block: string): EngineSummary | undefined {
 }
 
 /**
- * Extract the engine summary from stdout, robust to four shapes (first valid wins):
+ * Extract the engine summary from stdout, robust to native-first shapes (first valid wins):
  *  (a) codex `exec --json` JSONL — find `item.completed` with `item.type === "agent_message"`,
  *      recurse on `.text` (fenced ```json block). **Only** agent_message — the `reasoning`
  *      event echoes the same json and must NOT be mistaken for the answer.
+ *  (a') copilot `--output-format json` JSONL — `assistant.message.data.content` (ephemeral
+ *      streaming notices skipped), recurse like codex.
  *  (b) a fenced ```json block, (c) the claude `--output-format json` envelope (`.result` /
  *  `.structured_output`), (d) a bare object. Uses balanced-brace scanning so nested objects
  *  parse correctly (the old `lastIndexOf("{")` slice broke on `{"a":{"b":1}}`).
@@ -192,10 +194,22 @@ export function parseEngineSummary(stdout: string): EngineSummary | undefined {
         type?: string;
         item?: Record<string, unknown>;
         part?: Record<string, unknown>;
+        data?: Record<string, unknown>;
+        ephemeral?: unknown;
       };
       // opencode text event
       if (obj.type === "text" && typeof obj.part?.text === "string") {
         opencodeTexts.push(obj.part.text as string);
+      }
+      // copilot `--output-format json` JSONL: `assistant.message` carries the model's
+      // final text in data.content; ephemeral:true events are streaming notices, not
+      // durable output — never read them as the answer.
+      if (obj.type === "assistant.message" && obj.ephemeral !== true) {
+        const content = obj.data?.content;
+        if (typeof content === "string") {
+          const inner = parseEngineSummary(content);
+          if (inner) return inner;
+        }
       }
       if (obj.type === "item.completed") {
         sawItemCompleted = true;
@@ -227,19 +241,25 @@ export function parseEngineSummary(stdout: string): EngineSummary | undefined {
   return undefined;
 }
 
-/** #618: pull the engine session id from stdout. Supports two shapes:
+/** #618: pull the engine session id from stdout. Supports four shapes:
+ *  - opencode `--format json`: JSONL events; `step_start` carries `sessionID` (scan forward).
  *  - codex `exec --json`: JSONL events; `thread.started` carries `thread_id` (scan forward).
- *  - claude `--output-format json`: envelope JSON carries `session_id` (scan reverse).
- *  copilot has no by-id resume so it never produces an id to capture. */
+ *  - copilot `--output-format json`: JSONL events; the final `result` event carries
+ *    `sessionId` (camelCase — scan forward). Extraction only: resume behavior is unchanged,
+ *    `engineCommand` still refuses a copilot resume id (the stream carries one now, but
+ *    by-id resume is not wired for copilot).
+ *  - claude `--output-format json`: envelope JSON carries `session_id` (scan reverse). */
 export function parseSessionId(stdout: string): string | undefined {
   if (!stdout) return undefined;
   // opencode: step_start carries sessionID → scan forward (before codex, both are JSONL)
   // codex: thread.started carries thread_id → scan forward
+  // copilot: the final result event carries sessionId → scan forward
   for (const block of extractJsonObjects(stdout)) {
     try {
       const obj = JSON.parse(block.trim()) as Record<string, unknown>;
       if (obj.type === "step_start" && typeof obj.sessionID === "string") return obj.sessionID;
       if (obj.type === "thread.started" && typeof obj.thread_id === "string") return obj.thread_id;
+      if (obj.type === "result" && typeof obj.sessionId === "string") return obj.sessionId;
     } catch {
       // not JSON — skip
     }
