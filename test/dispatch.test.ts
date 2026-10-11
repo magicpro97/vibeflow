@@ -52,8 +52,10 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
       // Without --allow-all-urls the engine hits "Permission
       // denied and could not request permission from user" when
       // it tries to fetch any URL.
-      // --output-format json: native JSONL (T3-verified order).
-      expect(r.args).toEqual(["-p", "--output-format", "json", "--allow-all"]);
+      // --output-format json: native JSONL. Flags-first order per the repo's
+      // verified 1.0.83 contract (docs/ENGINE-COMPAT.md): options precede `-p`;
+      // same order live-verified on 1.0.94.
+      expect(r.args).toEqual(["--output-format", "json", "--allow-all", "-p"]);
       expect(r.promptMode).toBe("arg");
       expect(r.cmd).not.toBe("gh");
       expect(r.warning).toBeUndefined();
@@ -61,9 +63,9 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
   });
 
   test("copilot dispatch requests native JSON output (piece contract)", () => {
-    // Task 3 verified argv contract: copilot -p <prompt> --output-format json --allow-all
-    // (exit 0, JSONL). The prompt is spliced right after -p by materializePrompt, so
-    // --output-format json must be in the static args. Injected probe keeps this
+    // Verified argv contract: flags BEFORE `-p` (1.0.83 rejects post-`-p` flags;
+    // live-verified exit 0 + JSONL on 1.0.94). materializePrompt splices the prompt
+    // right after the trailing -p, so --output-format json must be in the static args. Injected probe keeps this
     // deterministic regardless of whether copilot is installed.
     const probe: EngineProbe = { has: () => true, version: () => "copilot 1.2.3" };
     const r = engineCommand("copilot", probe);
@@ -286,13 +288,13 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     const call = calls[0];
     if (!call) throw new Error("expected one spawner call");
     expect(call.cmd).toBe("copilot");
-    // argv carries the POINTER, never the raw prompt, and keeps --output-format json + --allow-all after it
+    // argv carries the POINTER, never the raw prompt; flags precede the trailing `-p`
     expect(call.args).toEqual([
-      "-p",
-      "Read /tmp/base/.vibeflow/dispatch/u1.md and follow it",
       "--output-format",
       "json",
       "--allow-all",
+      "-p",
+      "Read /tmp/base/.vibeflow/dispatch/u1.md and follow it",
     ]);
     expect(call.input).toBe("");
     // the real prompt landed in the file (via the injected writer, no real FS)
@@ -400,11 +402,11 @@ describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () =
     });
     expect(r.ok).toBe(true);
     expect(calls[0]?.args).toEqual([
-      "-p",
-      "Read /b/.vibeflow/dispatch/u2.md and follow it",
       "--output-format",
       "json",
       "--allow-all",
+      "-p",
+      "Read /b/.vibeflow/dispatch/u2.md and follow it",
     ]);
     expect(written[0]?.content).toBe("async prompt");
   });
@@ -1052,7 +1054,10 @@ describe("parseSessionId copilot (#618 / T8)", () => {
   });
 
   test("fixture: sessionId from the final result event", () => {
-    const stream = readFileSync("test/fixtures/native/copilot-json.jsonl", "utf8");
+    const stream = readFileSync(
+      new URL("../test/fixtures/native/copilot-json.jsonl", import.meta.url),
+      "utf8",
+    );
     expect(parseSessionId(stream)).toBe("19155765-1b22-4d6e-82b3-3276bff805d8");
   });
 });

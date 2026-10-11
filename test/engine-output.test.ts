@@ -1,16 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parseEngineFinalText, parseEngineResources } from "../src/engine-output.js";
 
 // Why fixtures on disk: field paths were captured from real engine runs (T1-T4) and are
-// the contract this parser implements. Repo root (not test/) so the import specifier stays
-// clean and bun's resolver is never involved for a file-only read.
+// the contract this parser implements. Anchored to import.meta.url (not cwd or Bun.main)
+// so the read is portable across Windows separators and cwd-changing sibling suites —
+// same convention as test/commands-coverage.test.ts readSrc.
 const fixture = (name: string): string =>
-  readFileSync(
-    join(Bun.main.slice(0, Bun.main.lastIndexOf("/test/")), "test/fixtures/native", name),
-    "utf8",
-  );
+  readFileSync(new URL(`./fixtures/native/${name}`, import.meta.url), "utf8");
 
 describe("parseEngineResources (native engine JSON per engine)", () => {
   describe("claude (single JSON envelope)", () => {
@@ -265,5 +262,49 @@ describe("parseEngineFinalText (native engine final text per engine)", () => {
       expect(parseEngineFinalText("opencode", "[1,2,3]")).toBeUndefined();
       expect(parseEngineFinalText("codex", "\nnot json\n\n")).toBeUndefined();
     });
+  });
+});
+
+describe("numeric guards (Copilot review round): measurements must be finite and non-negative", () => {
+  // src/resources.ts aggregates tokens/cost under a never-negative assumption; a
+  // negative or non-finite value from untrusted engine JSON must be dropped, not summed.
+  test("claude: invalid measurements are dropped per field (no zeroing, no crash)", () => {
+    // Raw JSON string: `1e400` must reach the parser as Infinity (a JS literal would
+    // trip biome's noPrecisionLoss before the value ever gets there).
+    const envelope =
+      '{"usage":{"input_tokens":-1,"output_tokens":5},"total_cost_usd":1e400,"duration_ms":-5}';
+    // input_tokens (-1) / cost (Infinity) / duration (-5) each dropped; output 5 survives.
+    expect(parseEngineResources("claude", envelope)).toEqual({ tokens: 5 });
+  });
+
+  test("claude: mixed valid + invalid keeps only the valid fields", () => {
+    const envelope = JSON.stringify({
+      usage: { input_tokens: 10, output_tokens: 7 },
+      total_cost_usd: -0.5,
+      duration_ms: 1000,
+    });
+    expect(parseEngineResources("claude", envelope)).toEqual({ tokens: 17, wall_seconds: 1 });
+  });
+
+  test("codex/opencode/copilot: negative numbers are omitted, never summed", () => {
+    const codex = ['{"type":"turn.completed","usage":{"input_tokens":-2,"output_tokens":3}}'].join(
+      "\n",
+    );
+    expect(parseEngineResources("codex", codex)).toEqual({ tokens: 3 });
+
+    const opencode = [
+      '{"type":"step_start","sessionID":"s"}',
+      '{"type":"text","part":{"text":"ok"}}',
+      '{"type":"step_finish","part":{"cost":-1,"tokens":{"total":-9}}}',
+    ].join("\n");
+    expect(parseEngineResources("opencode", opencode)).toBeUndefined();
+
+    const copilot = JSON.stringify({
+      type: "result",
+      sessionId: "s",
+      exitCode: 0,
+      usage: { sessionDurationMs: -1 },
+    });
+    expect(parseEngineResources("copilot", copilot)).toBeUndefined();
   });
 });

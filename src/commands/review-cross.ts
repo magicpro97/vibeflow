@@ -222,8 +222,12 @@ export async function reviewCross(
     return 1;
   }
 
-  const primaryParsed = parseReviewVerdict(primaryResult.raw);
-  const secondaryParsed = parseReviewVerdict(secondaryResult.raw);
+  const primaryParsed = parseReviewVerdict(
+    parseEngineFinalText(primary, primaryResult.raw) ?? primaryResult.raw,
+  );
+  const secondaryParsed = parseReviewVerdict(
+    parseEngineFinalText(secondary, secondaryResult.raw) ?? secondaryResult.raw,
+  );
   // If either parse fails, treat as a forced disagreement (the engine
   // returned ok:true but produced unparseable output — that's a
   // signal worth surfacing to the human, not silently logging as

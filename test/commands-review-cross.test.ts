@@ -399,5 +399,8 @@ describe("vf review --cross (A5 #171) — auto cross-debate", () => {
     const data = readPilotData();
     const last = data[data.length - 1];
     expect(last?.primarySummary).toBe("native final text wins");
+    // Verdicts are ALSO parsed native-first (Copilot review round): the spinner's decoy
+    // "block" fence must not set the recorded verdict while the native text says approve.
+    expect(last?.verdicts).toEqual(["approve", "approve"]);
   });
 });

@@ -27,18 +27,15 @@ the engines expose.
 | claude   | `claude -p --output-format json`          | single JSON envelope | `test/fixtures/native/claude-p-json.txt`         |
 | codex    | `codex exec --json` (prompt on stdin `-`) | JSONL events         | `test/fixtures/native/codex-exec-json.jsonl`     |
 | opencode | `opencode run --format json`              | JSONL events         | `test/fixtures/native/opencode-format-json.jsonl` |
-| copilot  | `copilot -p <prompt> --output-format json --allow-all` | JSONL events | `test/fixtures/native/copilot-json.jsonl`  |
+| copilot  | `copilot --output-format json --allow-all -p <prompt>` | JSONL events | `test/fixtures/native/copilot-json.jsonl`  |
 
-The copilot argv order is load-bearing: the prompt is the **value of `-p`**
-(`copilot -p <prompt> …`). The form `copilot -p --output-format json … <prompt>`
-is rejected by the CLI parser (exit 1): a flag immediately after `-p` leaves it
-valueless, and the CLI does not steal the trailing `<prompt>`. What IS valid
-(verified live on copilot 1.0.94, exit 0 with valid JSONL): `-p <prompt>` with
-flags before `-p` or after the prompt value — e.g.
-`copilot -p <prompt> --output-format json --allow-all` (this repo's fresh-dispatch
-order) and `copilot --output-format json --allow-all -p <prompt>` both work.
-vibeflow keeps the prompt-value form because materializePrompt() splices the
-prompt right after `-p` and the session path repositions `-p` last.
+The copilot argv order is load-bearing. The repository's verified contract targets
+copilot **1.0.83** (`docs/ENGINE-COMPAT.md`): every option must precede `-p`, and the
+prompt is `-p`'s value — 1.0.83 rejects any flag after `-p` or after the prompt value.
+The flags-first form above satisfies 1.0.83 and was live-verified on copilot 1.0.94
+(exit 0, valid JSONL; the looser form `-p <prompt> --flag` also works on 1.0.94 but is
+not what vibeflow emits). `materializePrompt()` splices the prompt right after the
+trailing `-p`; the session path (`session-argv.ts`) also repositions `-p` last.
 
 ## Field paths per engine
 

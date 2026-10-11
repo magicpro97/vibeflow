@@ -19,7 +19,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const record = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 
-const num = (value: unknown): number | undefined => (typeof value === "number" ? value : undefined);
+const num = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 
 /** Sum of the numeric operands that were actually present; undefined when none were. */
 const sum = (values: (number | undefined)[]): number | undefined => {
