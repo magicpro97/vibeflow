@@ -9,6 +9,7 @@ import { applyGuidance } from "../dispatch/guidance.js";
 import { readDispatchResumeBinding } from "../dispatch/public-redaction.js";
 import { DISPATCH_MODE, type DispatchMode } from "../dispatch/session-contract.js";
 import type { EngineProcessSpawner } from "../dispatch/session-types.js";
+import { parseEngineResources } from "../engine-output.js";
 import { resolveMemoryProvider } from "../memory/provider.js";
 import { renderMemoryBlock } from "../memory/render.js";
 import { mapGateResult } from "../orchestrator/gate-map.js";
@@ -60,7 +61,6 @@ import {
   defaultWorktreeOps,
   makeWorktreeOps,
 } from "./dispatch-diff.js";
-import { parseResources } from "./dispatch-resources.js";
 import {
   type DispatchSessionRuntimeOptions,
   runDispatchWithSessionRuntime,
@@ -361,8 +361,8 @@ export function makeDispatcher(
           : undefined;
       const gates = mapGateResult(measured);
       // #523: surface engine cost/tokens so the progress footer shows real numbers
-      // (not a dead $0.00). Parse the Claude result envelope best-effort.
-      const resources = parseResources(result.raw);
+      // (not a dead $0.00). Parse the engine's native JSON output best-effort.
+      const resources = parseEngineResources(unitEngine, result.raw);
       return {
         status,
         confidence,
