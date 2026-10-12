@@ -2,7 +2,7 @@
 title: Engine Native Output
 description: The per-engine contract for reading resources, session ids, and final text from each engine CLI's native JSON output — flags, fixtures, exact field paths, deliberate exclusions, and the native-first rule.
 category: reference
-last_updated: 2026-10-11
+last_updated: 2026-10-12
 ---
 
 # Engine Native Output
@@ -33,8 +33,9 @@ The copilot argv order is load-bearing. The repository's verified contract targe
 copilot **1.0.83** (`docs/ENGINE-COMPAT.md`): every option must precede `-p`, and the
 prompt is `-p`'s value — 1.0.83 rejects any flag after `-p` or after the prompt value.
 The flags-first form above satisfies 1.0.83 and was live-verified on copilot 1.0.94
-(exit 0, valid JSONL; the looser form `-p <prompt> --flag` also works on 1.0.94 but is
-not what vibeflow emits). `materializePrompt()` splices the prompt right after the
+(2026-10-11) and re-verified on 1.0.95 (2026-10-12) — exit 0, valid JSONL both times.
+The looser form `-p <prompt> --flag` was re-probed on 1.0.95 (2026-10-12) with the
+argv captured under `bash -x` — also exit 0, but it is not what vibeflow emits. `materializePrompt()` splices the prompt right after the
 trailing `-p`; the session path (`session-argv.ts`) also repositions `-p` last.
 
 ## Field paths per engine
