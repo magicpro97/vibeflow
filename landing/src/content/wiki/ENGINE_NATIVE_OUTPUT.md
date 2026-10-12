@@ -2,7 +2,7 @@
 title: Engine Native Output
 description: The per-engine contract for reading resources, session ids, and final text from each engine CLI's native JSON output — flags, fixtures, exact field paths, deliberate exclusions, and the native-first rule.
 category: reference
-last_updated: 2026-10-11
+last_updated: 2026-10-12
 ---
 
 # Engine Native Output

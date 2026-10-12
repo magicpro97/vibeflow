@@ -2,7 +2,7 @@
 title: Engine CLI Compatibility
 description: Which engine CLI versions the current code was verified against, and the invocation/output contract each integration assumes.
 category: reference
-last_updated: 2026-08-28
+last_updated: 2026-10-12
 ---
 
 # Engine CLI Compatibility
