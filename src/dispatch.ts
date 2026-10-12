@@ -173,9 +173,10 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
   // (docs/ENGINE-COMPAT.md, copilot 1.0.83): every option must precede `-p`,
   // which must precede its prompt value. `--output-format json` requests
   // copilot's native JSONL (one JSON object per line); the same order was
-  // live-verified on copilot 1.0.94 (exit 0, valid JSONL), and 1.0.83 rejects
+  // live-verified on copilot 1.0.94 and re-verified on 1.0.95 (2026-10-12;
+  // both argv orders probed, exit 0), and 1.0.83 rejects
   // any flag placed after `-p` or after the prompt value — so flags-first is
-  // the conservative form that works across both. materializePrompt()
+  // the conservative form that works across all three. materializePrompt()
   // splices the prompt right after the trailing `-p`.
   return {
     cmd: "copilot",
