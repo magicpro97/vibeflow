@@ -52,11 +52,28 @@ describe("engineCommand — exact argv per engine (defect #1)", () => {
       // Without --allow-all-urls the engine hits "Permission
       // denied and could not request permission from user" when
       // it tries to fetch any URL.
-      expect(r.args).toEqual(["-p", "--allow-all"]);
+      // --output-format json: native JSONL. Flags-first order per the repo's
+      // verified 1.0.83 contract (docs/ENGINE-COMPAT.md): options precede `-p`;
+      // same order live-verified on 1.0.94.
+      expect(r.args).toEqual(["--output-format", "json", "--allow-all", "-p"]);
       expect(r.promptMode).toBe("arg");
       expect(r.cmd).not.toBe("gh");
       expect(r.warning).toBeUndefined();
     }
+  });
+
+  test("copilot dispatch requests native JSON output (piece contract)", () => {
+    // Verified argv contract: flags BEFORE `-p` (1.0.83 rejects post-`-p` flags;
+    // live-verified exit 0 + JSONL on 1.0.94). materializePrompt splices the prompt
+    // right after the trailing -p, so --output-format json must be in the static args. Injected probe keeps this
+    // deterministic regardless of whether copilot is installed.
+    const probe: EngineProbe = { has: () => true, version: () => "copilot 1.2.3" };
+    const r = engineCommand("copilot", probe);
+    expect(isUnavailable(r)).toBe(false);
+    if (isUnavailable(r)) return;
+    const idx = r.args.indexOf("--output-format");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(r.args[idx + 1]).toBe("json");
   });
 
   test("copilot absent → unavailable, NOT a bogus `gh -p`", () => {
@@ -271,11 +288,13 @@ describe("runDispatch — copilot-absent path (defect #1)", () => {
     const call = calls[0];
     if (!call) throw new Error("expected one spawner call");
     expect(call.cmd).toBe("copilot");
-    // argv carries the POINTER, never the raw prompt, and keeps --allow-all after it
+    // argv carries the POINTER, never the raw prompt; flags precede the trailing `-p`
     expect(call.args).toEqual([
+      "--output-format",
+      "json",
+      "--allow-all",
       "-p",
       "Read /tmp/base/.vibeflow/dispatch/u1.md and follow it",
-      "--allow-all",
     ]);
     expect(call.input).toBe("");
     // the real prompt landed in the file (via the injected writer, no real FS)
@@ -383,9 +402,11 @@ describe("writeDispatchPrompt — file-based copilot prompt (#526 item 7)", () =
     });
     expect(r.ok).toBe(true);
     expect(calls[0]?.args).toEqual([
+      "--output-format",
+      "json",
+      "--allow-all",
       "-p",
       "Read /b/.vibeflow/dispatch/u2.md and follow it",
-      "--allow-all",
     ]);
     expect(written[0]?.content).toBe("async prompt");
   });
@@ -982,6 +1003,62 @@ describe("parseEngineSummary opencode JSONL stream", () => {
     expect(s).toBeDefined();
     expect(s?.confidence).toBe(0.9);
     expect(s?.files_changed).toEqual(["src/x.ts"]);
+  });
+});
+
+describe("parseEngineSummary copilot JSONL stream (T8)", () => {
+  test("assistant.message data.content → fenced summary; ephemeral decoy skipped", () => {
+    // The ephemeral decoy comes FIRST: if the ephemeral guard is dropped, the decoy's
+    // 0.1 is returned by the native branch before the durable 0.9 is ever seen.
+    const raw = [
+      '{"type":"assistant.message","ephemeral":true,"data":{"content":"```json\\n{\\"confidence\\":0.1}\\n```"}}',
+      '{"type":"assistant.message","data":{"content":"```json\\n{\\"confidence\\":0.9,\\"files_changed\\":[\\"src/x.ts\\"]}\\n```"}}',
+    ].join("\n");
+    const s = parseEngineSummary(raw);
+    expect(s).toBeDefined();
+    expect(s?.confidence).toBe(0.9);
+    expect(s?.files_changed).toEqual(["src/x.ts"]);
+  });
+
+  test("assistant.message with non-string or absent data.content is skipped without crashing", () => {
+    // Covers the fall-through close of the content-type guard (prompt.ts line 212):
+    // copilot streams can carry assistant.message frames whose data.content is not a
+    // string (or data itself is absent) — the scanner must skip them, never throw.
+    const raw = [
+      '{"type":"assistant.message","data":{"content":42}}',
+      '{"type":"assistant.message"}',
+      "not json at all",
+    ].join("\n");
+    const skipped = parseEngineSummary(raw); // must not throw
+    // The malformed frames are never parsed as native content summaries. (The
+    // pre-existing bare-object fallback may surface an event frame itself; pin only
+    // that no confidence-bearing summary was extracted FROM the frames.)
+    expect(skipped?.confidence).toBeUndefined();
+    // A durable message whose content carries no summary lets a LATER parseable
+    // message win — the non-string frames above must not short-circuit scanning.
+    const mixed = [
+      '{"type":"assistant.message","data":{"content":"plain prose, no json"}}',
+      '{"type":"assistant.message","data":{"content":"```json\\n{\\"confidence\\":0.7}\\n```"}}',
+    ].join("\n");
+    expect(parseEngineSummary(mixed)?.confidence).toBe(0.7);
+  });
+});
+
+describe("parseSessionId copilot (#618 / T8)", () => {
+  test("result event carries sessionId → captured", () => {
+    const raw = [
+      '{"type":"assistant.message","data":{"content":"ok"}}',
+      '{"type":"result","sessionId":"19155765-1b22-4d6e-82b3-3276bff805d8","exitCode":0,"usage":{"sessionDurationMs":1000}}',
+    ].join("\n");
+    expect(parseSessionId(raw)).toBe("19155765-1b22-4d6e-82b3-3276bff805d8");
+  });
+
+  test("fixture: sessionId from the final result event", () => {
+    const stream = readFileSync(
+      new URL("../test/fixtures/native/copilot-json.jsonl", import.meta.url),
+      "utf8",
+    );
+    expect(parseSessionId(stream)).toBe("19155765-1b22-4d6e-82b3-3276bff805d8");
   });
 });
 

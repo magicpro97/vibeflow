@@ -169,9 +169,17 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
   // docs lookup, MCP server handshakes). The individual
   // --allow-all-* flags are still listed in the help text but
   // --allow-all is the supported umbrella as of copilot 0.3+.
+  // Argument ORDER follows the repository's verified contract
+  // (docs/ENGINE-COMPAT.md, copilot 1.0.83): every option must precede `-p`,
+  // which must precede its prompt value. `--output-format json` requests
+  // copilot's native JSONL (one JSON object per line); the same order was
+  // live-verified on copilot 1.0.94 (exit 0, valid JSONL), and 1.0.83 rejects
+  // any flag placed after `-p` or after the prompt value — so flags-first is
+  // the conservative form that works across both. materializePrompt()
+  // splices the prompt right after the trailing `-p`.
   return {
     cmd: "copilot",
-    args: ["-p", "--allow-all"],
+    args: ["--output-format", "json", "--allow-all", "-p"],
     promptMode: ENGINE_PROMPT_MODE.ARG,
     warning,
   };
@@ -183,7 +191,7 @@ function copilotCommand(probe: EngineProbe): EngineCommandResult {
  *   claude (resume) -> claude -p -r <id> --output-format json   (#618 PR2a)
  *   codex           -> codex exec -                              (stdin prompt)
  *   opencode        -> opencode run [--session <id>] --format json --auto
- *   copilot         -> copilot -p <prompt> --allow-all-tools
+ *   copilot         -> copilot --output-format json --allow-all -p <prompt> (flags before -p; 1.0.83 contract)
  * Claude and Codex receive the prompt on stdin; Copilot's current CLI requires it as the
  * `-p/--prompt` option value, so we pass it as a single argv element without a shell.
  * `gh -p` is NOT a valid fallback (gh has no global -p flag) so copilot resolves to an explicit

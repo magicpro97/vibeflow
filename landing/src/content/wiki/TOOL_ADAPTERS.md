@@ -164,17 +164,16 @@ enforcement is post-hoc-only until live denial proof.
 normalised exhaustion signal. The preflight gate
 (`src/preflight-delegate.ts`) consumes it before any dispatch.
 
-```text
-claude   → spawn `claude usage --json`         → parse remaining % + reset window
-codex    → spawn `codex doctor --usage`       → parse remaining % + reset window
-copilot  → spawn `gh api copilot`              → parse remaining % + reset window
-```
+There are no probe commands to list: none verified — no engine exposes a stable
+headless quota command (#355/#50926). The `RESOURCE_PROBE_COMMANDS` table
+(`src/resources-quota.ts`) is intentionally empty — it gains an entry only
+after the command has been run successfully against a representative payload
+fixture.
 
 The adapter is **best-effort**: it never blocks the preflight gate for more than
 the per-engine probe timeout, and a non-JSON / non-zero exit returns
 `unknown` (the gate then falls back to the next engine if all three layers are
-unusable). The Claude JSON variant, the Codex usage line, and the GitHub
-Copilot REST shape are all parsed defensively — extra / missing fields are
+unusable). Quota JSON output is parsed defensively — extra / missing fields are
 ignored, only `remaining` + `reset_at` (when present) drive the gate.
 
 ## Shared adapter contract

@@ -34,6 +34,7 @@ Claude, Codex, and OpenCode support exact by-id native resume; OpenCode uses `op
 
 - [Command Reference](./COMMAND_REFERENCE.md) — Complete reference of all shipped `vf` CLI commands, conversation semantics, and flags.
 - [Engine CLI Compatibility](./ENGINE-COMPAT.md) — Which engine CLI versions the current code was verified against and the invocation/output contract per integration.
+- [Engine Native Output](./ENGINE_NATIVE_OUTPUT.md) — The per-engine native JSON contract: flags, fixtures, exact field paths for resources/session/final text, and the native-first rule.
 - [Bun and TypeScript Coding Conventions](./CODING_CONVENTIONS.md) — Enforced source, protocol, process, testing, and portability rules for contributors and coding agents.
 - [npm CLI Design](./NPM_CLI_DESIGN.md) — CLI design: startup flow, commands, package layout, and dependency policy.
 - [Generated Files](./GENERATED_FILES.md) — All files the orchestrator may generate in a target repository.

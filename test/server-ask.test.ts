@@ -291,7 +291,7 @@ describe("captureSpawnAsync — async capture seam (#584)", () => {
   test("materializeArgs: arg-mode flags are expanded before spawn", async () => {
     const spy: AsyncSpawner = (cmd, args) => Promise.resolve({ status: 0, stdout: args.join(" ") });
     const r = await captureSpawnAsync(
-      { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: "arg" },
+      { cmd: "copilot", args: ["--allow-all", "-p"], promptMode: "arg" },
       "test question",
       spy,
     );

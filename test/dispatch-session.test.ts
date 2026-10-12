@@ -279,7 +279,11 @@ describe("engine session execution projection", () => {
       ],
     ],
     ["codex", "codex", ["--sandbox", "read-only", "exec", "--json", "-"]],
-    ["copilot", "copilot", ["--model", "default", "-p", "prompt-copilot"]],
+    [
+      "copilot",
+      "copilot",
+      ["--output-format", "json", "--model", "default", "-p", "prompt-copilot"],
+    ],
     ["opencode", "opencode", ["run", "--format", "json", "--model", "default"]],
     ["antigravity", "agy", ["-p", "prompt-antigravity", "--model", "default"]],
   ] as const;

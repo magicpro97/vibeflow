@@ -191,13 +191,9 @@ ready is recorded as `BLOCKED` and surfaced on the triage banner
 probe cache (`src/probe-cache.ts`, 60 s stable / 5 s short TTL) and only hits the
 network / engine CLI on miss; `vf doctor --refresh` invalidates the cache.
 
-Quota signals come from `src/engine-quota.ts`, which parses:
-
-```text
-claude  → `claude usage --json`
-codex   → `codex doctor --usage`
-copilot → `gh api copilot`
-```
+Quota signals come from `src/engine-quota.ts`: none verified — no engine
+exposes a stable headless quota command (#355/#50926), so the probe roster is
+intentionally empty until one lands.
 
 Exhaustion, 429 (rate-limited), 403 (forbidden / billing region), and auth
 failures all trigger fallback. A `BLOCKED` unit with no fallback engine is the

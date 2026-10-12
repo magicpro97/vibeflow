@@ -106,7 +106,9 @@ export function askInvocation(engine: Engine): AskInvocation {
     case AGENT_ENGINE.CODEX:
       return { cmd: "codex", args: ["exec", "-"], promptMode: ENGINE_PROMPT_MODE.STDIN };
     case AGENT_ENGINE.COPILOT:
-      return { cmd: "copilot", args: ["-p", "--allow-all"], promptMode: ENGINE_PROMPT_MODE.ARG };
+      // Flags-first: copilot 1.0.83 rejects any option placed after `-p` or its value
+      // (docs/ENGINE-COMPAT.md); materializeArgs splices the question right after `-p`.
+      return { cmd: "copilot", args: ["--allow-all", "-p"], promptMode: ENGINE_PROMPT_MODE.ARG };
     case AGENT_ENGINE.OPENCODE:
       return {
         cmd: "opencode",

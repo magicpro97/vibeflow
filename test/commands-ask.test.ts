@@ -118,7 +118,7 @@ describe("askInvocation", () => {
     });
     expect(askInvocation("copilot")).toEqual({
       cmd: "copilot",
-      args: ["-p", "--allow-all"],
+      args: ["--allow-all", "-p"],
       promptMode: "arg",
     });
     expect(askInvocation("opencode")).toEqual({
@@ -135,13 +135,14 @@ describe("askInvocation", () => {
 });
 
 describe("materializeArgs (#562 — copilot -p takes a VALUE, order matters)", () => {
-  test("copilot: prompt spliced IMMEDIATELY after -p, --allow-all stays trailing", () => {
-    // Regression: appending at the end makes -p swallow --allow-all and the
-    // question is silently lost. The prompt must sit right after -p.
+  test("copilot: flags precede -p; prompt spliced IMMEDIATELY after -p", () => {
+    // Regression (#562): appending at the end makes -p swallow --allow-all and the
+    // question is silently lost. Flags-first also satisfies the 1.0.83 contract
+    // (options must precede -p) — see docs/ENGINE-COMPAT.md.
     expect(materializeArgs(askInvocation("copilot"), "MY QUESTION")).toEqual([
+      "--allow-all",
       "-p",
       "MY QUESTION",
-      "--allow-all",
     ]);
   });
   test("stdin engines: args unchanged (prompt goes on stdin, not argv)", () => {
@@ -302,7 +303,7 @@ describe("inheritSpawn (canonical owned-process route)", () => {
     expect(request).toMatchObject({
       engine: "copilot",
       command: "copilot",
-      args: ["-p", "PING", "--allow-all"],
+      args: ["--allow-all", "-p", "PING"],
       input: "",
     });
   });
