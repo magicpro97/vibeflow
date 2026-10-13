@@ -732,6 +732,69 @@ test.describe("AI-first conversation Home", () => {
     await expectAxeClean(page, "resources drawer");
   });
 
+  test("files drawer: browse, filter, preview, escape", async ({ page }) => {
+    // Playwright matches routes last-registered-FIRST: register the generic tree route
+    // first so the file-preview route (registered last) wins the overlap.
+    await page.route("**/api/files/tree", (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          ok: true,
+          truncated: false,
+          entries: [
+            { path: "src/a.ts", status: "modified" },
+            { path: "src/deep/b.ts" },
+            { path: "README.md" },
+          ],
+        },
+      }),
+    );
+    await page.route("**/api/file?path=**", (route) =>
+      route.fulfill({
+        status: 200,
+        json: { ok: true, path: "src/a.ts", content: "export {};\n" },
+      }),
+    );
+    await page.goto("/");
+    await waitForPage(page);
+
+    const openFiles = page.getByRole("button", { name: "Open files" });
+    await openFiles.click();
+    const drawer = page.getByLabel("Repository files");
+    await expect(drawer).toBeVisible();
+
+    // Browse: expanding src/ inlines its children. Row accessible names condense
+    // ("a.tsmodified"), so row locators stay substring matches; after selection the
+    // preview header repeats the path, so every row lookup is scoped to the list.
+    const list = page.locator(".home-files-list");
+    await drawer.getByRole("button", { name: "▸ src/" }).click();
+    const aRow = list.getByRole("button", { name: "a.ts" });
+    await expect(aRow).toBeAttached();
+    await expect(aRow).toContainText("modified");
+
+    await aRow.click();
+    await expect(drawer.getByText("export {};")).toBeVisible();
+
+    const filter = drawer.getByPlaceholder("Filter by path");
+    await filter.fill("README");
+    await expect(list.locator("li")).toHaveCount(1);
+    await expect(list.getByText("src/a.ts")).not.toBeAttached();
+    await expect(list.getByText("README.md")).toBeVisible();
+    await filter.fill("");
+
+    await page.keyboard.press("Escape");
+    await expect(drawer).not.toBeAttached();
+    await expect(openFiles).toBeFocused();
+
+    // Axe the reopened drawer (mirrors the resources case): pin the final transition
+    // frame so axe measures settled colors, not the 180ms opacity blend.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openFiles.click();
+    await expect(drawer).toBeVisible();
+    await expect(drawer).not.toHaveClass(/home-drawer-enter-active/);
+    await expectAxeClean(page, "files drawer");
+  });
+
   test("drops stale pages and renders normalized direct output after a rapid session switch", async ({
     page,
   }) => {
