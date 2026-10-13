@@ -316,6 +316,11 @@ button:disabled {
 .home-topbar-button:hover {
   background: var(--home-surface-skeleton);
 }
+/* WCAG AA: --home-muted on the hover skeleton background lands at 4.03:1, so
+   text buttons darken to ink while hovered (icons are graphics, exempt). */
+.home-topbar-button:hover {
+  color: var(--home-ink);
+}
 .home-icon-button:active:not(:disabled),
 .home-topbar-button:active:not(:disabled) {
   transform: translateY(1px);
@@ -4900,8 +4905,10 @@ button:disabled {
 .home-files-list button.is-selected {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
+/* WCAG AA: the raw gold #d9a441 lands at 2.15:1 on the drawer paper; the theme
+   amber clears 4.5:1 on both the paper and the selected-row tint. */
 .home-files-list em[data-status="modified"] {
-  color: #d9a441;
+  color: var(--home-amber);
   font-style: normal;
 }
 .home-files-list em[data-status="untracked"],
