@@ -1471,11 +1471,6 @@ button:disabled {
   gap: 0.35rem;
   margin-top: 0.45rem;
 }
-.home-reaction-picker__note {
-  margin: 0.45rem 0 0;
-  color: var(--home-faint);
-  font-size: 0.65rem;
-}
 .home-revision-boundary {
   display: grid;
   grid-template-columns: 1fr auto auto 1fr;

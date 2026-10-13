@@ -304,7 +304,7 @@ describe("AI-first Home source contract", () => {
 
   test("quotes and reactions use typed seams instead of markdown simulation", () => {
     expect(timeline).toContain("<HomeMessageInteractions");
-    expect(messageInteractions).toContain("Counts update only after the public fold returns");
+    expect(messageInteractions).toContain('aria-label="Add reaction"');
     expect(messageInteractions).toContain("Remove quote");
     expect(composer).toContain("<HomeQuoteSelectionList");
     expect(quoteSelection).toContain("Quoted sources");

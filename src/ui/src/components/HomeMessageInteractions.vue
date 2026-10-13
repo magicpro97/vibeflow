@@ -24,7 +24,7 @@
       </li>
     </ul>
     <details class="home-reaction-picker">
-      <summary>{{ busy ? "Updating reaction…" : "React" }}</summary>
+      <summary aria-label="Add reaction">{{ busy ? "…" : "😊+" }}</summary>
       <div
         class="home-reaction-picker__grid"
         role="group"
@@ -38,10 +38,10 @@
           :aria-pressed="reactionSelected(option.emoji)"
           :disabled="busy || !online"
           :title="`Add or remove your ${option.label.toLowerCase()} reaction`"
+          :aria-label="`${option.label} reaction`"
           @click="$emit('toggle-reaction', option.emoji)"
-        >{{ option.emoji }} {{ option.label }}</button>
+        >{{ option.emoji }}</button>
       </div>
-      <p class="home-reaction-picker__note">Counts update only after the public fold returns.</p>
     </details>
   </div>
 </template>
