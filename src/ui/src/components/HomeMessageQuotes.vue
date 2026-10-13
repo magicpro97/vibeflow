@@ -3,15 +3,16 @@
     <article
       v-for="quote in quoteRefs"
       :key="`${quote.quotingMessageId}-${quote.quoteOrder}-${quote.target.target_event_id}`"
-      class="home-message-quote"
+      class="home-quote-chip"
     >
-      <header>
-        <strong>Quote {{ quote.quoteOrder }}</strong>
-        <small>{{ author(quote.target) }}</small>
-      </header>
-      <p>{{ quote.target.preview_text }}</p>
-      <button type="button" class="home-button" @click="$emit('jump', quote.target.target_event_id)">
-        Jump to source
+      <button
+        type="button"
+        class="home-quote-chip__jump"
+        :aria-label="`Jump to source for quote ${quote.quoteOrder}`"
+        @click="$emit('jump', quote.target.target_event_id)"
+      >
+        <strong>{{ author(quote.target) }}</strong>
+        <span class="home-quote-chip__excerpt">{{ quote.target.preview_text }}</span>
       </button>
     </article>
   </div>
