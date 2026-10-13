@@ -299,12 +299,11 @@ function coerce(raw: unknown): VibeSettings {
   return out;
 }
 
-/** Paths already reported corrupt in this process — warn once per path, not per read. */
+/** Corrupt-file paths already reported in this process — warn once per path, not per read. */
 const corruptWarned = new Set<string>();
 
-/** Read settings for a repo; missing/corrupt files yield a fresh copy of the defaults.
- *  A corrupt file is reported once per path (default sink: stderr; `inject.warn` = test seam)
- *  so a broken hand-edit stays visible instead of silently reverting every read. */
+/** Read settings; missing/corrupt files yield defaults. A corrupt file is reported once per
+ *  path (stderr by default; `inject.warn` = test seam) instead of silently reverting. */
 export function readSettings(
   base?: string,
   inject: { warn?: (message: string) => void } = {},
@@ -317,7 +316,9 @@ export function readSettings(
     if (!corruptWarned.has(p)) {
       corruptWarned.add(p);
       const warn = inject.warn ?? ((m: string) => process.stderr.write(m));
-      warn(`vf: ${p} is not valid JSON — using default settings\n`);
+      try {
+        warn(`vf: ${p} is not valid JSON — using default settings\n`);
+      } catch {} // a throwing sink must not break the fail-safe read
     }
     return defaults();
   }

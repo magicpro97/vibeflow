@@ -163,6 +163,21 @@ describe("settings.resilience", () => {
     }
   });
 
+  test("a throwing sink cannot break the fail-safe read", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, "{ this is : not json ");
+      const s = readSettings(dir, {
+        warn: () => {
+          throw new Error("sink boom");
+        },
+      });
+      expect(s).toEqual(DEFAULT_SETTINGS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("invalid toolPriority falls back to the default order", () => {
     const dir = tmpRepo();
     try {

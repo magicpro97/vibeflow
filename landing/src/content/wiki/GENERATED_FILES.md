@@ -184,8 +184,9 @@ AGENTS.md
 
 `~/.vibeflow/SETTINGS.json` is created by `vf init` when absent and carries the user-scope
 `schema_version` stamp for the capability-authority layer. It is NOT a settings tier — per-repo
-settings live in `.vibeflow/SETTINGS.json` (the file above is SHARED/committed; see
-`no-tracked-machine-path` in CI for what must never leak into it).
+settings live in `.vibeflow/SETTINGS.json` — the shared, committed file. The
+`no-tracked-machine-path` CI gate enforces the machine-path leak class but exempts `.json`,
+so review `.vibeflow/SETTINGS.json` by hand when it changes.
 
 Purpose:
 
@@ -198,8 +199,9 @@ Purpose:
 - per-task work units, gates, and resource ledger (see WORK_UNIT_ORCHESTRATION.md)
 ```
 
-`SETTINGS.json` is seeded from `DEFAULT_SETTINGS` on the FIRST `vf init` only; every later init
-leaves the file untouched, so enabling tools or tuning `failureProtection` survives re-init.
+`SETTINGS.json` is seeded from `DEFAULT_SETTINGS` on the FIRST `vf init` only; later inits only
+merge-write it (the memory and hooks steps) and never reseed, so enabling tools or tuning
+`failureProtection` survives re-init.
 A file that is not valid JSON is ignored with a one-time warning and settings fall back to the
 defaults. Unknown or legacy keys are dropped with forward-merge semantics (`coerce()` in
 `src/settings.ts`) — there is no versioned migration; keep keys you want preserved within the
