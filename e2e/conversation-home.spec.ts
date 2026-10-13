@@ -795,6 +795,15 @@ test.describe("AI-first conversation Home", () => {
     await expectAxeClean(page, "files drawer");
   });
 
+  test("home shell fills the viewport without dead space", async ({ page }) => {
+    await page.goto("/");
+    const gap = await page.evaluate(() => {
+      const el = document.querySelector(".home-composer");
+      return innerHeight - (el?.getBoundingClientRect().bottom ?? 0);
+    });
+    expect(gap).toBeLessThanOrEqual(24);
+  });
+
   test("drops stale pages and renders normalized direct output after a rapid session switch", async ({
     page,
   }) => {

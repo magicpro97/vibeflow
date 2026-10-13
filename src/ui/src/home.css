@@ -437,6 +437,7 @@ button:disabled {
 .conversation-home {
   position: relative;
   display: flex;
+  grid-row: 3;
   min-height: 0;
   overflow: hidden;
 }
@@ -1573,7 +1574,7 @@ button:disabled {
   width: 100%;
   max-width: min(100%, calc(var(--home-composer-width) + 2rem));
   margin: 0 auto;
-  padding: 0.9rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.9rem 1rem env(safe-area-inset-bottom, 0px);
   overflow-y: auto;
   overscroll-behavior: contain;
   pointer-events: auto;
