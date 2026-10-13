@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleFilesTreeRoute } from "../src/server/files-tree-route.js";
 
-import { startServer } from "../src/server";
+import { startServer } from "../src/server.js";
 
 /** Fetch the CSRF token from the HTML page served at `/`. */
 async function csrfToken(url: string): Promise<string> {
