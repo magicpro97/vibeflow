@@ -44,7 +44,7 @@
       <span class="w-28 text-neutral-300 text-xs">Severity threshold</span>
       <select
         v-model="model.severityThreshold"
-        class="bg-neutral-900 border border-neutral-800 rounded px-2 py-0.5 text-sm text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors"
+        class="bg-neutral-900 border border-neutral-800 rounded px-2 py-0.5 text-sm text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors home-select"
         aria-label="Curator severity threshold"
       >
         <option value="low">Low</option>

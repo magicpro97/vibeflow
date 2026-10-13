@@ -28,6 +28,7 @@
         </svg>
         <span class="sr-only">Search conversations</span>
         <input
+          class="home-input"
           v-model="store.sessionQuery"
           type="search"
           autocomplete="off"

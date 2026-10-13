@@ -382,4 +382,37 @@ describe("AI-first Home source contract", () => {
       "../../server/runtime.js",
     ]);
   });
+
+  test("every home select carries the canonical control class", () => {
+    const files = [
+      "CuratorSettings.vue",
+      "HomePreferencesDrawer.vue",
+      "HomePrivateRangePanel.vue",
+      "ProjectSettingsPanel.vue",
+      "Stage1Describe.vue",
+      "UpdateSettingsSection.vue",
+    ];
+    for (const f of files) {
+      const src = read(`../src/ui/src/components/${f}`);
+      for (const m of src.matchAll(/<select\b[^>]*>/g)) {
+        expect(m[0], `${f}: ${m[0].slice(0, 60)}`).toContain("home-select");
+      }
+    }
+  });
+
+  test("every home text input carries the canonical control class", () => {
+    const files = [
+      "HomeSessionRail.vue",
+      "HomeActionCard.vue",
+      "HomeControlCenterDrawer.vue",
+      "HomePreferencesDrawer.vue",
+    ];
+    for (const f of files) {
+      const src = read(`../src/ui/src/components/${f}`);
+      for (const m of src.matchAll(/<input\b[^>]*>/g)) {
+        if (/type="(?:checkbox|radio|file)"/u.test(m[0])) continue;
+        expect(m[0], `${f}: ${m[0].slice(0, 60)}`).toContain("home-input");
+      }
+    }
+  });
 });

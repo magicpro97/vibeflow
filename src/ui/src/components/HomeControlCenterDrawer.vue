@@ -9,7 +9,7 @@
 
       <section class="home-control-section" aria-labelledby="harness-title">
         <div class="home-control-section__heading"><span><small>Project bootstrap</small><strong id="harness-title">Harness initialization</strong></span><button type="button" :disabled="busy" @click="initialize(false)">{{ busy ? "Initializing…" : "Initialize harness" }}</button></div>
-        <label class="home-control-path"><span>Repository</span><input v-model="repoPath" type="text" placeholder="/path/to/repo" @blur="detect" /><button type="button" :disabled="detecting" @click="detect">{{ detecting ? "Checking…" : "Detect" }}</button></label>
+        <label class="home-control-path"><span>Repository</span><input v-model="repoPath" class="home-input" type="text" placeholder="/path/to/repo" @blur="detect" /><button type="button" :disabled="detecting" @click="detect">{{ detecting ? "Checking…" : "Detect" }}</button></label>
         <p v-if="detected" class="home-control-note">{{ detection?.isGit ? "Git repository detected" : "Directory detected — git protection unavailable" }}</p>
         <p v-if="message" class="home-control-message" role="status">{{ message }}</p><p v-if="error" class="home-control-error" role="alert">{{ error }}</p>
       </section>
@@ -57,8 +57,8 @@
 
         <label for="typesafe-enabled" class="home-control-toggle"><input id="typesafe-enabled" v-model="settingsForm.typesafe.enabled" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>Enable System One judge</strong><small>Off by default. The API key stays on the machine.</small></span></label>
 
-        <label for="typesafe-run-threshold" class="home-control-field"><span>Run judge at confidence</span><input id="typesafe-run-threshold" v-model.number="settingsForm.typesafe.runAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
-        <label for="typesafe-accept-threshold" class="home-control-field"><span>Accept verdict at confidence</span><input id="typesafe-accept-threshold" v-model.number="settingsForm.typesafe.acceptAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
+        <label for="typesafe-run-threshold" class="home-control-field"><span>Run judge at confidence</span><input id="typesafe-run-threshold" class="home-input" v-model.number="settingsForm.typesafe.runAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
+        <label for="typesafe-accept-threshold" class="home-control-field"><span>Accept verdict at confidence</span><input id="typesafe-accept-threshold" class="home-input" v-model.number="settingsForm.typesafe.acceptAtConfidence" type="number" min="0" max="1" step="0.05" aria-describedby="typesafe-threshold-error" @blur="validateThresholds" :disabled="typesafeStatus !== 'ready'" /></label>
         <p v-if="thresholdError" id="typesafe-threshold-error" class="home-control-error" role="alert">{{ thresholdError }}</p>
 
         <label for="typesafe-callsite-reviewer" class="home-control-toggle"><input id="typesafe-callsite-reviewer" v-model="settingsForm.typesafe.callSites.reviewer" type="checkbox" :disabled="typesafeStatus !== 'ready'" /><span><strong>reviewer</strong><small>Judge the unit diff before the engine reviewer.</small></span></label>

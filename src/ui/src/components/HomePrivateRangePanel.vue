@@ -19,6 +19,7 @@
       <label>
         <span>File source</span>
         <select
+          class="home-select"
           v-if="textAttachments.length && !usePathFallback"
           ref="privateAttachmentSelect"
           aria-label="Private range file"

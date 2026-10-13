@@ -18,7 +18,7 @@
 
     <div class="home-project-settings__row">
       <label :for="cliId">Classifier CLI</label>
-      <select :id="cliId" v-model="draft.cli" :disabled="saving">
+      <select class="home-select" :id="cliId" v-model="draft.cli" :disabled="saving">
         <option value="">Auto (recommended)</option>
         <option v-for="engine in engineOptions" :key="engine" :value="engine">{{ engine }}</option>
       </select>
@@ -73,6 +73,7 @@
             {{ entry.project.name ?? entry.project.id }}
           </span>
           <select
+            class="home-select"
             v-model="entry.row.cli"
             :disabled="saving"
             :aria-label="`${entry.project.name ?? entry.project.id} CLI override`"

@@ -42,6 +42,7 @@
         Type <strong>{{ challenge.phrase }}</strong> to confirm this authority change.
       </label>
       <input
+        class="home-input"
         :id="`challenge-${view.proposal.proposal_id}`"
         ref="challengeInput"
         v-model="challenge.response"

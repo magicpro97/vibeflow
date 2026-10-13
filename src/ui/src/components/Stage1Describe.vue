@@ -158,7 +158,7 @@
           <div v-for="(src, i) in docSources" :key="i" class="flex gap-2 mb-1">
             <select
               v-model="src.type"
-              class="bg-transparent border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors"
+              class="bg-transparent border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors home-select"
             >
               <option value="url">url</option>
               <option value="file">file</option>
@@ -194,7 +194,7 @@
           <div v-for="(src, i) in taskSources" :key="i" class="flex gap-2 mb-1">
             <select
               v-model="src.type"
-              class="bg-transparent border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors"
+              class="bg-transparent border border-neutral-800 rounded px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors home-select"
             >
               <option value="url">url</option>
               <option value="file">file</option>
