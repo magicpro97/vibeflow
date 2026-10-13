@@ -317,7 +317,7 @@ export function readSettings(
       corruptWarned.add(p);
       const warn = inject.warn ?? ((m: string) => process.stderr.write(m));
       try {
-        warn(`vf: ${p} is not valid JSON — using default settings\n`);
+        warn(`vf: ${p} cannot be read or is not valid JSON — using default settings\n`);
       } catch {
         /* sink errors swallowed by design; the fail-safe read must not throw */
       }

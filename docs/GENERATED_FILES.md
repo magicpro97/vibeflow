@@ -202,8 +202,8 @@ Purpose:
 `SETTINGS.json` is seeded from `DEFAULT_SETTINGS` on the FIRST `vf init` only; later inits only
 merge-write it (the memory and hooks steps) and never reseed, so enabling tools or tuning
 `failureProtection` survives re-init.
-A file that is not valid JSON is ignored with a one-time warning and settings fall back to the
-defaults. Unknown or legacy keys are dropped with forward-merge semantics (`coerce()` in
+A file that cannot be read or parsed is ignored with a one-time warning and settings fall back
+to the defaults. Unknown or legacy keys are dropped with forward-merge semantics (`coerce()` in
 `src/settings.ts`) — there is no versioned migration; keep keys you want preserved within the
 known schema. Each work unit dir
 holds `CONTEXT.md` (the dispatch prompt) and an `evidence/` folder of JSON results

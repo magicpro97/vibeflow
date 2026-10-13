@@ -163,6 +163,20 @@ describe("settings.resilience", () => {
     }
   });
 
+  test("a directory at the settings path (read failure) warns via the same fail-safe path", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, CTX_DIR, "SETTINGS.json"), { recursive: true }); // EISDIR on read
+      const seen: string[] = [];
+      const s = readSettings(dir, { warn: (m) => seen.push(m) });
+      expect(s).toEqual(DEFAULT_SETTINGS);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toContain("cannot be read");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("a throwing sink cannot break the fail-safe read", () => {
     const dir = tmpRepo();
     try {
