@@ -1439,6 +1439,24 @@ button:disabled {
   padding: 0;
   list-style: none;
 }
+.home-reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 1.7rem;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--home-line);
+  border-radius: 999px;
+  background: var(--home-paper-strong);
+}
+.home-reaction-pill[aria-pressed="true"] {
+  border-color: var(--home-amber);
+  background: var(--home-amber-soft);
+}
+.home-reaction-pill__count {
+  font-size: 0.72rem;
+  font-weight: 650;
+}
 .home-reaction-picker {
   min-width: min(100%, 24rem);
 }

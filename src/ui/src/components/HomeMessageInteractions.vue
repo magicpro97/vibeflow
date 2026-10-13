@@ -11,13 +11,16 @@
       <li v-for="reaction in item.reactions" :key="`${item.id}-${reaction.emoji}`">
         <button
           type="button"
-          class="home-button"
+          class="home-button home-reaction-pill"
           :aria-pressed="reaction.reacted_by_recipient"
           :disabled="busy || !online"
           :aria-label="reactionAriaLabel(reaction)"
           :title="homeReactionSummaryTitle(reaction)"
           @click="$emit('toggle-reaction', reaction.emoji)"
-        >{{ reaction.emoji }} {{ reaction.label }} · {{ reaction.count }}</button>
+        >
+          <span class="home-reaction-pill__emoji" aria-hidden="true">{{ reaction.emoji }}</span>
+          <span class="home-reaction-pill__count">{{ reaction.count }}</span>
+        </button>
       </li>
     </ul>
     <details class="home-reaction-picker">
