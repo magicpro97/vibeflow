@@ -1178,7 +1178,7 @@ button:disabled {
   letter-spacing: -0.045em;
 }
 .home-welcome__copy {
-  max-width: 36rem;
+  max-width: min(44rem, 70ch);
   margin: 1rem auto 0;
   color: var(--home-muted);
   font-size: 0.93rem;
@@ -1215,12 +1215,12 @@ button:disabled {
   font-size: 1rem;
 }
 .home-starters strong {
-  font-size: 0.78rem;
+  font-size: 0.86rem;
 }
 .home-starters small {
   margin-top: 0.18rem;
   color: var(--home-faint);
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   line-height: 1.35;
 }
 .home-welcome__hint {
@@ -1283,6 +1283,7 @@ button:disabled {
   color: var(--home-amber-ink);
 }
 .home-message__content {
+  font-size: 0.9rem;
   min-width: 0;
   max-width: 65ch;
 }
@@ -1293,13 +1294,13 @@ button:disabled {
   gap: 0.55rem;
 }
 .home-message__content header strong {
-  font-size: 0.76rem;
+  font-size: 0.84rem;
   font-weight: 680;
 }
 .home-message__content time,
 .home-system-event time {
   color: var(--home-faint);
-  font-size: 0.62rem;
+  font-size: 0.72rem;
 }
 .home-message__content p {
   margin: 0.32rem 0 0;
@@ -4949,4 +4950,17 @@ button:disabled {
 .home-files-list,
 .home-files-preview {
   margin: 0 1.15rem;
+}
+
+
+@media (min-width: 1440px) {
+  .home-welcome {
+    margin-top: clamp(1rem, 4vh, 4rem);
+  }
+  .home-thread {
+    padding-inline: clamp(1rem, 4vw, 3.5rem);
+  }
+  .home-message__content {
+    max-width: 72ch;
+  }
 }
