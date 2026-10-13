@@ -58,6 +58,7 @@ const DIRECT_PROCESS_BOUNDARIES: Readonly<Record<string, BoundaryClass>> = {
   "src/safety/checkpoint.ts": "git-or-system-command",
   "src/sandbox.ts": "tool-extension",
   "src/server/dashboard-diff.ts": "git-or-system-command",
+  "src/server/files-tree-route.ts": "git-or-system-command",
   "src/server/routes-update.ts": "tool-extension",
   "src/skills/curator-scan.ts": "git-or-system-command",
   "src/skills/curator.ts": "git-or-system-command",
