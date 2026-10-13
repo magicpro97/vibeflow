@@ -2704,10 +2704,10 @@ test.describe("AI-first conversation Home", () => {
     ).toBe(true);
     await expectFullyInViewport(page, ".home-quote-stack--selection", "quoted sources tray");
     await expectHomeComposerViewportFit(page);
-    await expect(page.getByRole("button", { name: "Remove quote 4" })).toBeVisible();
-    await page.getByRole("button", { name: "Remove quote 4" }).click();
-    await expect(page.getByRole("button", { name: "Remove quote 4" })).toBeFocused();
-    await expect(page.locator(".home-quote-stack--selection .home-quote-card")).toHaveCount(7);
+    await expect(page.getByRole("button", { name: "Dismiss quote 4" })).toBeVisible();
+    await page.getByRole("button", { name: "Dismiss quote 4" }).click();
+    await expect(page.getByRole("button", { name: "Dismiss quote 4" })).toBeFocused();
+    await expect(page.locator(".home-quote-stack--selection .home-quote-chip")).toHaveCount(7);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expectFullyInViewport(page, ".home-quote-stack--selection", "quoted sources tray");

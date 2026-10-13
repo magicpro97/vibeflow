@@ -8,49 +8,46 @@
     <article
       v-for="(chip, index) in chips"
       :key="`${chip.reference.root_session_id}:${chip.reference.source_key}`"
-      class="home-quote-card"
+      class="home-quote-chip"
       :data-status="chip.status"
     >
-      <header>
-        <strong>Quote {{ index + 1 }}</strong>
-        <small>{{ chip.reference.author }} · Revision {{ chip.reference.revision_ordinal + 1 }}</small>
-      </header>
-      <p>{{ chip.reference.excerpt }}</p>
-      <small>{{ chip.message }}</small>
-      <div class="home-quote-card__actions">
+      <button
+        type="button"
+        class="home-quote-chip__jump"
+        :disabled="!chip.canJump"
+        :aria-label="`Jump to source for quote ${index + 1}`"
+        @click="jumpToSource(chip.reference.source_key)"
+      >
+        <strong>{{ chip.reference.author }}</strong>
+        <span class="home-quote-chip__excerpt">{{ chip.reference.excerpt }}</span>
+      </button>
+      <span class="home-quote-chip__actions">
         <button
           type="button"
-          class="home-button"
-          :aria-label="`Jump to source for quote ${index + 1}`"
-          :disabled="!chip.canJump"
-          @click="jumpToSource(chip.reference.source_key)"
-        >
-          Jump to source
-        </button>
-        <button
-          type="button"
-          class="home-button"
-          :aria-label="`Move quote ${index + 1} earlier`"
+          aria-label="Move quote earlier"
           :disabled="index === 0"
           @click="store.moveQuoteReference(index, -1)"
         >
-          Move earlier
+          ↑
         </button>
         <button
           type="button"
-          class="home-button"
-          :aria-label="`Move quote ${index + 1} later`"
+          aria-label="Move quote later"
           :disabled="index === chips.length - 1"
           @click="store.moveQuoteReference(index, 1)"
-        >Move later</button>
+        >
+          ↓
+        </button>
         <button
           :id="quoteRemoveId(index)"
           type="button"
-          class="home-button"
-          :aria-label="`Remove quote ${index + 1}`"
+          :aria-label="`Dismiss quote ${index + 1}`"
           @click="removeQuote(chip.reference, index)"
-        >Remove</button>
-      </div>
+        >
+          ×
+        </button>
+      </span>
+      <small v-if="chip.message">{{ chip.message }}</small>
     </article>
   </section>
 </template>
