@@ -4952,7 +4952,6 @@ button:disabled {
   margin: 0 1.15rem;
 }
 
-
 @media (min-width: 1440px) {
   .home-welcome {
     margin-top: clamp(1rem, 4vh, 4rem);
@@ -4986,5 +4985,12 @@ button:disabled {
   background-size: 0.7rem;
   cursor: pointer;
 }
-.home-input:disabled, .home-select:disabled { opacity: 0.55; cursor: not-allowed; }
-.home-input:hover:not(:disabled), .home-select:hover:not(:disabled) { border-color: var(--home-amber); }
+.home-input:disabled,
+.home-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.home-input:hover:not(:disabled),
+.home-select:hover:not(:disabled) {
+  border-color: var(--home-amber);
+}
