@@ -396,6 +396,23 @@ Sections, in order:
 Until a snapshot arrives the drawer shows `No workflow state yet.` — shown when the repo
 has no workflow state (and until the first successful fetch).
 
+## 14. Files panel
+
+The Files panel is a read-only repository browser drawer opened from the top bar.
+It renders tracked and untracked-not-ignored files (same enumeration as the
+sandbox: `git ls-files --cached --others --exclude-standard`) as a collapsible
+tree — directories collapsed by default — with a git-status badge per file
+(modified / added / deleted / renamed / untracked; unmerged entries stay
+unbadged). Typing in the filter box switches to a flat substring hit list with
+full paths. Clicking a file previews its content via the sandboxed `GET
+/api/file` route (text files up to 256 KB; binary and oversized files report a
+labeled state instead of a preview — Download saves the previewed content
+client-side, so it inherits the same 256 KB text-only limit). Actions: copy
+relative path, download the previewed content. The listing is capped at 5000
+entries and reports `truncated: true`; write operations (rename, delete, new
+file) are deliberately out of scope for this iteration — they require the
+confirm-and-audit flow tracked as a follow-up.
+
 ---
 
 **Related:** [Architecture](./ARCHITECTURE.md) · [Workflow](./WORKFLOW.md)

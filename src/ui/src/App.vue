@@ -6,10 +6,11 @@
       @open-settings="openSettings"
       @open-control-center="openControlCenter"
       @open-resources="openResources"
+      @open-files="openFiles"
     />
     <HomeUpdateBanner />
     <ConversationHome
-      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen || agentsOpen || resourcesOpen"
+      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen || agentsOpen || resourcesOpen || filesOpen"
       @open-capabilities="openCapabilities"
       @open-trace="openTrace"
       @select-agent="openAgentDrawer"
@@ -20,6 +21,7 @@
     <HomeTraceDrawer :open="traceOpen" @close="closeTrace" />
     <HomeAgentDrawer :open="agentsOpen" :participant-id="selectedAgentId" @close="closeAgents" />
     <HomeResourcesDrawer :open="resourcesOpen" @close="closeResources" />
+    <HomeFilesDrawer :open="filesOpen" @close="closeFiles" />
     <div class="sr-only" role="status" aria-live="polite">{{ announcement }}</div>
   </div>
 </template>
@@ -30,6 +32,7 @@ import ConversationHome from "./components/ConversationHome.vue";
 import HomeAgentDrawer from "./components/HomeAgentDrawer.vue";
 import HomeCapabilityDrawer from "./components/HomeCapabilityDrawer.vue";
 import HomeControlCenterDrawer from "./components/HomeControlCenterDrawer.vue";
+import HomeFilesDrawer from "./components/HomeFilesDrawer.vue";
 import HomePreferencesDrawer from "./components/HomePreferencesDrawer.vue";
 import HomeResourcesDrawer from "./components/HomeResourcesDrawer.vue";
 import HomeTraceDrawer from "./components/HomeTraceDrawer.vue";
@@ -45,6 +48,7 @@ const controlCenterOpen = ref(false);
 const traceOpen = ref(false);
 const agentsOpen = ref(false);
 const resourcesOpen = ref(false);
+const filesOpen = ref(false);
 const selectedAgentId = ref<string | null>(null);
 const agentDrawerTrigger = ref<HTMLElement | null>(null);
 const announcement = ref("");
@@ -60,7 +64,8 @@ watch(
 
 // A conversation switch must not leave the agent drawer bound to a stale
 // participant; close it without stealing focus (no closeAgents call here).
-// The resources drawer is repo-scoped, not conversation-scoped — it stays open.
+// The resources and files drawers are repo-scoped, not conversation-scoped —
+// they stay open.
 watch(
   () => store.selectedConversationId,
   () => {
@@ -82,6 +87,7 @@ function openCapabilities() {
   traceOpen.value = false;
   agentsOpen.value = false;
   resourcesOpen.value = false;
+  filesOpen.value = false;
   capabilitiesOpen.value = true;
 }
 
@@ -96,6 +102,7 @@ function openSettings() {
   traceOpen.value = false;
   agentsOpen.value = false;
   resourcesOpen.value = false;
+  filesOpen.value = false;
   settingsOpen.value = true;
 }
 
@@ -112,6 +119,7 @@ function openControlCenter() {
   traceOpen.value = false;
   agentsOpen.value = false;
   resourcesOpen.value = false;
+  filesOpen.value = false;
   controlCenterOpen.value = true;
 }
 
@@ -120,12 +128,28 @@ function closeResources() {
   nextTick(() => document.querySelector<HTMLElement>('[aria-label="Open resources"]')?.focus());
 }
 
+function closeFiles() {
+  filesOpen.value = false;
+  nextTick(() => document.querySelector<HTMLElement>('[aria-label="Open files"]')?.focus());
+}
+
+function openFiles() {
+  capabilitiesOpen.value = false;
+  settingsOpen.value = false;
+  controlCenterOpen.value = false;
+  traceOpen.value = false;
+  agentsOpen.value = false;
+  resourcesOpen.value = false;
+  filesOpen.value = true;
+}
+
 function openResources() {
   capabilitiesOpen.value = false;
   settingsOpen.value = false;
   controlCenterOpen.value = false;
   traceOpen.value = false;
   agentsOpen.value = false;
+  filesOpen.value = false;
   resourcesOpen.value = true;
 }
 
@@ -135,6 +159,7 @@ function openTrace() {
   controlCenterOpen.value = false;
   agentsOpen.value = false;
   resourcesOpen.value = false;
+  filesOpen.value = false;
   traceOpen.value = true;
 }
 
@@ -155,6 +180,7 @@ function openAgentDrawer(participantId: string) {
   controlCenterOpen.value = false;
   traceOpen.value = false;
   resourcesOpen.value = false;
+  filesOpen.value = false;
   selectedAgentId.value = participantId;
   agentDrawerTrigger.value =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -181,6 +207,7 @@ function closeActiveDrawer(event: KeyboardEvent) {
   else if (traceOpen.value) closeTrace();
   else if (agentsOpen.value) closeAgents();
   else if (resourcesOpen.value) closeResources();
+  else if (filesOpen.value) closeFiles();
 }
 
 onMounted(() => window.addEventListener("keydown", closeActiveDrawer));
