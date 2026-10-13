@@ -46,12 +46,17 @@ Nguyên văn tách từ SKILL.md 2026-10-07.
 
 ## Unresolved review threads fail review-thread-gate
 
-CI's `review-thread-gate` job fails while ANY review thread is unresolved —
-including threads a review bot (Copilot) opened by itself. It is not a code
+CI's `review-thread-gate` job fails while ANY review thread is unresolved AND not outdated —
+including threads a review bot (Copilot) opened by itself. The gate skips `isResolved` and
+`isOutdated` threads (`.github/workflows/review-thread-gate.yml:98-101`) and also re-checks that
+the PR head is still the live head before judging. It is not a code
 signal; triage every thread and either fix it or adjudicate it, then resolve
 ALL of them before the gate can pass. Flow:
 
 1. List: `gh api graphql -f query='{repository(owner:"<o>",name:"<r>"){pullRequest(number:<n>){reviewThreads(first:50){nodes{id isResolved path line comments(first:1){nodes{author{login} body}}}}}}}'`
+   (This query fetches only the FIRST 50 threads — on a PR with more, add
+   `pageInfo{hasNextPage endCursor}` and loop the pages, and keep `isOutdated`
+   in the node selection so your triage mirrors the gate's skip rules.)
 2. Classify: cheap REAL findings → fix them as ONE batch commit (never one
    commit per thread); accepted-by-design / already-fixed → reply with the
    rationale and evidence (file:line, test name, or the fixing commit).
