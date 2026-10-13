@@ -379,6 +379,8 @@ src/orchestrator/conversation/project-fts.ts               # bun:sqlite FTS5 ret
 src/skills/project-classifier-runtime.ts # tier 3/4 composition (index + AI seam)
 src/server/conversation-project-route.ts # registry read, engine override, classify, move
 src/ui/src/project-rail-group.ts         # pure, browser-safe folder grouping for the rail
+src/server/files-tree-route.ts           # GET /api/files/tree — read-only repo file listing + git status badges
+src/ui/src/files-tree.ts                 # pure, browser-safe flat-path → tree folding + filter for the Files panel
 src/typesafe-contract.ts        # frozen call-site / policy vocabularies (runtime-free)
 src/typesafe-settings.ts        # optional `typesafe` block, key resolution, ~/.vibeflow/typesafe.env
 src/typesafe-health.ts          # file-backed 5-state breaker + withTypesafeGuard
