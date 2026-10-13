@@ -146,6 +146,52 @@ describe("settings.resilience", () => {
     }
   });
 
+  test("a corrupt file warns once per path through the injectable sink", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, "{ this is : not json ");
+      const seen: string[] = [];
+      const warn = (m: string) => seen.push(m);
+      const first = readSettings(dir, { warn });
+      const second = readSettings(dir, { warn });
+      expect(first).toEqual(DEFAULT_SETTINGS);
+      expect(second).toEqual(DEFAULT_SETTINGS);
+      expect(seen).toHaveLength(1); // once per path per process — no per-read spam
+      expect(seen[0]).toContain(settingsPath(dir));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a directory at the settings path (read failure) warns via the same fail-safe path", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, CTX_DIR, "SETTINGS.json"), { recursive: true }); // EISDIR on read
+      const seen: string[] = [];
+      const s = readSettings(dir, { warn: (m) => seen.push(m) });
+      expect(s).toEqual(DEFAULT_SETTINGS);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toContain("cannot be read");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a throwing sink cannot break the fail-safe read", () => {
+    const dir = tmpRepo();
+    try {
+      writeRaw(dir, "{ this is : not json ");
+      const s = readSettings(dir, {
+        warn: () => {
+          throw new Error("sink boom");
+        },
+      });
+      expect(s).toEqual(DEFAULT_SETTINGS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("invalid toolPriority falls back to the default order", () => {
     const dir = tmpRepo();
     try {

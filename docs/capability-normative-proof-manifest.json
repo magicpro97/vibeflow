@@ -365,7 +365,7 @@
         "src/safety/checkpoint.ts"
       ],
       "test_sha256": "838295477689727947a3e5258a63c8d64ece2e28c2a8aca35c2f1231abffcbfd",
-      "production_sha256": "428569393477be624fd6e04329efb781ea9d873d488b846e9661b07443d993f0"
+      "production_sha256": "2bf0a60c2b7b8037f06e478d80e09ca6f61e26637effed92a165131026d1b7b1"
     },
     {
       "id": "proof:bun:test/capabilities/action-domain-runtime.test.ts#real-action-domain",
@@ -2575,6 +2575,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "ee3b6e311de0cc5ae2de6b18e8711dc4d0af34d3537b26fd75766634a0a80503"
+    "reviewed_payload_sha256": "8731466ce6de10e00a35879407cf23c820ea4b37ea8aac830d175331b3c6e5b0"
   }
 }
