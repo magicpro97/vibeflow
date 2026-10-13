@@ -31,6 +31,10 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3h8v4h3v7h-3v3H6v-3H3V7h3V3Z" /></svg>
         <span>Capabilities</span>
       </button>
+      <button class="home-topbar-button" type="button" aria-label="Open files" title="Files" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-files')">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h5l1.5 2H16v10H4V3Z" /></svg>
+        <span>Files</span>
+      </button>
       <button class="home-icon-button" type="button" aria-label="New conversation" title="New conversation" @click="newConversation">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
       </button>
@@ -66,6 +70,7 @@ defineEmits<{
   "open-settings": [];
   "open-control-center": [];
   "open-resources": [];
+  "open-files": [];
 }>();
 const store = useConversationHomeStore();
 const { current, toggle } = useColorScheme();

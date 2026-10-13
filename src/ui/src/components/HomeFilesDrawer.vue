@@ -3,7 +3,7 @@
     <aside v-if="open" class="home-files-drawer" aria-label="Repository files">
       <header>
         <span><small>Repository</small><strong>Files</strong></span>
-        <button type="button" aria-label="Close files" @click="emit('close')">×</button>
+        <button ref="closeButton" type="button" aria-label="Close files" @click="emit('close')">×</button>
       </header>
       <label class="home-files-search">
         <span class="sr-only">Filter files</span>
@@ -57,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { filesApi } from "../api-files.js";
 import { api } from "../api.js";
 import { createFilesStore } from "../files-store.js";
@@ -75,14 +75,19 @@ const store = createFilesStore({
   readFile: (path: string) => api.readFile(path),
 });
 
+const closeButton = ref<HTMLButtonElement | null>(null);
+
 const rows = computed(() =>
   panelRows(store.state.entries, store.state.expanded, store.state.filter),
 );
 
 watch(
   () => props.open,
-  (open) => {
-    if (open && store.state.entries.length === 0) void store.load();
+  async (open) => {
+    if (!open) return;
+    if (store.state.entries.length === 0) await store.load();
+    await nextTick();
+    closeButton.value?.focus();
   },
   { immediate: true },
 );
