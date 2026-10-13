@@ -299,13 +299,26 @@ function coerce(raw: unknown): VibeSettings {
   return out;
 }
 
-/** Read settings for a repo; missing/corrupt files yield a fresh copy of the defaults. */
-export function readSettings(base?: string): VibeSettings {
+/** Paths already reported corrupt in this process — warn once per path, not per read. */
+const corruptWarned = new Set<string>();
+
+/** Read settings for a repo; missing/corrupt files yield a fresh copy of the defaults.
+ *  A corrupt file is reported once per path (default sink: stderr; `inject.warn` = test seam)
+ *  so a broken hand-edit stays visible instead of silently reverting every read. */
+export function readSettings(
+  base?: string,
+  inject: { warn?: (message: string) => void } = {},
+): VibeSettings {
   const p = settingsPath(base);
   if (!existsSync(p)) return defaults();
   try {
     return coerce(JSON.parse(readFileSync(p, "utf8")) as unknown);
   } catch {
+    if (!corruptWarned.has(p)) {
+      corruptWarned.add(p);
+      const warn = inject.warn ?? ((m: string) => process.stderr.write(m));
+      warn(`vf: ${p} is not valid JSON — using default settings\n`);
+    }
     return defaults();
   }
 }

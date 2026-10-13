@@ -246,7 +246,10 @@ export async function init(
   if (!dry) {
     ensurePortableProjectIdentityTracked(cwd());
     activateProjectCapabilityAuthorityForVfInit(cwd());
-    // Ensure user-level SETTINGS.json exists before activating user capability authority
+    // Ensure user-level SETTINGS.json exists before activating user capability authority.
+    // This file is the user-scope policy-settings target for the capability-authority layer
+    // (schema_version stamp only) — NOT a VibeSettings tier; per-repo settings live in
+    // .vibeflow/SETTINGS.json.
     const userVfRoot =
       inject.userVibeflowRoot ?? process.env.VF_USER_VIBEFLOW_ROOT ?? join(homedir(), ".vibeflow");
     const userSettingsPath = join(userVfRoot, "SETTINGS.json");
