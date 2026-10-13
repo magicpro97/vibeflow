@@ -4964,3 +4964,27 @@ button:disabled {
     max-width: 72ch;
   }
 }
+
+/* Canonical form controls — every input/select in Home uses these. */
+.home-input,
+.home-select {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.6rem;
+  background: var(--home-paper-strong);
+  color: var(--home-ink);
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+.home-select {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23867a6a' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 0.7rem;
+  cursor: pointer;
+}
+.home-input:disabled, .home-select:disabled { opacity: 0.55; cursor: not-allowed; }
+.home-input:hover:not(:disabled), .home-select:hover:not(:disabled) { border-color: var(--home-amber); }
