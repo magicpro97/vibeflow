@@ -38,6 +38,7 @@ import {
 } from "./server/conversation-route.js";
 import { handleDomainImpact, handleDomainsView } from "./server/domain-route.js";
 import { handleFileRoute } from "./server/file-route.js";
+import { handleFilesTreeRoute } from "./server/files-tree-route.js";
 import {
   listAttachments,
   replayFromLog,
@@ -506,6 +507,12 @@ export async function startServer(
           url.searchParams.get("path") ?? "",
           url.searchParams.has("preview"),
         );
+      }
+
+      // --- GET /api/files/tree — token+loopback guarded, read-only listing ---
+      if (method === "GET" && path === "/api/files/tree") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleFilesTreeRoute(activeRepo);
       }
 
       // --- GET /api/projects* and /api/hook/pending (#561: guarded) ---

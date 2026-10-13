@@ -4,6 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleFilesTreeRoute } from "../src/server/files-tree-route.js";
 
+import { startServer } from "../src/server";
+
+/** Fetch the CSRF token from the HTML page served at `/`. */
+async function csrfToken(url: string): Promise<string> {
+  const res = await fetch(url);
+  const html = await res.text();
+  const m = html.match(/<meta\s+name="vf-token"\s+content="([^"]+)"\s*\/?>/i);
+  if (!m) throw new Error("CSRF token not found in page HTML");
+  return m[1] as string;
+}
+
 // Fake git: queued responses, call-count checked, throws on overrun.
 function fakeGit(responses: { status: number; stdout: string }[]) {
   const queue = [...responses];
@@ -106,6 +117,29 @@ describe("handleFilesTreeRoute", () => {
       expect(body.ok).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- wrapper-level wiring: the token guard must gate the new route ---
+describe("GET /api/files/tree wiring", () => {
+  test("403 without a token, 200 + entries with one", async () => {
+    // Default repoDir = process.cwd() (the repo itself) — a real git tree,
+    // read through the route's default runner. No spawning in this file.
+    const { server, url } = await startServer(0);
+    try {
+      const denied = await fetch(`${url}/api/files/tree`);
+      expect(denied.status).toBe(403);
+      const token = await csrfToken(url);
+      const ok = await fetch(`${url}/api/files/tree`, {
+        headers: { "x-vibeflow-token": token },
+      });
+      expect(ok.status).toBe(200);
+      const body = (await ok.json()) as { ok: boolean; entries: { path: string }[] };
+      expect(body.ok).toBe(true);
+      expect(body.entries.some((e) => e.path === "package.json")).toBe(true);
+    } finally {
+      server.stop(true);
     }
   });
 });
