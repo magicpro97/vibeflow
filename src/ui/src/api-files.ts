@@ -1,3 +1,4 @@
+import type { FileStatusLabel } from "../../core/file-tree-contract.js";
 // src/ui/src/api-files.ts — client for the Files panel endpoints.
 //
 // Kept OUT of api.ts on purpose: that file sits at the 400-line size cap, and
@@ -6,7 +7,7 @@ import { req } from "./api.js";
 
 export interface FilesTreeClientEntry {
   path: string;
-  status?: string;
+  status?: FileStatusLabel;
 }
 
 export const filesApi = {

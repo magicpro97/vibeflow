@@ -64,22 +64,30 @@ export function createFilesStore(deps: FilesStoreDeps) {
     }
   }
 
+  // Monotonic selection token: only the newest select() may mutate preview
+  // state, so a slow earlier response can neither overwrite a newer preview
+  // nor clear its previewLoading.
+  let selectionSeq = 0;
+
   async function select(path: string): Promise<void> {
+    const seq = ++selectionSeq;
     state.selected = path;
     state.preview = null;
     state.previewError = null;
     state.previewLoading = true;
     try {
       const res = await deps.readFile(path);
+      if (seq !== selectionSeq) return;
       if (res.ok && typeof res.content === "string") {
         state.preview = res.content;
       } else {
         state.previewError = res.reason ?? "unavailable";
       }
     } catch (err) {
+      if (seq !== selectionSeq) return;
       state.previewError = err instanceof Error ? err.message : String(err);
     } finally {
-      state.previewLoading = false;
+      if (seq === selectionSeq) state.previewLoading = false;
     }
   }
 

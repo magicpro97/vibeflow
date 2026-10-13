@@ -57,6 +57,58 @@ describe("files-store", () => {
     expect(throws.state.previewError).toBe("Server error 413");
   });
 
+  test("a slow earlier selection cannot overwrite a newer selection's preview", async () => {
+    const resolvers = new Map<
+      string,
+      (res: { ok: boolean; content?: string; reason?: string }) => void
+    >();
+    const store = createFilesStore({
+      fetchTree: async () => ({ ok: true, entries: [], truncated: false }),
+      readFile: (path: string) =>
+        new Promise((resolve) => {
+          resolvers.set(path, resolve);
+        }),
+    });
+    const slowFirst = store.select("a.txt");
+    const second = store.select("b.txt");
+    resolvers.get("b.txt")?.({ ok: true, content: "body of b" });
+    await second;
+    expect(store.state.preview).toBe("body of b");
+    expect(store.state.previewLoading).toBe(false);
+    resolvers.get("a.txt")?.({ ok: true, content: "body of a" });
+    await slowFirst;
+    expect(store.state.preview).toBe("body of b"); // the late earlier response is ignored
+    expect(store.state.previewError).toBeNull();
+    expect(store.state.previewLoading).toBe(false);
+    expect(store.state.selected).toBe("b.txt");
+  });
+
+  test("a late failure of an earlier selection cannot poison the newer preview", async () => {
+    const pending = new Map<
+      string,
+      {
+        resolve: (res: { ok: boolean; content?: string; reason?: string }) => void;
+        reject: (error: unknown) => void;
+      }
+    >();
+    const store = createFilesStore({
+      fetchTree: async () => ({ ok: true, entries: [], truncated: false }),
+      readFile: (path: string) =>
+        new Promise((resolve, reject) => {
+          pending.set(path, { resolve, reject });
+        }),
+    });
+    const failing = store.select("broken.txt");
+    const good = store.select("good.txt");
+    pending.get("good.txt")?.resolve({ ok: true, content: "body of good" });
+    await good;
+    pending.get("broken.txt")?.reject(new Error("boom"));
+    await failing;
+    expect(store.state.preview).toBe("body of good");
+    expect(store.state.previewError).toBeNull(); // the stale failure is dropped
+    expect(store.state.selected).toBe("good.txt");
+  });
+
   test("toggle expands and collapses a directory path", async () => {
     const store = createFilesStore({
       fetchTree: async () => ({ ok: true, entries: [], truncated: false }),

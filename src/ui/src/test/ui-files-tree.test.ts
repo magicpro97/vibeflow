@@ -1,6 +1,12 @@
 const { describe, expect, test } = await import(String("bun:test"));
 const { buildTree, filterPaths, panelRows } = await import("../files-tree.js");
+import {
+  FILE_STATUS,
+  FILE_TREE_MAX_ENTRIES,
+  type FileStatusLabel,
+} from "../../../../src/core/file-tree-contract.js";
 import type { DirNode, TreeNode } from "../files-tree.js";
+import type { TreeFileEntry } from "../files-tree.js";
 
 /** Find a dir node by path, failing loudly — no non-null assertions (biome bans them). */
 function dirOf(nodes: TreeNode[], path: string): DirNode {
@@ -45,8 +51,23 @@ describe("filterPaths", () => {
   });
 });
 
+describe("contract consumption", () => {
+  test("the panel speaks the shared status vocabulary and cap", () => {
+    const entries: TreeFileEntry[] = Object.values(FILE_STATUS).map((status) => ({
+      path: "f.txt",
+      status,
+    }));
+    expect(FILE_TREE_MAX_ENTRIES).toBe(5000);
+    const typed: FileStatusLabel = FILE_STATUS.MODIFIED;
+    expect(typed).toBe("modified");
+    expect(panelRows(entries, new Set(), "").map((row) => row.status)).toEqual([
+      ...Object.values(FILE_STATUS),
+    ]);
+  });
+});
+
 describe("panelRows", () => {
-  const entries = [
+  const entries: TreeFileEntry[] = [
     { path: "src/deep/b.ts" },
     { path: "src/a.ts", status: "modified" },
     { path: "README.md" },

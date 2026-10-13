@@ -1,7 +1,9 @@
 // src/ui/src/files-tree.ts — pure helpers for the Files panel (no Vue imports).
+import type { FileStatusLabel } from "../../core/file-tree-contract.js";
+
 export interface TreeFileEntry {
   path: string;
-  status?: string;
+  status?: FileStatusLabel;
 }
 
 export interface DirNode {
@@ -14,7 +16,7 @@ export interface FileNode {
   name: string;
   path: string;
   kind: "file";
-  status?: string;
+  status?: FileStatusLabel;
 }
 export type TreeNode = DirNode | FileNode;
 
@@ -66,7 +68,7 @@ export interface PanelRow {
   label: string;
   depth: number;
   kind: "dir" | "file";
-  status?: string;
+  status?: FileStatusLabel;
   expanded: boolean;
 }
 

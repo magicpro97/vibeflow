@@ -36,7 +36,8 @@
         </li>
       </ul>
       <p v-if="store.state.truncated" class="home-drawer-copy">
-        Listing capped at 5000 files — narrow with the filter or use a terminal.
+        Listing capped at {{ FILE_TREE_MAX_ENTRIES }} files — the filter cannot reach omitted
+        entries; search externally.
       </p>
       <section v-if="store.state.selected" class="home-files-preview" aria-label="Preview">
         <header>
@@ -58,6 +59,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { FILE_TREE_MAX_ENTRIES } from "../../../core/file-tree-contract.js";
 import { filesApi } from "../api-files.js";
 import { api } from "../api.js";
 import { createFilesStore } from "../files-store.js";
