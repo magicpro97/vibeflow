@@ -231,6 +231,23 @@ describe("GET /api/files/diff wiring (inline block in server.ts)", () => {
         expect(body.text).toContain("+two");
         expect(body.truncated).toBe(false);
         expect(body.binary).toBe(false);
+
+        // Pin the query-key → slot mapping: `staged=1` reads the index (the
+        // staged content), `untracked=1` short-circuits before any git call.
+        defaultRunGit(["add", "--", "tracked.txt"], repo);
+        const stagedRes = await get(url, "/api/files/diff?path=tracked.txt&staged=1", token);
+        expect(stagedRes.status).toBe(200);
+        const stagedBody = (await stagedRes.json()) as DiffResp;
+        expect(stagedBody.ok).toBe(true);
+        expect(stagedBody.kind).toBe("diff");
+        expect(stagedBody.text).toContain("+two");
+
+        const untrackedRes = await get(url, "/api/files/diff?path=tracked.txt&untracked=1", token);
+        expect(untrackedRes.status).toBe(200);
+        const untrackedBody = (await untrackedRes.json()) as DiffResp;
+        expect(untrackedBody.ok).toBe(true);
+        expect(untrackedBody.kind).toBe("untracked");
+        expect(untrackedBody.text).toBe("");
       } finally {
         server.stop();
       }
