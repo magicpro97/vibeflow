@@ -10,13 +10,18 @@ import { spawnSync } from "node:child_process";
 import {
   FILE_STATUS,
   FILE_TREE_MAX_ENTRIES,
+  type FileChangeSplit,
   type FileStatusLabel,
   isUnmergedPorcelainCode,
+  splitPorcelain,
 } from "../core/file-tree-contract.js";
 
 export interface FileTreeEntry {
   path: string;
   status?: FileStatusLabel;
+  index?: FileStatusLabel;
+  worktree?: FileStatusLabel;
+  untracked?: boolean;
 }
 
 export interface RunGitResult {
@@ -97,6 +102,9 @@ export function handleFilesTreeRoute(
 
   const dry = deps.runGit(["status", "--porcelain", "-z"], repo);
   const statuses = new Map<string, FileStatusLabel>();
+  // Parallel to `statuses`: the raw index/worktree split per path, from the
+  // SAME porcelain pass (one splitPorcelain call per entry, no second git run).
+  const splits = new Map<string, FileChangeSplit>();
   if (dry.status === 0) {
     for (const chunk of dry.stdout.split("\0")) {
       // -z format: "XY <path>"; a rename entry carries the OLD path as the next
@@ -106,6 +114,7 @@ export function handleFilesTreeRoute(
       if (!m) continue;
       const label = statusLabel(m[1] as string);
       if (label) statuses.set(m[2] as string, label);
+      splits.set(m[2] as string, splitPorcelain(m[1] as string));
     }
   }
 
@@ -118,7 +127,14 @@ export function handleFilesTreeRoute(
     }
     if (unsafeGitPath(path)) continue;
     const status = statuses.get(path);
-    entries.push(status ? { path, status } : { path });
+    const split = splits.get(path);
+    entries.push({
+      path,
+      ...(status ? { status } : {}),
+      ...(split?.index ? { index: split.index } : {}),
+      ...(split?.worktree ? { worktree: split.worktree } : {}),
+      ...(split?.untracked ? { untracked: true } : {}),
+    });
   }
   return Response.json({ ok: true, entries, truncated: capped });
 }
