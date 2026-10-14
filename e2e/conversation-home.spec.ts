@@ -824,9 +824,19 @@ test.describe("AI-first conversation Home", () => {
     await page.keyboard.press("Escape");
     await expect(sidebar).toBeHidden();
 
+    // Collapse must not clobber the selected tab: the persisted pin still reads "changes".
+    const persistedTab = await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem("vf-right-sidebar") ?? "null") as {
+        tab?: unknown;
+      } | null;
+      return raw?.tab;
+    });
+    expect(persistedTab).toBe("changes");
+
     // Collapse is v-show, so the shell and its three tab layers never unmount; the
     // TopBar triggers pin their own tab (Files/Resources), so retention is asserted
-    // on the mounted layers plus the tab switching that still works after reopen.
+    // on the mounted layers, the persisted tab above, and the tab switching that
+    // still works after reopen.
     await openFiles.click();
     await expect(sidebar).toBeVisible();
     await expect(panel).toBeAttached();
