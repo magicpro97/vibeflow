@@ -1,6 +1,8 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { HOST_ACTION_KIND } from "../src/actions/host-action-contract.js";
 import {
   ACTION_OPERATION_SSE_EVENT,
@@ -847,6 +849,65 @@ test.describe("AI-first conversation Home", () => {
 
     await sidebar.getByRole("button", { name: "Close panels" }).click();
     await expect(sidebar).toBeHidden();
+  });
+
+  test("changes panel: stage and unstage a modified file", async ({ page }) => {
+    const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
+    test.skip(!setupRun, "needs VF_PLAYWRIGHT_SETUP_RUN — the throwaway e2e workspace");
+    // Workers inherit the controller's setup uuid and playwright.config.ts serves
+    // `cwd: resolve(PROJECT_ROOT, `.e2e-workspace-${setupRun}`)`, so the mutated dir
+    // IS the repo the webServer serves. Env resolution only — no probing, no fallback.
+    const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
+    expect(existsSync(resolve(ws, ".git"))).toBe(true);
+    const readme = resolve(ws, "README.md");
+    const original = readFileSync(readme, "utf8");
+
+    try {
+      await page.goto("/");
+      await waitForPage(page);
+      writeFileSync(readme, `${original}e2e stage/unstage roundtrip\n`);
+      await page.reload();
+      await waitForPage(page);
+
+      const sidebar = page.locator(".home-right-sidebar");
+      await page.getByRole("button", { name: "Open files" }).click();
+      await expect(sidebar).toBeVisible();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+
+      const panel = sidebar.locator(".home-changes");
+      await expect(panel).toBeVisible();
+
+      // Scope every row to its group section: a partially staged path can sit in
+      // Staged AND Changes at once, so a panel-wide row locator is ambiguous.
+      const groupOf = (label: string) =>
+        panel
+          .locator(".home-change-group")
+          .filter({ has: page.locator(".home-change-group__header strong", { hasText: label }) });
+      const rowOf = (section: Locator, path: string) =>
+        section
+          .locator(".home-change-row")
+          .filter({ has: page.getByRole("button", { name: path, exact: true }) });
+      const changes = groupOf("Changes");
+      const staged = groupOf("Staged");
+      const badge = ".home-change-row__badge";
+
+      await expect(rowOf(changes, "README.md").locator(badge)).toHaveText("modified");
+
+      await changes.getByRole("button", { name: "Stage README.md", exact: true }).click();
+      await expect(rowOf(staged, "README.md").locator(badge)).toHaveText("modified");
+      await expect(rowOf(changes, "README.md")).toHaveCount(0);
+
+      await staged.getByRole("button", { name: "Unstage README.md", exact: true }).click();
+      await expect(rowOf(changes, "README.md").locator(badge)).toHaveText("modified");
+      await expect(rowOf(staged, "README.md")).toHaveCount(0);
+    } finally {
+      // A mid-test failure must never leak a dirty workspace into later cases.
+      writeFileSync(readme, original);
+      if (page.url().startsWith("http")) {
+        await page.reload();
+        await waitForPage(page);
+      }
+    }
   });
 
   test("home shell fills the viewport without dead space", async ({ page }) => {
