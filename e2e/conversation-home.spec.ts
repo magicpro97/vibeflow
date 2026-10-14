@@ -723,6 +723,14 @@ test.describe("AI-first conversation Home", () => {
     await expect(panel.getByText("claude", { exact: true })).toBeVisible();
     await expect(panel.getByText("2 units · 1.2K tokens · $1.25")).toBeVisible();
     await expect(panel.getByText("1 units on claude have no recorded resources")).toBeVisible();
+    // The pin only has teeth if focus started inside the collapsed subtree: the
+    // trigger click leaves focus on the TopBar button, and the panel has no
+    // autofocus, so without this the toBeFocused() below passes vacuously even
+    // when App.vue's rightSidebarOpen watcher is reverted. Park focus on the
+    // panel's Refresh control, then Escape hides it and the watcher must hand
+    // focus back to the trigger.
+    await panel.getByRole("button", { name: "Refresh resources" }).focus();
+    await expect(panel.getByRole("button", { name: "Refresh resources" })).toBeFocused();
     // Escape falls through the ladder to the sidebar collapse rung (no drawer owns
     // the key here); the shell is v-show, so the panel hides without unmounting and
     // focus returns to the TopBar trigger matching the sidebar's active tab.
