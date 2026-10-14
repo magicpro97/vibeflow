@@ -27,6 +27,7 @@
         <InfoTip tip="Five-field cron (minute hour day-of-month month day-of-week). Default: Mondays 9am." />
       </span>
       <input
+        class="home-input"
         v-model="model.schedule"
         type="text"
         spellcheck="false"

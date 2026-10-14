@@ -326,6 +326,11 @@ describe("AI-first Home source contract", () => {
     expect(api).not.toMatch(/markdown|md simulation/i);
   });
 
+  test("quote chip controls name their quote by index", () => {
+    expect(quoteSelection).toContain("Move quote earlier for quote ${index + 1}");
+    expect(quoteSelection).toContain("Move quote later for quote ${index + 1}");
+  });
+
   test("trace and evidence open as a real public-timeline drawer", () => {
     expect(app).toContain("<HomeTraceDrawer");
     expect(home).toContain('aria-label="Open trace and evidence"');
@@ -402,10 +407,14 @@ describe("AI-first Home source contract", () => {
 
   test("every home text input carries the canonical control class", () => {
     const files = [
-      "HomeSessionRail.vue",
+      "CuratorSettings.vue",
       "HomeActionCard.vue",
       "HomeControlCenterDrawer.vue",
       "HomePreferencesDrawer.vue",
+      "HomePrivateRangePanel.vue",
+      "HomeSessionRail.vue",
+      "ProjectSettingsPanel.vue",
+      "Stage1Describe.vue",
     ];
     for (const f of files) {
       const src = read(`../src/ui/src/components/${f}`);

@@ -221,6 +221,7 @@ body {
 }
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -2539,15 +2540,10 @@ button:disabled {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* Layout only — the controls' appearance belongs to the canonical .home-input / .home-select. */
 .home-private-range-grid input,
 .home-private-range-grid select {
   width: 100%;
-  min-height: 2.75rem;
-  padding: 0 0.65rem;
-  border: 1px solid var(--home-line);
-  border-radius: 0.55rem;
-  background: var(--home-field);
-  color: var(--home-ink);
 }
 .home-private-range-panel__empty-source {
   min-height: 2.75rem;
@@ -4463,19 +4459,13 @@ button:disabled {
 .home-project-settings__row > span {
   color: var(--home-muted);
 }
+/* Layout only — the controls' appearance belongs to the canonical .home-input / .home-select. */
 .home-project-settings__row input[type="text"],
 .home-project-settings__row select,
 .home-project-settings__override input[type="text"],
 .home-project-settings__override select {
   min-width: 0;
   max-width: 12rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--home-line);
-  border-radius: 0.2rem;
-  background: var(--home-field);
-  color: var(--home-ink);
-  font: inherit;
-  font-size: 0.72rem;
 }
 .home-project-settings__overrides {
   margin-top: 0.3rem;

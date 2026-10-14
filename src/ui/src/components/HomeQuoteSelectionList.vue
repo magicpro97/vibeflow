@@ -24,7 +24,7 @@
       <span class="home-quote-chip__actions">
         <button
           type="button"
-          aria-label="Move quote earlier"
+          :aria-label="`Move quote earlier for quote ${index + 1}`"
           :disabled="index === 0"
           @click="store.moveQuoteReference(index, -1)"
         >
@@ -32,7 +32,7 @@
         </button>
         <button
           type="button"
-          aria-label="Move quote later"
+          :aria-label="`Move quote later for quote ${index + 1}`"
           :disabled="index === chips.length - 1"
           @click="store.moveQuoteReference(index, 1)"
         >

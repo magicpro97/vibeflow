@@ -45,7 +45,7 @@
           v-model="form.repoPath"
           type="text"
           placeholder="/path/to/repo (not ~/...)"
-          class="flex-1 box-border bg-transparent border border-neutral-800 rounded px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
+          class="home-input flex-1 box-border bg-transparent border border-neutral-800 rounded px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
           @blur="form.repoPath.trim() && !detectInfo && !detecting && runDetect()"
           @input="detectInfo = null; detectWarn = false; detectErr = null; engineWarning = null; detected = false"
         />
@@ -164,6 +164,7 @@
               <option value="file">file</option>
             </select>
             <input
+              class="home-input"
               v-model="src.ref"
               type="text"
               :placeholder="src.type === 'file' ? 'Absolute server-side path, e.g. /srv/docs/api.md' : 'https://…'"
@@ -200,6 +201,7 @@
               <option value="file">file</option>
             </select>
             <input
+              class="home-input"
               v-model="src.ref"
               type="text"
               :placeholder="src.type === 'file' ? 'Absolute server-side path, e.g. /srv/tasks/sprint.md' : 'https://…'"
@@ -233,7 +235,7 @@
               v-model="workflowSteps[i]"
               type="text"
               placeholder="Step description…"
-              class="flex-1 box-border bg-transparent border border-neutral-800 rounded px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
+              class="home-input flex-1 box-border bg-transparent border border-neutral-800 rounded px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
             />
             <button
               class="border border-neutral-800 hover:border-neutral-600 text-neutral-500 hover:text-neutral-200 bg-transparent px-1.5 py-1 rounded text-xs disabled:opacity-30 transition-colors"
