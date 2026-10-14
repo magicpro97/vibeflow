@@ -469,7 +469,6 @@ button:disabled {
   pointer-events: none;
 }
 .home-right-sidebar {
-  z-index: 15;
   position: relative;
   display: flex;
   flex: 0 0 var(--home-sidebar-width);
