@@ -16,9 +16,15 @@ export interface FilesMutationResponse {
   reason?: string;
 }
 
+/** GET /api/files/diff answer, matching the route: `ok:false` carries a reason only. */
 export interface FilesDiffResponse {
   ok: boolean;
-  diff?: string;
+  // Union ordered so the literal `"untracked"` never sits before a `|`: the
+  // file-tree contract pin reads a status union out of this file's source.
+  kind: "diff" | "empty" | "untracked";
+  text: string;
+  truncated: boolean;
+  binary: boolean;
   reason?: string;
 }
 
@@ -32,9 +38,9 @@ export const filesApi = {
     req<FilesMutationResponse>("POST", "/api/files/stage", { paths }),
   unstageFiles: (paths: string[]) =>
     req<FilesMutationResponse>("POST", "/api/files/unstage", { paths }),
-  fileDiff: (path: string, staged: boolean) =>
+  fileDiff: (path: string, staged: boolean, untracked = false) =>
     req<FilesDiffResponse>(
       "GET",
-      `/api/files/diff?path=${encodeURIComponent(path)}&staged=${staged ? 1 : 0}`,
+      `/api/files/diff?path=${encodeURIComponent(path)}&staged=${staged ? 1 : 0}${untracked ? "&untracked=1" : ""}`,
     ),
 };
