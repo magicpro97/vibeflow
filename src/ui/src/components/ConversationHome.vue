@@ -1,12 +1,12 @@
 <template>
   <div class="conversation-home">
     <button
-      v-if="!store.railCollapsed"
+      v-if="!store.railCollapsed || rightSidebarOpen"
       class="home-mobile-backdrop"
       type="button"
       aria-hidden="true"
       tabindex="-1"
-      @click="closeRail"
+      @click="closeBackdrop"
     />
     <HomeSessionRail />
 
@@ -125,6 +125,7 @@ import { projectHomeTimeline } from "../conversation-home-projection.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
 import { homeConversationLifecycleLabel } from "../conversation-lifecycle-presentation.js";
 import { buildAgentPresence } from "../lib/agent-presence.js";
+import { rightSidebarOpen, toggleRightSidebar } from "../right-sidebar-prefs.js";
 import HomeAgentPanel from "./HomeAgentPanel.vue";
 import HomeComposer from "./HomeComposer.vue";
 import HomeRightSidebar from "./HomeRightSidebar.vue";
@@ -249,6 +250,16 @@ function closeRail() {
       .querySelector<HTMLButtonElement>('.home-topbar button[aria-label="Open conversation list"]')
       ?.focus(),
   );
+}
+
+// The backdrop covers the conversation area only; it closes the topmost open
+// panel (right sidebar first, then the session rail).
+function closeBackdrop() {
+  if (rightSidebarOpen.value) {
+    toggleRightSidebar();
+    return;
+  }
+  closeRail();
 }
 
 function onOnline() {

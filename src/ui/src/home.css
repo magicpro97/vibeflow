@@ -18,6 +18,7 @@
   --home-blue: #4e6878;
   --home-topbar-height: 3.625rem;
   --home-rail-width: 18rem;
+  --home-sidebar-width: 22rem;
   --home-composer-width: 48rem;
   --home-shadow: 0 18px 45px rgb(58 47 33 / 0.12);
   --home-surface-top: rgb(251 250 246 / 0.94);
@@ -462,6 +463,17 @@ button:disabled {
 .home-rail[aria-hidden="true"] {
   visibility: hidden;
   pointer-events: none;
+}
+.home-right-sidebar {
+  z-index: 15;
+  display: flex;
+  flex: 0 0 var(--home-sidebar-width);
+  flex-direction: column;
+  width: var(--home-sidebar-width);
+  min-width: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--home-line);
+  background: var(--home-panel);
 }
 .home-rail__top {
   display: grid;
@@ -3812,6 +3824,7 @@ button:disabled {
 @media (max-width: 62rem) {
   :root {
     --home-rail-width: 16.5rem;
+    --home-sidebar-width: 18rem;
   }
   .home-inspector {
     position: absolute;
@@ -3849,6 +3862,14 @@ button:disabled {
     flex-basis: 0;
     box-shadow: none;
     transform: translateX(-105%);
+  }
+  .home-right-sidebar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(23rem, 88vw);
+    flex-basis: auto;
   }
   .home-mobile-backdrop {
     position: absolute;
