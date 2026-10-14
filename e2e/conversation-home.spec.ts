@@ -701,40 +701,43 @@ test.describe("AI-first conversation Home", () => {
     warnings: ["1 units on claude have no recorded resources"],
   });
 
-  async function openResourcesDrawer(page: Page) {
+  async function openResourcesPanel(page: Page) {
     await page.route("**/api/resources", (route) =>
       route.fulfill({ status: 200, json: resourcesSnapshotFixture() }),
     );
     await page.goto("/");
     await waitForPage(page);
+    // A4: the TopBar trigger opens the right sidebar and pins its Resources tab.
     await page.getByRole("button", { name: "Open resources" }).click();
-    return page.getByRole("complementary", { name: "Resources" });
+    // The panel root is a named <section>, so its role is region — the drawer's
+    // role="complementary" went away with the overlay.
+    return page.getByRole("region", { name: "Resources" });
   }
 
-  test("opens the resources drawer from the TopBar with a repo-scoped snapshot", async ({
+  test("opens the resources panel from the TopBar with a repo-scoped snapshot", async ({
     page,
   }) => {
-    const drawer = await openResourcesDrawer(page);
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByText("Totals: 1/2 done · 1200 tokens · $1.25 · 40s")).toBeVisible();
-    await expect(drawer.getByText("claude", { exact: true })).toBeVisible();
-    await expect(drawer.getByText("2 units · 1.2K tokens · $1.25")).toBeVisible();
-    await expect(drawer.getByText("1 units on claude have no recorded resources")).toBeVisible();
+    const panel = await openResourcesPanel(page);
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("Totals: 1/2 done · 1200 tokens · $1.25 · 40s")).toBeVisible();
+    await expect(panel.getByText("claude", { exact: true })).toBeVisible();
+    await expect(panel.getByText("2 units · 1.2K tokens · $1.25")).toBeVisible();
+    await expect(panel.getByText("1 units on claude have no recorded resources")).toBeVisible();
+    // Escape falls through the ladder to the sidebar collapse rung (no drawer owns
+    // the key here); the shell is v-show, so the panel hides without unmounting.
     await page.keyboard.press("Escape");
-    await expect(drawer).toBeHidden();
+    await expect(panel).toBeHidden();
   });
 
-  test("keeps the open resources drawer axe-clean", async ({ page }) => {
-    // Pin the final transition frame: axe must measure settled colors, not the
-    // 180ms opacity blend of the drawer enter animation (matches :2676/:3752).
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    const drawer = await openResourcesDrawer(page);
-    await expect(drawer).toBeVisible();
-    await expect(drawer).not.toHaveClass(/home-drawer-enter-active/);
-    await expectAxeClean(page, "resources drawer");
+  test("keeps the open resources panel axe-clean", async ({ page }) => {
+    // The sidebar is toggled with v-show and carries no enter <Transition>, so axe
+    // already reads settled colors — there is no mid-blend frame left to pin.
+    const panel = await openResourcesPanel(page);
+    await expect(panel).toBeVisible();
+    await expectAxeClean(page, "resources panel");
   });
 
-  test("files drawer: browse, filter, preview, escape", async ({ page }) => {
+  test("files panel: browse, filter, preview, escape", async ({ page }) => {
     // Playwright matches routes last-registered-FIRST: register the generic tree route
     // first so the file-preview route (registered last) wins the overlap.
     await page.route("**/api/files/tree", (route) =>
@@ -760,41 +763,56 @@ test.describe("AI-first conversation Home", () => {
     await page.goto("/");
     await waitForPage(page);
 
+    // The TopBar trigger opens the right sidebar and pins its Files tab (A4: the
+    // drawer overlay is gone; the panel now lives in the sidebar shell).
     const openFiles = page.getByRole("button", { name: "Open files" });
     await openFiles.click();
-    const drawer = page.getByLabel("Repository files");
-    await expect(drawer).toBeVisible();
+    const sidebar = page.locator(".home-right-sidebar");
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // The panel root is a named <section> inside the sidebar's tabpanel, so it is
+    // reachable by aria-label.
+    const panel = page.getByLabel("Repository files");
+    await expect(panel).toBeVisible();
 
     // Browse: expanding src/ inlines its children. Row accessible names condense
     // ("a.tsmodified"), so row locators stay substring matches; after selection the
     // preview header repeats the path, so every row lookup is scoped to the list.
     const list = page.locator(".home-files-list");
-    await drawer.getByRole("button", { name: "▸ src/" }).click();
-    const aRow = list.getByRole("button", { name: "a.ts" });
+    await panel.getByRole("button", { name: "▸ src/" }).click();
+    // A modified row now renders a second button ("Diff src/a.ts") whose name also
+    // contains "a.ts" — anchor the name so only the file button matches.
+    const aRow = list.getByRole("button", { name: /^a\.ts/ });
     await expect(aRow).toBeAttached();
     await expect(aRow).toContainText("modified");
 
     await aRow.click();
-    await expect(drawer.getByText("export {};")).toBeVisible();
+    await expect(panel.getByText("export {};")).toBeVisible();
 
-    const filter = drawer.getByPlaceholder("Filter by path");
+    const filter = panel.getByPlaceholder("Filter by path");
     await filter.fill("README");
     await expect(list.locator("li")).toHaveCount(1);
     await expect(list.getByText("src/a.ts")).not.toBeAttached();
     await expect(list.getByText("README.md")).toBeVisible();
     await filter.fill("");
 
+    // Escape is consumed by no drawer here, so the ladder collapses the sidebar
+    // (App.vue closeActiveDrawer). Collapse is v-show — the panel stays attached but
+    // hidden — and there is NO focus handoff: A4 rewired the TopBar trigger to
+    // toggleRightSidebar, which never unmounts the button, so the drawer-era
+    // `expect(openFiles).toBeFocused()` assertion no longer holds and was dropped.
     await page.keyboard.press("Escape");
-    await expect(drawer).not.toBeAttached();
-    await expect(openFiles).toBeFocused();
+    await expect(panel).toBeHidden();
 
-    // Axe the reopened drawer (mirrors the resources case): pin the final transition
-    // frame so axe measures settled colors, not the 180ms opacity blend.
-    await page.emulateMedia({ reducedMotion: "reduce" });
+    // Axe the reopened panel: the sidebar has no enter <Transition> (v-show only),
+    // so axe already measures settled colors.
     await openFiles.click();
-    await expect(drawer).toBeVisible();
-    await expect(drawer).not.toHaveClass(/home-drawer-enter-active/);
-    await expectAxeClean(page, "files drawer");
+    await expect(panel).toBeVisible();
+    await expectAxeClean(page, "files panel");
   });
 
   test("right sidebar: tabs, collapse, and escape", async ({ page }) => {
