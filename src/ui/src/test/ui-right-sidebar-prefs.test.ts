@@ -15,7 +15,8 @@ const STORAGE_KEY = "vf-right-sidebar";
 // initial prefs at load time, so the file-scope values captured below must
 // reflect this stored state. This pins the module-load wiring — replacing the
 // read with a hard-coded default object must fail the "module-load prefs
-// wiring" test at the bottom of this file.
+// wiring" test at the bottom of this file. The payload is deliberately a
+// legacy one (no `width`), so it also pins the width default.
 const seededStorage = {
   getItem: (key: string) =>
     key === STORAGE_KEY ? JSON.stringify({ open: true, tab: "files" }) : null,
@@ -26,12 +27,16 @@ const seededStorage = {
 const prefs = await import("../right-sidebar-prefs.js");
 const initialOpen = prefs.rightSidebarOpen.value;
 const initialTab = prefs.rightSidebarTab.value;
+const initialWidth = prefs.rightSidebarWidth.value;
 const {
   RIGHT_SIDEBAR_TABS,
+  RIGHT_SIDEBAR_WIDTH,
   persistRightSidebarPrefs,
   readRightSidebarPrefs,
   rightSidebarOpen,
   rightSidebarTab,
+  rightSidebarWidth,
+  setRightSidebarWidth,
   toggleRightSidebar,
 } = prefs;
 
@@ -69,6 +74,10 @@ function persisted(storage: StorageStub): unknown {
   return JSON.parse(storage.store.get(STORAGE_KEY) ?? "null");
 }
 
+function seededPrefs(payload: unknown, key = STORAGE_KEY): StorageStub {
+  return makeStorage({ [key]: JSON.stringify(payload) });
+}
+
 // Capture the prior global in beforeEach (never at module scope) and restore
 // it in afterEach — the repo's global-stub discipline.
 let previousLocalStorage: unknown;
@@ -86,80 +95,131 @@ afterEach(() => {
 });
 
 describe("right-sidebar-prefs — read/persist seams", () => {
-  test("defaults closed on the changes tab when nothing is stored", () => {
+  test("defaults OPEN on the changes tab at the default width when nothing is stored", () => {
     expect(RIGHT_SIDEBAR_TABS).toEqual(["files", "changes", "resources"]);
     expect(Object.isFrozen(RIGHT_SIDEBAR_TABS)).toBe(true);
-    expect(readRightSidebarPrefs(makeStorage())).toEqual({ open: false, tab: "changes" });
+    expect(RIGHT_SIDEBAR_WIDTH).toEqual({ DEFAULT: 320, MIN: 240, MAX: 560 });
+    expect(Object.isFrozen(RIGHT_SIDEBAR_WIDTH)).toBe(true);
+    expect(readRightSidebarPrefs(makeStorage())).toEqual({
+      open: true,
+      tab: "changes",
+      width: 320,
+    });
+    // A stored literal "null" (key present, JSON null) is the same default.
+    expect(readRightSidebarPrefs(makeStorage({ [STORAGE_KEY]: "null" }))).toEqual({
+      open: true,
+      tab: "changes",
+      width: 320,
+    });
   });
 
   test("a stored tab is honored (including the global default-parameter read)", () => {
     const seeded = { [STORAGE_KEY]: JSON.stringify({ open: true, tab: "files" }) };
-    expect(readRightSidebarPrefs(makeStorage(seeded))).toEqual({ open: true, tab: "files" });
+    expect(readRightSidebarPrefs(makeStorage(seeded))).toEqual({
+      open: true,
+      tab: "files",
+      width: 320,
+    });
     storage = installStorage(seeded);
-    expect(readRightSidebarPrefs()).toEqual({ open: true, tab: "files" });
+    expect(readRightSidebarPrefs()).toEqual({ open: true, tab: "files", width: 320 });
+  });
+
+  test("a legacy payload with no width keeps the default width", () => {
+    const s = seededPrefs({ open: true, tab: "files" });
+    expect(readRightSidebarPrefs(s)).toEqual({ open: true, tab: "files", width: 320 });
+  });
+
+  test("a stored width is honored and clamped to [240, 560]", () => {
+    const cases: [unknown, number][] = [
+      [500, 500],
+      [300.6, 301],
+      [999999, 560],
+      [10, 240],
+      ["wide", 320],
+      [null, 320],
+      [{}, 320],
+    ];
+    for (const [width, expected] of cases) {
+      const s = seededPrefs({ open: true, tab: "changes", width });
+      expect(readRightSidebarPrefs(s).width).toBe(expected);
+    }
+  });
+
+  test("an explicit stored open:false is the only way to close", () => {
+    expect(readRightSidebarPrefs(seededPrefs({ open: false, tab: "files", width: 500 }))).toEqual({
+      open: false,
+      tab: "files",
+      width: 500,
+    });
   });
 
   test("an unknown stored tab falls back to 'changes'", () => {
-    const s = makeStorage({ [STORAGE_KEY]: JSON.stringify({ open: true, tab: "nope" }) });
-    expect(readRightSidebarPrefs(s)).toEqual({ open: true, tab: "changes" });
+    const s = seededPrefs({ open: true, tab: "nope" });
+    expect(readRightSidebarPrefs(s)).toEqual({ open: true, tab: "changes", width: 320 });
   });
 
   test("corrupted JSON falls back to defaults (catch path)", () => {
     const s = makeStorage({ [STORAGE_KEY]: "{not json" });
-    expect(readRightSidebarPrefs(s)).toEqual({ open: false, tab: "changes" });
+    expect(readRightSidebarPrefs(s)).toEqual({ open: true, tab: "changes", width: 320 });
   });
 
-  test("a non-boolean open falls back to false", () => {
-    const s = makeStorage({ [STORAGE_KEY]: JSON.stringify({ open: "yes", tab: 7 }) });
-    expect(readRightSidebarPrefs(s)).toEqual({ open: false, tab: "changes" });
+  test("a non-boolean open falls back to the default (open)", () => {
+    const s = seededPrefs({ open: "yes", tab: 7 });
+    expect(readRightSidebarPrefs(s)).toEqual({ open: true, tab: "changes", width: 320 });
   });
 
   test("readRightSidebarPrefs(undefined) defaults when no storage global exists", () => {
     (globalThis as { localStorage?: unknown }).localStorage = undefined;
-    expect(readRightSidebarPrefs(undefined)).toEqual({ open: false, tab: "changes" });
-    expect(readRightSidebarPrefs()).toEqual({ open: false, tab: "changes" });
+    expect(readRightSidebarPrefs(undefined)).toEqual({
+      open: true,
+      tab: "changes",
+      width: 320,
+    });
+    expect(readRightSidebarPrefs()).toEqual({ open: true, tab: "changes", width: 320 });
   });
 
-  test("persist writes {open, tab} under the storage key", () => {
+  test("persist writes {open, tab, width} under the storage key", () => {
     const s = makeStorage();
-    persistRightSidebarPrefs(s, true, "changes");
-    expect(persisted(s)).toEqual({ open: true, tab: "changes" });
-    persistRightSidebarPrefs(s, false, "files");
-    expect(persisted(s)).toEqual({ open: false, tab: "files" });
+    persistRightSidebarPrefs(s, true, "changes", 320);
+    expect(persisted(s)).toEqual({ open: true, tab: "changes", width: 320 });
+    persistRightSidebarPrefs(s, false, "files", 500);
+    expect(persisted(s)).toEqual({ open: false, tab: "files", width: 500 });
   });
 
   test("a throwing setItem is swallowed (best-effort persistence)", () => {
     const s = makeStorage({}, { throwOnSet: true });
-    expect(() => persistRightSidebarPrefs(s, true, "changes")).not.toThrow();
+    expect(() => persistRightSidebarPrefs(s, true, "changes", 320)).not.toThrow();
     expect(s.store.size).toBe(0);
   });
 
   test("persist without storage is a no-op", () => {
-    expect(() => persistRightSidebarPrefs(undefined, true, "changes")).not.toThrow();
+    expect(() => persistRightSidebarPrefs(undefined, true, "changes", 320)).not.toThrow();
   });
 });
 
 describe("right-sidebar-prefs — module integration (single instance)", () => {
-  test("toggle flips visibility and the watcher persists {open, tab}", async () => {
+  test("toggle flips visibility and the watcher persists {open, tab, width}", async () => {
     rightSidebarOpen.value = false;
     rightSidebarTab.value = "changes";
+    rightSidebarWidth.value = 320;
     await nextTick();
     storage.store.clear();
 
     toggleRightSidebar();
     expect(rightSidebarOpen.value).toBe(true);
     await nextTick();
-    expect(persisted(storage)).toEqual({ open: true, tab: "changes" });
+    expect(persisted(storage)).toEqual({ open: true, tab: "changes", width: 320 });
 
     toggleRightSidebar();
     expect(rightSidebarOpen.value).toBe(false);
     await nextTick();
-    expect(persisted(storage)).toEqual({ open: false, tab: "changes" });
+    expect(persisted(storage)).toEqual({ open: false, tab: "changes", width: 320 });
   });
 
   test("toggleRightSidebar('files') switches the tab, opens, and persists", async () => {
     rightSidebarOpen.value = false;
     rightSidebarTab.value = "changes";
+    rightSidebarWidth.value = 320;
     await nextTick();
     storage.store.clear();
 
@@ -167,13 +227,36 @@ describe("right-sidebar-prefs — module integration (single instance)", () => {
     expect(rightSidebarTab.value).toBe("files");
     expect(rightSidebarOpen.value).toBe(true);
     await nextTick();
-    expect(persisted(storage)).toEqual({ open: true, tab: "files" });
+    expect(persisted(storage)).toEqual({ open: true, tab: "files", width: 320 });
+  });
+
+  test("setRightSidebarWidth rounds + clamps and the watcher persists the width", async () => {
+    rightSidebarOpen.value = true;
+    rightSidebarTab.value = "changes";
+    rightSidebarWidth.value = 320;
+    await nextTick();
+    storage.store.clear();
+
+    setRightSidebarWidth(700);
+    expect(rightSidebarWidth.value).toBe(560);
+    await nextTick();
+    expect(persisted(storage)).toEqual({ open: true, tab: "changes", width: 560 });
+
+    setRightSidebarWidth(300.6);
+    expect(rightSidebarWidth.value).toBe(301);
+    setRightSidebarWidth(-5);
+    expect(rightSidebarWidth.value).toBe(240);
+    setRightSidebarWidth(Number.NaN);
+    expect(rightSidebarWidth.value).toBe(320);
+    await nextTick();
+    expect(persisted(storage)).toEqual({ open: true, tab: "changes", width: 320 });
   });
 
   test("a throwing setItem does not break toggling", async () => {
     storage = installStorage({}, { throwOnSet: true });
     rightSidebarOpen.value = false;
     rightSidebarTab.value = "changes";
+    rightSidebarWidth.value = 320;
     await nextTick(); // reset persistence also swallows the storage error
 
     toggleRightSidebar();
@@ -186,6 +269,7 @@ describe("right-sidebar-prefs — module integration (single instance)", () => {
   test("without a localStorage global the module still toggles (watcher early-returns)", async () => {
     rightSidebarOpen.value = false;
     rightSidebarTab.value = "changes";
+    rightSidebarWidth.value = 320;
     await nextTick();
     storage.store.clear();
     (globalThis as { localStorage?: unknown }).localStorage = undefined;
@@ -210,5 +294,6 @@ describe("right-sidebar-prefs — module-load wiring", () => {
   test("the initial ref values honor the storage seeded before import", () => {
     expect(initialOpen).toBe(true);
     expect(initialTab).toBe("files");
+    expect(initialWidth).toBe(320);
   });
 });
