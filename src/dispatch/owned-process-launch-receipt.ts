@@ -82,15 +82,18 @@ export function waitForOwnedSupervisorReceipt(
       ? OWNED_PROCESS_TIMING_MS.CLI_RECEIPT_TIMEOUT
       : OWNED_PROCESS_TIMING_MS.SUPERVISOR_BOOT;
   const deadline = runtime.now() + timeout;
+  let lastRead = "none";
   while (runtime.now() < deadline) {
     try {
       const parsed: unknown = JSON.parse(runtime.readFileSync(path, "utf8"));
       const receipt = parseOwnedSupervisorReceipt(parsed, key);
       if (receipt) return receipt;
+      lastRead = "receipt file invalid";
     } catch (error) {
       const code =
         error && typeof error === "object" ? (error as NodeJS.ErrnoException).code : null;
       if (code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+      lastRead = code === "ENOENT" ? "receipt file absent" : "receipt file incomplete";
     }
     Atomics.wait(
       new Int32Array(new SharedArrayBuffer(4)),
@@ -99,5 +102,7 @@ export function waitForOwnedSupervisorReceipt(
       OWNED_PROCESS_TIMING_MS.SUPERVISOR_STATUS_POLL,
     );
   }
-  throw new Error(`owned supervisor ${key} receipt timed out`);
+  throw new Error(
+    `owned supervisor ${key} receipt timed out after ${timeout}ms (last read: ${lastRead})`,
+  );
 }

@@ -298,7 +298,12 @@ export const OWNED_PROCESS_LIMIT = Object.freeze({
 
 export const OWNED_PROCESS_TIMING_MS = Object.freeze({
   BIND_ACK_POLL: 10,
-  CLI_RECEIPT_TIMEOUT: 12_000,
+  // Parent deadline for the supervisor's cli_pid receipt: it must strictly
+  // cover the supervisor's worst path before it can write that receipt
+  // (bindAck round trip + CLI spawn + WINDOWS_COLD_START start-identity probe +
+  // write), so a slow-but-alive probe never trips a false receipt timeout
+  // (issue #846: loaded windows runners outran the old fixed 12s budget).
+  CLI_RECEIPT_TIMEOUT: PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.WINDOWS_COLD_START + 8_000,
   OUTPUT_DRAIN_PROOF_TIMEOUT: 30_000,
   IDENTITY_SETTLE_POLL: 10,
   PARENT_REAP_HOLD_TICK: 1_000,
@@ -306,7 +311,9 @@ export const OWNED_PROCESS_TIMING_MS = Object.freeze({
   WINDOWS_COLD_START_PROBE_TIMEOUT: PROCESS_START_IDENTITY_PROBE_TIMEOUT_MS.WINDOWS_COLD_START,
   REAP_POLL: 25,
   RECOVERY_GRACE: 250,
-  SUPERVISOR_BOOT: 2_000,
+  // Cold bun boot + antivirus scan of the spawned supervisor script before its
+  // first receipt write (issue #846).
+  SUPERVISOR_BOOT: 4_000,
   SUPERVISOR_STATUS_POLL: 10,
   TREE_TERMINATE_TIMEOUT: 3_000,
 } as const);
