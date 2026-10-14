@@ -104,7 +104,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.3
       # The typesafe live gate below drives the SHIPPED artifact under Node (`Bun.which("node")`),
       # so the toolchain must be pinned here too: without this, the release gate rides the ambient
       # Node of the `windows-latest` image and fails as "node is not on PATH" instead of a
