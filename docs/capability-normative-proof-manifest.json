@@ -618,7 +618,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -633,7 +633,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -648,7 +648,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -663,7 +663,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -678,7 +678,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -693,7 +693,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -709,7 +709,7 @@
         "src/server",
         "src/actions"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "4b22d35faab0013450c750f85118c94854a4e5768e1bf82e3980ab8548e40fdb"
     },
     {
@@ -724,7 +724,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -739,7 +739,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -754,7 +754,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -769,7 +769,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -784,7 +784,7 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "e878854e551aad52921fe3b382f0709a95df6f72adfdeb36a2d6aacd44a7ca64",
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
       "production_sha256": "48f762dbbdfdf446aa53aebf09e16d5128770000d21f4b506c09aca1f133f4e5"
     },
     {
@@ -2575,6 +2575,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "a5805b85b5fe90755533ee99b6ddb5e9a9d7af2a2cd6ed168942a0b76ee5b086"
+    "reviewed_payload_sha256": "2dbec1a5788996e0ce4ef30ee27f32da68b6d3f560bb9812d52fba80966b61f5"
   }
 }
