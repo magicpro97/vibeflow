@@ -68,10 +68,10 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { FILE_STATUS, type FileStatusLabel } from "../../../core/file-tree-contract.js";
-import { api } from "../api.js";
 import { filesApi } from "../api-files.js";
+import { api } from "../api.js";
 import { createFilesStore } from "../files-store.js";
-import { groupChanges, type ChangeGroups, type TreeFileEntry } from "../files-tree.js";
+import { type ChangeGroups, type TreeFileEntry, groupChanges } from "../files-tree.js";
 
 // Own store instance — never the Files drawer's: the panel owns its refresh,
 // staging lockout, and error surface. Same deps the drawer injects.

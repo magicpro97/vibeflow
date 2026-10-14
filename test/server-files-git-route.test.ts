@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { unsafeGitPath } from "../src/core/file-tree-contract.js";
 import {
+  type FilesGitDeps,
   STAGE_BUTTON_CAP,
   handleFilesStageRoute,
   handleFilesUnstageRoute,
   validateGitPaths,
-  type FilesGitDeps,
 } from "../src/server/files-git-route.js";
 
 // Fake runner: records argv and returns the canned result — never launches git.

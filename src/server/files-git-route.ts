@@ -40,17 +40,18 @@ function failureReason(result: RunGitResult): string {
 }
 
 /** One mutating run; git's exit code re-surfaces as ok:false, never an HTTP error. */
-function runMutation(prefix: string[], repo: string, paths: string[], deps: FilesGitDeps): Response {
+function runMutation(
+  prefix: string[],
+  repo: string,
+  paths: string[],
+  deps: FilesGitDeps,
+): Response {
   const result = deps.runGit([...prefix, "--", ...paths], repo);
   if (result.status !== 0) return Response.json({ ok: false, reason: failureReason(result) });
   return Response.json({ ok: true, changed: paths.length });
 }
 
-export function handleFilesStageRoute(
-  repo: string,
-  paths: string[],
-  deps: FilesGitDeps,
-): Response {
+export function handleFilesStageRoute(repo: string, paths: string[], deps: FilesGitDeps): Response {
   return runMutation(["add"], repo, paths, deps);
 }
 
