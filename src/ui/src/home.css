@@ -4943,11 +4943,16 @@ button:disabled {
 .home-files-list button.is-selected {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
-/* WCAG AA: the raw gold #d9a441 lands at 2.15:1 on the drawer paper; the theme
-   amber clears 4.5:1 on both the paper and the selected-row tint. */
+/* WCAG AA: the raw gold #d9a441 lands at 2.15:1 on the panel paper; the theme
+   amber clears 4.5:1 on the bare paper (4.88:1) but only 3.91:1 once the selected
+   row's 12% ink tint sits behind it — the selected-row override below re-darkens
+   the badge toward the ink (4.77:1). */
 .home-files-list em[data-status="modified"] {
   color: var(--home-amber);
   font-style: normal;
+}
+.home-files-list button.is-selected em[data-status="modified"] {
+  color: color-mix(in srgb, var(--home-amber) 80%, var(--home-ink));
 }
 .home-files-list em[data-status="untracked"],
 .home-files-list em[data-status="added"] {
