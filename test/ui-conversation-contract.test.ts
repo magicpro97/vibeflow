@@ -47,6 +47,7 @@ const controlCenter = read("../src/ui/src/components/HomeControlCenterDrawer.vue
 const updateBanner = read("../src/ui/src/components/HomeUpdateBanner.vue");
 const updateSettings = read("../src/ui/src/components/UpdateSettingsSection.vue");
 const rightSidebar = read("../src/ui/src/components/HomeRightSidebar.vue");
+const changesPanel = read("../src/ui/src/components/HomeChangesPanel.vue");
 
 const BACKEND_RUNTIME_IMPORT = /(?:^node:|(?:^|\/)server(?:\/|\.|$)|orchestrator\/conversation)/u;
 
@@ -303,6 +304,47 @@ describe("AI-first Home source contract", () => {
     for (const slot of ["files", "changes", "resources"])
       expect(rightSidebar).toContain(`<slot name="${slot}">`);
     expect(rightSidebar).toContain("home-rs-placeholder");
+  });
+
+  test("changes panel groups staged, changes, and untracked with bulk and row actions", () => {
+    // The panel mounts as the Changes tab's slot fallback; Home stays self-closing.
+    expect(rightSidebar).toContain('<slot name="changes"><HomeChangesPanel /></slot>');
+    // Own store instance, wired to the real files clients.
+    expect(changesPanel).toContain("createFilesStore");
+    expect(changesPanel).toContain("groupChanges(store.state.entries)");
+    expect(changesPanel).toContain("filesApi.stageFiles");
+    expect(changesPanel).toContain("filesApi.unstageFiles");
+    // Refresh re-runs THAT instance's load().
+    expect(changesPanel).toContain('aria-label="Refresh changes"');
+    expect(changesPanel).toContain("store.load()");
+    // Bulk actions chunk at the server's 500-path cap instead of one giant call.
+    expect(changesPanel).toContain("STAGE_PATH_CAP");
+    for (const label of [
+      "Staged",
+      "Changes",
+      "Untracked",
+      "Stage all",
+      "Unstage all",
+      "Stage all changes",
+      "Unstage all changes",
+      "No changes — working tree is clean.",
+    ])
+      expect(changesPanel).toContain(label);
+    // Per-row accessible names: "Stage <path>" / "Unstage <path>".
+    expect(changesPanel).toContain("`${group.verb} ${entry.path}`");
+    expect(changesPanel).not.toMatch(/<input|<select|v-html/u);
+    // Sidebar chrome + changes-panel presentation live in home.css.
+    for (const rule of [
+      ".home-right-sidebar__header",
+      ".home-right-sidebar__tabs",
+      ".home-right-sidebar__tab",
+      '.home-right-sidebar__tab[aria-selected="true"]',
+      ".home-right-sidebar__panels",
+      ".home-rs-placeholder",
+      ".home-change-group__header",
+      ".home-change-row__action",
+    ])
+      expect(homeCss).toContain(rule);
   });
 
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {

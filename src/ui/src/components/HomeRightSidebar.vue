@@ -35,7 +35,7 @@
         <slot name="files"><p class="home-rs-placeholder">Files will land here.</p></slot>
       </div>
       <div v-show="rightSidebarTab === 'changes'">
-        <slot name="changes"><p class="home-rs-placeholder">Changes will land here.</p></slot>
+        <slot name="changes"><HomeChangesPanel /></slot>
       </div>
       <div v-show="rightSidebarTab === 'resources'">
         <slot name="resources"><p class="home-rs-placeholder">Resources will land here.</p></slot>
@@ -52,6 +52,7 @@ import {
   rightSidebarTab,
   toggleRightSidebar,
 } from "../right-sidebar-prefs.js";
+import HomeChangesPanel from "./HomeChangesPanel.vue";
 
 const TAB_LABELS: Readonly<Record<RightSidebarTab, string>> = Object.freeze({
   files: "Files",
