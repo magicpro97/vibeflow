@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
@@ -903,6 +903,126 @@ test.describe("AI-first conversation Home", () => {
     } finally {
       // A mid-test failure must never leak a dirty workspace into later cases.
       writeFileSync(readme, original);
+      if (page.url().startsWith("http")) {
+        await page.reload();
+        await waitForPage(page);
+      }
+    }
+  });
+
+  test("changes panel: diff preview", async ({ page }) => {
+    const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
+    test.skip(!setupRun, "needs VF_PLAYWRIGHT_SETUP_RUN — the throwaway e2e workspace");
+    // Same env resolution as the stage/unstage roundtrip above: the mutated dir
+    // IS the repo the webServer serves (playwright.config.ts `cwd: WORKSPACE`).
+    const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
+    expect(existsSync(resolve(ws, ".git"))).toBe(true);
+    const readme = resolve(ws, "README.md");
+    const original = readFileSync(readme, "utf8");
+    // A changed line, not an append: the unified diff must carry a '-' and a '+'
+    // row for the same line.
+    const modified = original.replace("# E2E Demo", "# E2E Demo (diff preview)");
+
+    try {
+      await page.goto("/");
+      await waitForPage(page);
+      writeFileSync(readme, modified);
+      await page.reload();
+      await waitForPage(page);
+
+      const sidebar = page.locator(".home-right-sidebar");
+      await page.getByRole("button", { name: "Open files" }).click();
+      await expect(sidebar).toBeVisible();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+      const panel = sidebar.locator(".home-changes");
+      await expect(panel).toBeVisible();
+
+      // Scope to the Changes group: an index copy of the same path would make a
+      // panel-wide row locator ambiguous (same reason as the roundtrip case).
+      const changes = panel
+        .locator(".home-change-group")
+        .filter({ has: page.locator(".home-change-group__header strong", { hasText: "Changes" }) });
+      const row = changes
+        .locator(".home-change-row")
+        .filter({ has: page.getByRole("button", { name: "README.md", exact: true }) });
+      const pathButton = row.locator(".home-change-row__path");
+      const diff = row.locator(".home-diff");
+
+      await expect(row.locator(".home-change-row__badge")).toHaveText("modified");
+
+      // (a)+(b) open the row's inline diff: one '-' and one '+' row for the edited line.
+      await expect(diff).toBeHidden();
+      await pathButton.click();
+      await expect(diff).toBeVisible();
+      await expect(diff.locator(".home-diff--del")).toContainText("# E2E Demo");
+      await expect(diff.locator(".home-diff--add")).toContainText("# E2E Demo (diff preview)");
+      // (d) the escape ladder: no drawer consumes Escape here, so it collapses the
+      // right sidebar (App.vue closeActiveDrawer). The open diff is panel state, not
+      // a ladder rung — it survives the collapse. (Role locators stop matching while
+      // the v-show'd sidebar is display:none, so re-assert after reopening the tab.)
+      await pathButton.press("Escape");
+      await expect(sidebar).toBeHidden();
+      await page.getByRole("button", { name: "Open files" }).click();
+      await expect(sidebar).toBeVisible();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+      await expect(diff).toBeVisible();
+      // (c) the same row click toggles the diff closed.
+      await pathButton.click();
+      await expect(diff).toHaveCount(0);
+
+      // (e) axe with the diff OPEN: the tinted add/del lines were never measured.
+      await pathButton.click();
+      await expect(diff).toBeVisible();
+      await expectAxeClean(page, "changes diff");
+    } finally {
+      writeFileSync(readme, original);
+      if (page.url().startsWith("http")) {
+        await page.reload();
+        await waitForPage(page);
+      }
+    }
+  });
+
+  test("changes panel: untracked row preview", async ({ page }) => {
+    const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
+    test.skip(!setupRun, "needs VF_PLAYWRIGHT_SETUP_RUN — the throwaway e2e workspace");
+    const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
+    expect(existsSync(resolve(ws, ".git"))).toBe(true);
+    const untracked = resolve(ws, "e2e-untracked-preview.txt");
+    const content = "untracked preview line\n";
+
+    try {
+      await page.goto("/");
+      await waitForPage(page);
+      writeFileSync(untracked, content);
+      await page.reload();
+      await waitForPage(page);
+
+      const sidebar = page.locator(".home-right-sidebar");
+      await page.getByRole("button", { name: "Open files" }).click();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+      const panel = sidebar.locator(".home-changes");
+      const untrackedGroup = panel
+        .locator(".home-change-group")
+        .filter({
+          has: page.locator(".home-change-group__header strong", { hasText: "Untracked" }),
+        });
+      const row = untrackedGroup
+        .locator(".home-change-row")
+        .filter({
+          has: page.getByRole("button", { name: "e2e-untracked-preview.txt", exact: true }),
+        });
+
+      await row.locator(".home-change-row__path").click();
+      const diff = row.locator(".home-diff");
+      await expect(diff).toBeVisible();
+      // Raw content preview, never classified as a patch body.
+      await expect(diff).toHaveText(content);
+      await expect(row.locator(".home-diff--add")).toHaveCount(0);
+      await expect(row.locator(".home-diff--del")).toHaveCount(0);
+      await expect(row.getByText(/Untracked — stage it to diff/)).toBeVisible();
+    } finally {
+      rmSync(untracked, { force: true });
       if (page.url().startsWith("http")) {
         await page.reload();
         await waitForPage(page);
