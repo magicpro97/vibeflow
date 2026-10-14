@@ -38,7 +38,12 @@ import {
 } from "./server/conversation-route.js";
 import { handleDomainImpact, handleDomainsView } from "./server/domain-route.js";
 import { handleFileRoute } from "./server/file-route.js";
-import { handleFilesTreeRoute } from "./server/files-tree-route.js";
+import {
+  handleFilesStageRoute,
+  handleFilesUnstageRoute,
+  validateGitPaths,
+} from "./server/files-git-route.js";
+import { defaultRunGit, handleFilesTreeRoute } from "./server/files-tree-route.js";
 import {
   listAttachments,
   replayFromLog,
@@ -998,6 +1003,22 @@ export async function startServer(
           body.result as import("./core/types.js").HookResult,
         );
         return Response.json({ ok: true });
+      }
+
+      // --- POST /api/files/stage|unstage — self-guarded; routes.ts is at the 400 cap ---
+      if (method === "POST" && (path === "/api/files/stage" || path === "/api/files/unstage")) {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        let body: unknown = null;
+        try {
+          body = await req.json();
+        } catch {
+          body = null;
+        }
+        const paths = validateGitPaths((body as { paths?: unknown } | null)?.paths);
+        if (!paths) return Response.json({ error: "invalid paths" }, { status: 400 });
+        return path === "/api/files/stage"
+          ? handleFilesStageRoute(activeRepo, paths, { runGit: defaultRunGit })
+          : handleFilesUnstageRoute(activeRepo, paths, { runGit: defaultRunGit });
       }
 
       // --- Write surface: CSRF + loopback guard ---
