@@ -8,7 +8,7 @@
   },
   "manifest": {
     "path": "docs/capability-normative-proof-manifest.json",
-    "sha256": "755fe6dc2fb735e2024aabac478dca4b2c70b0a032ef1083f43daed8aeeae80f"
+    "sha256": "eabb411a1fa0f255ce505b22f378fd24075e08db42fc16310f78a387175a1623"
   },
   "atoms": [
     {
