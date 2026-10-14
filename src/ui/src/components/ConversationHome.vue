@@ -60,6 +60,8 @@
       />
     </section>
 
+    <HomeRightSidebar />
+
     <Transition name="home-inspector">
       <aside
         v-if="detailsOpen && store.activeRevision"
@@ -125,6 +127,7 @@ import { homeConversationLifecycleLabel } from "../conversation-lifecycle-presen
 import { buildAgentPresence } from "../lib/agent-presence.js";
 import HomeAgentPanel from "./HomeAgentPanel.vue";
 import HomeComposer from "./HomeComposer.vue";
+import HomeRightSidebar from "./HomeRightSidebar.vue";
 import HomeSessionRail from "./HomeSessionRail.vue";
 import HomeTimeline from "./HomeTimeline.vue";
 

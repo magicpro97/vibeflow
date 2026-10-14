@@ -46,6 +46,7 @@ const workUnitDetails = read("../src/ui/src/components/WorkUnitExpandedDetails.v
 const controlCenter = read("../src/ui/src/components/HomeControlCenterDrawer.vue");
 const updateBanner = read("../src/ui/src/components/HomeUpdateBanner.vue");
 const updateSettings = read("../src/ui/src/components/UpdateSettingsSection.vue");
+const rightSidebar = read("../src/ui/src/components/HomeRightSidebar.vue");
 
 const BACKEND_RUNTIME_IMPORT = /(?:^node:|(?:^|\/)server(?:\/|\.|$)|orchestrator\/conversation)/u;
 
@@ -281,6 +282,27 @@ describe("AI-first Home source contract", () => {
     expect(updateSettings).toContain("saving || !ready");
     expect(updateSettings.match(/:disabled="!ready"/g)).toHaveLength(2);
     expect(updateSettings).toContain("ready.value = true");
+  });
+
+  test("right sidebar is a tabbed workspace shell beside the conversation", () => {
+    expect(home).toContain('import HomeRightSidebar from "./HomeRightSidebar.vue"');
+    expect(home).toContain("<HomeRightSidebar />");
+    expect(rightSidebar).toContain('aria-label="Workspace panels"');
+    expect(rightSidebar).toContain('role="tablist"');
+    expect(rightSidebar).toContain('role="tab"');
+    expect(rightSidebar).toContain("aria-selected");
+    expect(rightSidebar).toContain('role="tabpanel"');
+    expect(rightSidebar).toContain("home-rs-tab-");
+    expect(rightSidebar).toContain("Files");
+    expect(rightSidebar).toContain("Changes");
+    expect(rightSidebar).toContain("Resources");
+    expect(rightSidebar).toContain('aria-label="Close panels"');
+    // Collapse hides the shell without unmounting tab content (state retention).
+    expect(rightSidebar).toContain('v-show="rightSidebarOpen"');
+    expect(rightSidebar).toContain('v-show="rightSidebarTab ===');
+    for (const slot of ["files", "changes", "resources"])
+      expect(rightSidebar).toContain(`<slot name="${slot}">`);
+    expect(rightSidebar).toContain("home-rs-placeholder");
   });
 
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {
