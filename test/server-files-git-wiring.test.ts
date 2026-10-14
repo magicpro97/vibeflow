@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { startServer } from "../src/server";
+import { startServer } from "../src/server.js";
 import { defaultRunGit } from "../src/server/files-tree-route.js";
 
 /** Fetch the CSRF token from the HTML page served at `/`. */
