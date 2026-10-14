@@ -9,16 +9,31 @@
 const { afterEach, beforeEach, describe, expect, test } = await import(String("bun:test"));
 const { nextTick } = await import(String("vue"));
 
-import {
+const STORAGE_KEY = "vf-right-sidebar";
+
+// Seed the storage global BEFORE the module is imported: the module reads its
+// initial prefs at load time, so the file-scope values captured below must
+// reflect this stored state. This pins the module-load wiring — replacing the
+// read with a hard-coded default object must fail the "module-load prefs
+// wiring" test at the bottom of this file.
+const seededStorage = {
+  getItem: (key: string) =>
+    key === STORAGE_KEY ? JSON.stringify({ open: true, tab: "files" }) : null,
+  setItem: () => undefined,
+};
+(globalThis as { localStorage?: unknown }).localStorage = seededStorage;
+
+const prefs = await import("../right-sidebar-prefs.js");
+const initialOpen = prefs.rightSidebarOpen.value;
+const initialTab = prefs.rightSidebarTab.value;
+const {
   RIGHT_SIDEBAR_TABS,
   persistRightSidebarPrefs,
   readRightSidebarPrefs,
   rightSidebarOpen,
   rightSidebarTab,
   toggleRightSidebar,
-} from "../right-sidebar-prefs.js";
-
-const STORAGE_KEY = "vf-right-sidebar";
+} = prefs;
 
 type StorageStub = {
   store: Map<string, string>;
@@ -181,5 +196,19 @@ describe("right-sidebar-prefs — module integration (single instance)", () => {
     await nextTick(); // watcher early-returns without storage
     expect(rightSidebarOpen.value).toBe(true);
     expect(storage.store.size).toBe(0);
+  });
+});
+
+// The module-load read runs exactly once, at import time — and it must go
+// through storage. The seeded storage installed at the top of this file is
+// still in place when the module is imported, so the file-scope values
+// captured right after the import pin the load-time wiring (mutant M7: a
+// hard-coded `{open: false, tab: "changes"}` initial object fails here).
+// Runs against the captured file-scope values, so the beforeEach replacement
+// of the global below/above does not affect it.
+describe("right-sidebar-prefs — module-load wiring", () => {
+  test("the initial ref values honor the storage seeded before import", () => {
+    expect(initialOpen).toBe(true);
+    expect(initialTab).toBe("files");
   });
 });
