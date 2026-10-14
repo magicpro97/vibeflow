@@ -333,6 +333,13 @@ describe("AI-first Home source contract", () => {
     // Per-row accessible names: "Stage <path>" / "Unstage <path>".
     expect(changesPanel).toContain("`${group.verb} ${entry.path}`");
     expect(changesPanel).not.toMatch(/<input|<select|v-html/u);
+    // Clicking a path toggles that row's inline diff; binary and untracked
+    // rows fall back to explicit copy instead of an empty pre.
+    expect(changesPanel).toContain("toggleDiff");
+    expect(changesPanel).toContain("home-diff");
+    expect(changesPanel).toContain("Binary file — no text diff.");
+    expect(changesPanel).toContain("Untracked — stage it to diff; preview shows content.");
+    expect(changesPanel).toContain("Diff truncated — showing the first lines.");
     // Sidebar chrome + changes-panel presentation live in home.css.
     for (const rule of [
       ".home-right-sidebar__header",
@@ -343,6 +350,11 @@ describe("AI-first Home source contract", () => {
       ".home-rs-placeholder",
       ".home-change-group__header",
       ".home-change-row__action",
+      ".home-diff",
+      ".home-diff--add",
+      ".home-diff--del",
+      ".home-diff--hunk",
+      ".home-diff--ctx",
     ])
       expect(homeCss).toContain(rule);
   });

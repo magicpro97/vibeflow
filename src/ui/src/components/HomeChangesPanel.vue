@@ -42,8 +42,14 @@
             :key="`${group.key}:${entry.path}`"
             class="home-change-row"
           >
-            <!-- Phase D wires the inline diff onto this button; until then selection is inert. -->
-            <button class="home-change-row__path" type="button" :title="entry.path">
+            <!-- The path button toggles this row's inline diff; the diff itself
+                 renders below the action button (wrapped onto its own line). -->
+            <button
+              class="home-change-row__path"
+              type="button"
+              :title="entry.path"
+              @click="toggleDiffRow(group, entry)"
+            >
               {{ entry.path }}
             </button>
             <em class="home-change-row__badge" :data-status="badgeFor(entry, group)">
@@ -58,6 +64,50 @@
             >
               {{ group.glyph }}
             </button>
+            <template v-if="isDiffOpen(group, entry)">
+              <p v-if="store.state.diffLoading" class="home-changes__note" role="status">
+                Loading diff…
+              </p>
+              <p v-else-if="store.state.diffError" class="home-changes__error" role="alert">
+                Diff unavailable: {{ store.state.diffError }}
+              </p>
+              <template v-else-if="store.state.diff">
+                <p v-if="store.state.diff.binary" class="home-changes__note">
+                  Binary file — no text diff.
+                </p>
+                <template v-else-if="store.state.diff.kind === 'untracked'">
+                  <p class="home-changes__note">
+                    Untracked — stage it to diff; preview shows content.
+                  </p>
+                  <p v-if="previewFor(entry).loading" class="home-changes__note" role="status">
+                    Loading preview…
+                  </p>
+                  <p v-else-if="previewFor(entry).error" class="home-changes__error" role="alert">
+                    Cannot preview: {{ previewFor(entry).error }}
+                  </p>
+                  <!-- Raw content, NOT a diff: an untracked file has no patch body. -->
+                  <pre
+                    v-else-if="previewFor(entry).text !== null"
+                    class="home-diff"
+                  >{{ previewFor(entry).text }}</pre>
+                </template>
+                <template v-else>
+                  <p v-if="store.state.diff.kind === 'empty'" class="home-changes__note">
+                    No changes to show.
+                  </p>
+                  <p v-else-if="truncatedDiff()" class="home-changes__note">
+                    Diff truncated — showing the first lines.
+                  </p>
+                  <pre v-if="renderedDiff.lines.length > 0" class="home-diff"
+                    ><span
+                      v-for="(line, index) in renderedDiff.lines"
+                      :key="index"
+                      :class="`home-diff--${line.kind}`"
+                      >{{ line.text }}</span
+                    ></pre>
+                </template>
+              </template>
+            </template>
           </li>
         </ul>
       </section>
@@ -70,6 +120,7 @@ import { computed, onMounted } from "vue";
 import { FILE_STATUS, type FileStatusLabel } from "../../../core/file-tree-contract.js";
 import { filesApi } from "../api-files.js";
 import { api } from "../api.js";
+import { classifyDiffLines } from "../diff-lines.js";
 import { createFilesStore } from "../files-store.js";
 import { type ChangeGroups, type TreeFileEntry, groupChanges } from "../files-tree.js";
 
@@ -80,6 +131,8 @@ const store = createFilesStore({
   readFile: (path: string) => api.readFile(path),
   stagePaths: (paths: string[]) => filesApi.stageFiles(paths),
   unstagePaths: (paths: string[]) => filesApi.unstageFiles(paths),
+  diffPaths: (path: string, staged: boolean, untracked: boolean) =>
+    filesApi.fileDiff(path, staged, untracked),
 });
 
 // Load once at mount; `Refresh changes` re-runs it.
@@ -160,5 +213,42 @@ async function mutate(group: ChangeGroupSpec, paths: string[]): Promise<void> {
 
 function badgeFor(entry: TreeFileEntry, group: ChangeGroupSpec): FileStatusLabel | undefined {
   return group.split === null ? FILE_STATUS.UNTRACKED : entry[group.split];
+}
+
+// The diff store fetches; this component only projects it onto the clicked row.
+const renderedDiff = computed(() => classifyDiffLines(store.state.diff?.text ?? ""));
+
+function isDiffOpen(group: ChangeGroupSpec, entry: TreeFileEntry): boolean {
+  const target = store.state.diffFor;
+  return Boolean(
+    target && target.path === entry.path && target.staged === (group.key === "staged"),
+  );
+}
+
+function toggleDiffRow(group: ChangeGroupSpec, entry: TreeFileEntry): void {
+  const open = isDiffOpen(group, entry);
+  void store.toggleDiff(entry.path, group.key === "staged", group.key === "untracked");
+  // Untracked rows have no patch body: the route flags the kind and the existing
+  // readFile preview supplies the content (never classified as diff text).
+  if (group.key === "untracked" && !open) void store.select(entry.path);
+}
+
+function truncatedDiff(): boolean {
+  return (store.state.diff?.truncated ?? false) || renderedDiff.value.truncated;
+}
+
+function previewFor(entry: TreeFileEntry): {
+  loading: boolean;
+  error: string | null;
+  text: string | null;
+} {
+  // `select` writes one preview slot; a row that is not the selected path is
+  // still waiting for its fetch.
+  if (store.state.selected !== entry.path) return { loading: true, error: null, text: null };
+  return {
+    loading: store.state.previewLoading,
+    error: store.state.previewError,
+    text: store.state.preview,
+  };
 }
 </script>

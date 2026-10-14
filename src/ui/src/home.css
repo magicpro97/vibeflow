@@ -5169,6 +5169,7 @@ button:disabled {
 }
 .home-change-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
   min-height: 1.75rem;
@@ -5231,6 +5232,41 @@ button:disabled {
 .home-change-row__action:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Inline diff under a clicked changes row. The tint washes sit behind the ink,
+   so add/del bodies keep the ink-on-card contrast the panel already passes;
+   --home-amber-ink (hunk) is AA on both the warm tint and its dark twin. */
+.home-diff {
+  flex: 1 1 100%;
+  max-height: 40vh;
+  margin: 0.1rem 0 0.45rem;
+  overflow: auto;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.5rem;
+  background: var(--home-tone-card);
+  color: var(--home-ink-soft);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.home-diff span {
+  display: block;
+}
+.home-diff--add {
+  background: var(--home-tone-green);
+}
+.home-diff--del {
+  background: var(--home-tone-rose);
+}
+.home-diff--hunk {
+  background: var(--home-tone-warm-panel);
+  color: var(--home-amber-ink);
+}
+.home-diff--ctx {
+  color: var(--home-muted);
 }
 
 @media (min-width: 1440px) {
