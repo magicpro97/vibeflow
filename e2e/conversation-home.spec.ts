@@ -724,9 +724,11 @@ test.describe("AI-first conversation Home", () => {
     await expect(panel.getByText("2 units · 1.2K tokens · $1.25")).toBeVisible();
     await expect(panel.getByText("1 units on claude have no recorded resources")).toBeVisible();
     // Escape falls through the ladder to the sidebar collapse rung (no drawer owns
-    // the key here); the shell is v-show, so the panel hides without unmounting.
+    // the key here); the shell is v-show, so the panel hides without unmounting and
+    // focus returns to the TopBar trigger matching the sidebar's active tab.
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
+    await expect(page.getByRole("button", { name: "Open resources" })).toBeFocused();
   });
 
   test("keeps the open resources panel axe-clean", async ({ page }) => {
@@ -801,12 +803,12 @@ test.describe("AI-first conversation Home", () => {
     await filter.fill("");
 
     // Escape is consumed by no drawer here, so the ladder collapses the sidebar
-    // (App.vue closeActiveDrawer). Collapse is v-show — the panel stays attached but
-    // hidden — and there is NO focus handoff: A4 rewired the TopBar trigger to
-    // toggleRightSidebar, which never unmounts the button, so the drawer-era
-    // `expect(openFiles).toBeFocused()` assertion no longer holds and was dropped.
+    // (App.vue closeActiveDrawer). Collapse is v-show — the panel stays attached
+    // but hidden — so the focused filter input would otherwise fall to <body>;
+    // App.vue's rightSidebarOpen watcher hands focus back to the TopBar trigger.
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
+    await expect(openFiles).toBeFocused();
 
     // Axe the reopened panel: the sidebar has no enter <Transition> (v-show only),
     // so axe already measures settled colors.
@@ -867,6 +869,9 @@ test.describe("AI-first conversation Home", () => {
 
     await sidebar.getByRole("button", { name: "Close panels" }).click();
     await expect(sidebar).toBeHidden();
+    // The Close-panels button sits inside the v-show'd shell, so the collapse must
+    // hand focus back to the TopBar trigger for the last active tab (Changes → Files).
+    await expect(openFiles).toBeFocused();
   });
 
   test("changes panel: stage and unstage a modified file", async ({ page }) => {

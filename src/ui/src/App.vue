@@ -33,7 +33,7 @@ import HomeTraceDrawer from "./components/HomeTraceDrawer.vue";
 import HomeUpdateBanner from "./components/HomeUpdateBanner.vue";
 import TopBar from "./components/TopBar.vue";
 import { useConversationHomeStore } from "./conversation-home-store.js";
-import { rightSidebarOpen, toggleRightSidebar } from "./right-sidebar-prefs.js";
+import { rightSidebarOpen, rightSidebarTab, toggleRightSidebar } from "./right-sidebar-prefs.js";
 import "./home.css";
 
 const store = useConversationHomeStore();
@@ -152,6 +152,20 @@ function closeAgents() {
   });
 }
 
+// Every true→false flip of the sidebar (Escape ladder, the panels' own Close
+// button, the backdrop) hides still-focused panel controls via v-show — focus
+// would fall to <body>. Hand it back to the TopBar trigger that matches the
+// sidebar's last active tab. Skip the initial load so a persisted "open" pref
+// never steals focus on mount.
+watch(rightSidebarOpen, (open, wasOpen) => {
+  if (open || !wasOpen) return;
+  const trigger =
+    rightSidebarTab.value === "resources"
+      ? '[aria-label="Open resources"]'
+      : '[aria-label="Open files"]';
+  nextTick(() => document.querySelector<HTMLElement>(trigger)?.focus());
+});
+
 function closeActiveDrawer(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
   if (capabilitiesOpen.value) closeCapabilities();
@@ -160,10 +174,8 @@ function closeActiveDrawer(event: KeyboardEvent) {
   else if (traceOpen.value) closeTrace();
   else if (agentsOpen.value) closeAgents();
   // Bottom of the ladder: Escape collapses the right sidebar when no drawer
-  // consumed the key (mirrors the backdrop's close order). No focus handoff:
-  // A4 rewired the TopBar triggers to toggleRightSidebar, which never unmounts
-  // the trigger button, so it keeps focus — the drawer's close-button focus
-  // addendum and its return-to-trigger both die with the overlay.
+  // consumed the key (mirrors the backdrop's close order). The collapse itself
+  // returns focus to the TopBar trigger (rightSidebarOpen watcher above).
   else if (rightSidebarOpen.value) toggleRightSidebar();
 }
 
