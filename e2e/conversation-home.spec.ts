@@ -884,7 +884,6 @@ test.describe("AI-first conversation Home", () => {
 
   test("changes panel: stage and unstage a modified file", async ({ page }) => {
     const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
-    test.skip(!setupRun, "needs VF_PLAYWRIGHT_SETUP_RUN — the throwaway e2e workspace");
     // Workers inherit the controller's setup uuid and playwright.config.ts serves
     // `cwd: resolve(PROJECT_ROOT, `.e2e-workspace-${setupRun}`)`, so the mutated dir
     // IS the repo the webServer serves. Env resolution only — no probing, no fallback.
@@ -943,7 +942,6 @@ test.describe("AI-first conversation Home", () => {
 
   test("changes panel: diff preview", async ({ page }) => {
     const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
-    test.skip(!setupRun, "needs VF_PLAYWRIGHT_SETUP_RUN — the throwaway e2e workspace");
     // Same env resolution as the stage/unstage roundtrip above: the mutated dir
     // IS the repo the webServer serves (playwright.config.ts `cwd: WORKSPACE`).
     const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
@@ -1016,7 +1014,6 @@ test.describe("AI-first conversation Home", () => {
 
   test("changes panel: untracked row preview", async ({ page }) => {
     const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
-    test.skip(!setupRun, "needs VF_PLAYWRIGHT_SETUP_RUN — the throwaway e2e workspace");
     const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
     expect(existsSync(resolve(ws, ".git"))).toBe(true);
     const untracked = resolve(ws, "e2e-untracked-preview.txt");
