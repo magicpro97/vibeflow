@@ -304,7 +304,7 @@ describe("AI-first Home source contract", () => {
 
   test("quotes and reactions use typed seams instead of markdown simulation", () => {
     expect(timeline).toContain("<HomeMessageInteractions");
-    expect(messageInteractions).toContain("Counts update only after the public fold returns");
+    expect(messageInteractions).toContain('aria-label="Add reaction"');
     expect(messageInteractions).toContain("Remove quote");
     expect(composer).toContain("<HomeQuoteSelectionList");
     expect(quoteSelection).toContain("Quoted sources");
@@ -324,6 +324,11 @@ describe("AI-first Home source contract", () => {
     expect(commandRuntime).not.toContain("HOME_REACTION_API_BLOCKER");
     expect(streamRuntime).toContain("watchHomeConversationStream");
     expect(api).not.toMatch(/markdown|md simulation/i);
+  });
+
+  test("quote chip controls name their quote by index", () => {
+    expect(quoteSelection).toContain("Move quote earlier for quote ${index + 1}");
+    expect(quoteSelection).toContain("Move quote later for quote ${index + 1}");
   });
 
   test("trace and evidence open as a real public-timeline drawer", () => {
@@ -381,5 +386,42 @@ describe("AI-first Home source contract", () => {
     expect(browserUnsafeRuntimeImports('void import("../../server/runtime.js");')).toEqual([
       "../../server/runtime.js",
     ]);
+  });
+
+  test("every home select carries the canonical control class", () => {
+    const files = [
+      "CuratorSettings.vue",
+      "HomePreferencesDrawer.vue",
+      "HomePrivateRangePanel.vue",
+      "ProjectSettingsPanel.vue",
+      "Stage1Describe.vue",
+      "UpdateSettingsSection.vue",
+    ];
+    for (const f of files) {
+      const src = read(`../src/ui/src/components/${f}`);
+      for (const m of src.matchAll(/<select\b[^>]*>/g)) {
+        expect(m[0], `${f}: ${m[0].slice(0, 60)}`).toContain("home-select");
+      }
+    }
+  });
+
+  test("every home text input carries the canonical control class", () => {
+    const files = [
+      "CuratorSettings.vue",
+      "HomeActionCard.vue",
+      "HomeControlCenterDrawer.vue",
+      "HomePreferencesDrawer.vue",
+      "HomePrivateRangePanel.vue",
+      "HomeSessionRail.vue",
+      "ProjectSettingsPanel.vue",
+      "Stage1Describe.vue",
+    ];
+    for (const f of files) {
+      const src = read(`../src/ui/src/components/${f}`);
+      for (const m of src.matchAll(/<input\b[^>]*>/g)) {
+        if (/type="(?:checkbox|radio|file)"/u.test(m[0])) continue;
+        expect(m[0], `${f}: ${m[0].slice(0, 60)}`).toContain("home-input");
+      }
+    }
   });
 });

@@ -18,18 +18,19 @@
 
     <div class="home-project-settings__row">
       <label :for="cliId">Classifier CLI</label>
-      <select :id="cliId" v-model="draft.cli" :disabled="saving">
+      <select class="home-select" :id="cliId" v-model="draft.cli" :disabled="saving">
         <option value="">Auto (recommended)</option>
         <option v-for="engine in engineOptions" :key="engine" :value="engine">{{ engine }}</option>
       </select>
     </div>
     <div class="home-project-settings__row">
       <label :for="modelId">Classifier model</label>
-      <input :id="modelId" v-model="draft.model" type="text" autocomplete="off" :disabled="saving" placeholder="engine default" />
+      <input class="home-input" :id="modelId" v-model="draft.model" type="text" autocomplete="off" :disabled="saving" placeholder="engine default" />
     </div>
     <div class="home-project-settings__row">
       <label :for="thinkingId">Thinking effort</label>
       <input
+        class="home-input"
         :id="thinkingId"
         v-model="draft.thinking"
         type="text"
@@ -73,6 +74,7 @@
             {{ entry.project.name ?? entry.project.id }}
           </span>
           <select
+            class="home-select"
             v-model="entry.row.cli"
             :disabled="saving"
             :aria-label="`${entry.project.name ?? entry.project.id} CLI override`"
@@ -81,6 +83,7 @@
             <option v-for="engine in engineOptions" :key="engine" :value="engine">{{ engine }}</option>
           </select>
           <input
+            class="home-input"
             v-model="entry.row.model"
             type="text"
             autocomplete="off"
@@ -89,6 +92,7 @@
             placeholder="model…"
           />
           <input
+            class="home-input"
             v-model="entry.row.thinking"
             type="text"
             autocomplete="off"

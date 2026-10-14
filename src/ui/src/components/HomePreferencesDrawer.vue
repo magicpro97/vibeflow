@@ -18,21 +18,21 @@
           <legend>Conversation policy</legend>
           <label>
             <span><strong>Policy</strong><small>Current: {{ store.activeRevision.policy }}</small></span>
-            <input v-model="form.policy" type="text" autocomplete="off" placeholder="direct" />
+            <input v-model="form.policy" class="home-input" type="text" autocomplete="off" placeholder="direct" />
           </label>
         </fieldset>
         <fieldset>
           <legend>Execution controls</legend>
           <label class="home-timeout-setting">
             <span><strong>Max rounds</strong><small>Leave blank to keep the current value.</small></span>
-            <input v-model="form.maxRounds" type="number" min="1" step="1" inputmode="numeric" />
+            <input v-model="form.maxRounds" class="home-input" type="number" min="1" step="1" inputmode="numeric" />
           </label>
           <label>
             <span>
               <strong>Baseline context</strong>
               <small>Current value is not exposed in the public revision summary yet.</small>
             </span>
-            <select v-model="form.baseline">
+            <select v-model="form.baseline" class="home-select">
               <option value="unchanged">No change</option>
               <option value="enabled">Enable baseline</option>
               <option value="disabled">Disable baseline</option>

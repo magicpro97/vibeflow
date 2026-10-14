@@ -9,13 +9,13 @@
       >{{ saving ? "Saving…" : "Save update settings" }}</button>
     </div>
     <label>Mode
-      <select v-model="mode" :disabled="!ready">
+      <select v-model="mode" class="home-select" :disabled="!ready">
         <option value="notify">notify — show the nudge only</option>
         <option value="auto">auto — apply updates automatically</option>
       </select>
     </label>
     <label>Package manager
-      <select v-model="manager" :disabled="!ready">
+      <select v-model="manager" class="home-select" :disabled="!ready">
         <option value="npm">npm</option>
         <option value="bun">bun</option>
         <option value="pnpm">pnpm</option>

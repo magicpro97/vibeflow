@@ -19,6 +19,7 @@
       <label>
         <span>File source</span>
         <select
+          class="home-select"
           v-if="textAttachments.length && !usePathFallback"
           ref="privateAttachmentSelect"
           aria-label="Private range file"
@@ -42,6 +43,7 @@
       <label v-if="!textAttachments.length || usePathFallback">
         <span>{{ textAttachments.length ? "Path fallback" : "Path" }}</span>
         <input
+          class="home-input"
           ref="privatePathInput"
           v-model="privateRangeDraft.path"
           type="text"
@@ -57,6 +59,7 @@
       <label>
         <span>Start line</span>
         <input
+          class="home-input"
           v-model.number="privateRangeDraft.startLine"
           type="number"
           min="1"
@@ -68,6 +71,7 @@
       <label>
         <span>End line</span>
         <input
+          class="home-input"
           v-model.number="privateRangeDraft.endLine"
           type="number"
           min="1"

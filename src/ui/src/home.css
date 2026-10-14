@@ -211,6 +211,7 @@ body,
   width: 100%;
   min-width: 320px;
   height: 100%;
+  height: 100dvh;
   margin: 0;
 }
 body {
@@ -220,6 +221,7 @@ body {
 }
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -436,6 +438,7 @@ button:disabled {
 .conversation-home {
   position: relative;
   display: flex;
+  grid-row: 3;
   min-height: 0;
   overflow: hidden;
 }
@@ -1176,7 +1179,7 @@ button:disabled {
   letter-spacing: -0.045em;
 }
 .home-welcome__copy {
-  max-width: 36rem;
+  max-width: min(44rem, 70ch);
   margin: 1rem auto 0;
   color: var(--home-muted);
   font-size: 0.93rem;
@@ -1213,12 +1216,12 @@ button:disabled {
   font-size: 1rem;
 }
 .home-starters strong {
-  font-size: 0.78rem;
+  font-size: 0.86rem;
 }
 .home-starters small {
   margin-top: 0.18rem;
   color: var(--home-faint);
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   line-height: 1.35;
 }
 .home-welcome__hint {
@@ -1281,6 +1284,7 @@ button:disabled {
   color: var(--home-amber-ink);
 }
 .home-message__content {
+  font-size: 0.9rem;
   min-width: 0;
   max-width: 65ch;
 }
@@ -1291,13 +1295,13 @@ button:disabled {
   gap: 0.55rem;
 }
 .home-message__content header strong {
-  font-size: 0.76rem;
+  font-size: 0.84rem;
   font-weight: 680;
 }
 .home-message__content time,
 .home-system-event time {
   color: var(--home-faint);
-  font-size: 0.62rem;
+  font-size: 0.72rem;
 }
 .home-message__content p {
   margin: 0.32rem 0 0;
@@ -1344,39 +1348,10 @@ button:disabled {
 }
 .home-message-quotes {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.3rem;
   margin-top: 0.8rem;
   padding-left: 0.35rem;
   border-left: 1px solid rgb(185 95 38 / 0.24);
-}
-.home-message-quote {
-  display: grid;
-  gap: 0.28rem;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid rgb(185 95 38 / 0.15);
-  border-radius: 0.7rem;
-  background: var(--home-tone-amber-tint);
-}
-.home-message-quote header {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.55rem;
-}
-.home-message-quote header strong {
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.home-message-quote header small {
-  color: var(--home-faint);
-  font-size: 0.64rem;
-}
-.home-message-quote p {
-  margin: 0;
-  color: var(--home-ink);
-  font-size: 0.78rem;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
 }
 .home-interaction-hint {
   margin-top: 0.72rem;
@@ -1465,6 +1440,24 @@ button:disabled {
   padding: 0;
   list-style: none;
 }
+.home-reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 1.7rem;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--home-line);
+  border-radius: 999px;
+  background: var(--home-paper-strong);
+}
+.home-reaction-pill[aria-pressed="true"] {
+  border-color: var(--home-amber);
+  background: var(--home-amber-soft);
+}
+.home-reaction-pill__count {
+  font-size: 0.72rem;
+  font-weight: 650;
+}
 .home-reaction-picker {
   min-width: min(100%, 24rem);
 }
@@ -1478,11 +1471,6 @@ button:disabled {
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-top: 0.45rem;
-}
-.home-reaction-picker__note {
-  margin: 0.45rem 0 0;
-  color: var(--home-faint);
-  font-size: 0.65rem;
 }
 .home-revision-boundary {
   display: grid;
@@ -1572,7 +1560,7 @@ button:disabled {
   width: 100%;
   max-width: min(100%, calc(var(--home-composer-width) + 2rem));
   margin: 0 auto;
-  padding: 0.9rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.9rem 1rem env(safe-area-inset-bottom, 0px);
   overflow-y: auto;
   overscroll-behavior: contain;
   pointer-events: auto;
@@ -1800,6 +1788,63 @@ button:disabled {
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-top: 0.55rem;
+}
+.home-quote-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem 0.5rem;
+  border-left: 3px solid var(--home-amber);
+  border-radius: 0.35rem 0.6rem 0.6rem 0.35rem;
+  background: var(--home-tone-warm-elev);
+  padding: 0.45rem 0.6rem;
+}
+.home-quote-chip__jump {
+  display: grid;
+  gap: 0.15rem;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.home-quote-chip__jump strong {
+  font-size: 0.72rem;
+  color: var(--home-amber-ink);
+}
+.home-quote-chip__excerpt {
+  font-size: 0.82rem;
+  color: var(--home-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.home-quote-chip__actions {
+  display: flex;
+  gap: 0.2rem;
+  align-items: start;
+}
+.home-quote-chip__actions button {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--home-amber-ink);
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+.home-quote-chip__actions button:hover:not(:disabled) {
+  background: var(--home-amber-soft);
+}
+.home-quote-chip[data-status="missing"],
+.home-quote-chip[data-status="stale"],
+.home-quote-chip[data-status="foreign"] {
+  border-left-color: var(--home-red);
 }
 .home-composer {
   position: relative;
@@ -2495,15 +2540,10 @@ button:disabled {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* Layout only — the controls' appearance belongs to the canonical .home-input / .home-select. */
 .home-private-range-grid input,
 .home-private-range-grid select {
   width: 100%;
-  min-height: 2.75rem;
-  padding: 0 0.65rem;
-  border: 1px solid var(--home-line);
-  border-radius: 0.55rem;
-  background: var(--home-field);
-  color: var(--home-ink);
 }
 .home-private-range-panel__empty-source {
   min-height: 2.75rem;
@@ -4419,19 +4459,13 @@ button:disabled {
 .home-project-settings__row > span {
   color: var(--home-muted);
 }
+/* Layout only — the controls' appearance belongs to the canonical .home-input / .home-select. */
 .home-project-settings__row input[type="text"],
 .home-project-settings__row select,
 .home-project-settings__override input[type="text"],
 .home-project-settings__override select {
   min-width: 0;
   max-width: 12rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--home-line);
-  border-radius: 0.2rem;
-  background: var(--home-field);
-  color: var(--home-ink);
-  font: inherit;
-  font-size: 0.72rem;
 }
 .home-project-settings__overrides {
   margin-top: 0.3rem;
@@ -4947,4 +4981,47 @@ button:disabled {
 .home-files-list,
 .home-files-preview {
   margin: 0 1.15rem;
+}
+
+@media (min-width: 1440px) {
+  .home-welcome {
+    margin-top: clamp(1rem, 4vh, 4rem);
+  }
+  .home-thread {
+    padding-inline: clamp(1rem, 4vw, 3.5rem);
+  }
+  .home-message__content {
+    max-width: 72ch;
+  }
+}
+
+/* Canonical form controls — every input/select in Home uses these. */
+.home-input,
+.home-select {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.6rem;
+  background: var(--home-paper-strong);
+  color: var(--home-ink);
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+.home-select {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23867a6a' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 0.7rem;
+  cursor: pointer;
+}
+.home-input:disabled,
+.home-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.home-input:hover:not(:disabled),
+.home-select:hover:not(:disabled) {
+  border-color: var(--home-amber);
 }

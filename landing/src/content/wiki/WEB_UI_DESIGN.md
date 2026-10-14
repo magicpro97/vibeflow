@@ -123,6 +123,21 @@ Messages accept only 👍, 👎, ❤️, 🎉, 👀, 🤔, ✅, and ❗ reaction
 records rather than prompt syntax; an agent may add at most three distinct non-self
 reactions so the affordance does not become noise.
 
+#### Community conventions
+
+Home follows community chat conventions for quoting and reactions.
+- **Quote = replying-to bar.** A sent message shows its quotes as a compact bar above
+  it, whole row a jump back to the source, with the author and a two-line excerpt; the
+  composer's quote tray adds a per-chip dismiss.
+- **Reactions = emoji count pills.** Emoji + count pills, own reaction tinted
+  (`aria-pressed`), picker restricted to the typed emoji set with typed semantics in
+  the accessible name (e.g. `Approve reaction`) — no implementation jargon.
+- **Canonical controls.** Home form controls share `.home-input` / `.home-select`
+  styling; no per-panel variants.
+- **Viewport-filling shell.** The Home shell fills the dynamic viewport (`100dvh`,
+  `100%` fallback) with the composer pinned to the bottom — no dead strip below the
+  fold.
+
 ### 6. Repository intake
 
 Run `vf init` in a TTY for first-run repository intake; it asks the goal, engine, sources,
