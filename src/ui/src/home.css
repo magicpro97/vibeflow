@@ -14,6 +14,8 @@
   --home-amber: #9c4d18;
   --home-amber-soft: #f2dfce;
   --home-green: #47725c;
+  /* Status-badge green (untracked/added): raw #4aa564 is only 2.48:1 on the light paper. */
+  --home-badge-new: #35704a;
   --home-red: #a84b3e;
   --home-blue: #4e6878;
   --home-topbar-height: 3.625rem;
@@ -93,6 +95,7 @@
     --home-amber: #d98a4a;
     --home-amber-soft: #3d2e1e;
     --home-green: #6aa684;
+    --home-badge-new: #55a672;
     --home-red: #d4756a;
     --home-blue: #7a9aaa;
     --home-shadow: 0 18px 45px rgb(0 0 0 / 0.4);
@@ -155,6 +158,7 @@
   --home-amber: #d98a4a;
   --home-amber-soft: #3d2e1e;
   --home-green: #6aa684;
+    --home-badge-new: #55a672;
   --home-red: #d4756a;
   --home-blue: #7a9aaa;
   --home-shadow: 0 18px 45px rgb(0 0 0 / 0.4);
@@ -5042,7 +5046,7 @@ button:disabled {
 }
 .home-files-list em[data-status="untracked"],
 .home-files-list em[data-status="added"] {
-  color: #4aa564;
+  color: var(--home-badge-new);
   font-style: normal;
 }
 .home-files-list em[data-status="renamed"] {
@@ -5197,7 +5201,7 @@ button:disabled {
 }
 .home-change-row__badge[data-status="untracked"],
 .home-change-row__badge[data-status="added"] {
-  color: #4aa564;
+  color: var(--home-badge-new);
 }
 .home-change-row__badge[data-status="renamed"] {
   color: #6da3d9;
