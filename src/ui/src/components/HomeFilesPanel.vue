@@ -1,5 +1,20 @@
 <template>
   <section class="home-files-panel" aria-label="Repository files">
+    <!-- The sidebar keeps this panel mounted across tab switches (v-show), so the
+         em[data-status] badges only move on demand — mirror the Changes panel's
+         Refresh. ponytail: split into a `.home-files__refresh` alias if the two
+         panels ever need to diverge visually. -->
+    <header class="home-changes__toolbar">
+      <button
+        class="home-changes__refresh"
+        type="button"
+        aria-label="Refresh files"
+        :disabled="store.state.loading"
+        @click="void store.load()"
+      >
+        Refresh
+      </button>
+    </header>
     <label class="home-files-search">
       <span class="sr-only">Filter files</span>
       <input

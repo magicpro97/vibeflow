@@ -359,6 +359,14 @@ describe("AI-first Home source contract", () => {
       expect(homeCss).toContain(rule);
   });
 
+  test("files panel refreshes on demand instead of only at mount", () => {
+    const filesPanel = read("../src/ui/src/components/HomeFilesPanel.vue");
+    // The sidebar keeps this panel mounted (v-show), so a stale badge list needs
+    // a manual refetch — same affordance and pin style as the Changes panel.
+    expect(filesPanel).toContain('aria-label="Refresh files"');
+    expect(filesPanel).toContain("store.load()");
+  });
+
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {
     expect(rootStore).not.toMatch(/askOpen|askPrefill|openAsk|closeAsk/);
     expect(workUnitDetails).toContain("Use in conversation");
