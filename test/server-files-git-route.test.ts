@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { unsafeGitPath } from "../src/core/file-tree-contract.js";
 import {
+  DIFF_MAX_CHARS,
   type FilesGitDeps,
   STAGE_BUTTON_CAP,
+  handleFilesDiffRoute,
   handleFilesStageRoute,
   handleFilesUnstageRoute,
   validateGitPaths,
@@ -106,5 +108,126 @@ describe("validateGitPaths", () => {
     expect(unsafeGitPath("../x")).toBe(true);
     expect(unsafeGitPath("/abs")).toBe(true);
     expect(unsafeGitPath("src/a b.ts")).toBe(false);
+  });
+});
+
+describe("handleFilesDiffRoute: exact argv, cap, binary + untracked passthrough", () => {
+  interface DiffBody {
+    ok: boolean;
+    kind?: string;
+    text?: string;
+    truncated?: boolean;
+    binary?: boolean;
+    reason?: string;
+  }
+  const body = async (res: Response) => (await res.json()) as DiffBody;
+
+  test("staged runs exactly `git diff --cached --no-color -- <path>`", async () => {
+    const git = fakeGit({ status: 0, stdout: "diff --git a/src/a.ts b/src/a.ts\n" });
+    const res = handleFilesDiffRoute("/repo", "src/a.ts", true, false, git.deps);
+    expect(res.status).toBe(200);
+    expect(git.calls).toHaveLength(1);
+    expect(git.calls[0]?.args).toEqual(["diff", "--cached", "--no-color", "--", "src/a.ts"]);
+    expect(git.calls[0]?.cwd).toBe("/repo");
+    expect(await body(res)).toEqual({
+      ok: true,
+      kind: "diff",
+      text: "diff --git a/src/a.ts b/src/a.ts\n",
+      truncated: false,
+      binary: false,
+    });
+  });
+
+  test("unstaged runs exactly `git diff --no-color -- <path>`", async () => {
+    const git = fakeGit({ status: 0, stdout: "+line\n" });
+    const res = handleFilesDiffRoute("/repo", "docs/b c.md", false, false, git.deps);
+    expect(git.calls[0]?.args).toEqual(["diff", "--no-color", "--", "docs/b c.md"]);
+    expect(await body(res)).toEqual({
+      ok: true,
+      kind: "diff",
+      text: "+line\n",
+      truncated: false,
+      binary: false,
+    });
+  });
+
+  test("untracked flag short-circuits: no git run, kind untracked", async () => {
+    const git = fakeGit({ status: 0, stdout: "never read" });
+    const res = handleFilesDiffRoute("/repo", "new.ts", false, true, git.deps);
+    expect(git.calls).toHaveLength(0);
+    expect(await body(res)).toEqual({
+      ok: true,
+      kind: "untracked",
+      text: "",
+      truncated: false,
+      binary: false,
+    });
+  });
+
+  test("`Binary files` marker yields binary:true with empty text", async () => {
+    const git = fakeGit({ status: 0, stdout: "Binary files a/logo.png and b/logo.png differ\n" });
+    const res = handleFilesDiffRoute("/repo", "logo.png", false, false, git.deps);
+    expect(await body(res)).toEqual({
+      ok: true,
+      kind: "diff",
+      text: "",
+      truncated: false,
+      binary: true,
+    });
+  });
+
+  test("truncation boundary: exactly DIFF_MAX_CHARS kept, one more sliced", async () => {
+    const atCap = fakeGit({ status: 0, stdout: "x".repeat(DIFF_MAX_CHARS) });
+    const exact = await body(handleFilesDiffRoute("/repo", "big.ts", false, false, atCap.deps));
+    expect(exact.truncated).toBe(false);
+    expect(exact.text).toHaveLength(DIFF_MAX_CHARS);
+
+    const over = fakeGit({ status: 0, stdout: "x".repeat(DIFF_MAX_CHARS + 1) });
+    const sliced = await body(handleFilesDiffRoute("/repo", "big.ts", false, false, over.deps));
+    expect(sliced.truncated).toBe(true);
+    expect(sliced.text).toHaveLength(DIFF_MAX_CHARS);
+  });
+
+  test("empty and whitespace-only stdout are kind empty", async () => {
+    for (const stdout of ["", "\n"]) {
+      const git = fakeGit({ status: 0, stdout });
+      expect(await body(handleFilesDiffRoute("/repo", "src/a.ts", false, false, git.deps))).toEqual(
+        {
+          ok: true,
+          kind: "empty",
+          text: "",
+          truncated: false,
+          binary: false,
+        },
+      );
+    }
+  });
+
+  test("non-zero status: 200, ok:false, first stderr line only", async () => {
+    const git = fakeGit({
+      status: 1,
+      stdout: "",
+      stderr: "fatal: bad revision\nsecond line never leaks",
+    });
+    const res = handleFilesDiffRoute("/repo", "src/a.ts", false, false, git.deps);
+    expect(res.status).toBe(200);
+    expect(await body(res)).toEqual({ ok: false, reason: "fatal: bad revision" });
+  });
+
+  test("runner failure (status null) degrades to a stable reason", async () => {
+    const git = fakeGit({ status: null, stdout: "" });
+    const res = handleFilesDiffRoute("/repo", "src/a.ts", true, false, git.deps);
+    expect(res.status).toBe(200);
+    expect(await body(res)).toEqual({ ok: false, reason: "git command failed" });
+  });
+
+  test("unsafe path: 400 invalid paths, git never runs", async () => {
+    for (const path of ["-A", "--pathspec-from-file=x", "../x", "/abs", "a\u0000b", ""]) {
+      const git = fakeGit({ status: 0, stdout: "nope" });
+      const res = handleFilesDiffRoute("/repo", path, false, false, git.deps);
+      expect(res.status, path).toBe(400);
+      expect(git.calls).toHaveLength(0);
+      expect(await res.json()).toEqual({ error: "invalid paths" });
+    }
   });
 });
