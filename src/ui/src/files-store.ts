@@ -19,6 +19,10 @@ interface FileResponse {
 export interface FilesStoreDeps {
   fetchTree: () => Promise<TreeResponse>;
   readFile: (path: string) => Promise<FileResponse>;
+  // Optional so every existing store test still compiles; the drawer injects
+  // the real client calls (filesApi.stageFiles / unstageFiles).
+  stagePaths?: (paths: string[]) => Promise<{ ok: boolean; reason?: string }>;
+  unstagePaths?: (paths: string[]) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 export interface FilesState {
@@ -32,6 +36,7 @@ export interface FilesState {
   preview: string | null;
   previewError: string | null;
   previewLoading: boolean;
+  staging: boolean;
 }
 
 export function createFilesStore(deps: FilesStoreDeps) {
@@ -46,6 +51,7 @@ export function createFilesStore(deps: FilesStoreDeps) {
     preview: null,
     previewError: null,
     previewLoading: false,
+    staging: false,
   });
 
   async function load(): Promise<void> {
@@ -96,5 +102,37 @@ export function createFilesStore(deps: FilesStoreDeps) {
     else state.expanded.add(path);
   }
 
-  return { state, load, select, toggle };
+  // One mutation at a time: a call while `staging` is set is dropped on the
+  // floor (the buttons render disabled anyway). On success the tree is
+  // refetched so the index column matches git; on failure the reason keeps
+  // `state.error`'s existing convention. `staging` resets in `finally`, so a
+  // failed call can be retried.
+  async function mutate(
+    call: ((paths: string[]) => Promise<{ ok: boolean; reason?: string }>) | undefined,
+    paths: string[],
+  ): Promise<void> {
+    if (state.staging || !call) return;
+    state.staging = true;
+    try {
+      const res = await call(paths);
+      if (!res.ok) {
+        state.error = res.reason ?? "unavailable";
+      } else {
+        await load();
+      }
+    } catch (err) {
+      state.error = err instanceof Error ? err.message : String(err);
+    } finally {
+      state.staging = false;
+    }
+  }
+
+  return {
+    state,
+    load,
+    select,
+    toggle,
+    stage: (paths: string[]) => mutate(deps.stagePaths, paths),
+    unstage: (paths: string[]) => mutate(deps.unstagePaths, paths),
+  };
 }

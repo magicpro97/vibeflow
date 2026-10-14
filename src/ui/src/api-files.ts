@@ -10,10 +10,31 @@ export interface FilesTreeClientEntry {
   status?: FileStatusLabel;
 }
 
+/** Shared answer shape for the mutating files endpoints (git exit ≠ HTTP error). */
+export interface FilesMutationResponse {
+  ok: boolean;
+  reason?: string;
+}
+
+export interface FilesDiffResponse {
+  ok: boolean;
+  diff?: string;
+  reason?: string;
+}
+
 export const filesApi = {
   filesTree: () =>
     req<{ ok: boolean; entries: FilesTreeClientEntry[]; truncated: boolean }>(
       "GET",
       "/api/files/tree",
+    ),
+  stageFiles: (paths: string[]) =>
+    req<FilesMutationResponse>("POST", "/api/files/stage", { paths }),
+  unstageFiles: (paths: string[]) =>
+    req<FilesMutationResponse>("POST", "/api/files/unstage", { paths }),
+  fileDiff: (path: string, staged: boolean) =>
+    req<FilesDiffResponse>(
+      "GET",
+      `/api/files/diff?path=${encodeURIComponent(path)}&staged=${staged ? 1 : 0}`,
     ),
 };
