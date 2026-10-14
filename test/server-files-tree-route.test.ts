@@ -124,6 +124,63 @@ describe("handleFilesTreeRoute", () => {
     }
   });
 
+  test("splits porcelain into index/worktree halves; untracked and unmerged carry none", async () => {
+    const git = fakeGit([
+      {
+        status: 0,
+        stdout: "src/a.ts\0src/new.ts\0notes.md\0src/c.ts\0w.txt\0i.txt\0t.txt\0new.txt\0",
+      },
+      {
+        status: 0,
+        stdout:
+          "MM src/a.ts\0AM src/new.ts\0?? notes.md\0UU src/c.ts\0 M w.txt\0M  i.txt\0T  t.txt\0R  new.txt\0old.txt\0",
+      },
+    ]);
+    const body = (await handleFilesTreeRoute("/repo", git.deps).json()) as {
+      entries: {
+        path: string;
+        status?: string;
+        index?: string;
+        worktree?: string;
+        untracked?: boolean;
+      }[];
+    };
+    const byPath = new Map(body.entries.map((e) => [e.path, e]));
+    // MM: both halves modified — exact shape also proves no untracked flag.
+    expect(byPath.get("src/a.ts")).toEqual({
+      path: "src/a.ts",
+      status: FILE_STATUS.MODIFIED,
+      index: FILE_STATUS.MODIFIED,
+      worktree: FILE_STATUS.MODIFIED,
+    });
+    // AM: staged add, then edited again in the worktree.
+    expect(byPath.get("src/new.ts")).toEqual({
+      path: "src/new.ts",
+      status: FILE_STATUS.ADDED,
+      index: FILE_STATUS.ADDED,
+      worktree: FILE_STATUS.MODIFIED,
+    });
+    // ??: untracked flag only — no index/worktree halves.
+    expect(byPath.get("notes.md")).toEqual({
+      path: "notes.md",
+      status: FILE_STATUS.UNTRACKED,
+      untracked: true,
+    });
+    // UU: unmerged carries NO badge and NO halves.
+    expect(byPath.get("src/c.ts")).toEqual({ path: "src/c.ts" });
+    // " M" is worktree-only; "M " is index-only.
+    expect(byPath.get("w.txt")?.worktree).toBe(FILE_STATUS.MODIFIED);
+    expect(byPath.get("w.txt")?.index).toBeUndefined();
+    expect(byPath.get("i.txt")?.index).toBe(FILE_STATUS.MODIFIED);
+    expect(byPath.get("i.txt")?.worktree).toBeUndefined();
+    // "T " (typechange) reads as modified on the index half.
+    expect(byPath.get("t.txt")?.index).toBe(FILE_STATUS.MODIFIED);
+    // Rename keyed by the NEW path; the old chunk stays out of the map.
+    expect(byPath.get("new.txt")?.index).toBe(FILE_STATUS.RENAMED);
+    expect(byPath.get("new.txt")?.status).toBe(FILE_STATUS.RENAMED);
+    expect(byPath.get("old.txt")).toBeUndefined();
+  });
+
   test("unsafe paths are dropped before they reach the UI (and do not fake truncation)", async () => {
     const git = fakeGit([
       { status: 0, stdout: `ok.txt\0../escape.txt\0${String.fromCharCode(7)}bell.txt\0` },

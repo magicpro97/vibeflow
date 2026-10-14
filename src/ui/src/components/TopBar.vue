@@ -31,7 +31,7 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3h8v4h3v7h-3v3H6v-3H3V7h3V3Z" /></svg>
         <span>Capabilities</span>
       </button>
-      <button class="home-topbar-button" type="button" aria-label="Open files" title="Files" :disabled="Boolean(store.queuedMessageEdit)" @click="$emit('open-files')">
+      <button class="home-topbar-button" type="button" aria-label="Open files" title="Files" :disabled="Boolean(store.queuedMessageEdit)" @click="toggleRightSidebar('files')">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h5l1.5 2H16v10H4V3Z" /></svg>
         <span>Files</span>
       </button>
@@ -49,7 +49,7 @@
         <svg v-else-if="current === 'dark'" viewBox="0 0 20 20" aria-hidden="true"><path d="M17.4 11.5A8 8 0 0 1 8.5 2.6 8 8 0 1 0 17.4 11.5Z" /></svg>
         <svg v-else viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4" /><path d="M10 2v2m0 12v2M2 10h2m12 0h2M5.5 5.5l1 1m7 7 1 1m0-9-1 1m-7 7-1 1" /><circle cx="10" cy="10" r="1.5" fill="none" stroke-width="1.5" stroke-dasharray="2 2" /></svg>
       </button>
-      <button class="home-icon-button" type="button" aria-label="Open resources" title="Resources" @click="$emit('open-resources')">
+      <button class="home-icon-button" type="button" aria-label="Open resources" title="Resources" @click="toggleRightSidebar('resources')">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16V9m4 7V4m4 12v-5m4 5V7" /></svg>
       </button>
       <button class="home-icon-button" type="button" aria-label="Open settings" title="Settings" @click="$emit('open-settings')">
@@ -64,13 +64,12 @@
 import { computed, nextTick } from "vue";
 import { SCHEME_LABELS, useColorScheme } from "../composables/useColorScheme.js";
 import { useConversationHomeStore } from "../conversation-home-store.js";
+import { toggleRightSidebar } from "../right-sidebar-prefs.js";
 
 defineEmits<{
   "open-capabilities": [];
   "open-settings": [];
   "open-control-center": [];
-  "open-resources": [];
-  "open-files": [];
 }>();
 const store = useConversationHomeStore();
 const { current, toggle } = useColorScheme();

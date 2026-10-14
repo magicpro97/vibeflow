@@ -273,7 +273,7 @@
         "src/server"
       ],
       "test_sha256": "b505741f2480fee7793a3515441ef454bfd082e3434ac5c4426d44ae21aa37aa",
-      "production_sha256": "f2fba2d0530c7a8bc6fa341056f1f3063f68f3b35c25feebfd2df0eed85d5342"
+      "production_sha256": "c252d1122db35149cc8efa846ec4b89e9c2fa81f3aea5b077f6edc7f779a7478"
     },
     {
       "id": "proof:bun:test/capabilities/authority-audit.test.ts#authority-crash-frontiers",
@@ -379,7 +379,7 @@
         "src/server"
       ],
       "test_sha256": "8a5a7b96a46d6c0ad97856ee1f23ec51ee303500abcf2b229b992883b19fd1a8",
-      "production_sha256": "92eb5a6214154f96cc419ae9c1b0d9af9a1c1d9e37e63de8fbcecc8ccec44a64"
+      "production_sha256": "ca397bdb711b1555d2d5c3fe9d6ab4f251ab4d59d716c4de23be0d46f6757b77"
     },
     {
       "id": "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
@@ -552,7 +552,7 @@
         "src/ui/src"
       ],
       "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
-      "production_sha256": "0c8759f5359f9995dbd727bc309d9cb7df06b8790162daed62329b9db285db85"
+      "production_sha256": "8de1a925f953d789f320962c728e79073d3c6ec964cd393bdcca04eea5aa6833"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-pagination-epoch",
@@ -565,7 +565,7 @@
         "src/ui/src"
       ],
       "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
-      "production_sha256": "0c8759f5359f9995dbd727bc309d9cb7df06b8790162daed62329b9db285db85"
+      "production_sha256": "8de1a925f953d789f320962c728e79073d3c6ec964cd393bdcca04eea5aa6833"
     },
     {
       "id": "proof:bun:test/ui-conversation-home-pagination-authority.test.ts#home-pagination-head-authority",
@@ -578,7 +578,7 @@
         "src/ui/src"
       ],
       "test_sha256": "8e62143168f8ee72c165cff055c48cbb2a2dbde178653a2dd2cb32f886cd3e61",
-      "production_sha256": "0c8759f5359f9995dbd727bc309d9cb7df06b8790162daed62329b9db285db85"
+      "production_sha256": "8de1a925f953d789f320962c728e79073d3c6ec964cd393bdcca04eea5aa6833"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-private-file-once",
@@ -591,7 +591,7 @@
         "src/ui/src"
       ],
       "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
-      "production_sha256": "0c8759f5359f9995dbd727bc309d9cb7df06b8790162daed62329b9db285db85"
+      "production_sha256": "8de1a925f953d789f320962c728e79073d3c6ec964cd393bdcca04eea5aa6833"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-quotes",
@@ -604,7 +604,7 @@
         "src/ui/src"
       ],
       "test_sha256": "3d8499bd8df8de38246338cc94f30e82bac3a5a8faae0abefc919a42c60154a9",
-      "production_sha256": "0c8759f5359f9995dbd727bc309d9cb7df06b8790162daed62329b9db285db85"
+      "production_sha256": "8de1a925f953d789f320962c728e79073d3c6ec964cd393bdcca04eea5aa6833"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-real-create",
@@ -618,8 +618,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-inline-controls",
@@ -633,8 +633,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-rapid-switch",
@@ -648,8 +648,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-social-fold",
@@ -663,8 +663,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-private-file-browser",
@@ -678,8 +678,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-focus-restoration",
@@ -693,8 +693,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-action-authority",
@@ -709,8 +709,8 @@
         "src/server",
         "src/actions"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "5118ab4e515d8cd8470ea97c7ed0731a1224b2553e7270db6badaca54f046f14"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "7ed5db6b83101a213bb04ab13e24ba959b8c00576418d00927e56159aa7c66a7"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-draft-error",
@@ -724,8 +724,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-offline-ime",
@@ -739,8 +739,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-quote-private-zoom",
@@ -754,8 +754,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-responsive-reflow",
@@ -769,8 +769,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/conversation-home.spec.ts#home-accessibility",
@@ -784,8 +784,8 @@
         "src/server.ts",
         "src/server"
       ],
-      "test_sha256": "45a004ccf9a9bf6d4d1c402d9fc895fafea581a16863200c994b325ae23d31dd",
-      "production_sha256": "ed392349b83aebaf5fbbe26fc9a16d2517636925273dc2e5d8d4769ec078df17"
+      "test_sha256": "89dda0a863a01df8194a22ba49e6d09476366c4bf0b3e40119841ca289148d92",
+      "production_sha256": "30e0ed35123ba919125a735d5ee81253343e419de44a14bae2335fa5159d8eaf"
     },
     {
       "id": "proof:playwright:e2e/bun-serve-compat.e2e.ts#bun-server-bounded-stream",
@@ -799,7 +799,7 @@
         "src/server"
       ],
       "test_sha256": "5601d1646d444f8541cc96b0b911528b3d67607db362d136e12195a6a9fd0d04",
-      "production_sha256": "f2fba2d0530c7a8bc6fa341056f1f3063f68f3b35c25feebfd2df0eed85d5342"
+      "production_sha256": "c252d1122db35149cc8efa846ec4b89e9c2fa81f3aea5b077f6edc7f779a7478"
     },
     {
       "id": "proof:bun:test/orchestrator/conversation-message-queue.test.ts#durable-message-fifo",
@@ -2575,6 +2575,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "b0ad0fe7ed3faca523aca96a87c3f1a67b35ee5bfabb35e65038a62f073dd9f6"
+    "reviewed_payload_sha256": "681fc2fe774eaf70cbfaecef7614a6af1e28199b4e1b6d261b59db7626cd6065"
   }
 }

@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import {
   FILE_STATUS,
   FILE_TREE_MAX_ENTRIES,
+  type FileChangeSplit,
   type FileStatusLabel,
   UNMERGED_PORCELAIN_CODES,
   isUnmergedPorcelainCode,
+  splitPorcelain,
 } from "../src/core/file-tree-contract.js";
 import type { FileTreeEntry } from "../src/server/files-tree-route.js";
 import type { FilesTreeClientEntry } from "../src/ui/src/api-files.js";
@@ -63,6 +65,29 @@ describe("shared file-tree contract", () => {
       expect(isUnmergedPorcelainCode(value)).toBe(false);
   });
 
+  test("splits porcelain XY codes into index and worktree halves", () => {
+    const groups: Array<[string, FileChangeSplit]> = [
+      ["MM", { index: FILE_STATUS.MODIFIED, worktree: FILE_STATUS.MODIFIED }],
+      ["AM", { index: FILE_STATUS.ADDED, worktree: FILE_STATUS.MODIFIED }],
+      ["M ", { index: FILE_STATUS.MODIFIED }],
+      ["A ", { index: FILE_STATUS.ADDED }],
+      ["D ", { index: FILE_STATUS.DELETED }],
+      ["R ", { index: FILE_STATUS.RENAMED }],
+      ["T ", { index: FILE_STATUS.MODIFIED }],
+      ["RM", { index: FILE_STATUS.RENAMED, worktree: FILE_STATUS.MODIFIED }],
+      [" M", { worktree: FILE_STATUS.MODIFIED }],
+      [" D", { worktree: FILE_STATUS.DELETED }],
+      [" T", { worktree: FILE_STATUS.MODIFIED }],
+      ["??", { untracked: true }],
+    ];
+    for (const [code, expected] of groups) expect(splitPorcelain(code), code).toEqual(expected);
+  });
+
+  test("keeps unmerged, copy, and unknown codes out of both groups", () => {
+    const unbadged = [...UNMERGED_PORCELAIN_CODES, "C ", " C", "CC", "U ", " U", "X ", ""];
+    for (const code of unbadged) expect(splitPorcelain(code), code).toEqual({});
+  });
+
   test("stays dependency-free and browser-safe", () => {
     const contractSource = source("src/core/file-tree-contract.ts");
     expect(moduleSpecifiers(contractSource)).toEqual([]);
@@ -74,7 +99,7 @@ describe("shared file-tree contract", () => {
       "src/server/files-tree-route.ts",
       "src/ui/src/files-tree.ts",
       "src/ui/src/api-files.ts",
-      "src/ui/src/components/HomeFilesDrawer.vue",
+      "src/ui/src/components/HomeFilesPanel.vue",
     ];
     const rawStatusUnion = /["'](?:modified|added|deleted|untracked|renamed)["']\s*\|/u;
     for (const path of consumers) {

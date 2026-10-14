@@ -5,12 +5,10 @@
       @open-capabilities="openCapabilities"
       @open-settings="openSettings"
       @open-control-center="openControlCenter"
-      @open-resources="openResources"
-      @open-files="openFiles"
     />
     <HomeUpdateBanner />
     <ConversationHome
-      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen || agentsOpen || resourcesOpen || filesOpen"
+      :transient-ui-open="capabilitiesOpen || settingsOpen || controlCenterOpen || traceOpen || agentsOpen"
       @open-capabilities="openCapabilities"
       @open-trace="openTrace"
       @select-agent="openAgentDrawer"
@@ -20,8 +18,6 @@
     <HomeControlCenterDrawer :open="controlCenterOpen" @close="closeControlCenter" />
     <HomeTraceDrawer :open="traceOpen" @close="closeTrace" />
     <HomeAgentDrawer :open="agentsOpen" :participant-id="selectedAgentId" @close="closeAgents" />
-    <HomeResourcesDrawer :open="resourcesOpen" @close="closeResources" />
-    <HomeFilesDrawer :open="filesOpen" @close="closeFiles" />
     <div class="sr-only" role="status" aria-live="polite">{{ announcement }}</div>
   </div>
 </template>
@@ -32,13 +28,12 @@ import ConversationHome from "./components/ConversationHome.vue";
 import HomeAgentDrawer from "./components/HomeAgentDrawer.vue";
 import HomeCapabilityDrawer from "./components/HomeCapabilityDrawer.vue";
 import HomeControlCenterDrawer from "./components/HomeControlCenterDrawer.vue";
-import HomeFilesDrawer from "./components/HomeFilesDrawer.vue";
 import HomePreferencesDrawer from "./components/HomePreferencesDrawer.vue";
-import HomeResourcesDrawer from "./components/HomeResourcesDrawer.vue";
 import HomeTraceDrawer from "./components/HomeTraceDrawer.vue";
 import HomeUpdateBanner from "./components/HomeUpdateBanner.vue";
 import TopBar from "./components/TopBar.vue";
 import { useConversationHomeStore } from "./conversation-home-store.js";
+import { rightSidebarOpen, rightSidebarTab, toggleRightSidebar } from "./right-sidebar-prefs.js";
 import "./home.css";
 
 const store = useConversationHomeStore();
@@ -47,8 +42,6 @@ const settingsOpen = ref(false);
 const controlCenterOpen = ref(false);
 const traceOpen = ref(false);
 const agentsOpen = ref(false);
-const resourcesOpen = ref(false);
-const filesOpen = ref(false);
 const selectedAgentId = ref<string | null>(null);
 const agentDrawerTrigger = ref<HTMLElement | null>(null);
 const announcement = ref("");
@@ -64,8 +57,8 @@ watch(
 
 // A conversation switch must not leave the agent drawer bound to a stale
 // participant; close it without stealing focus (no closeAgents call here).
-// The resources and files drawers are repo-scoped, not conversation-scoped —
-// they stay open.
+// A repo-scoped panel surface (the right sidebar) is not conversation-scoped —
+// it stays open, so no handoff is needed here.
 watch(
   () => store.selectedConversationId,
   () => {
@@ -86,8 +79,6 @@ function openCapabilities() {
   controlCenterOpen.value = false;
   traceOpen.value = false;
   agentsOpen.value = false;
-  resourcesOpen.value = false;
-  filesOpen.value = false;
   capabilitiesOpen.value = true;
 }
 
@@ -101,8 +92,6 @@ function openSettings() {
   controlCenterOpen.value = false;
   traceOpen.value = false;
   agentsOpen.value = false;
-  resourcesOpen.value = false;
-  filesOpen.value = false;
   settingsOpen.value = true;
 }
 
@@ -118,39 +107,7 @@ function openControlCenter() {
   settingsOpen.value = false;
   traceOpen.value = false;
   agentsOpen.value = false;
-  resourcesOpen.value = false;
-  filesOpen.value = false;
   controlCenterOpen.value = true;
-}
-
-function closeResources() {
-  resourcesOpen.value = false;
-  nextTick(() => document.querySelector<HTMLElement>('[aria-label="Open resources"]')?.focus());
-}
-
-function closeFiles() {
-  filesOpen.value = false;
-  nextTick(() => document.querySelector<HTMLElement>('[aria-label="Open files"]')?.focus());
-}
-
-function openFiles() {
-  capabilitiesOpen.value = false;
-  settingsOpen.value = false;
-  controlCenterOpen.value = false;
-  traceOpen.value = false;
-  agentsOpen.value = false;
-  resourcesOpen.value = false;
-  filesOpen.value = true;
-}
-
-function openResources() {
-  capabilitiesOpen.value = false;
-  settingsOpen.value = false;
-  controlCenterOpen.value = false;
-  traceOpen.value = false;
-  agentsOpen.value = false;
-  filesOpen.value = false;
-  resourcesOpen.value = true;
 }
 
 function openTrace() {
@@ -158,8 +115,6 @@ function openTrace() {
   settingsOpen.value = false;
   controlCenterOpen.value = false;
   agentsOpen.value = false;
-  resourcesOpen.value = false;
-  filesOpen.value = false;
   traceOpen.value = true;
 }
 
@@ -179,8 +134,6 @@ function openAgentDrawer(participantId: string) {
   settingsOpen.value = false;
   controlCenterOpen.value = false;
   traceOpen.value = false;
-  resourcesOpen.value = false;
-  filesOpen.value = false;
   selectedAgentId.value = participantId;
   agentDrawerTrigger.value =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -199,6 +152,20 @@ function closeAgents() {
   });
 }
 
+// Every true→false flip of the sidebar (Escape ladder, the panels' own Close
+// button, the backdrop) hides still-focused panel controls via v-show — focus
+// would fall to <body>. Hand it back to the TopBar trigger that matches the
+// sidebar's last active tab. Skip the initial load so a persisted "open" pref
+// never steals focus on mount.
+watch(rightSidebarOpen, (open, wasOpen) => {
+  if (open || !wasOpen) return;
+  const trigger =
+    rightSidebarTab.value === "resources"
+      ? '[aria-label="Open resources"]'
+      : '[aria-label="Open files"]';
+  nextTick(() => document.querySelector<HTMLElement>(trigger)?.focus());
+});
+
 function closeActiveDrawer(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
   if (capabilitiesOpen.value) closeCapabilities();
@@ -206,8 +173,10 @@ function closeActiveDrawer(event: KeyboardEvent) {
   else if (controlCenterOpen.value) closeControlCenter();
   else if (traceOpen.value) closeTrace();
   else if (agentsOpen.value) closeAgents();
-  else if (resourcesOpen.value) closeResources();
-  else if (filesOpen.value) closeFiles();
+  // Bottom of the ladder: Escape collapses the right sidebar when no drawer
+  // consumed the key (mirrors the backdrop's close order). The collapse itself
+  // returns focus to the TopBar trigger (rightSidebarOpen watcher above).
+  else if (rightSidebarOpen.value) toggleRightSidebar();
 }
 
 onMounted(() => window.addEventListener("keydown", closeActiveDrawer));

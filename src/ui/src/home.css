@@ -14,10 +14,13 @@
   --home-amber: #9c4d18;
   --home-amber-soft: #f2dfce;
   --home-green: #47725c;
+  /* Status-badge green (untracked/added): raw #4aa564 is only 2.48:1 on the light paper. */
+  --home-badge-new: #35704a;
   --home-red: #a84b3e;
   --home-blue: #4e6878;
   --home-topbar-height: 3.625rem;
   --home-rail-width: 18rem;
+  --home-sidebar-width: 22rem;
   --home-composer-width: 48rem;
   --home-shadow: 0 18px 45px rgb(58 47 33 / 0.12);
   --home-surface-top: rgb(251 250 246 / 0.94);
@@ -92,6 +95,7 @@
     --home-amber: #d98a4a;
     --home-amber-soft: #3d2e1e;
     --home-green: #6aa684;
+    --home-badge-new: #55a672;
     --home-red: #d4756a;
     --home-blue: #7a9aaa;
     --home-shadow: 0 18px 45px rgb(0 0 0 / 0.4);
@@ -154,6 +158,7 @@
   --home-amber: #d98a4a;
   --home-amber-soft: #3d2e1e;
   --home-green: #6aa684;
+  --home-badge-new: #55a672;
   --home-red: #d4756a;
   --home-blue: #7a9aaa;
   --home-shadow: 0 18px 45px rgb(0 0 0 / 0.4);
@@ -462,6 +467,84 @@ button:disabled {
 .home-rail[aria-hidden="true"] {
   visibility: hidden;
   pointer-events: none;
+}
+.home-right-sidebar {
+  z-index: 15;
+  display: flex;
+  flex: 0 0 var(--home-sidebar-width);
+  flex-direction: column;
+  width: var(--home-sidebar-width);
+  min-width: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--home-line);
+  background: var(--home-panel);
+}
+.home-right-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 4.6rem;
+  padding: 0 0.75rem 0 1.15rem;
+  border-bottom: 1px solid var(--home-line);
+}
+.home-right-sidebar__header strong {
+  font-family: Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+.home-right-sidebar__collapse {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.7rem;
+  background: var(--home-paper);
+  color: var(--home-muted);
+  cursor: pointer;
+}
+.home-right-sidebar__collapse:hover {
+  border-color: var(--home-border-hover);
+  color: var(--home-ink);
+}
+.home-right-sidebar__collapse svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+.home-right-sidebar__tabs {
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.35rem 0.75rem 0;
+  border-bottom: 1px solid var(--home-line);
+}
+.home-right-sidebar__tab {
+  min-height: 2.1rem;
+  padding: 0.35rem 0.7rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--home-muted);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+.home-right-sidebar__tab:hover {
+  color: var(--home-ink);
+}
+.home-right-sidebar__tab[aria-selected="true"] {
+  border-bottom-color: var(--home-ink);
+  color: var(--home-ink);
+}
+.home-right-sidebar__panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.85rem 0 1.15rem;
 }
 .home-rail__top {
   display: grid;
@@ -3812,6 +3895,7 @@ button:disabled {
 @media (max-width: 62rem) {
   :root {
     --home-rail-width: 16.5rem;
+    --home-sidebar-width: 18rem;
   }
   .home-inspector {
     position: absolute;
@@ -3849,6 +3933,14 @@ button:disabled {
     flex-basis: 0;
     box-shadow: none;
     transform: translateX(-105%);
+  }
+  .home-right-sidebar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(23rem, 88vw);
+    flex-basis: auto;
   }
   .home-mobile-backdrop {
     position: absolute;
@@ -4763,68 +4855,22 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-/* Resources drawer */
-.home-resources-drawer {
-  position: fixed;
-  top: var(--home-topbar-height);
-  right: 0;
-  bottom: 0;
-  z-index: 25;
-  width: min(28rem, 92vw);
-  overflow-y: auto;
-  border-left: 1px solid var(--home-line);
-  background: var(--home-paper);
-  box-shadow: -14px 0 35px rgb(65 51 34 / 0.08);
-}
-.home-resources-drawer > header {
+/* Resources panel (right sidebar Resources tab) */
+.home-resources-panel {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 4.6rem;
-  padding: 0 1.15rem;
-  border-bottom: 1px solid var(--home-line);
+  flex-direction: column;
+  gap: 0.5rem;
 }
-.home-resources-drawer > header button {
-  display: grid;
-  place-items: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  border: 0;
-  border-radius: 0.6rem;
-  background: transparent;
-  color: var(--home-muted);
-  cursor: pointer;
-  font-size: 1.3rem;
+.home-resources-panel .home-control-section {
+  margin: 1rem 1.15rem 0;
 }
-.home-resources-drawer > header button:hover {
-  background: var(--home-panel);
-}
-.home-resources-drawer > header small {
-  display: block;
-  margin-bottom: 0.75rem;
-  color: var(--home-faint);
-  font-size: 0.61rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-.home-resources-drawer > header span strong {
-  display: block;
-  margin-top: -0.6rem;
-  font-family: Georgia, serif;
-  font-size: 1.25rem;
-  font-weight: 500;
+.home-resources-panel .home-control-section:last-child {
+  margin-bottom: 2rem;
 }
 .home-resources-totals {
   margin: 1rem 1.15rem 0;
   color: var(--home-muted);
   font-size: 0.72rem;
-}
-.home-resources-drawer .home-control-section {
-  margin: 1rem 1.15rem 0;
-}
-.home-resources-drawer .home-control-section:last-child {
-  margin-bottom: 2rem;
 }
 .home-resources-list {
   display: grid;
@@ -4862,60 +4908,11 @@ button:disabled {
   font-size: 0.68rem;
 }
 
-/* Files drawer */
-.home-files-drawer {
-  position: fixed;
-  top: var(--home-topbar-height);
-  right: 0;
-  bottom: 0;
-  z-index: 25;
-  width: min(28rem, 92vw);
-  overflow-y: auto;
-  border-left: 1px solid var(--home-line);
-  background: var(--home-paper);
-  box-shadow: -14px 0 35px rgb(65 51 34 / 0.08);
+/* Files panel (right sidebar Files tab) */
+.home-files-panel {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-}
-.home-files-drawer > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 4.6rem;
-  padding: 0 1.15rem;
-  border-bottom: 1px solid var(--home-line);
-}
-.home-files-drawer > header button {
-  display: grid;
-  place-items: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  border: 0;
-  border-radius: 0.6rem;
-  background: transparent;
-  color: var(--home-muted);
-  cursor: pointer;
-  font-size: 1.3rem;
-}
-.home-files-drawer > header button:hover {
-  background: var(--home-panel);
-}
-.home-files-drawer > header small {
-  display: block;
-  margin-bottom: 0.75rem;
-  color: var(--home-faint);
-  font-size: 0.61rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-.home-files-drawer > header span strong {
-  display: block;
-  margin-top: -0.6rem;
-  font-family: Georgia, serif;
-  font-size: 1.25rem;
-  font-weight: 500;
 }
 .home-files-list {
   list-style: none;
@@ -4924,9 +4921,16 @@ button:disabled {
   max-height: 42vh;
   overflow-y: auto;
 }
+.home-files-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
 .home-files-list button {
   display: flex;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 0.5rem;
   justify-content: space-between;
   background: none;
@@ -4939,15 +4943,20 @@ button:disabled {
 .home-files-list button.is-selected {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
-/* WCAG AA: the raw gold #d9a441 lands at 2.15:1 on the drawer paper; the theme
-   amber clears 4.5:1 on both the paper and the selected-row tint. */
+/* WCAG AA: the raw gold #d9a441 lands at 2.15:1 on the paper; the theme
+   amber clears 4.5:1 on the bare panel (4.88:1) but only 3.91:1 once the selected
+   row's 12% ink tint sits behind it — the selected-row override below re-darkens
+   the badge toward the ink (4.77:1). */
 .home-files-list em[data-status="modified"] {
   color: var(--home-amber);
   font-style: normal;
 }
+.home-files-list button.is-selected em[data-status="modified"] {
+  color: color-mix(in srgb, var(--home-amber) 80%, var(--home-ink));
+}
 .home-files-list em[data-status="untracked"],
 .home-files-list em[data-status="added"] {
-  color: #4aa564;
+  color: var(--home-badge-new);
   font-style: normal;
 }
 .home-files-list em[data-status="renamed"] {
@@ -4957,6 +4966,23 @@ button:disabled {
 .home-files-list em[data-status="deleted"] {
   color: #d4655a;
   font-style: normal;
+}
+/* Second class beats `.home-files-list button`'s flex-grow, so the toggle keeps
+   its intrinsic width beside the row button. */
+.home-files-list .home-files-row__diff {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: none;
+  color: var(--home-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.68rem;
+}
+.home-files-list .home-files-row__diff:hover {
+  border-color: var(--home-line-strong);
+  color: var(--home-ink);
 }
 .home-files-search input {
   width: 100%;
@@ -4975,12 +5001,199 @@ button:disabled {
   margin: 0.5rem 0 0;
   white-space: pre-wrap;
 }
-/* Sibling drawers (e.g. `.home-resources-drawer .home-control-section`) give
-   their children 1.15rem side margins; the root frame carries no padding. */
+/* Panels give their children 1.15rem side margins; the sidebar's tabpanel
+   frame carries no padding. */
 .home-files-search,
 .home-files-list,
 .home-files-preview {
   margin: 0 1.15rem;
+}
+
+/* Changes panel (right sidebar Changes tab) */
+.home-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.home-changes__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0.75rem;
+}
+.home-changes__refresh {
+  min-height: 1.8rem;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 0.55rem;
+  background: var(--home-paper);
+  color: var(--home-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.home-changes__refresh:hover:not(:disabled) {
+  border-color: var(--home-border-hover);
+  color: var(--home-ink);
+}
+.home-changes__refresh:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.home-changes__note {
+  margin: 0;
+  padding: 0.25rem 1.15rem;
+  color: var(--home-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+.home-changes__error {
+  margin: 0;
+  padding: 0.25rem 1.15rem;
+  color: #d4655a;
+  font-size: 0.76rem;
+}
+.home-change-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0 0.55rem;
+}
+.home-change-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.35rem;
+  color: var(--home-faint);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.home-change-group__all {
+  padding: 0.15rem 0;
+  border: 0;
+  background: none;
+  color: var(--home-muted);
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.home-change-group__all:hover:not(:disabled) {
+  color: var(--home-ink);
+}
+.home-change-group__all:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.home-change-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.home-change-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.75rem;
+  padding: 0 0.15rem 0 0.35rem;
+  border-radius: 0.5rem;
+}
+.home-change-row:hover {
+  background: var(--home-panel);
+}
+.home-change-row__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.2rem 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-change-row__badge {
+  flex: 0 0 auto;
+  color: var(--home-amber);
+  font-size: 0.68rem;
+  font-style: normal;
+}
+.home-change-row__badge[data-status="untracked"],
+.home-change-row__badge[data-status="added"] {
+  color: var(--home-badge-new);
+}
+.home-change-row__badge[data-status="renamed"] {
+  color: #6da3d9;
+}
+.home-change-row__badge[data-status="deleted"] {
+  color: #d4655a;
+}
+.home-change-row__action {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: none;
+  color: var(--home-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.home-change-row__action:hover:not(:disabled) {
+  border-color: var(--home-line-strong);
+  color: var(--home-ink);
+}
+.home-change-row__action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Inline diff under a clicked changes row. The tint washes sit behind the ink,
+   so add/del bodies keep the ink-on-card contrast the panel already passes;
+   --home-amber-ink (hunk) is AA on both the warm tint and its dark twin. */
+.home-diff {
+  flex: 1 1 100%;
+  max-height: 40vh;
+  margin: 0.1rem 0 0.45rem;
+  overflow: auto;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--home-line);
+  border-radius: 0.5rem;
+  background: var(--home-tone-card);
+  color: var(--home-ink-soft);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.home-diff span {
+  display: block;
+}
+.home-diff--add {
+  background: var(--home-tone-green);
+}
+.home-diff--del {
+  background: var(--home-tone-rose);
+}
+.home-diff--hunk {
+  background: var(--home-tone-warm-panel);
+  color: var(--home-amber-ink);
+}
+.home-diff--ctx {
+  color: var(--home-muted);
 }
 
 @media (min-width: 1440px) {

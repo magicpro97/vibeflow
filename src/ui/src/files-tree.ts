@@ -1,7 +1,8 @@
 // src/ui/src/files-tree.ts — pure helpers for the Files panel (no Vue imports).
-import type { FileStatusLabel } from "../../core/file-tree-contract.js";
+import type { FileChangeSplit, FileStatusLabel } from "../../core/file-tree-contract.js";
 
-export interface TreeFileEntry {
+/** Mirrors the server route DTO: a path plus its label and index/worktree split. */
+export interface TreeFileEntry extends FileChangeSplit {
   path: string;
   status?: FileStatusLabel;
 }
@@ -61,6 +62,28 @@ export function filterPaths(entries: TreeFileEntry[], query: string): TreeFileEn
   const q = query.trim().toLowerCase();
   if (!q) return entries;
   return entries.filter((entry) => entry.path.toLowerCase().includes(q));
+}
+
+export interface ChangeGroups {
+  staged: TreeFileEntry[];
+  changes: TreeFileEntry[];
+  untracked: TreeFileEntry[];
+}
+
+/** Bucket entries by staging state (Orca/VS Code buckets). An `MM` file joins
+ *  BOTH staged and changes as the SAME object reference — entries are read-only
+ *  display data, so sharing one entry across groups is safe. */
+export function groupChanges(entries: TreeFileEntry[]): ChangeGroups {
+  const groups: ChangeGroups = { staged: [], changes: [], untracked: [] };
+  for (const entry of entries) {
+    if (entry.untracked === true) {
+      groups.untracked.push(entry);
+    } else {
+      if (entry.index) groups.staged.push(entry);
+      if (entry.worktree) groups.changes.push(entry);
+    }
+  }
+  return groups;
 }
 
 export interface PanelRow {
