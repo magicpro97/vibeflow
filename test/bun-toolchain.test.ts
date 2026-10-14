@@ -27,18 +27,27 @@ const workflowPaths = [
 
 describe("Bun toolchain policy", () => {
   test("pins the runtime and matching Bun types at 1.4", () => {
-    expect(packageJson.packageManager).toBe("bun@1.4.0");
+    expect(packageJson.packageManager).toBe("bun@1.4.3");
     expect(packageJson.devDependencies?.["@types/bun"]).toBe("^1.4.0");
     expect(packageLock.packages?.[""]?.devDependencies?.["@types/bun"]).toBe("^1.4.0");
   });
 
-  test("lets setup-bun resolve the packageManager pin and uses frozen bun ci installs", () => {
+  test("uses setup-bun and frozen bun ci installs in every workflow", () => {
     for (const path of workflowPaths) {
       const workflow = readFileSync(path, "utf8");
       expect(workflow).toContain("oven-sh/setup-bun@v2");
       expect(workflow).not.toContain("bun-version: latest");
       expect(workflow).not.toContain("bun install --frozen-lockfile");
       expect(workflow).toContain("bun ci");
+    }
+  });
+
+  test("pins the CI bun version in lockstep with packageManager", () => {
+    const pinnedBun = packageJson.packageManager?.replace("bun@", "");
+    expect(pinnedBun).toBeTruthy();
+    for (const path of [".github/workflows/ci.yml", ".github/workflows/release.yml"] as const) {
+      const workflow = readFileSync(path, "utf8");
+      expect(workflow).toContain(`bun-version: ${pinnedBun}`);
     }
   });
 

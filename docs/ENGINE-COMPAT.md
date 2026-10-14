@@ -27,11 +27,11 @@ CLI is bumped you know exactly what to re-check.
 | copilot  | 1.0.95           | 2026-10-12 | brew `copilot` (GitHub Copilot CLI) |
 | opencode | 1.19.0           | 2026-10-12 | brew `anomalyco/tap/opencode`     |
 | agy      | 1.1.4            | 2026-07-19 | `%LOCALAPPDATA%\\agy\\bin\\agy.exe` |
-| bun      | 1.4.0            | 2026-08-26 | (runtime)                         |
+| bun      | 1.4.3            | 2026-10-14 | (runtime)                         |
 
 Re-verified 2026-10-12 on the engine versions above: native structured-output shapes
 were unchanged (fresh captures re-parsed by `src/engine-output.ts` — see
-`docs/ENGINE_NATIVE_OUTPUT.md`). bun remains pinned at 1.4.0 (CI + `packageManager`).
+`docs/ENGINE_NATIVE_OUTPUT.md`). bun remains pinned at 1.4.3 (CI + `packageManager`).
 
 ## Per-engine integration contract
 

@@ -55,7 +55,7 @@ test("Windows coverage matrix gates live and shipped-artifact suites", () => {
   const windows = jobBlock(workflow, "windows");
   const aggregate = jobBlock(workflow, "release-prerequisites");
 
-  assert.match(windows, /bun-version: 1\.4\.0/);
+  assert.match(windows, /bun-version: 1\.4\.3/);
   assert.match(windows, /node-version: 20/);
   assert.ok(windows.includes("if: matrix.suite == 'package-smoke'"));
   assert.ok(windows.includes("if: matrix.suite == 'owned-process'"));
