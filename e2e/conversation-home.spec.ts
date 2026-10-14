@@ -795,6 +795,50 @@ test.describe("AI-first conversation Home", () => {
     await expectAxeClean(page, "files drawer");
   });
 
+  test("right sidebar: tabs, collapse, and escape", async ({ page }) => {
+    await page.goto("/");
+    await waitForPage(page);
+
+    const sidebar = page.locator(".home-right-sidebar");
+    await expect(sidebar).toBeHidden();
+
+    const openFiles = page.getByRole("button", { name: "Open files" });
+    await openFiles.click();
+    await expect(sidebar).toBeVisible();
+
+    await expect(sidebar.getByRole("tablist", { name: "Workspace panels" })).toBeVisible();
+    const filesTab = sidebar.getByRole("tab", { name: "Files" });
+    const changesTab = sidebar.getByRole("tab", { name: "Changes" });
+    const panel = sidebar.getByRole("tabpanel");
+    await expect(filesTab).toHaveAttribute("aria-selected", "true");
+    await expect(changesTab).toHaveAttribute("aria-selected", "false");
+    await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-files");
+
+    await changesTab.click();
+    await expect(changesTab).toHaveAttribute("aria-selected", "true");
+    await expect(filesTab).toHaveAttribute("aria-selected", "false");
+    await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-changes");
+
+    await expectAxeClean(page, "right sidebar");
+
+    await page.keyboard.press("Escape");
+    await expect(sidebar).toBeHidden();
+
+    // Collapse is v-show, so the shell and its three tab layers never unmount; the
+    // TopBar triggers pin their own tab (Files/Resources), so retention is asserted
+    // on the mounted layers plus the tab switching that still works after reopen.
+    await openFiles.click();
+    await expect(sidebar).toBeVisible();
+    await expect(panel).toBeAttached();
+    await expect(sidebar.locator(".home-right-sidebar__panels > div")).toHaveCount(3);
+    await changesTab.click();
+    await expect(changesTab).toHaveAttribute("aria-selected", "true");
+    await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-changes");
+
+    await sidebar.getByRole("button", { name: "Close panels" }).click();
+    await expect(sidebar).toBeHidden();
+  });
+
   test("home shell fills the viewport without dead space", async ({ page }) => {
     await page.goto("/");
     const gap = await page.evaluate(() => {
