@@ -137,6 +137,14 @@ Home follows community chat conventions for quoting and reactions.
 - **Viewport-filling shell.** The Home shell fills the dynamic viewport (`100dvh`,
   `100%` fallback) with the composer pinned to the bottom — no dead strip below the
   fold.
+- **Right sidebar = persistent tabbed panels.** Files / Changes / Resources,
+  Orca-style; width and active tab persist, Escape collapses and returns focus to the
+  TopBar trigger.
+- **Changes = staged / changes / untracked groups** with per-row stage/unstage and a
+  manual refresh — no polling.
+- **Diff preview.** Unstaged = worktree vs index, staged = index vs HEAD, untracked =
+  raw content preview (no diff); truncation notes at 200k chars (route) and 2000 lines
+  (renderer).
 
 ### 6. Repository intake
 
