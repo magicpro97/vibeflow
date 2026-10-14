@@ -303,7 +303,8 @@ describe("AI-first Home source contract", () => {
     expect(rightSidebar).toContain('v-show="rightSidebarTab ===');
     for (const slot of ["files", "changes", "resources"])
       expect(rightSidebar).toContain(`<slot name="${slot}">`);
-    expect(rightSidebar).toContain("home-rs-placeholder");
+    // Each tabpanel now mounts its real panel; the placeholder copy is gone.
+    expect(rightSidebar).toContain('<slot name="resources"><HomeResourcesPanel /></slot>');
   });
 
   test("changes panel groups staged, changes, and untracked with bulk and row actions", () => {
@@ -347,7 +348,7 @@ describe("AI-first Home source contract", () => {
       ".home-right-sidebar__tab",
       '.home-right-sidebar__tab[aria-selected="true"]',
       ".home-right-sidebar__panels",
-      ".home-rs-placeholder",
+      ".home-resources-panel",
       ".home-change-group__header",
       ".home-change-row__action",
       ".home-diff",
@@ -365,6 +366,18 @@ describe("AI-first Home source contract", () => {
     // a manual refetch — same affordance and pin style as the Changes panel.
     expect(filesPanel).toContain('aria-label="Refresh files"');
     expect(filesPanel).toContain("store.load()");
+  });
+
+  test("resources panel keeps the drawer board and refreshes on demand", () => {
+    const resourcesPanel = read("../src/ui/src/components/HomeResourcesPanel.vue");
+    // Same mounted-panel convention as Files/Changes: manual refresh, no overlay.
+    expect(resourcesPanel).toContain('aria-label="Refresh resources"');
+    expect(resourcesPanel).toContain("fetchResourceSnapshot");
+    for (const label of ["Per engine", "Top units", "Quota", "Warnings"])
+      expect(resourcesPanel).toContain(label);
+    expect(resourcesPanel).toContain("resourceSummaryLine(snapshot)");
+    expect(resourcesPanel).toContain("No workflow state yet.");
+    expect(resourcesPanel).not.toContain("<input");
   });
 
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {

@@ -57,7 +57,8 @@ watch(
 
 // A conversation switch must not leave the agent drawer bound to a stale
 // participant; close it without stealing focus (no closeAgents call here).
-// The right sidebar is repo-scoped, not conversation-scoped — it stays open.
+// A repo-scoped panel surface (the right sidebar) is not conversation-scoped —
+// it stays open, so no handoff is needed here.
 watch(
   () => store.selectedConversationId,
   () => {
@@ -159,7 +160,10 @@ function closeActiveDrawer(event: KeyboardEvent) {
   else if (traceOpen.value) closeTrace();
   else if (agentsOpen.value) closeAgents();
   // Bottom of the ladder: Escape collapses the right sidebar when no drawer
-  // consumed the key (mirrors the backdrop's close order).
+  // consumed the key (mirrors the backdrop's close order). No focus handoff:
+  // A4 rewired the TopBar triggers to toggleRightSidebar, which never unmounts
+  // the trigger button, so it keeps focus — the drawer's close-button focus
+  // addendum and its return-to-trigger both die with the overlay.
   else if (rightSidebarOpen.value) toggleRightSidebar();
 }
 
