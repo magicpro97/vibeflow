@@ -989,7 +989,10 @@ test.describe("AI-first conversation Home", () => {
     const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
     expect(existsSync(resolve(ws, ".git"))).toBe(true);
     const untracked = resolve(ws, "e2e-untracked-preview.txt");
-    const content = "untracked preview line\n";
+    // Diff-looking content: if the preview ever ran through classifyDiffLines,
+    // this line would classify as add/del and the count-0 assertions below
+    // would fail (review D4-I1: the old plain-text fixture made them toothless).
+    const content = "+plus line\n-minus line\n";
 
     try {
       await page.goto("/");
