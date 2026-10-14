@@ -95,6 +95,14 @@ export function createFilesStore(deps: FilesStoreDeps) {
       state.error = err instanceof Error ? err.message : String(err);
     } finally {
       state.loading = false;
+      // The refetched tree can move the open row to the other group (changes
+      // <-> staged), so its diff no longer describes this tree: close it and
+      // invalidate any in-flight diff fetch so it cannot land afterwards.
+      diffSeq++;
+      state.diffFor = null;
+      state.diff = null;
+      state.diffError = null;
+      state.diffLoading = false;
     }
   }
 

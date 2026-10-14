@@ -361,4 +361,60 @@ describe("files-store", () => {
     expect(store.state.diffLoading).toBe(false);
     expect(store.state.diffFor).toEqual({ path: "new.txt", staged: false });
   });
+
+  test("a tree refetch closes the open diff and drops its state", async () => {
+    let treeCalls = 0;
+    const store = createFilesStore({
+      fetchTree: async () => {
+        treeCalls++;
+        return { ok: true, entries: [{ path: "a.txt" }], truncated: false };
+      },
+      readFile: async () => ({ ok: false, reason: "not found" }),
+      diffPaths: async () => ({
+        ok: true,
+        kind: "diff",
+        text: "@@ -1 +1 @@\n-a\n+b",
+        truncated: false,
+        binary: false,
+      }),
+    });
+    await store.load();
+    await store.toggleDiff("a.txt", false);
+    expect(store.state.diffFor).toEqual({ path: "a.txt", staged: false });
+    await store.load();
+    expect(treeCalls).toBe(2);
+    expect(store.state.diffFor).toBeNull();
+    expect(store.state.diff).toBeNull();
+    expect(store.state.diffError).toBeNull();
+  });
+
+  test("an in-flight diff fetch cannot land after a tree refetch", async () => {
+    const pending = new Map<
+      string,
+      (res: {
+        ok: boolean;
+        kind?: "diff" | "empty" | "untracked";
+        text?: string;
+        truncated?: boolean;
+        binary?: boolean;
+        reason?: string;
+      }) => void
+    >();
+    const store = createFilesStore({
+      fetchTree: async () => ({ ok: true, entries: [{ path: "a.txt" }], truncated: false }),
+      readFile: async () => ({ ok: false, reason: "not found" }),
+      diffPaths: () =>
+        new Promise((resolve) => {
+          pending.set("a.txt", resolve);
+        }),
+    });
+    await store.load();
+    const inflight = store.toggleDiff("a.txt", false);
+    await store.load();
+    pending.get("a.txt")?.({ ok: true, kind: "diff", text: "late", truncated: false });
+    await inflight;
+    expect(store.state.diffFor).toBeNull();
+    expect(store.state.diff).toBeNull();
+    expect(store.state.diffLoading).toBe(false);
+  });
 });

@@ -22,6 +22,20 @@ describe("classifyDiffLines", () => {
     expect(kinds(`${body}\n`)).toEqual(["hunk", "del", "add", "ctx", "ctx"]);
   });
 
+  test("CRLF rows keep no trailing carriage return", () => {
+    expect(classifyDiffLines("+a\r\n+b\r\n")).toEqual({
+      lines: [
+        { kind: "add", text: "+a" },
+        { kind: "add", text: "+b" },
+      ],
+      truncated: false,
+    });
+    expect(classifyDiffLines("\r\n")).toEqual({
+      lines: [{ kind: "ctx", text: "" }],
+      truncated: false,
+    });
+  });
+
   test("empty text renders no rows", () => {
     expect(classifyDiffLines("")).toEqual({ lines: [], truncated: false });
     expect(classifyDiffLines("\n")).toEqual({ lines: [], truncated: false });

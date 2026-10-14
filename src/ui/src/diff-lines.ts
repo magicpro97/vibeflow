@@ -21,7 +21,16 @@ export function classifyDiffLines(text: string): { lines: DiffLine[]; truncated:
   const all = raw.split("\n");
   const truncated = all.length > LINE_CAP;
   const kept = truncated ? all.slice(0, LINE_CAP) : all;
-  return { lines: kept.map((line) => ({ kind: classifyLine(line), text: line })), truncated };
+  return {
+    lines: kept.map((line) => {
+      // A CRLF diff keeps a trailing \r on every row after the \n split; under
+      // `white-space: pre-wrap` a lone \r is its own break, so the row would
+      // render a stray blank line. One trailing \r is the line terminator.
+      const text = line.endsWith("\r") ? line.slice(0, -1) : line;
+      return { kind: classifyLine(text), text };
+    }),
+    truncated,
+  };
 }
 
 // `+++`/`---` are `diff --git` file headers, not body lines: testing them after
