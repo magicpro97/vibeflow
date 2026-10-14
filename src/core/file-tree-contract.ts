@@ -53,3 +53,13 @@ export function splitPorcelain(code: string): FileChangeSplit {
 
 /** Upper bound on listed entries; also rendered in the drawer's truncation copy. */
 export const FILE_TREE_MAX_ENTRIES = 5000;
+
+/** Reject the same unsafe shapes src/sandbox.ts rejects before a path reaches the UI. */
+export function unsafeGitPath(file: string): boolean {
+  const parts = file.split(/[\\/]/);
+  return (
+    file.startsWith("/") ||
+    parts.includes("..") ||
+    [...file].some((character) => character.charCodeAt(0) < 32)
+  );
+}

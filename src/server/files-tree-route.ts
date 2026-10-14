@@ -14,6 +14,7 @@ import {
   type FileStatusLabel,
   isUnmergedPorcelainCode,
   splitPorcelain,
+  unsafeGitPath,
 } from "../core/file-tree-contract.js";
 
 export interface FileTreeEntry {
@@ -27,6 +28,8 @@ export interface FileTreeEntry {
 export interface RunGitResult {
   status: number | null;
   stdout: string;
+  /** Git's stderr (git routes surface its first line as the failure reason). */
+  stderr?: string;
 }
 export interface FilesTreeDeps {
   runGit: (args: string[], cwd: string) => RunGitResult;
@@ -56,17 +59,8 @@ export function defaultRunGit(
     // listing that the route would mistake for a complete one.
     status: out.error ? null : out.status,
     stdout: (out.stdout ?? Buffer.alloc(0)).toString(),
+    stderr: (out.stderr ?? Buffer.alloc(0)).toString(),
   };
-}
-
-/** Reject the same unsafe shapes src/sandbox.ts rejects before a path reaches the UI. */
-function unsafeGitPath(file: string): boolean {
-  const parts = file.split(/[\\/]/);
-  return (
-    file.startsWith("/") ||
-    parts.includes("..") ||
-    [...file].some((character) => character.charCodeAt(0) < 32)
-  );
 }
 
 /** Map a porcelain XY code to the UI label; undefined = clean tracked file. */
