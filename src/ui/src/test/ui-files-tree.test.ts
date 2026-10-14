@@ -1,5 +1,5 @@
 const { describe, expect, test } = await import(String("bun:test"));
-const { buildTree, filterPaths, panelRows } = await import("../files-tree.js");
+const { buildTree, filterPaths, groupChanges, panelRows } = await import("../files-tree.js");
 import {
   FILE_STATUS,
   FILE_TREE_MAX_ENTRIES,
@@ -102,5 +102,77 @@ describe("panelRows", () => {
     expect(rows.map((r) => `${r.kind}:${r.label}:${r.depth}`)).toEqual(["file:README.md:0"]);
     const withStatus = panelRows(entries, new Set(), "a.ts");
     expect(withStatus.map((r) => `${r.label}:${r.status ?? "-"}`)).toEqual(["src/a.ts:modified"]);
+  });
+});
+
+describe("groupChanges", () => {
+  const file = (path: string, split: Partial<TreeFileEntry> = {}): TreeFileEntry => ({
+    path,
+    ...split,
+  });
+
+  test("empty input yields three empty groups", () => {
+    expect(groupChanges([])).toEqual({ staged: [], changes: [], untracked: [] });
+  });
+
+  test("staged-only entry joins staged only", () => {
+    const entry = file("staged.ts", { index: "added" });
+    const groups = groupChanges([entry]);
+    expect(groups.staged).toEqual([entry]);
+    expect(groups.changes).toEqual([]);
+    expect(groups.untracked).toEqual([]);
+  });
+
+  test("worktree-only entry joins changes only", () => {
+    const entry = file("changed.ts", { worktree: "modified" });
+    const groups = groupChanges([entry]);
+    expect(groups.staged).toEqual([]);
+    expect(groups.changes).toEqual([entry]);
+    expect(groups.untracked).toEqual([]);
+  });
+
+  test("MM entry joins BOTH staged and changes as the same object reference", () => {
+    const entry = file("both.ts", { index: "modified", worktree: "modified" });
+    const groups = groupChanges([entry]);
+    expect(groups.staged).toHaveLength(1);
+    expect(groups.changes).toHaveLength(1);
+    expect(groups.staged[0]).toBe(groups.changes[0]);
+    expect(groups.staged[0]).toBe(entry);
+  });
+
+  test("untracked entry joins untracked only", () => {
+    const entry = file("new.ts", { untracked: true });
+    const groups = groupChanges([entry]);
+    expect(groups.untracked).toEqual([entry]);
+    expect(groups.staged).toEqual([]);
+    expect(groups.changes).toEqual([]);
+  });
+
+  test("untracked entry with a stray index half still stays out of staged", () => {
+    const entry = file("weird.ts", { untracked: true, index: "added" });
+    const groups = groupChanges([entry]);
+    expect(groups.untracked).toEqual([entry]);
+    expect(groups.staged).toEqual([]);
+  });
+
+  test("unmerged entry (no split fields) joins no group", () => {
+    const entry = file("conflict.ts", { status: "modified" });
+    const groups = groupChanges([entry]);
+    expect(groups).toEqual({ staged: [], changes: [], untracked: [] });
+  });
+
+  test("mixed fixture partitions by staging state; counts and order hold", () => {
+    const staged = file("s1.ts", { index: "added" });
+    const worktreeOnly = file("w1.ts", { worktree: "deleted" });
+    const both = file("mm.ts", { index: "modified", worktree: "modified" });
+    const untracked = file("u1.ts", { untracked: true });
+    const plain = file("plain.ts");
+    const groups = groupChanges([staged, worktreeOnly, both, untracked, plain]);
+    expect(groups.staged).toHaveLength(2);
+    expect(groups.changes).toHaveLength(2);
+    expect(groups.untracked).toHaveLength(1);
+    expect(groups.staged).toEqual([staged, both]);
+    expect(groups.changes).toEqual([worktreeOnly, both]);
+    expect(groups.staged[1]).toBe(groups.changes[1]);
   });
 });
