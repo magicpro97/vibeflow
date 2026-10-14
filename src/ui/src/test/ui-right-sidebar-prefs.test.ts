@@ -197,6 +197,61 @@ describe("right-sidebar-prefs — read/persist seams", () => {
   });
 });
 
+// The fresh-context default is viewport-aware: mobile widths get a CLOSED
+// sidebar (it is a full-screen overlay there), desktop keeps OPEN. Only a
+// missing/non-boolean stored `open` consults matchMedia; an explicit stored
+// boolean always wins. matchMedia is stubbed per test and restored in
+// afterEach so the stub cannot leak into the other suites (which assume the
+// global is absent, as it is in bun).
+describe("right-sidebar-prefs — viewport-aware fresh default", () => {
+  let previousMatchMedia: unknown;
+
+  beforeEach(() => {
+    previousMatchMedia = (globalThis as { matchMedia?: unknown }).matchMedia;
+  });
+
+  afterEach(() => {
+    (globalThis as { matchMedia?: unknown }).matchMedia = previousMatchMedia;
+  });
+
+  const stubMatchMedia = (matches: boolean): void => {
+    (globalThis as { matchMedia?: unknown }).matchMedia = () => ({ matches });
+  };
+
+  test("a fresh context without a matchMedia global keeps the desktop default (open)", () => {
+    (globalThis as { matchMedia?: unknown }).matchMedia = undefined;
+    expect(readRightSidebarPrefs(makeStorage())).toEqual({
+      open: true,
+      tab: "changes",
+      width: 320,
+    });
+  });
+
+  test("a fresh context at the mobile breakpoint defaults CLOSED", () => {
+    stubMatchMedia(true);
+    expect(readRightSidebarPrefs(makeStorage())).toEqual({
+      open: false,
+      tab: "changes",
+      width: 320,
+    });
+  });
+
+  test("a fresh context above the mobile breakpoint defaults open", () => {
+    stubMatchMedia(false);
+    expect(readRightSidebarPrefs(makeStorage()).open).toBe(true);
+  });
+
+  test("a stored open:true still wins at the mobile breakpoint", () => {
+    stubMatchMedia(true);
+    expect(readRightSidebarPrefs(seededPrefs({ open: true, tab: "files" })).open).toBe(true);
+  });
+
+  test("a stored open:false still closes above the mobile breakpoint", () => {
+    stubMatchMedia(false);
+    expect(readRightSidebarPrefs(seededPrefs({ open: false })).open).toBe(false);
+  });
+});
+
 describe("right-sidebar-prefs — module integration (single instance)", () => {
   test("toggle flips visibility and the watcher persists {open, tab, width}", async () => {
     rightSidebarOpen.value = false;
