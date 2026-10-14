@@ -486,6 +486,7 @@ describe("AI-first Home source contract", () => {
       "CuratorSettings.vue",
       "HomeActionCard.vue",
       "HomeControlCenterDrawer.vue",
+      "HomeFilesPanel.vue",
       "HomePreferencesDrawer.vue",
       "HomePrivateRangePanel.vue",
       "HomeSessionRail.vue",

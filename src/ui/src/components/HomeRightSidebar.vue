@@ -32,7 +32,7 @@
       :aria-labelledby="`home-rs-tab-${rightSidebarTab}`"
     >
       <div v-show="rightSidebarTab === 'files'">
-        <slot name="files"><p class="home-rs-placeholder">Files will land here.</p></slot>
+        <slot name="files"><HomeFilesPanel /></slot>
       </div>
       <div v-show="rightSidebarTab === 'changes'">
         <slot name="changes"><HomeChangesPanel /></slot>
@@ -53,6 +53,7 @@ import {
   toggleRightSidebar,
 } from "../right-sidebar-prefs.js";
 import HomeChangesPanel from "./HomeChangesPanel.vue";
+import HomeFilesPanel from "./HomeFilesPanel.vue";
 
 const TAB_LABELS: Readonly<Record<RightSidebarTab, string>> = Object.freeze({
   files: "Files",

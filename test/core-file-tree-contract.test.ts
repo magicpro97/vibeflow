@@ -99,7 +99,7 @@ describe("shared file-tree contract", () => {
       "src/server/files-tree-route.ts",
       "src/ui/src/files-tree.ts",
       "src/ui/src/api-files.ts",
-      "src/ui/src/components/HomeFilesDrawer.vue",
+      "src/ui/src/components/HomeFilesPanel.vue",
     ];
     const rawStatusUnion = /["'](?:modified|added|deleted|untracked|renamed)["']\s*\|/u;
     for (const path of consumers) {
