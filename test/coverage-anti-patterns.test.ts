@@ -151,3 +151,26 @@ describe("coverage anti-patterns (test/ only)", () => {
     expect(allTestTypescript.length).toBeGreaterThan(40);
   });
 });
+
+// Cache-busted multi-instance imports diverge between bun versions under
+// coverage: bun 1.4.0 (CI) keeps the last instance's module record, so the
+// storage-present branches of earlier instances report uncovered and the
+// per-file 100% gate fails on CI while local bun 1.4.3 stays green (PR #843).
+// Import every module exactly once; never cache-bust a dynamic specifier.
+describe("coverage anti-patterns (cache-busted dynamic imports)", () => {
+  const CACHE_BUSTED_IMPORT = /import\s*\([^)]*\?(?:case|v|t)=/;
+  const scannedTestFiles = [...walk("test", [], true), ...walk("src/ui/src/test", [], true)]
+    .filter((p) => p.endsWith(".test.ts"))
+    // This scanner's own source describes the banned pattern; skip it.
+    .filter((p) => !p.endsWith("coverage-anti-patterns.test.ts"));
+
+  test("no test file cache-busts a dynamic import specifier", () => {
+    const offenders = scannedTestFiles.filter((f) =>
+      CACHE_BUSTED_IMPORT.test(readFileSync(f, "utf8")),
+    );
+    expect(
+      offenders,
+      `cache-busted dynamic import (query strings like ?case=, ?v=, ?t=) found in:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+});

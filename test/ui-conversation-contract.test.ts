@@ -46,6 +46,8 @@ const workUnitDetails = read("../src/ui/src/components/WorkUnitExpandedDetails.v
 const controlCenter = read("../src/ui/src/components/HomeControlCenterDrawer.vue");
 const updateBanner = read("../src/ui/src/components/HomeUpdateBanner.vue");
 const updateSettings = read("../src/ui/src/components/UpdateSettingsSection.vue");
+const rightSidebar = read("../src/ui/src/components/HomeRightSidebar.vue");
+const changesPanel = read("../src/ui/src/components/HomeChangesPanel.vue");
 
 const BACKEND_RUNTIME_IMPORT = /(?:^node:|(?:^|\/)server(?:\/|\.|$)|orchestrator\/conversation)/u;
 
@@ -283,6 +285,101 @@ describe("AI-first Home source contract", () => {
     expect(updateSettings).toContain("ready.value = true");
   });
 
+  test("right sidebar is a tabbed workspace shell beside the conversation", () => {
+    expect(home).toContain('import HomeRightSidebar from "./HomeRightSidebar.vue"');
+    expect(home).toContain("<HomeRightSidebar />");
+    expect(rightSidebar).toContain('aria-label="Workspace panels"');
+    expect(rightSidebar).toContain('role="tablist"');
+    expect(rightSidebar).toContain('role="tab"');
+    expect(rightSidebar).toContain("aria-selected");
+    expect(rightSidebar).toContain('role="tabpanel"');
+    expect(rightSidebar).toContain("home-rs-tab-");
+    expect(rightSidebar).toContain("Files");
+    expect(rightSidebar).toContain("Changes");
+    expect(rightSidebar).toContain("Resources");
+    expect(rightSidebar).toContain('aria-label="Close panels"');
+    // Collapse hides the shell without unmounting tab content (state retention).
+    expect(rightSidebar).toContain('v-show="rightSidebarOpen"');
+    expect(rightSidebar).toContain('v-show="rightSidebarTab ===');
+    for (const slot of ["files", "changes", "resources"])
+      expect(rightSidebar).toContain(`<slot name="${slot}">`);
+    // Each tabpanel now mounts its real panel; the placeholder copy is gone.
+    expect(rightSidebar).toContain('<slot name="resources"><HomeResourcesPanel /></slot>');
+  });
+
+  test("changes panel groups staged, changes, and untracked with bulk and row actions", () => {
+    // The panel mounts as the Changes tab's slot fallback; Home stays self-closing.
+    expect(rightSidebar).toContain('<slot name="changes"><HomeChangesPanel /></slot>');
+    // Own store instance, wired to the real files clients.
+    expect(changesPanel).toContain("createFilesStore");
+    expect(changesPanel).toContain("groupChanges(store.state.entries)");
+    expect(changesPanel).toContain("filesApi.stageFiles");
+    expect(changesPanel).toContain("filesApi.unstageFiles");
+    // Refresh re-runs THAT instance's load().
+    expect(changesPanel).toContain('aria-label="Refresh changes"');
+    expect(changesPanel).toContain("store.load()");
+    // Bulk actions chunk at the server's 500-path cap instead of one giant call.
+    expect(changesPanel).toContain("STAGE_PATH_CAP");
+    for (const label of [
+      "Staged",
+      "Changes",
+      "Untracked",
+      "Stage all",
+      "Unstage all",
+      "Stage all changes",
+      "Unstage all changes",
+      "No changes — working tree is clean.",
+    ])
+      expect(changesPanel).toContain(label);
+    // Per-row accessible names: "Stage <path>" / "Unstage <path>".
+    expect(changesPanel).toContain("`${group.verb} ${entry.path}`");
+    expect(changesPanel).not.toMatch(/<input|<select|v-html/u);
+    // Clicking a path toggles that row's inline diff; binary and untracked
+    // rows fall back to explicit copy instead of an empty pre.
+    expect(changesPanel).toContain("toggleDiff");
+    expect(changesPanel).toContain("home-diff");
+    expect(changesPanel).toContain("Binary file — no text diff.");
+    expect(changesPanel).toContain("Untracked — stage it to diff; preview shows content.");
+    expect(changesPanel).toContain("Diff truncated — showing the first lines.");
+    // Sidebar chrome + changes-panel presentation live in home.css.
+    for (const rule of [
+      ".home-right-sidebar__header",
+      ".home-right-sidebar__tabs",
+      ".home-right-sidebar__tab",
+      '.home-right-sidebar__tab[aria-selected="true"]',
+      ".home-right-sidebar__panels",
+      ".home-resources-panel",
+      ".home-change-group__header",
+      ".home-change-row__action",
+      ".home-diff",
+      ".home-diff--add",
+      ".home-diff--del",
+      ".home-diff--hunk",
+      ".home-diff--ctx",
+    ])
+      expect(homeCss).toContain(rule);
+  });
+
+  test("files panel refreshes on demand instead of only at mount", () => {
+    const filesPanel = read("../src/ui/src/components/HomeFilesPanel.vue");
+    // The sidebar keeps this panel mounted (v-show), so a stale badge list needs
+    // a manual refetch — same affordance and pin style as the Changes panel.
+    expect(filesPanel).toContain('aria-label="Refresh files"');
+    expect(filesPanel).toContain("store.load()");
+  });
+
+  test("resources panel keeps the drawer board and refreshes on demand", () => {
+    const resourcesPanel = read("../src/ui/src/components/HomeResourcesPanel.vue");
+    // Same mounted-panel convention as Files/Changes: manual refresh, no overlay.
+    expect(resourcesPanel).toContain('aria-label="Refresh resources"');
+    expect(resourcesPanel).toContain("fetchResourceSnapshot");
+    for (const label of ["Per engine", "Top units", "Quota", "Warnings"])
+      expect(resourcesPanel).toContain(label);
+    expect(resourcesPanel).toContain("resourceSummaryLine(snapshot)");
+    expect(resourcesPanel).toContain("No workflow state yet.");
+    expect(resourcesPanel).not.toContain("<input");
+  });
+
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {
     expect(rootStore).not.toMatch(/askOpen|askPrefill|openAsk|closeAsk/);
     expect(workUnitDetails).toContain("Use in conversation");
@@ -410,6 +507,7 @@ describe("AI-first Home source contract", () => {
       "CuratorSettings.vue",
       "HomeActionCard.vue",
       "HomeControlCenterDrawer.vue",
+      "HomeFilesPanel.vue",
       "HomePreferencesDrawer.vue",
       "HomePrivateRangePanel.vue",
       "HomeSessionRail.vue",

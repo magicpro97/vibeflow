@@ -10,18 +10,26 @@ import { spawnSync } from "node:child_process";
 import {
   FILE_STATUS,
   FILE_TREE_MAX_ENTRIES,
+  type FileChangeSplit,
   type FileStatusLabel,
   isUnmergedPorcelainCode,
+  splitPorcelain,
+  unsafeGitPath,
 } from "../core/file-tree-contract.js";
 
 export interface FileTreeEntry {
   path: string;
   status?: FileStatusLabel;
+  index?: FileStatusLabel;
+  worktree?: FileStatusLabel;
+  untracked?: boolean;
 }
 
 export interface RunGitResult {
   status: number | null;
   stdout: string;
+  /** Git's stderr (git routes surface its first line as the failure reason). */
+  stderr?: string;
 }
 export interface FilesTreeDeps {
   runGit: (args: string[], cwd: string) => RunGitResult;
@@ -51,17 +59,8 @@ export function defaultRunGit(
     // listing that the route would mistake for a complete one.
     status: out.error ? null : out.status,
     stdout: (out.stdout ?? Buffer.alloc(0)).toString(),
+    stderr: (out.stderr ?? Buffer.alloc(0)).toString(),
   };
-}
-
-/** Reject the same unsafe shapes src/sandbox.ts rejects before a path reaches the UI. */
-function unsafeGitPath(file: string): boolean {
-  const parts = file.split(/[\\/]/);
-  return (
-    file.startsWith("/") ||
-    parts.includes("..") ||
-    [...file].some((character) => character.charCodeAt(0) < 32)
-  );
 }
 
 /** Map a porcelain XY code to the UI label; undefined = clean tracked file. */
@@ -97,6 +96,9 @@ export function handleFilesTreeRoute(
 
   const dry = deps.runGit(["status", "--porcelain", "-z"], repo);
   const statuses = new Map<string, FileStatusLabel>();
+  // Parallel to `statuses`: the raw index/worktree split per path, from the
+  // SAME porcelain pass (one splitPorcelain call per entry, no second git run).
+  const splits = new Map<string, FileChangeSplit>();
   if (dry.status === 0) {
     for (const chunk of dry.stdout.split("\0")) {
       // -z format: "XY <path>"; a rename entry carries the OLD path as the next
@@ -106,6 +108,7 @@ export function handleFilesTreeRoute(
       if (!m) continue;
       const label = statusLabel(m[1] as string);
       if (label) statuses.set(m[2] as string, label);
+      splits.set(m[2] as string, splitPorcelain(m[1] as string));
     }
   }
 
@@ -118,7 +121,14 @@ export function handleFilesTreeRoute(
     }
     if (unsafeGitPath(path)) continue;
     const status = statuses.get(path);
-    entries.push(status ? { path, status } : { path });
+    const split = splits.get(path);
+    entries.push({
+      path,
+      ...(status ? { status } : {}),
+      ...(split?.index ? { index: split.index } : {}),
+      ...(split?.worktree ? { worktree: split.worktree } : {}),
+      ...(split?.untracked ? { untracked: true } : {}),
+    });
   }
   return Response.json({ ok: true, entries, truncated: capped });
 }

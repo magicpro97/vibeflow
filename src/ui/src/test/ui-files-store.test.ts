@@ -119,4 +119,130 @@ describe("files-store", () => {
     store.toggle("src");
     expect(store.state.expanded.has("src")).toBe(false);
   });
+
+  test("stage refetches the tree on success", async () => {
+    let treeCalls = 0;
+    const staged: string[][] = [];
+    const store = createFilesStore({
+      fetchTree: async () => {
+        treeCalls++;
+        return { ok: true, entries: [{ path: "a.txt" }], truncated: false };
+      },
+      readFile: async () => ({ ok: false, reason: "not found" }),
+      stagePaths: async (paths: string[]) => {
+        staged.push(paths);
+        return { ok: true };
+      },
+    });
+    await store.load();
+    expect(treeCalls).toBe(1);
+    await store.stage(["a.txt"]);
+    expect(staged).toEqual([["a.txt"]]);
+    expect(treeCalls).toBe(2);
+    expect(store.state.staging).toBe(false);
+    expect(store.state.error).toBeNull();
+  });
+
+  test("stage failure sets the error, skips the refetch, and resets staging for retry", async () => {
+    let treeCalls = 0;
+    let attempt = 0;
+    const store = createFilesStore({
+      fetchTree: async () => {
+        treeCalls++;
+        return { ok: true, entries: [], truncated: false };
+      },
+      readFile: async () => ({ ok: false, reason: "not found" }),
+      stagePaths: async () => {
+        attempt++;
+        return attempt === 1 ? { ok: false, reason: "read-only workspace" } : { ok: true };
+      },
+    });
+    await store.load();
+    await store.stage(["a.txt"]);
+    expect(store.state.error).toBe("read-only workspace");
+    expect(treeCalls).toBe(1);
+    expect(store.state.staging).toBe(false);
+    await store.stage(["a.txt"]);
+    expect(treeCalls).toBe(2);
+    expect(store.state.error).toBeNull();
+  });
+
+  test("a thrown stage dep surfaces its message and resets staging", async () => {
+    const store = createFilesStore({
+      fetchTree: async () => ({ ok: true, entries: [], truncated: false }),
+      readFile: async () => ({ ok: false, reason: "not found" }),
+      stagePaths: async () => {
+        throw new Error("Server error 403");
+      },
+    });
+    await store.load();
+    await store.stage(["a.txt"]);
+    expect(store.state.error).toBe("Server error 403");
+    expect(store.state.staging).toBe(false);
+  });
+
+  test("unstage mirrors stage: refetch on success, error without refetch on failure", async () => {
+    let treeCalls = 0;
+    const seen: string[][] = [];
+    const store = createFilesStore({
+      fetchTree: async () => {
+        treeCalls++;
+        return { ok: true, entries: [], truncated: false };
+      },
+      readFile: async () => ({ ok: false, reason: "not found" }),
+      unstagePaths: async (paths: string[]) => {
+        seen.push(paths);
+        return seen.length === 1 ? { ok: true } : { ok: false, reason: "index locked" };
+      },
+    });
+    await store.load();
+    await store.unstage(["a.txt", "b.txt"]);
+    expect(seen).toEqual([["a.txt", "b.txt"]]);
+    expect(treeCalls).toBe(2);
+    await store.unstage(["a.txt"]);
+    expect(store.state.error).toBe("index locked");
+    expect(treeCalls).toBe(2);
+    expect(store.state.staging).toBe(false);
+  });
+
+  test("a second stage call while busy is ignored", async () => {
+    const resolvers: Array<(res: { ok: boolean }) => void> = [];
+    let treeCalls = 0;
+    const store = createFilesStore({
+      fetchTree: async () => {
+        treeCalls++;
+        return { ok: true, entries: [], truncated: false };
+      },
+      readFile: async () => ({ ok: false, reason: "not found" }),
+      stagePaths: () => new Promise((resolve) => resolvers.push(resolve)),
+    });
+    await store.load();
+    const first = store.stage(["a.txt"]);
+    const second = store.stage(["b.txt"]);
+    expect(store.state.staging).toBe(true);
+    expect(resolvers.length).toBe(1);
+    resolvers[0]?.({ ok: true });
+    await Promise.all([first, second]);
+    expect(treeCalls).toBe(2);
+    expect(store.state.staging).toBe(false);
+  });
+
+  test("stage and toggleDiff without an injected dep are no-ops", async () => {
+    let treeCalls = 0;
+    const store = createFilesStore({
+      fetchTree: async () => {
+        treeCalls++;
+        return { ok: true, entries: [], truncated: false };
+      },
+      readFile: async () => ({ ok: false, reason: "not found" }),
+    });
+    await store.load();
+    await store.stage(["a.txt"]);
+    await store.toggleDiff("a.txt", false);
+    expect(treeCalls).toBe(1);
+    expect(store.state.staging).toBe(false);
+    expect(store.state.diffFor).toBeNull();
+    expect(store.state.diff).toBeNull();
+    expect(store.state.error).toBeNull();
+  });
 });

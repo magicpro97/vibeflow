@@ -1,6 +1,8 @@
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { HOST_ACTION_KIND } from "../src/actions/host-action-contract.js";
 import {
   ACTION_OPERATION_SSE_EVENT,
@@ -699,40 +701,53 @@ test.describe("AI-first conversation Home", () => {
     warnings: ["1 units on claude have no recorded resources"],
   });
 
-  async function openResourcesDrawer(page: Page) {
+  async function openResourcesPanel(page: Page) {
     await page.route("**/api/resources", (route) =>
       route.fulfill({ status: 200, json: resourcesSnapshotFixture() }),
     );
     await page.goto("/");
     await waitForPage(page);
+    // A4: the TopBar trigger opens the right sidebar and pins its Resources tab.
     await page.getByRole("button", { name: "Open resources" }).click();
-    return page.getByRole("complementary", { name: "Resources" });
+    // The panel root is a named <section>, so its role is region — the drawer's
+    // role="complementary" went away with the overlay.
+    return page.getByRole("region", { name: "Resources" });
   }
 
-  test("opens the resources drawer from the TopBar with a repo-scoped snapshot", async ({
+  test("opens the resources panel from the TopBar with a repo-scoped snapshot", async ({
     page,
   }) => {
-    const drawer = await openResourcesDrawer(page);
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByText("Totals: 1/2 done · 1200 tokens · $1.25 · 40s")).toBeVisible();
-    await expect(drawer.getByText("claude", { exact: true })).toBeVisible();
-    await expect(drawer.getByText("2 units · 1.2K tokens · $1.25")).toBeVisible();
-    await expect(drawer.getByText("1 units on claude have no recorded resources")).toBeVisible();
+    const panel = await openResourcesPanel(page);
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("Totals: 1/2 done · 1200 tokens · $1.25 · 40s")).toBeVisible();
+    await expect(panel.getByText("claude", { exact: true })).toBeVisible();
+    await expect(panel.getByText("2 units · 1.2K tokens · $1.25")).toBeVisible();
+    await expect(panel.getByText("1 units on claude have no recorded resources")).toBeVisible();
+    // The pin only has teeth if focus started inside the collapsed subtree: the
+    // trigger click leaves focus on the TopBar button, and the panel has no
+    // autofocus, so without this the toBeFocused() below passes vacuously even
+    // when App.vue's rightSidebarOpen watcher is reverted. Park focus on the
+    // panel's Refresh control, then Escape hides it and the watcher must hand
+    // focus back to the trigger.
+    await panel.getByRole("button", { name: "Refresh resources" }).focus();
+    await expect(panel.getByRole("button", { name: "Refresh resources" })).toBeFocused();
+    // Escape falls through the ladder to the sidebar collapse rung (no drawer owns
+    // the key here); the shell is v-show, so the panel hides without unmounting and
+    // focus returns to the TopBar trigger matching the sidebar's active tab.
     await page.keyboard.press("Escape");
-    await expect(drawer).toBeHidden();
+    await expect(panel).toBeHidden();
+    await expect(page.getByRole("button", { name: "Open resources" })).toBeFocused();
   });
 
-  test("keeps the open resources drawer axe-clean", async ({ page }) => {
-    // Pin the final transition frame: axe must measure settled colors, not the
-    // 180ms opacity blend of the drawer enter animation (matches :2676/:3752).
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    const drawer = await openResourcesDrawer(page);
-    await expect(drawer).toBeVisible();
-    await expect(drawer).not.toHaveClass(/home-drawer-enter-active/);
-    await expectAxeClean(page, "resources drawer");
+  test("keeps the open resources panel axe-clean", async ({ page }) => {
+    // The sidebar is toggled with v-show and carries no enter <Transition>, so axe
+    // already reads settled colors — there is no mid-blend frame left to pin.
+    const panel = await openResourcesPanel(page);
+    await expect(panel).toBeVisible();
+    await expectAxeClean(page, "resources panel");
   });
 
-  test("files drawer: browse, filter, preview, escape", async ({ page }) => {
+  test("files panel: browse, filter, preview, escape", async ({ page }) => {
     // Playwright matches routes last-registered-FIRST: register the generic tree route
     // first so the file-preview route (registered last) wins the overlap.
     await page.route("**/api/files/tree", (route) =>
@@ -758,41 +773,292 @@ test.describe("AI-first conversation Home", () => {
     await page.goto("/");
     await waitForPage(page);
 
+    // The TopBar trigger opens the right sidebar and pins its Files tab (A4: the
+    // drawer overlay is gone; the panel now lives in the sidebar shell).
     const openFiles = page.getByRole("button", { name: "Open files" });
     await openFiles.click();
-    const drawer = page.getByLabel("Repository files");
-    await expect(drawer).toBeVisible();
+    const sidebar = page.locator(".home-right-sidebar");
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // The panel root is a named <section> inside the sidebar's tabpanel, so it is
+    // reachable by aria-label.
+    const panel = page.getByLabel("Repository files");
+    await expect(panel).toBeVisible();
 
     // Browse: expanding src/ inlines its children. Row accessible names condense
     // ("a.tsmodified"), so row locators stay substring matches; after selection the
     // preview header repeats the path, so every row lookup is scoped to the list.
     const list = page.locator(".home-files-list");
-    await drawer.getByRole("button", { name: "▸ src/" }).click();
-    const aRow = list.getByRole("button", { name: "a.ts" });
+    await panel.getByRole("button", { name: "▸ src/" }).click();
+    // A modified row now renders a second button ("Diff src/a.ts") whose name also
+    // contains "a.ts" — anchor the name so only the file button matches.
+    const aRow = list.getByRole("button", { name: /^a\.ts/ });
     await expect(aRow).toBeAttached();
     await expect(aRow).toContainText("modified");
 
     await aRow.click();
-    await expect(drawer.getByText("export {};")).toBeVisible();
+    await expect(panel.getByText("export {};")).toBeVisible();
 
-    const filter = drawer.getByPlaceholder("Filter by path");
+    const filter = panel.getByPlaceholder("Filter by path");
     await filter.fill("README");
     await expect(list.locator("li")).toHaveCount(1);
     await expect(list.getByText("src/a.ts")).not.toBeAttached();
     await expect(list.getByText("README.md")).toBeVisible();
     await filter.fill("");
 
+    // Escape is consumed by no drawer here, so the ladder collapses the sidebar
+    // (App.vue closeActiveDrawer). Collapse is v-show — the panel stays attached
+    // but hidden — so the focused filter input would otherwise fall to <body>;
+    // App.vue's rightSidebarOpen watcher hands focus back to the TopBar trigger.
     await page.keyboard.press("Escape");
-    await expect(drawer).not.toBeAttached();
+    await expect(panel).toBeHidden();
     await expect(openFiles).toBeFocused();
 
-    // Axe the reopened drawer (mirrors the resources case): pin the final transition
-    // frame so axe measures settled colors, not the 180ms opacity blend.
-    await page.emulateMedia({ reducedMotion: "reduce" });
+    // Axe the reopened panel: the sidebar has no enter <Transition> (v-show only),
+    // so axe already measures settled colors.
     await openFiles.click();
-    await expect(drawer).toBeVisible();
-    await expect(drawer).not.toHaveClass(/home-drawer-enter-active/);
-    await expectAxeClean(page, "files drawer");
+    await expect(panel).toBeVisible();
+    await expectAxeClean(page, "files panel");
+  });
+
+  test("right sidebar: tabs, collapse, and escape", async ({ page }) => {
+    await page.goto("/");
+    await waitForPage(page);
+
+    const sidebar = page.locator(".home-right-sidebar");
+    await expect(sidebar).toBeHidden();
+
+    const openFiles = page.getByRole("button", { name: "Open files" });
+    await openFiles.click();
+    await expect(sidebar).toBeVisible();
+
+    await expect(sidebar.getByRole("tablist", { name: "Workspace panels" })).toBeVisible();
+    const filesTab = sidebar.getByRole("tab", { name: "Files" });
+    const changesTab = sidebar.getByRole("tab", { name: "Changes" });
+    const panel = sidebar.getByRole("tabpanel");
+    await expect(filesTab).toHaveAttribute("aria-selected", "true");
+    await expect(changesTab).toHaveAttribute("aria-selected", "false");
+    await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-files");
+
+    await changesTab.click();
+    await expect(changesTab).toHaveAttribute("aria-selected", "true");
+    await expect(filesTab).toHaveAttribute("aria-selected", "false");
+    await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-changes");
+
+    await expectAxeClean(page, "right sidebar");
+
+    await page.keyboard.press("Escape");
+    await expect(sidebar).toBeHidden();
+
+    // Collapse must not clobber the selected tab: the persisted pin still reads "changes".
+    const persistedTab = await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem("vf-right-sidebar") ?? "null") as {
+        tab?: unknown;
+      } | null;
+      return raw?.tab;
+    });
+    expect(persistedTab).toBe("changes");
+
+    // Collapse is v-show, so the shell and its three tab layers never unmount; the
+    // TopBar triggers pin their own tab (Files/Resources), so retention is asserted
+    // on the mounted layers, the persisted tab above, and the tab switching that
+    // still works after reopen.
+    await openFiles.click();
+    await expect(sidebar).toBeVisible();
+    await expect(panel).toBeAttached();
+    await expect(sidebar.locator(".home-right-sidebar__panels > div")).toHaveCount(3);
+    await changesTab.click();
+    await expect(changesTab).toHaveAttribute("aria-selected", "true");
+    await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-changes");
+
+    await sidebar.getByRole("button", { name: "Close panels" }).click();
+    await expect(sidebar).toBeHidden();
+    // The Close-panels button sits inside the v-show'd shell, so the collapse must
+    // hand focus back to the TopBar trigger for the last active tab (Changes → Files).
+    await expect(openFiles).toBeFocused();
+  });
+
+  test("changes panel: stage and unstage a modified file", async ({ page }) => {
+    const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
+    // Workers inherit the controller's setup uuid and playwright.config.ts serves
+    // `cwd: resolve(PROJECT_ROOT, `.e2e-workspace-${setupRun}`)`, so the mutated dir
+    // IS the repo the webServer serves. Env resolution only — no probing, no fallback.
+    const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
+    expect(existsSync(resolve(ws, ".git"))).toBe(true);
+    const readme = resolve(ws, "README.md");
+    const original = readFileSync(readme, "utf8");
+
+    try {
+      await page.goto("/");
+      await waitForPage(page);
+      writeFileSync(readme, `${original}e2e stage/unstage roundtrip\n`);
+      await page.reload();
+      await waitForPage(page);
+
+      const sidebar = page.locator(".home-right-sidebar");
+      await page.getByRole("button", { name: "Open files" }).click();
+      await expect(sidebar).toBeVisible();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+
+      const panel = sidebar.locator(".home-changes");
+      await expect(panel).toBeVisible();
+
+      // Scope every row to its group section: a partially staged path can sit in
+      // Staged AND Changes at once, so a panel-wide row locator is ambiguous.
+      const groupOf = (label: string) =>
+        panel
+          .locator(".home-change-group")
+          .filter({ has: page.locator(".home-change-group__header strong", { hasText: label }) });
+      const rowOf = (section: Locator, path: string) =>
+        section
+          .locator(".home-change-row")
+          .filter({ has: page.getByRole("button", { name: path, exact: true }) });
+      const changes = groupOf("Changes");
+      const staged = groupOf("Staged");
+      const badge = ".home-change-row__badge";
+
+      await expect(rowOf(changes, "README.md").locator(badge)).toHaveText("modified");
+
+      await changes.getByRole("button", { name: "Stage README.md", exact: true }).click();
+      await expect(rowOf(staged, "README.md").locator(badge)).toHaveText("modified");
+      await expect(rowOf(changes, "README.md")).toHaveCount(0);
+
+      await staged.getByRole("button", { name: "Unstage README.md", exact: true }).click();
+      await expect(rowOf(changes, "README.md").locator(badge)).toHaveText("modified");
+      await expect(rowOf(staged, "README.md")).toHaveCount(0);
+    } finally {
+      // A mid-test failure must never leak a dirty workspace into later cases.
+      writeFileSync(readme, original);
+      if (page.url().startsWith("http")) {
+        await page.reload();
+        await waitForPage(page);
+      }
+    }
+  });
+
+  test("changes panel: diff preview", async ({ page }) => {
+    const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
+    // Same env resolution as the stage/unstage roundtrip above: the mutated dir
+    // IS the repo the webServer serves (playwright.config.ts `cwd: WORKSPACE`).
+    const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
+    expect(existsSync(resolve(ws, ".git"))).toBe(true);
+    const readme = resolve(ws, "README.md");
+    const original = readFileSync(readme, "utf8");
+    // A changed line, not an append: the unified diff must carry a '-' and a '+'
+    // row for the same line.
+    const modified = original.replace("# E2E Demo", "# E2E Demo (diff preview)");
+
+    try {
+      await page.goto("/");
+      await waitForPage(page);
+      writeFileSync(readme, modified);
+      await page.reload();
+      await waitForPage(page);
+
+      const sidebar = page.locator(".home-right-sidebar");
+      await page.getByRole("button", { name: "Open files" }).click();
+      await expect(sidebar).toBeVisible();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+      const panel = sidebar.locator(".home-changes");
+      await expect(panel).toBeVisible();
+
+      // Scope to the Changes group: an index copy of the same path would make a
+      // panel-wide row locator ambiguous (same reason as the roundtrip case).
+      const changes = panel
+        .locator(".home-change-group")
+        .filter({ has: page.locator(".home-change-group__header strong", { hasText: "Changes" }) });
+      const row = changes
+        .locator(".home-change-row")
+        .filter({ has: page.getByRole("button", { name: "README.md", exact: true }) });
+      const pathButton = row.locator(".home-change-row__path");
+      const diff = row.locator(".home-diff");
+
+      await expect(row.locator(".home-change-row__badge")).toHaveText("modified");
+
+      // (a)+(b) open the row's inline diff: one '-' and one '+' row for the edited line.
+      await expect(diff).toBeHidden();
+      await pathButton.click();
+      await expect(diff).toBeVisible();
+      await expect(diff.locator(".home-diff--del")).toContainText("# E2E Demo");
+      await expect(diff.locator(".home-diff--add")).toContainText("# E2E Demo (diff preview)");
+      // (d) the escape ladder: no drawer consumes Escape here, so it collapses the
+      // right sidebar (App.vue closeActiveDrawer). The open diff is panel state, not
+      // a ladder rung — it survives the collapse. (Role locators stop matching while
+      // the v-show'd sidebar is display:none, so re-assert after reopening the tab.)
+      await pathButton.press("Escape");
+      await expect(sidebar).toBeHidden();
+      await page.getByRole("button", { name: "Open files" }).click();
+      await expect(sidebar).toBeVisible();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+      await expect(diff).toBeVisible();
+      // (c) the same row click toggles the diff closed.
+      await pathButton.click();
+      await expect(diff).toHaveCount(0);
+
+      // (e) axe with the diff OPEN: the tinted add/del lines were never measured.
+      await pathButton.click();
+      await expect(diff).toBeVisible();
+      await expectAxeClean(page, "changes diff");
+    } finally {
+      writeFileSync(readme, original);
+      if (page.url().startsWith("http")) {
+        await page.reload();
+        await waitForPage(page);
+      }
+    }
+  });
+
+  test("changes panel: untracked row preview", async ({ page }) => {
+    const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
+    const ws = resolve(process.cwd(), `.e2e-workspace-${setupRun}`);
+    expect(existsSync(resolve(ws, ".git"))).toBe(true);
+    const untracked = resolve(ws, "e2e-untracked-preview.txt");
+    // Diff-looking content: if the preview ever ran through classifyDiffLines,
+    // this line would classify as add/del and the count-0 assertions below
+    // would fail (review D4-I1: the old plain-text fixture made them toothless).
+    const content = "+plus line\n-minus line\n";
+
+    try {
+      await page.goto("/");
+      await waitForPage(page);
+      writeFileSync(untracked, content);
+      await page.reload();
+      await waitForPage(page);
+
+      const sidebar = page.locator(".home-right-sidebar");
+      await page.getByRole("button", { name: "Open files" }).click();
+      await sidebar.getByRole("tab", { name: "Changes" }).click();
+      const panel = sidebar.locator(".home-changes");
+      const untrackedGroup = panel
+        .locator(".home-change-group")
+        .filter({
+          has: page.locator(".home-change-group__header strong", { hasText: "Untracked" }),
+        });
+      const row = untrackedGroup
+        .locator(".home-change-row")
+        .filter({
+          has: page.getByRole("button", { name: "e2e-untracked-preview.txt", exact: true }),
+        });
+
+      await row.locator(".home-change-row__path").click();
+      const diff = row.locator(".home-diff");
+      await expect(diff).toBeVisible();
+      // Raw content preview, never classified as a patch body.
+      await expect(diff).toHaveText(content);
+      await expect(row.locator(".home-diff--add")).toHaveCount(0);
+      await expect(row.locator(".home-diff--del")).toHaveCount(0);
+      await expect(row.getByText(/Untracked — stage it to diff/)).toBeVisible();
+    } finally {
+      rmSync(untracked, { force: true });
+      if (page.url().startsWith("http")) {
+        await page.reload();
+        await waitForPage(page);
+      }
+    }
   });
 
   test("home shell fills the viewport without dead space", async ({ page }) => {
