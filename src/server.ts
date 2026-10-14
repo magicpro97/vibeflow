@@ -39,6 +39,7 @@ import {
 import { handleDomainImpact, handleDomainsView } from "./server/domain-route.js";
 import { handleFileRoute } from "./server/file-route.js";
 import {
+  handleFilesDiffRoute,
   handleFilesStageRoute,
   handleFilesUnstageRoute,
   validateGitPaths,
@@ -518,6 +519,18 @@ export async function startServer(
       if (method === "GET" && path === "/api/files/tree") {
         if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
         return handleFilesTreeRoute(activeRepo);
+      }
+
+      // --- GET /api/files/diff — self-guarded read-only per-file diff ---
+      if (method === "GET" && path === "/api/files/diff") {
+        if (!guarded(req)) return Response.json({ error: "forbidden" }, { status: 403 });
+        return handleFilesDiffRoute(
+          activeRepo,
+          url.searchParams.get("path") ?? "",
+          url.searchParams.get("staged") === "1",
+          url.searchParams.get("untracked") === "1",
+          { runGit: defaultRunGit },
+        );
       }
 
       // --- GET /api/projects* and /api/hook/pending (#561: guarded) ---

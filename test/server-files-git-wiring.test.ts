@@ -32,6 +32,19 @@ interface GitResp {
   error?: string;
 }
 
+interface DiffResp {
+  ok?: boolean;
+  kind?: string;
+  text?: string;
+  truncated?: boolean;
+  binary?: boolean;
+  error?: string;
+  reason?: string;
+}
+
+const get = (url: string, route: string, token?: string) =>
+  fetch(`${url}${route}`, { headers: token ? { "x-vibeflow-token": token } : {} });
+
 /** Temp repo with one commit — `restore --staged` needs a HEAD to restore from. */
 function seededRepo(): string {
   const repo = mkdtempSync(join(tmpdir(), "vf-files-git-"));
@@ -144,6 +157,80 @@ describe("POST /api/files/stage|unstage wiring (inline block in server.ts)", () 
         expect(body.ok).toBe(false);
         expect(typeof body.reason).toBe("string");
         expect(body.reason?.length).toBeGreaterThan(0);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      expect(process.cwd()).toBe(callerCwd);
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+// The diff route is wired inline in server.ts next to /api/files/tree and
+// self-guards the same way: 403 without the CSRF token, real git otherwise.
+describe("GET /api/files/diff wiring (inline block in server.ts)", () => {
+  test("missing token → 403 (self-guarded)", async () => {
+    const callerCwd = process.cwd();
+    const repo = seededRepo();
+    try {
+      const { server, url } = await startServer(0, { repoDir: repo });
+      try {
+        const res = await get(url, "/api/files/diff?path=tracked.txt");
+        expect(res.status).toBe(403);
+      } finally {
+        server.stop();
+      }
+    } finally {
+      expect(process.cwd()).toBe(callerCwd);
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  test("with token: unchanged tracked file → 200 empty-diff shape", async () => {
+    const callerCwd = process.cwd();
+    const repo = seededRepo();
+    try {
+      const { server, url } = await startServer(0, { repoDir: repo });
+      try {
+        const token = await csrfToken(url);
+        const res = await get(url, "/api/files/diff?path=tracked.txt", token);
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as DiffResp;
+        expect(body).toEqual({
+          ok: true,
+          kind: "empty",
+          text: "",
+          truncated: false,
+          binary: false,
+        });
+      } finally {
+        server.stop();
+      }
+    } finally {
+      expect(process.cwd()).toBe(callerCwd);
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  test("with token: modified tracked file → kind diff with the changed line", async () => {
+    const callerCwd = process.cwd();
+    const repo = seededRepo();
+    try {
+      const { server, url } = await startServer(0, { repoDir: repo });
+      try {
+        const token = await csrfToken(url);
+        writeFileSync(join(repo, "tracked.txt"), "one\ntwo\n");
+        const res = await get(url, "/api/files/diff?path=tracked.txt&staged=0", token);
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as DiffResp;
+        expect(body.ok).toBe(true);
+        expect(body.kind).toBe("diff");
+        expect(typeof body.text).toBe("string");
+        expect(body.text?.length).toBeGreaterThan(0);
+        expect(body.text).toContain("+two");
+        expect(body.truncated).toBe(false);
+        expect(body.binary).toBe(false);
       } finally {
         server.stop();
       }
