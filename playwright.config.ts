@@ -11,7 +11,15 @@ const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(PROJECT_ROOT, "dist/cli.js");
 const TEST_DIR = resolve(PROJECT_ROOT, "e2e");
 const SETUP_RUN_ENV = "VF_PLAYWRIGHT_SETUP_RUN";
-const setupRun = randomUUID();
+// Only the controller mints a fresh identity. Workers re-import this config
+// (TEST_WORKER_INDEX is set in worker processes, never in the controller); if a
+// worker minted its own uuid it would seed a SECOND workspace and rebuild, and
+// the spec's env uuid would point at a different dir than the one the webServer
+// (whose cwd the controller fixed) actually serves.
+const setupRun =
+  process.env.TEST_WORKER_INDEX !== undefined
+    ? (process.env[SETUP_RUN_ENV] ?? randomUUID())
+    : randomUUID();
 process.env[SETUP_RUN_ENV] = setupRun;
 const WORKSPACE = resolve(PROJECT_ROOT, `.e2e-workspace-${setupRun}`);
 const TEST_HOME = resolve(WORKSPACE, ".home");
