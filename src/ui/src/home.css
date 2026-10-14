@@ -3963,6 +3963,7 @@ button:disabled {
   }
   .home-right-sidebar {
     position: absolute;
+    z-index: 13; /* above the mobile backdrop (12), below the rail (15) */
     top: 0;
     right: 0;
     bottom: 0;
