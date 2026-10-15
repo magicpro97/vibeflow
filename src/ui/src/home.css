@@ -20,7 +20,7 @@
   --home-badge-new: #35704a;
   --home-red: #a84b3e;
   --home-blue: #4e6878;
-  --home-topbar-height: 3.625rem;
+  --home-topbar-height: 2.5rem;
   --home-rail-width: 18rem;
   --home-sidebar-width: 22rem;
   --home-composer-width: 54rem;
@@ -311,10 +311,10 @@ button:disabled {
 }
 .home-icon-button,
 .home-topbar-button {
-  min-width: 2.75rem;
-  min-height: 2.75rem;
+  min-width: 2rem;
+  min-height: 2rem;
   border: 0;
-  border-radius: 0.65rem;
+  border-radius: 0.55rem;
   background: transparent;
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
@@ -515,8 +515,8 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  min-height: 4.6rem;
-  padding: 0 0.75rem 0 1.15rem;
+  min-height: 3rem;
+  padding: 0 0.65rem 0 0.95rem;
   border-bottom: 1px solid var(--home-line);
 }
 .home-right-sidebar__header strong {
@@ -1012,8 +1012,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 4.6rem;
-  padding: 0.75rem clamp(1rem, 3vw, 2.5rem);
+  min-height: 3rem;
+  padding: 0.4rem clamp(0.8rem, 2vw, 1.75rem);
   border-bottom: 1px solid var(--home-header-border);
   background: var(--home-header-bg);
   backdrop-filter: blur(12px);
@@ -1671,6 +1671,9 @@ button:disabled {
   display: grid;
   align-content: start;
   height: max-content;
+  /* ponytail: 4.6rem reserve, not the 3rem header min-height — at 200% zoom the
+     header is content-driven and shrinks far less than its min-height, so a
+     3rem reserve lets #composer-help slide below the viewport. */
   max-height: calc(100dvh - var(--home-topbar-height) - 4.6rem);
   min-width: 0;
   width: 100%;
