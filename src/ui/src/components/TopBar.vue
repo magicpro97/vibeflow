@@ -8,7 +8,7 @@
         :aria-expanded="!store.railCollapsed"
         @click="store.railCollapsed = !store.railCollapsed"
       >
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h14M3 10h14M3 15.5h14" /></svg>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="1.7" /><path d="M7.5 2.5v15" /></svg>
       </button>
       <a class="home-brand" href="#conversation-main" aria-label="VibeFlow Home">
         <span aria-hidden="true"><i /><i /></span>
@@ -32,7 +32,7 @@
         <span>Capabilities</span>
       </button>
       <button class="home-topbar-button" type="button" aria-label="Open files" title="Files" :disabled="Boolean(store.queuedMessageEdit)" @click="toggleRightSidebar('files')">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h5l1.5 2H16v10H4V3Z" /></svg>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="1.7" /><path d="M12.5 2.5v15" /></svg>
         <span>Files</span>
       </button>
       <button class="home-icon-button" type="button" aria-label="New conversation" title="New conversation" @click="newConversation">
@@ -50,7 +50,7 @@
         <svg v-else viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4" /><path d="M10 2v2m0 12v2M2 10h2m12 0h2M5.5 5.5l1 1m7 7 1 1m0-9-1 1m-7 7-1 1" /><circle cx="10" cy="10" r="1.5" fill="none" stroke-width="1.5" stroke-dasharray="2 2" /></svg>
       </button>
       <button class="home-icon-button" type="button" aria-label="Open resources" title="Resources" @click="toggleRightSidebar('resources')">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16V9m4 7V4m4 12v-5m4 5V7" /></svg>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="1.7" /><path d="M12.5 2.5v15" /></svg>
       </button>
       <button class="home-icon-button" type="button" aria-label="Open settings" title="Settings" @click="$emit('open-settings')">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3" /><path d="M10 2v2m0 12v2M2 10h2m12 0h2M4.35 4.35l1.4 1.4m8.5 8.5 1.4 1.4m0-11.3-1.4 1.4m-8.5 8.5-1.4 1.4" /></svg>
