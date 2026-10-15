@@ -128,6 +128,15 @@ describe("AI-first Home source contract", () => {
     expect(queryRuntime).toContain("loadMoreSessions");
     expect(pagination).toContain("mergeHomePage");
     expect(pagination).toContain("staleHomeCursor");
+    // Resize affordances: an APG separator at the rail's right edge drives the
+    // pointer drag + ArrowRight/Left (±16) nudges, the aside re-binds the width
+    // var inline, and every write funnels through the clamped setter / drag math.
+    expect(rail).toContain('role="separator"');
+    expect(rail).toContain('aria-orientation="vertical"');
+    expect(rail).toContain('aria-label="Resize conversation list"');
+    expect(rail).toContain("'--home-rail-width': `${railWidth}px`");
+    expect(rail).toContain("setRailWidth(");
+    expect(rail).toContain("resizeFromDrag(");
   });
 
   test("timeline and composer are natural, IME-safe, and memory-only", () => {
