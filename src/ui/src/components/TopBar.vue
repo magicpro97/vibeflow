@@ -8,7 +8,7 @@
         :aria-expanded="!store.railCollapsed"
         @click="store.railCollapsed = !store.railCollapsed"
       >
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h14M3 10h14M3 15.5h14" /></svg>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="1.7" /><path d="M7.5 2.5v15" /></svg>
       </button>
       <a class="home-brand" href="#conversation-main" aria-label="VibeFlow Home">
         <span aria-hidden="true"><i /><i /></span>
