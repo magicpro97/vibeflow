@@ -305,6 +305,15 @@ describe("AI-first Home source contract", () => {
       expect(rightSidebar).toContain(`<slot name="${slot}">`);
     // Each tabpanel now mounts its real panel; the placeholder copy is gone.
     expect(rightSidebar).toContain('<slot name="resources"><HomeResourcesPanel /></slot>');
+    // Resize affordances: an APG separator at the panel's left edge drives the
+    // pointer drag + ArrowLeft/Right (±16) nudges, the aside re-binds the width
+    // var inline, and every write funnels through the clamped setter / drag math.
+    expect(rightSidebar).toContain('role="separator"');
+    expect(rightSidebar).toContain('aria-orientation="vertical"');
+    expect(rightSidebar).toContain('aria-label="Resize panels"');
+    expect(rightSidebar).toContain("'--home-sidebar-width': `${rightSidebarWidth}px`");
+    expect(rightSidebar).toContain("setRightSidebarWidth(");
+    expect(rightSidebar).toContain("resizeFromDrag(");
   });
 
   test("changes panel groups staged, changes, and untracked with bulk and row actions", () => {

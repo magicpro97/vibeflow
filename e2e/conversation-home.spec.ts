@@ -830,16 +830,23 @@ test.describe("AI-first conversation Home", () => {
     await waitForPage(page);
 
     const sidebar = page.locator(".home-right-sidebar");
-    await expect(sidebar).toBeHidden();
+    // Fresh context ⇒ empty localStorage ⇒ the prefs default is OPEN with the
+    // Changes tab pinned — asserted before any click.
+    await expect(sidebar).toBeVisible();
+
+    const tablist = sidebar.getByRole("tablist", { name: "Workspace panels" });
+    const filesTab = sidebar.getByRole("tab", { name: "Files" });
+    const changesTab = sidebar.getByRole("tab", { name: "Changes" });
+    const panel = sidebar.getByRole("tabpanel");
+    await expect(changesTab).toHaveAttribute("aria-selected", "true");
+    await expect(filesTab).toHaveAttribute("aria-selected", "false");
+    await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-changes");
 
     const openFiles = page.getByRole("button", { name: "Open files" });
     await openFiles.click();
     await expect(sidebar).toBeVisible();
 
-    await expect(sidebar.getByRole("tablist", { name: "Workspace panels" })).toBeVisible();
-    const filesTab = sidebar.getByRole("tab", { name: "Files" });
-    const changesTab = sidebar.getByRole("tab", { name: "Changes" });
-    const panel = sidebar.getByRole("tabpanel");
+    await expect(tablist).toBeVisible();
     await expect(filesTab).toHaveAttribute("aria-selected", "true");
     await expect(changesTab).toHaveAttribute("aria-selected", "false");
     await expect(panel).toHaveAttribute("aria-labelledby", "home-rs-tab-files");
@@ -854,14 +861,17 @@ test.describe("AI-first conversation Home", () => {
     await page.keyboard.press("Escape");
     await expect(sidebar).toBeHidden();
 
-    // Collapse must not clobber the selected tab: the persisted pin still reads "changes".
-    const persistedTab = await page.evaluate(() => {
+    // Collapse must not clobber the selected tab or the width: the persisted pin
+    // still reads "changes" at the default 320.
+    const persisted = await page.evaluate(() => {
       const raw = JSON.parse(localStorage.getItem("vf-right-sidebar") ?? "null") as {
         tab?: unknown;
+        width?: unknown;
       } | null;
-      return raw?.tab;
+      return { tab: raw?.tab, width: raw?.width };
     });
-    expect(persistedTab).toBe("changes");
+    expect(persisted.tab).toBe("changes");
+    expect(persisted.width).toBe(320);
 
     // Collapse is v-show, so the shell and its three tab layers never unmount; the
     // TopBar triggers pin their own tab (Files/Resources), so retention is asserted
@@ -880,6 +890,49 @@ test.describe("AI-first conversation Home", () => {
     // The Close-panels button sits inside the v-show'd shell, so the collapse must
     // hand focus back to the TopBar trigger for the last active tab (Changes → Files).
     await expect(openFiles).toBeFocused();
+  });
+
+  test("right sidebar: drag and keyboard resize persist", async ({ page }) => {
+    await page.goto("/");
+    await waitForPage(page);
+
+    const sidebar = page.locator(".home-right-sidebar");
+    await expect(sidebar).toBeVisible(); // default-open, no clicks
+    const widthOf = () => sidebar.evaluate((el) => el.getBoundingClientRect().width);
+    const before = await widthOf();
+    const handle = page.getByRole("separator", { name: "Resize panels" });
+    await handle.focus();
+    await expect(handle).toBeFocused();
+    await page.keyboard.press("ArrowLeft"); // +16 (grow: panel is on the right edge)
+    await expect.poll(widthOf).toBeGreaterThan(before);
+    const grown = await widthOf();
+    expect(grown).toBe(before + 16);
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(widthOf).toBe(grown - 16);
+    // Persist (the prefs watch flushes on tick): settle the stored width, then reload.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const raw = JSON.parse(localStorage.getItem("vf-right-sidebar") ?? "null") as {
+            width?: number;
+          } | null;
+          return raw?.width;
+        }),
+      )
+      .toBe(grown - 16);
+    await page.reload();
+    await waitForPage(page);
+    await expect(sidebar).toBeVisible();
+    await expect.poll(widthOf).toBe(grown - 16);
+    // Drag LEFT grows by the pointer delta (grab the 6px handle, move -80px).
+    const box = await handle.boundingBox();
+    if (!box) throw new Error("resize separator has no bounding box");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 - 80, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(widthOf).toBeGreaterThan(grown - 16);
+    await expectAxeClean(page, "resized right sidebar");
   });
 
   test("changes panel: stage and unstage a modified file", async ({ page }) => {

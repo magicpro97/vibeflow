@@ -4,6 +4,8 @@
     "Segoe UI", sans-serif;
   --home-canvas: #f3f0e9;
   --home-panel: #ebe7de;
+  /* Right sidebar panel: page -2% luminance (real Orca sidebar proportion), distinct from the shared --home-panel. */
+  --home-rs-panel: #f5f3ee;
   --home-paper: #fbfaf6;
   --home-paper-strong: #fffefa;
   --home-ink: #29251f;
@@ -85,6 +87,7 @@
   :root:not([data-color-scheme="light"]) {
     --home-canvas: #1a1a1e;
     --home-panel: #242428;
+    --home-rs-panel: #2e2e35;
     --home-paper: #2c2c32;
     --home-paper-strong: #35353d;
     --home-ink: #e8e4de;
@@ -148,6 +151,7 @@
 :root[data-color-scheme="dark"] {
   --home-canvas: #1a1a1e;
   --home-panel: #242428;
+  --home-rs-panel: #2e2e35;
   --home-paper: #2c2c32;
   --home-paper-strong: #35353d;
   --home-ink: #e8e4de;
@@ -469,15 +473,42 @@ button:disabled {
   pointer-events: none;
 }
 .home-right-sidebar {
-  z-index: 15;
+  position: relative;
   display: flex;
   flex: 0 0 var(--home-sidebar-width);
   flex-direction: column;
   width: var(--home-sidebar-width);
   min-width: 0;
   overflow: hidden;
-  border-left: 1px solid var(--home-line);
-  background: var(--home-panel);
+  border-left: 1px solid color-mix(in srgb, var(--home-ink) 24%, transparent);
+  background: var(--home-rs-panel);
+}
+.home-right-sidebar__resize {
+  position: absolute;
+  z-index: 16;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.home-right-sidebar__resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: transparent;
+}
+.home-right-sidebar__resize:hover::after,
+.home-right-sidebar__resize:focus-visible::after {
+  background: color-mix(in srgb, var(--home-ink) 24%, transparent);
+}
+.home-right-sidebar__resize:focus-visible {
+  outline: 2px solid var(--home-ink);
+  outline-offset: -2px;
 }
 .home-right-sidebar__header {
   display: flex;
@@ -489,9 +520,9 @@ button:disabled {
   border-bottom: 1px solid var(--home-line);
 }
 .home-right-sidebar__header strong {
-  font-family: Georgia, serif;
-  font-size: 1.05rem;
-  font-weight: 500;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 .home-right-sidebar__collapse {
   display: grid;
@@ -538,6 +569,7 @@ button:disabled {
 }
 .home-right-sidebar__tab[aria-selected="true"] {
   border-bottom-color: var(--home-ink);
+  background: color-mix(in srgb, var(--home-ink) 6%, transparent);
   color: var(--home-ink);
 }
 .home-right-sidebar__panels {
@@ -2365,7 +2397,7 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 .home-composer__error {
-  flex: 1 1 16rem;
+  flex: 1 1 0;
   min-width: 0;
   margin-left: auto;
   color: var(--home-red);
@@ -3936,6 +3968,7 @@ button:disabled {
   }
   .home-right-sidebar {
     position: absolute;
+    z-index: 13; /* above the mobile backdrop (12), below the rail (15) */
     top: 0;
     right: 0;
     bottom: 0;
