@@ -168,37 +168,14 @@
         </div>
       </section>
     </nav>
-    <div v-if="store.paging.catalog.nextCursor" class="home-rail-state">
-      <button
-        type="button"
-        class="home-button"
-        :disabled="store.paging.catalog.loadingMore"
-        @click="store.loadMoreSessions()"
-      >{{ store.paging.catalog.loadingMore ? "Loading…" : "Load more conversations" }}</button>
-    </div>
+    <HomeRailLoadMore />
 
     <footer class="home-rail__footer">
       <span :class="store.online ? 'home-online' : 'home-offline'" aria-hidden="true" />
       <span>{{ store.online ? "Local runtime connected" : "Offline · draft stays here" }}</span>
     </footer>
 
-    <div
-      v-show="!store.railCollapsed"
-      class="home-rail__resize"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize conversation list"
-      :aria-valuenow="railWidth"
-      :aria-valuemin="RAIL_WIDTH.MIN"
-      :aria-valuemax="RAIL_WIDTH.MAX"
-      tabindex="0"
-      @pointerdown="startResize"
-      @pointermove="moveResize"
-      @pointerup="endResize"
-      @pointercancel="endResize"
-      @keydown.right.prevent="nudge(16)"
-      @keydown.left.prevent="nudge(-16)"
-    ></div>
+    <HomeRailResizeHandle v-show="!store.railCollapsed" />
   </aside>
 </template>
 
@@ -215,8 +192,9 @@ import {
   groupConversationsByProject,
   projectRailEntryOrder,
 } from "../project-rail-group.js";
-import { RAIL_WIDTH, railWidth, setRailWidth } from "../rail-prefs.js";
-import { resizeFromDrag } from "../right-sidebar-resize.js";
+import { railWidth } from "../rail-prefs.js";
+import HomeRailLoadMore from "./HomeRailLoadMore.vue";
+import HomeRailResizeHandle from "./HomeRailResizeHandle.vue";
 
 const store = useConversationHomeStore();
 const projectStore = useProjectClassificationStore();
@@ -232,49 +210,6 @@ const { attention } = useSessionAttention({
 const railRoot = ref<HTMLElement | null>(null);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let mobileQuery: MediaQueryList | null = null;
-
-// Start width is captured at pointerdown and never read live mid-drag — a live
-// read would double-count the already-applied delta on every pointermove.
-let dragStartX: number | null = null;
-let dragStartWidth = 0;
-
-function startResize(event: PointerEvent): void {
-  if (event.button !== 0) return; // primary button only
-  dragStartX = event.clientX;
-  dragStartWidth = railWidth.value;
-  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  document.body.style.cursor = "col-resize";
-  document.body.style.userSelect = "none";
-}
-
-function moveResize(event: PointerEvent): void {
-  if (dragStartX === null) return;
-  // All width writes go through setRailWidth (it clamps + rounds); never assign
-  // railWidth.value directly.
-  setRailWidth(
-    resizeFromDrag({
-      clientX: event.clientX,
-      startX: dragStartX,
-      startWidth: dragStartWidth,
-      deltaSign: 1, // left rail: dragging right grows the panel
-      minWidth: RAIL_WIDTH.MIN,
-      maxWidth: RAIL_WIDTH.MAX,
-    }),
-  );
-}
-
-function endResize(event: PointerEvent): void {
-  if (dragStartX === null) return;
-  dragStartX = null;
-  const target = event.currentTarget as HTMLElement;
-  if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId);
-  document.body.style.cursor = "";
-  document.body.style.userSelect = "";
-}
-
-function nudge(delta: number): void {
-  setRailWidth(railWidth.value + delta);
-}
 
 /**
  * Collapse state lives with the rail, not the store: it is pure presentation, is not shared with

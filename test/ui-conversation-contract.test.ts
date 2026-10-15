@@ -7,6 +7,7 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 const app = read("../src/ui/src/App.vue");
 const home = read("../src/ui/src/components/ConversationHome.vue");
 const rail = read("../src/ui/src/components/HomeSessionRail.vue");
+const railResize = read("../src/ui/src/components/HomeRailResizeHandle.vue");
 const timeline = read("../src/ui/src/components/HomeTimeline.vue");
 const messageInteractions = read("../src/ui/src/components/HomeMessageInteractions.vue");
 const composer = read("../src/ui/src/components/HomeComposer.vue");
@@ -131,12 +132,15 @@ describe("AI-first Home source contract", () => {
     // Resize affordances: an APG separator at the rail's right edge drives the
     // pointer drag + ArrowRight/Left (±16) nudges, the aside re-binds the width
     // var inline, and every write funnels through the clamped setter / drag math.
-    expect(rail).toContain('role="separator"');
-    expect(rail).toContain('aria-orientation="vertical"');
-    expect(rail).toContain('aria-label="Resize conversation list"');
+    // The separator + drag handlers live in the extracted handle component; the
+    // rail mounts it and keeps the width var binding.
+    expect(rail).toContain("<HomeRailResizeHandle");
     expect(rail).toContain("'--home-rail-width': `${railWidth}px`");
-    expect(rail).toContain("setRailWidth(");
-    expect(rail).toContain("resizeFromDrag(");
+    expect(railResize).toContain('role="separator"');
+    expect(railResize).toContain('aria-orientation="vertical"');
+    expect(railResize).toContain('aria-label="Resize conversation list"');
+    expect(railResize).toContain("setRailWidth(");
+    expect(railResize).toContain("resizeFromDrag(");
   });
 
   test("timeline and composer are natural, IME-safe, and memory-only", () => {
