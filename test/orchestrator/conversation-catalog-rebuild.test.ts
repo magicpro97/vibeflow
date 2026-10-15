@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { digestV1 } from "../../src/durability/index.js";
 import { CatalogCursorCodec } from "../../src/orchestrator/conversation/catalog-cursor.js";
-import { ConversationCatalogService } from "../../src/orchestrator/conversation/catalog-service.js";
+import {
+  CatalogDegradedError,
+  ConversationCatalogService,
+} from "../../src/orchestrator/conversation/catalog-service.js";
 import {
   CatalogProjectionCorruptError,
   ConversationCatalogStore,
@@ -287,6 +290,79 @@ test("durable source invalidations rebuild the rail while an epoch-zero leaf jou
       updated_at: "2026-08-25T00:00:01.000Z",
     });
     expect(advanced.catalog_generation).not.toBe(initial.catalog_generation);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a non-authoritative lineage serves the healthy subset degraded instead of failing the read", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vf-catalog-degraded-read-"));
+  try {
+    const artifacts = join(root, "artifacts");
+    const traces = join(root, "traces");
+    mkdirSync(artifacts, { mode: 0o700 });
+    mkdirSync(traces, { mode: 0o700 });
+    // A healthy root plus one child whose parent carries no durable child claim: exactly the
+    // `unlinked-parent` shape that used to 503 the whole rail.
+    const healthy = source(1, ISO, "d");
+    const orphan = {
+      ...source(1, ISO, "e"),
+      manifest: {
+        ...source(1, ISO, "e").manifest,
+        conversation_id: "orphan",
+        revision_id: "revision-orphan",
+        parent_conversation_id: "root",
+        parent_revision_id: "revision-root",
+      },
+    } as unknown as ValidatedConversationSourceV1;
+    const service = new ConversationCatalogService({
+      artifactRoot: artifacts,
+      traceRoot: traces,
+      scopeId: "project:test",
+      cursorCodec: new CatalogCursorCodec(Buffer.alloc(32, 9)),
+      readInventory: () => ({
+        schema_version: "1.0",
+        state: "degraded",
+        authoritative: false,
+        sources: [structuredClone(healthy), structuredClone(orphan)],
+        diagnostics: [],
+        observed_source_digest: `sha256:${"a".repeat(64)}`,
+      }),
+    });
+
+    const page = await service.list();
+    expect(page.catalog_health).toBe("degraded");
+    expect(page.read_only).toBe(true);
+    expect(page.items.some((item) => item.root_session_id === "root")).toBe(true);
+    expect(page.items.some((item) => item.root_session_id === "orphan")).toBe(false);
+    expect(page.diagnostics.some((entry) => entry.code === "unlinked-parent")).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a degraded read never projects an unreadable inventory as an empty catalog", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vf-catalog-degraded-empty-"));
+  try {
+    const artifacts = join(root, "artifacts");
+    const traces = join(root, "traces");
+    mkdirSync(artifacts, { mode: 0o700 });
+    mkdirSync(traces, { mode: 0o700 });
+    const service = new ConversationCatalogService({
+      artifactRoot: artifacts,
+      traceRoot: traces,
+      scopeId: "project:test",
+      cursorCodec: new CatalogCursorCodec(Buffer.alloc(32, 9)),
+      readInventory: () => ({
+        schema_version: "1.0",
+        state: "degraded",
+        authoritative: false,
+        sources: [],
+        diagnostics: [],
+        observed_source_digest: `sha256:${"b".repeat(64)}`,
+      }),
+    });
+    await expect(service.list()).rejects.toThrow(CatalogDegradedError);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

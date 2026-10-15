@@ -92,3 +92,17 @@ describe("conversation home loading copy seams", () => {
     ).toBe("Send message");
   });
 });
+
+test("a degraded catalog surfaces a read-only partial-index notice, healthy stays silent", async () => {
+  const { describeHomeCatalogDegradedNotice } = await import(
+    String("../conversation-home-loading.js")
+  );
+  const { CONVERSATION_CATALOG_HEALTH } = await import(
+    String("../../../orchestrator/conversation/conversation-catalog-contract.js")
+  );
+  expect(describeHomeCatalogDegradedNotice(CONVERSATION_CATALOG_HEALTH.READY)).toBeNull();
+  expect(describeHomeCatalogDegradedNotice(CONVERSATION_CATALOG_HEALTH.REBUILDING)).toBeNull();
+  const degraded = describeHomeCatalogDegradedNotice(CONVERSATION_CATALOG_HEALTH.DEGRADED);
+  expect(degraded).toContain("partial index");
+  expect(degraded).toContain("Read-only");
+});

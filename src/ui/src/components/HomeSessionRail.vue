@@ -47,6 +47,7 @@
       </label>
     </div>
 
+    <HomeRailDegradedNotice v-if="!store.catalogError && store.sessions.length" />
     <div v-if="store.catalogError" class="home-rail-state" role="status">
       <strong>Conversations unavailable</strong>
       <span>{{ store.catalogError }}</span>
@@ -196,6 +197,13 @@ import {
   groupConversationsByProject,
   projectRailEntryOrder,
 } from "../project-rail-group.js";
+import {
+  railGroupEntriesId,
+  railGroupNameId,
+  relativeRailTime,
+  toggleRailGroup,
+} from "../rail-presentation.js";
+import HomeRailDegradedNotice from "./HomeRailDegradedNotice.vue";
 
 const store = useConversationHomeStore();
 const projectStore = useProjectClassificationStore();
@@ -251,15 +259,11 @@ const rovingEntry = computed(() => {
 const rovingTabIndex = (rootSessionId: string): 0 | -1 =>
   rootSessionId === rovingEntry.value ? 0 : -1;
 
-const groupNameId = (projectId: string) => `rail-group-${projectId}`;
-const groupEntriesId = (projectId: string) => `rail-entries-${projectId}`;
-
-function toggleGroup(projectId: string): void {
-  const next = new Set(collapsedGroups.value);
-  if (next.has(projectId)) next.delete(projectId);
-  else next.add(projectId);
-  collapsedGroups.value = next;
-}
+const groupNameId = railGroupNameId;
+const groupEntriesId = railGroupEntriesId;
+const toggleGroup = (projectId: string): void => {
+  collapsedGroups.value = toggleRailGroup(collapsedGroups.value, projectId);
+};
 
 /** Track focus so the roving tabindex follows the entry the user is on, mouse or keyboard. */
 function onRailFocusIn(event: FocusEvent): void {
@@ -322,17 +326,7 @@ function onRailKeydown(event: KeyboardEvent): void {
 
 const lifecycleLabel = homeConversationLifecycleLabel;
 
-function relativeTime(value: string): string {
-  const elapsed = Date.now() - Date.parse(value);
-  if (!Number.isFinite(elapsed)) return "";
-  const minutes = Math.round(elapsed / 60_000);
-  if (Math.abs(minutes) < 1) return "now";
-  if (Math.abs(minutes) < 60) return `${Math.abs(minutes)}m`;
-  const hours = Math.round(minutes / 60);
-  if (Math.abs(hours) < 24) return `${Math.abs(hours)}h`;
-  const days = Math.round(hours / 24);
-  return `${Math.abs(days)}d`;
-}
+const relativeTime = relativeRailTime;
 
 function select(rootSessionId: string) {
   void store.selectSession(rootSessionId);

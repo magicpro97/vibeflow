@@ -130,6 +130,18 @@ describe("AI-first Home source contract", () => {
     expect(pagination).toContain("staleHomeCursor");
   });
 
+  test("a degraded catalog lists the healthy subset with a read-only notice, not the unavailable panel", () => {
+    const degradedNotice = read("../src/ui/src/components/HomeRailDegradedNotice.vue");
+    expect(rail).toContain(
+      '<HomeRailDegradedNotice v-if="!store.catalogError && store.sessions.length" />',
+    );
+    expect(degradedNotice).toContain("describeHomeCatalogDegradedNotice");
+    expect(degradedNotice).toContain('class="home-rail-notice"');
+    expect(loading).toContain("describeHomeCatalogDegradedNotice");
+    expect(loading).toContain("partial index");
+    expect(homeCss).toContain(".home-rail-notice");
+  });
+
   test("timeline and composer are natural, IME-safe, and memory-only", () => {
     expect(timeline).toContain('aria-label="Conversation timeline"');
     expect(home).toContain("projectHomeTimeline(store.timeline");

@@ -134,8 +134,7 @@ function homeSession(
   rootSessionId: string,
   topic: string,
   participants = [homeParticipant()],
-  lifecycle: (typeof CONVERSATION_LIFECYCLE)[keyof typeof CONVERSATION_LIFECYCLE] =
-    CONVERSATION_LIFECYCLE.COMPLETED,
+  lifecycle: (typeof CONVERSATION_LIFECYCLE)[keyof typeof CONVERSATION_LIFECYCLE] = CONVERSATION_LIFECYCLE.COMPLETED,
 ) {
   const revision = {
     schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
@@ -175,8 +174,7 @@ function homeSession(
 function homeLocator(
   rootSessionId: string,
   eventId: string,
-  targetKind: (typeof CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND)[keyof typeof CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND] =
-    CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
+  targetKind: (typeof CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND)[keyof typeof CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND] = CONVERSATION_MESSAGE_QUEUE_QUOTE_TARGET_KIND.COMPLETED_AGENT_RESPONSE,
 ) {
   return {
     root_session_id: rootSessionId,
@@ -1086,16 +1084,12 @@ test.describe("AI-first conversation Home", () => {
       await page.getByRole("button", { name: "Open files" }).click();
       await sidebar.getByRole("tab", { name: "Changes" }).click();
       const panel = sidebar.locator(".home-changes");
-      const untrackedGroup = panel
-        .locator(".home-change-group")
-        .filter({
-          has: page.locator(".home-change-group__header strong", { hasText: "Untracked" }),
-        });
-      const row = untrackedGroup
-        .locator(".home-change-row")
-        .filter({
-          has: page.getByRole("button", { name: "e2e-untracked-preview.txt", exact: true }),
-        });
+      const untrackedGroup = panel.locator(".home-change-group").filter({
+        has: page.locator(".home-change-group__header strong", { hasText: "Untracked" }),
+      });
+      const row = untrackedGroup.locator(".home-change-row").filter({
+        has: page.getByRole("button", { name: "e2e-untracked-preview.txt", exact: true }),
+      });
 
       await row.locator(".home-change-row__path").click();
       const diff = row.locator(".home-diff");
@@ -1375,11 +1369,7 @@ test.describe("AI-first conversation Home", () => {
     await expect(highlighted).toHaveText("Keep Implementation agent this draft");
     const spans = await highlighted.locator(":scope > span").allTextContents();
     const visibleSpans = spans.filter((text) => text.length > 0);
-    expect(visibleSpans).toEqual([
-      "Keep ",
-      "Implementation agent",
-      " this draft",
-    ]);
+    expect(visibleSpans).toEqual(["Keep ", "Implementation agent", " this draft"]);
     const chipVisual = page.locator(".home-composer-chip__label");
     await expect(chipVisual).toHaveCount(1);
     const chipPresentation = await page.locator(".home-composer-chip").evaluate((chip) => {
@@ -1409,7 +1399,9 @@ test.describe("AI-first conversation Home", () => {
       const style = getComputedStyle(node);
       context.font = style.font;
       return {
-        rawTokenWidth: context.measureText((node as HTMLTextAreaElement).value.slice("Keep ".length, tokenEnd)).width,
+        rawTokenWidth: context.measureText(
+          (node as HTMLTextAreaElement).value.slice("Keep ".length, tokenEnd),
+        ).width,
         chipWidth: chip.getBoundingClientRect().width,
         labelWidth: label.getBoundingClientRect().width,
       };
@@ -1422,11 +1414,14 @@ test.describe("AI-first conversation Home", () => {
     await composer.fill(`${firstToken} ${secondToken}`);
     const chipGap = await highlighted.evaluate((node) => {
       const chips = [...node.querySelectorAll<HTMLElement>(".home-composer-chip")];
-      const labels = chips.map((chip) => chip.querySelector<HTMLElement>(".home-composer-chip__label"));
+      const labels = chips.map((chip) =>
+        chip.querySelector<HTMLElement>(".home-composer-chip__label"),
+      );
       const separator = node.querySelector<HTMLElement>(".home-composer-highlight__text");
       if (!labels[0] || !labels[1] || !separator) throw new Error("two-chip geometry unavailable");
       return {
-        visibleGap: labels[1].getBoundingClientRect().left - labels[0].getBoundingClientRect().right,
+        visibleGap:
+          labels[1].getBoundingClientRect().left - labels[0].getBoundingClientRect().right,
         separatorWidth: separator.getBoundingClientRect().width,
       };
     });
@@ -1442,7 +1437,10 @@ test.describe("AI-first conversation Home", () => {
     const caretGeometry = await caret.evaluate((node) => {
       const label = document.querySelector<HTMLElement>(".home-composer-chip__label");
       if (!label) throw new Error("chip label unavailable");
-      return { caretLeft: node.getBoundingClientRect().left, labelRight: label.getBoundingClientRect().right };
+      return {
+        caretLeft: node.getBoundingClientRect().left,
+        labelRight: label.getBoundingClientRect().right,
+      };
     });
     expect(Math.abs(caretGeometry.caretLeft - caretGeometry.labelRight)).toBeLessThan(1.5);
     await expect(composer).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
@@ -2432,6 +2430,61 @@ test.describe("AI-first conversation Home", () => {
     await expectAxeClean(page, "private range attachment source");
   });
 
+  test("lists the healthy subset with a read-only notice when the catalog is degraded", async ({
+    page,
+  }) => {
+    await page.route("**/api/conversations?**", async (route) => {
+      const session = homeSession("root-degraded", "Degraded session", [
+        homeParticipant("reviewer", "reviewer"),
+      ]);
+      await route.fulfill({
+        status: 200,
+        json: {
+          schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+          items: [session],
+          next_cursor: null,
+          catalog_generation: "generation",
+          source_watermark: "watermark",
+          catalog_health: CONVERSATION_CATALOG_HEALTH.DEGRADED,
+        },
+      });
+    });
+    await page.route("**/api/conversation-sessions/root-degraded/head", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: homeHead(
+          homeSession("root-degraded", "Degraded session", [
+            homeParticipant("reviewer", "reviewer"),
+          ]),
+        ),
+      });
+    });
+    await page.route("**/api/conversation-sessions/root-degraded/timeline?**", async (route) => {
+      await route.fulfill({ status: 200, json: homeTimeline("root-degraded", []) });
+    });
+    await page.route("**/api/conversation-sessions/root-degraded/messages/queue", async (route) => {
+      await route.fulfill({ status: 200, json: homeMessageQueue("root-degraded") });
+    });
+    await page.route(
+      "**/api/conversations/root-degraded-conversation/action-proposals?**",
+      async (route) => {
+        await route.fulfill({ status: 200, json: homePending([]) });
+      },
+    );
+
+    await page.goto("/");
+    await waitForPage(page);
+
+    // The healthy conversation is listed and the rail stays usable: a degraded catalog is a
+    // partial read, not an unavailable one.
+    await expect(page.getByRole("button", { name: /Degraded session/ })).toBeVisible();
+    const notice = page.locator(".home-rail-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("partial index");
+    await expect(page.getByText("Conversations unavailable")).toHaveCount(0);
+    await expectAxeClean(page, "degraded catalog notice");
+  });
+
   test("restores focus for Conversation Details and keeps a collapsed rail inert", async ({
     page,
   }) => {
@@ -3080,18 +3133,22 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.locator("#home-composer")).toBeVisible();
     await expectHomeComposerViewportFit(page);
     await page.locator("#home-composer").fill("Before +coordination-executor@codex after");
-    const narrowChipGeometry = await page.locator(".home-composer__highlight").evaluate((highlight) => {
-      const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
-      if (!chip) throw new Error("narrow composer chip unavailable");
-      const highlightBox = highlight.getBoundingClientRect();
-      const chipBox = chip.getBoundingClientRect();
-      return {
-        chipRight: chipBox.right,
-        highlightRight: highlightBox.right,
-        chipHeight: chipBox.height,
-      };
-    });
-    expect(narrowChipGeometry.chipRight).toBeLessThanOrEqual(narrowChipGeometry.highlightRight + 0.5);
+    const narrowChipGeometry = await page
+      .locator(".home-composer__highlight")
+      .evaluate((highlight) => {
+        const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
+        if (!chip) throw new Error("narrow composer chip unavailable");
+        const highlightBox = highlight.getBoundingClientRect();
+        const chipBox = chip.getBoundingClientRect();
+        return {
+          chipRight: chipBox.right,
+          highlightRight: highlightBox.right,
+          chipHeight: chipBox.height,
+        };
+      });
+    expect(narrowChipGeometry.chipRight).toBeLessThanOrEqual(
+      narrowChipGeometry.highlightRight + 0.5,
+    );
     expect(narrowChipGeometry.chipHeight).toBeGreaterThan(21.6);
     for (const control of [
       page.getByRole("button", { name: /conversation list/ }),
@@ -3123,50 +3180,54 @@ test.describe("AI-first conversation Home", () => {
     await page.waitForTimeout(50);
     await expectHomeComposerViewportFit(page);
     await page.locator("#home-composer").fill("Before +coordination-executor@codex after");
-    const zoomedChipGeometry = await page.locator(".home-composer__highlight").evaluate((highlight) => {
-      const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
-      if (!chip) throw new Error("zoomed composer chip unavailable");
-      return {
-        chipRight: chip.getBoundingClientRect().right,
-        highlightRight: highlight.getBoundingClientRect().right,
-        chipBox: (() => {
-          const box = chip.getBoundingClientRect();
-          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
-        })(),
-        labelBox: (() => {
-          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
-          if (!label) throw new Error("zoomed composer chip label unavailable");
-          const box = label.getBoundingClientRect();
-          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
-        })(),
-        afterRects: (() => {
-          const after = [...highlight.children].find((child) => child.textContent === " after");
-          if (!after) return [];
-          const text = after.firstChild;
-          if (!text) return [];
-          const range = document.createRange();
-          range.setStart(text, text.textContent?.startsWith(" ") ? 1 : 0);
-          range.setEnd(text, text.textContent?.length ?? 0);
-          return [...range.getClientRects()].map((box) => ({
-            left: box.left,
-            right: box.right,
-            top: box.top,
-            bottom: box.bottom,
-          }));
-        })(),
-        labelWhiteSpace: (() => {
-          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
-          if (!label) throw new Error("zoomed composer chip label unavailable");
-          return getComputedStyle(label).whiteSpace;
-        })(),
-        labelOverflowWrap: (() => {
-          const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
-          if (!label) throw new Error("zoomed composer chip label unavailable");
-          return getComputedStyle(label).overflowWrap;
-        })(),
-      };
-    });
-    expect(zoomedChipGeometry.chipRight).toBeLessThanOrEqual(zoomedChipGeometry.highlightRight + 0.5);
+    const zoomedChipGeometry = await page
+      .locator(".home-composer__highlight")
+      .evaluate((highlight) => {
+        const chip = highlight.querySelector<HTMLElement>(".home-composer-chip");
+        if (!chip) throw new Error("zoomed composer chip unavailable");
+        return {
+          chipRight: chip.getBoundingClientRect().right,
+          highlightRight: highlight.getBoundingClientRect().right,
+          chipBox: (() => {
+            const box = chip.getBoundingClientRect();
+            return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+          })(),
+          labelBox: (() => {
+            const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+            if (!label) throw new Error("zoomed composer chip label unavailable");
+            const box = label.getBoundingClientRect();
+            return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+          })(),
+          afterRects: (() => {
+            const after = [...highlight.children].find((child) => child.textContent === " after");
+            if (!after) return [];
+            const text = after.firstChild;
+            if (!text) return [];
+            const range = document.createRange();
+            range.setStart(text, text.textContent?.startsWith(" ") ? 1 : 0);
+            range.setEnd(text, text.textContent?.length ?? 0);
+            return [...range.getClientRects()].map((box) => ({
+              left: box.left,
+              right: box.right,
+              top: box.top,
+              bottom: box.bottom,
+            }));
+          })(),
+          labelWhiteSpace: (() => {
+            const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+            if (!label) throw new Error("zoomed composer chip label unavailable");
+            return getComputedStyle(label).whiteSpace;
+          })(),
+          labelOverflowWrap: (() => {
+            const label = chip.querySelector<HTMLElement>(".home-composer-chip__label");
+            if (!label) throw new Error("zoomed composer chip label unavailable");
+            return getComputedStyle(label).overflowWrap;
+          })(),
+        };
+      });
+    expect(zoomedChipGeometry.chipRight).toBeLessThanOrEqual(
+      zoomedChipGeometry.highlightRight + 0.5,
+    );
     expect(zoomedChipGeometry.afterRects.length).toBeGreaterThan(0);
     for (const rect of zoomedChipGeometry.afterRects) {
       const isOutsideChip =
@@ -3176,7 +3237,9 @@ test.describe("AI-first conversation Home", () => {
         rect.top >= zoomedChipGeometry.labelBox.bottom - 0.5;
       expect(isOutsideChip).toBe(true);
     }
-    expect(zoomedChipGeometry.chipBox.bottom - zoomedChipGeometry.chipBox.top).toBeGreaterThan(43.2);
+    expect(zoomedChipGeometry.chipBox.bottom - zoomedChipGeometry.chipBox.top).toBeGreaterThan(
+      43.2,
+    );
     expect(zoomedChipGeometry.labelWhiteSpace).toBe("normal");
     expect(zoomedChipGeometry.labelOverflowWrap).toBe("anywhere");
     await testInfo.attach("home-390x844-text-zoom-200", {
@@ -3368,17 +3431,17 @@ test.describe("AI-first conversation Home", () => {
     await page.getByRole("button", { name: /Per-project engine override/ }).click();
     await page.getByLabel("alpha-service model override").fill("gpt-5-mini");
     await page.getByRole("button", { name: "Save project settings" }).click();
-    await expect.poll(() => settingsPosted).toMatchObject({
-      projectClassification: {
-        enabled: false,
-        engine: { cli: "codex", model: "gpt-5", thinking: "high" },
-      },
-    });
+    await expect
+      .poll(() => settingsPosted)
+      .toMatchObject({
+        projectClassification: {
+          enabled: false,
+          engine: { cli: "codex", model: "gpt-5", thinking: "high" },
+        },
+      });
     await expect
       .poll(() => enginePatches)
-      .toEqual([
-        { engine: { cli: "codex", model: "gpt-5-mini", thinking: "high" } },
-      ]);
+      .toEqual([{ engine: { cli: "codex", model: "gpt-5-mini", thinking: "high" } }]);
     await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
   });
 
@@ -3714,9 +3777,7 @@ test.describe("AI-first conversation Home", () => {
     await expect(page.getByText("Worked for 1m 35s")).toBeVisible();
     await expect(page.getByText(/^Working · \d+m \d+s$/)).toBeVisible();
     const firstText = await page.getByText(/^Working · /).textContent();
-    await expect
-      .poll(async () => page.getByText(/^Working · /).textContent())
-      .not.toBe(firstText);
+    await expect.poll(async () => page.getByText(/^Working · /).textContent()).not.toBe(firstText);
   });
 
   test("collapses long answers and flags a session completed after the first fetch", async ({
@@ -3843,7 +3904,9 @@ test.describe("AI-first conversation Home", () => {
     await expect(anchor).toBeInViewport();
   });
 
-  test("lists the working agent first in the agent panel with a ticking clock", async ({ page }) => {
+  test("lists the working agent first in the agent panel with a ticking clock", async ({
+    page,
+  }) => {
     const session = homeSession(
       "root-apanel",
       "Session Panel",
@@ -3885,19 +3948,28 @@ test.describe("AI-first conversation Home", () => {
             "claude",
             CONVERSATION_TOOL_ACTION_STATUS.STARTED,
           ),
-          homeAssistantEvent("root-apanel", "panel-assistant-2", "Reviewed the plan.", [], "reviewer"),
+          homeAssistantEvent(
+            "root-apanel",
+            "panel-assistant-2",
+            "Reviewed the plan.",
+            [],
+            "reviewer",
+          ),
         ]),
       });
     });
     await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
       await route.fulfill({ status: 200, json: homePending([]) });
     });
-    await page.route("**/api/conversations/root-apanel-conversation/stream-token", async (route) => {
-      await route.fulfill({
-        status: 200,
-        json: { stream_token: "panel-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
-      });
-    });
+    await page.route(
+      "**/api/conversations/root-apanel-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: { stream_token: "panel-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+        });
+      },
+    );
     await page.route("**/api/conversations/root-apanel-conversation/events?**", async (route) => {
       await route.fulfill({
         status: 200,
@@ -4106,12 +4178,15 @@ test.describe("AI-first conversation Home", () => {
     await page.route("**/api/conversations/*/action-proposals?**", async (route) => {
       await route.fulfill({ status: 200, json: homePending([]) });
     });
-    await page.route("**/api/conversations/root-adrawer-conversation/stream-token", async (route) => {
-      await route.fulfill({
-        status: 200,
-        json: { stream_token: "drawer-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
-      });
-    });
+    await page.route(
+      "**/api/conversations/root-adrawer-conversation/stream-token",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          json: { stream_token: "drawer-stream-token", stream_token_expires_at: HOME_FUTURE_TS },
+        });
+      },
+    );
     await page.route("**/api/conversations/root-adrawer-conversation/events?**", async (route) => {
       await route.fulfill({
         status: 200,

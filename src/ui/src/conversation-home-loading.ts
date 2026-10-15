@@ -79,6 +79,14 @@ export function describeHomeCatalogLoading(input: {
   };
 }
 
+export function describeHomeCatalogDegradedNotice(
+  health: ConversationCatalogHealth,
+): string | null {
+  return health === CONVERSATION_CATALOG_HEALTH.DEGRADED
+    ? "Showing a partial index — some conversations could not be verified. Read-only until the index recovers."
+    : null;
+}
+
 export function describeHomeActivationLoading(input: {
   topic: string | null;
   streamStatus: HomeConversationStreamStatus;
