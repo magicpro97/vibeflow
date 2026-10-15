@@ -23,7 +23,7 @@
   --home-topbar-height: 3.625rem;
   --home-rail-width: 18rem;
   --home-sidebar-width: 22rem;
-  --home-composer-width: 48rem;
+  --home-composer-width: 54rem;
   --home-shadow: 0 18px 45px rgb(58 47 33 / 0.12);
   --home-surface-top: rgb(251 250 246 / 0.94);
   --home-surface-raised: rgb(251 250 246 / 0.88);
@@ -1143,7 +1143,7 @@ button:disabled {
   scrollbar-color: var(--home-line-strong) transparent;
 }
 .home-thread {
-  width: min(100% - 2rem, 52rem);
+  width: min(100% - 2rem, 64rem);
   min-height: 100%;
   min-width: 0;
   max-width: 100%;
@@ -1257,7 +1257,7 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: min(100% - 2rem, 54rem);
+  width: min(100% - 2rem, 64rem);
   margin: 0 auto;
   padding: 3rem 1rem 4.5rem;
   text-align: center;
@@ -1401,7 +1401,8 @@ button:disabled {
 .home-message__content {
   font-size: 0.9rem;
   min-width: 0;
-  max-width: 65ch;
+  /* Readability guard: wider lines hurt reading, so the column (not the text) absorbs extra width. */
+  max-width: 72ch;
 }
 .home-message__content header {
   display: flex;
@@ -4650,10 +4651,10 @@ button:disabled {
 .home-agent-panel {
   width: min(24rem, calc(100% - 2rem));
   grid-row: 2;
-  /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 52rem) centered,
-     so its left edge sits at max(1rem, (100% - 52rem) / 2) inside this pane. */
+  /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 64rem) centered,
+     so its left edge sits at max(1rem, (100% - 64rem) / 2) inside this pane. */
   justify-self: start;
-  margin: 0.75rem 0 1rem max(1rem, calc((100% - 52rem) / 2));
+  margin: 0.75rem 0 1rem max(1rem, calc((100% - 64rem) / 2));
   overflow: hidden;
   border: 1px solid var(--home-line);
   border-radius: 0.75rem;
@@ -5235,9 +5236,6 @@ button:disabled {
   }
   .home-thread {
     padding-inline: clamp(1rem, 4vw, 3.5rem);
-  }
-  .home-message__content {
-    max-width: 72ch;
   }
 }
 
