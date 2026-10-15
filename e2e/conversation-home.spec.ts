@@ -935,6 +935,54 @@ test.describe("AI-first conversation Home", () => {
     await expectAxeClean(page, "resized right sidebar");
   });
 
+  test("conversation rail: drag and keyboard resize persist", async ({ page }) => {
+    await page.goto("/");
+    await waitForPage(page);
+
+    const rail = page.locator(".home-rail");
+    await expect(rail).toBeVisible();
+    const widthOf = () => rail.evaluate((el) => el.getBoundingClientRect().width);
+    const before = await widthOf();
+    expect(before).toBe(280);
+    const handle = page.getByRole("separator", { name: "Resize conversation list" });
+    await handle.focus();
+    await expect(handle).toBeFocused();
+    await page.keyboard.press("ArrowRight"); // +16 (the rail grows to the right)
+    await expect.poll(widthOf).toBe(before + 16);
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(widthOf).toBe(before);
+    // Persist (the prefs watch flushes on tick): settle the stored width, then reload.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const raw = JSON.parse(localStorage.getItem("vf-rail") ?? "null") as {
+            width?: number;
+          } | null;
+          return raw?.width;
+        }),
+      )
+      .toBe(before);
+    await page.reload();
+    await waitForPage(page);
+    await expect.poll(widthOf).toBe(before);
+    // Drag the rail's right edge 60px rightward; the rail grows by the pointer delta.
+    const box = await handle.boundingBox();
+    if (!box) throw new Error("rail resize separator has no bounding box");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    // The rail animates flex-basis/width (180ms): a single read right after
+    // mouse.up() catches a mid-transition value, so settle on the exact drag
+    // delta before snapshotting the width that reload must reproduce.
+    await expect.poll(widthOf).toBe(before + 60);
+    const grown = await widthOf();
+    await page.reload();
+    await waitForPage(page);
+    await expect.poll(widthOf).toBe(grown);
+    await expectAxeClean(page, "resized conversation rail");
+  });
+
   test("changes panel: stage and unstage a modified file", async ({ page }) => {
     const setupRun = process.env.VF_PLAYWRIGHT_SETUP_RUN;
     // Workers inherit the controller's setup uuid and playwright.config.ts serves

@@ -6,6 +6,7 @@
     :aria-hidden="store.railCollapsed ? 'true' : undefined"
     :inert="store.railCollapsed ? true : undefined"
     aria-label="Conversations"
+    :style="{ '--home-rail-width': `${railWidth}px` }"
   >
     <div class="home-rail__top">
       <button class="home-new-button" type="button" @click="startNew">
@@ -167,19 +168,14 @@
         </div>
       </section>
     </nav>
-    <div v-if="store.paging.catalog.nextCursor" class="home-rail-state">
-      <button
-        type="button"
-        class="home-button"
-        :disabled="store.paging.catalog.loadingMore"
-        @click="store.loadMoreSessions()"
-      >{{ store.paging.catalog.loadingMore ? "Loading…" : "Load more conversations" }}</button>
-    </div>
+    <HomeRailLoadMore />
 
     <footer class="home-rail__footer">
       <span :class="store.online ? 'home-online' : 'home-offline'" aria-hidden="true" />
       <span>{{ store.online ? "Local runtime connected" : "Offline · draft stays here" }}</span>
     </footer>
+
+    <HomeRailResizeHandle v-show="!store.railCollapsed" />
   </aside>
 </template>
 
@@ -196,6 +192,9 @@ import {
   groupConversationsByProject,
   projectRailEntryOrder,
 } from "../project-rail-group.js";
+import { railWidth } from "../rail-prefs.js";
+import HomeRailLoadMore from "./HomeRailLoadMore.vue";
+import HomeRailResizeHandle from "./HomeRailResizeHandle.vue";
 
 const store = useConversationHomeStore();
 const projectStore = useProjectClassificationStore();
