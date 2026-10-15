@@ -193,13 +193,13 @@ import {
   groupConversationsByProject,
   projectRailEntryOrder,
 } from "../project-rail-group.js";
+import { railWidth } from "../rail-prefs.js";
 import {
   railGroupEntriesId,
   railGroupNameId,
   relativeRailTime,
   toggleRailGroup,
 } from "../rail-presentation.js";
-import { railWidth } from "../rail-prefs.js";
 import HomeRailDegradedNotice from "./HomeRailDegradedNotice.vue";
 import HomeRailLoadMore from "./HomeRailLoadMore.vue";
 import HomeRailResizeHandle from "./HomeRailResizeHandle.vue";
