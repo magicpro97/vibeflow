@@ -860,6 +860,13 @@ button:disabled {
   color: var(--home-amber);
   cursor: pointer;
 }
+.home-rail-notice {
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--home-line);
+  color: var(--home-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
 .home-loading-panel {
   display: grid;
   gap: 0.85rem;

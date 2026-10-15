@@ -1,8 +1,10 @@
 import { PUBLIC_ERROR_CODE } from "../../actions/public-error-contract.js";
 import type { ConversationLifecycle } from "../trace/types.js";
 import type { CatalogCursorCodec } from "./catalog-cursor.js";
+import type { ConversationListResponseV1 } from "./catalog-types.js";
 import type { PublishedRevisionTransitionInputV1 } from "./lineage-published-transition.js";
 import type { ConversationLineageReadV1 } from "./lineage-reader.js";
+import type { ConversationSourceDiagnosticV1 } from "./lineage-types.js";
 import type {
   ConversationSourceInventoryV1,
   ReadConversationSourceInventoryOptions,
@@ -33,6 +35,15 @@ export interface ConversationCatalogListInputV1 {
   policy?: string[];
   cursor?: string;
   limit?: number;
+}
+
+/**
+ * The list page a degraded read returns: the same response plus the read-only marker and the
+ * diagnostics naming what was dropped. A healthy read returns the plain list response.
+ */
+export interface ConversationCatalogPageV1 extends ConversationListResponseV1 {
+  read_only: boolean;
+  diagnostics: ConversationSourceDiagnosticV1[];
 }
 
 export interface ConversationCatalogServiceOptions {

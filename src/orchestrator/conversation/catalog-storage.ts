@@ -191,6 +191,48 @@ export class ConversationCatalogStore {
     return { generation: structuredClone(generation), current: structuredClone(current) };
   }
 
+  /**
+   * Build the full published shape (generation + current pointer) without writing anything.
+   * `publishGeneration` uses it under the writer lock; the degraded read path uses it to serve a
+   * valid, read-only page in memory when the durable generation can no longer be validated.
+   */
+  materializeGeneration(
+    input: Omit<
+      ConversationCatalogGenerationV1,
+      "schema_version" | "generation_id" | "content_digest"
+    >,
+  ): PublishedConversationCatalogV1 {
+    const storedRows = input.rows.map((item) => ({
+      ...structuredClone(item),
+      matched_revision: null,
+    }));
+    const preimage = {
+      schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+      ...structuredClone(input),
+      rows: storedRows,
+    };
+    const contentDigest = digestV1("VF-CONVERSATION-CATALOG-GENERATION\0v1\0", preimage);
+    const generation: ConversationCatalogGenerationV1 = {
+      ...preimage,
+      generation_id: `vf-catalog-generation-${digestHex(contentDigest)}`,
+      content_digest: contentDigest,
+    };
+    assertCatalogGeneration(generation);
+    const currentPreimage = {
+      schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
+      generation_id: generation.generation_id,
+      generation_digest: generation.content_digest,
+      source_watermark: generation.source_watermark,
+      applied_through_delta_sequence: generation.applied_through_delta_sequence,
+      updated_at: generation.created_at,
+    };
+    const current: ConversationCatalogCurrentV1 = {
+      ...currentPreimage,
+      content_digest: digestV1("VF-CONVERSATION-CATALOG-CURRENT\0v1\0", currentPreimage),
+    };
+    return { generation: structuredClone(generation), current: structuredClone(current) };
+  }
+
   publishGeneration(
     input: Omit<
       ConversationCatalogGenerationV1,
@@ -213,45 +255,19 @@ export class ConversationCatalogStore {
       )
         throw new Error("catalog generation watermark mismatch");
       ensurePrivateDirectory(this.paths.generations);
-      const storedRows = input.rows.map((item) => ({
-        ...structuredClone(item),
-        matched_revision: null,
-      }));
-      const preimage = {
-        schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
-        ...structuredClone(input),
-        rows: storedRows,
-      };
-      const contentDigest = digestV1("VF-CONVERSATION-CATALOG-GENERATION\0v1\0", preimage);
-      const generation: ConversationCatalogGenerationV1 = {
-        ...preimage,
-        generation_id: `vf-catalog-generation-${digestHex(contentDigest)}`,
-        content_digest: contentDigest,
-      };
-      assertCatalogGeneration(generation);
+      const published = this.materializeGeneration(input);
+      const { generation, current } = published;
       createOrVerifyPrivateFile(
         join(this.paths.generations, `${generation.generation_id}.json`),
         canonicalJsonBytes(generation),
         { lock, maxBytes: MAX_CATALOG_FILE_BYTES },
       );
-      const currentPreimage = {
-        schema_version: CONVERSATION_CATALOG_SCHEMA_VERSION,
-        generation_id: generation.generation_id,
-        generation_digest: generation.content_digest,
-        source_watermark: generation.source_watermark,
-        applied_through_delta_sequence: generation.applied_through_delta_sequence,
-        updated_at: generation.created_at,
-      };
-      const current: ConversationCatalogCurrentV1 = {
-        ...currentPreimage,
-        content_digest: digestV1("VF-CONVERSATION-CATALOG-CURRENT\0v1\0", currentPreimage),
-      };
       const expected = privateFileBytes(this.paths.current, MAX_CATALOG_FILE_BYTES);
       atomicCompareAndSwap(this.paths.current, expected, canonicalJsonBytes(current), {
         lock,
         maxBytes: MAX_CATALOG_FILE_BYTES,
       });
-      return { generation: structuredClone(generation), current: structuredClone(current) };
+      return published;
     });
   }
 }
