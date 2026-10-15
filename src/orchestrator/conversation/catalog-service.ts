@@ -127,9 +127,13 @@ export class ConversationCatalogService {
       throw new CatalogDegradedError(false);
     const projection = project();
     const latest = deltas.at(-1) ?? null;
-    if (projection.authoritative) {
-      if (latest && latest.source_inventory_digest !== projection.source_inventory_digest)
-        throw new CatalogDegradedError(true);
+    // Durable deltas that lag the observed inventory digest cannot be republished under the
+    // caught-up invariant; the projection itself is still the current authority-derived state, so
+    // it serves read-only degraded and an explicit rebuild (or the next committed invalidation)
+    // republishes for real.
+    const stale =
+      latest !== null && latest.source_inventory_digest !== projection.source_inventory_digest;
+    if (projection.authoritative && !stale) {
       const createdAt =
         projection.generation_rows
           .map((row) => row.sort_updated_at)
