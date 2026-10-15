@@ -341,6 +341,55 @@ test("a non-authoritative lineage serves the healthy subset degraded instead of 
   }
 });
 
+test("stale durable deltas serve a read-only degraded page instead of failing the read", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vf-catalog-stale-deltas-"));
+  try {
+    const artifacts = join(root, "artifacts");
+    const traces = join(root, "traces");
+    mkdirSync(artifacts, { mode: 0o700 });
+    mkdirSync(traces, { mode: 0o700 });
+    let current = source(1, ISO, "d");
+    let observed = `sha256:${"e".repeat(64)}`;
+    const service = new ConversationCatalogService({
+      artifactRoot: artifacts,
+      traceRoot: traces,
+      scopeId: "project:test",
+      cursorCodec: new CatalogCursorCodec(Buffer.alloc(32, 12)),
+      readInventory: () => ({
+        schema_version: "1.0",
+        state: "ready",
+        authoritative: true,
+        sources: [structuredClone(current)],
+        diagnostics: [],
+        observed_source_digest: observed,
+      }),
+    });
+
+    // A committed delta records the inventory digest observed at commit time.
+    service.recordConversationSourceCommitted("root", ISO);
+    // The store then moves on without new invalidation records: the durable deltas lag the
+    // observed inventory digest. That used to throw and 503 the whole rail even though the
+    // current inventory projects fine.
+    current = source(2, "2026-08-25T00:00:01.000Z", "f");
+    observed = `sha256:${"f".repeat(64)}`;
+
+    const page = await service.list();
+    expect(page.catalog_health).toBe("degraded");
+    expect(page.read_only).toBe(true);
+    expect(page.items.length).toBe(1);
+    expect(page.items[0]?.root_session_id).toBe("root");
+
+    // A subsequent committed invalidation records the fresh digest, and the catalog republishes
+    // healthy: the degraded page is a read-only bridge, not a dead end.
+    service.recordConversationSourceCommitted("root", "2026-08-25T00:00:01.000Z");
+    const healed = await service.list();
+    expect(healed.catalog_health).toBe("ready");
+    expect(healed.read_only).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a degraded read never projects an unreadable inventory as an empty catalog", async () => {
   const root = await mkdtemp(join(tmpdir(), "vf-catalog-degraded-empty-"));
   try {
