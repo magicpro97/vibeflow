@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.0](https://github.com/magicpro97/vibeflow/compare/v0.23.0...v0.24.0) (2026-10-15)
+
+
+### Features
+
+* **ui:** optimize the home UI for working space (Orca-grounded density pass) ([09c7712](https://github.com/magicpro97/vibeflow/commit/09c7712280860ee5ac0ea4dbe4ca55b630ee7cbd))
+
+
+### Bug Fixes
+
+* **conversation:** serve a partial catalog with a degraded notice instead of 503 ([b9eca7c](https://github.com/magicpro97/vibeflow/commit/b9eca7c1fc5ec632691ee8dc8b51e71c8b6c992a))
+* **conversation:** serve a partial catalog with a degraded notice instead of 503 ([f77ac1f](https://github.com/magicpro97/vibeflow/commit/f77ac1fa6ec4ea180674b3f858dc8b4f015e1d9d))
+
 ## [0.23.0](https://github.com/magicpro97/vibeflow/compare/v0.22.0...v0.23.0) (2026-10-15)
 
 
