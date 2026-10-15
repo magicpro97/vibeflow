@@ -581,15 +581,15 @@ button:disabled {
 .home-rail__top {
   display: grid;
   gap: 0.65rem;
-  padding: 1rem 0.8rem 0.75rem;
+  padding: 0.6rem 0.7rem 0.5rem;
 }
 .home-new-button {
   display: flex;
   align-items: center;
   gap: 0.65rem;
   width: 100%;
-  min-height: 2.75rem;
-  padding: 0.45rem 0.65rem;
+  min-height: 2.35rem;
+  padding: 0.35rem 0.6rem;
   border: 1px solid var(--home-line-strong);
   border-radius: 0.7rem;
   background: var(--home-paper);
@@ -726,9 +726,9 @@ button:disabled {
 .home-session {
   display: grid;
   width: 100%;
-  min-height: 4.25rem;
+  min-height: 2.9rem;
   margin: 0.1rem 0;
-  padding: 0.72rem 0.68rem;
+  padding: 0.42rem 0.55rem;
   border: 1px solid transparent;
   border-radius: 0.72rem;
   background: transparent;
@@ -764,7 +764,7 @@ button:disabled {
   font-size: 0.65rem;
 }
 .home-session__meta {
-  margin-top: 0.42rem;
+  margin-top: 0.2rem;
   color: var(--home-faint);
   font-size: 0.66rem;
 }
@@ -1259,7 +1259,7 @@ button:disabled {
   justify-content: center;
   width: min(100% - 2rem, 64rem);
   margin: 0 auto;
-  padding: 3rem 1rem 4.5rem;
+  padding: 1.25rem 1rem 1.5rem;
   text-align: center;
 }
 .home-welcome__mark {
@@ -1267,7 +1267,7 @@ button:disabled {
   place-items: center;
   width: 3.5rem;
   height: 3.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.6rem;
   border: 1px solid var(--home-line-strong);
   border-radius: 1rem;
   background: var(--home-paper);
@@ -1295,7 +1295,7 @@ button:disabled {
 }
 .home-welcome__copy {
   max-width: min(44rem, 70ch);
-  margin: 1rem auto 0;
+  margin: 0.65rem auto 0;
   color: var(--home-muted);
   font-size: 0.93rem;
   line-height: 1.6;
@@ -1305,7 +1305,7 @@ button:disabled {
   grid-template-columns: repeat(3, 1fr);
   gap: 0.7rem;
   width: 100%;
-  margin-top: 2.3rem;
+  margin-top: 1.4rem;
 }
 .home-starters button {
   display: grid;
@@ -1340,7 +1340,7 @@ button:disabled {
   line-height: 1.35;
 }
 .home-welcome__hint {
-  margin: 1.15rem 0 0;
+  margin: 0.7rem 0 0;
   color: var(--home-faint);
   font-size: 0.68rem;
 }
@@ -2390,8 +2390,9 @@ button:disabled {
   flex-wrap: wrap;
   gap: 0.45rem 0.75rem;
   min-height: 1.35rem;
-  padding: 0.32rem 0.25rem 0;
-  color: var(--home-faint);
+  padding: 0.28rem 0.25rem 0;
+  border-top: 1px solid var(--home-line);
+  color: var(--home-muted);
   font-size: 0.62rem;
 }
 .home-composer__status {
