@@ -20,10 +20,10 @@
   --home-badge-new: #35704a;
   --home-red: #a84b3e;
   --home-blue: #4e6878;
-  --home-topbar-height: 3.625rem;
+  --home-topbar-height: 2.5rem;
   --home-rail-width: 18rem;
   --home-sidebar-width: 22rem;
-  --home-composer-width: 48rem;
+  --home-composer-width: 54rem;
   --home-shadow: 0 18px 45px rgb(58 47 33 / 0.12);
   --home-surface-top: rgb(251 250 246 / 0.94);
   --home-surface-raised: rgb(251 250 246 / 0.88);
@@ -311,10 +311,10 @@ button:disabled {
 }
 .home-icon-button,
 .home-topbar-button {
-  min-width: 2.75rem;
-  min-height: 2.75rem;
+  min-width: 2rem;
+  min-height: 2rem;
   border: 0;
-  border-radius: 0.65rem;
+  border-radius: 0.55rem;
   background: transparent;
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
@@ -452,6 +452,7 @@ button:disabled {
   overflow: hidden;
 }
 .home-rail {
+  position: relative;
   z-index: 15;
   display: flex;
   flex: 0 0 var(--home-rail-width);
@@ -471,6 +472,33 @@ button:disabled {
 .home-rail[aria-hidden="true"] {
   visibility: hidden;
   pointer-events: none;
+}
+.home-rail__resize {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.home-rail__resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 2px;
+  background: transparent;
+}
+.home-rail__resize:hover::after,
+.home-rail__resize:focus-visible::after {
+  background: color-mix(in srgb, var(--home-ink) 24%, transparent);
+}
+.home-rail__resize:focus-visible {
+  outline: 2px solid var(--home-ink);
+  outline-offset: -2px;
 }
 .home-right-sidebar {
   position: relative;
@@ -515,8 +543,8 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  min-height: 4.6rem;
-  padding: 0 0.75rem 0 1.15rem;
+  min-height: 3rem;
+  padding: 0 0.65rem 0 0.95rem;
   border-bottom: 1px solid var(--home-line);
 }
 .home-right-sidebar__header strong {
@@ -581,15 +609,15 @@ button:disabled {
 .home-rail__top {
   display: grid;
   gap: 0.65rem;
-  padding: 1rem 0.8rem 0.75rem;
+  padding: 0.6rem 0.7rem 0.5rem;
 }
 .home-new-button {
   display: flex;
   align-items: center;
   gap: 0.65rem;
   width: 100%;
-  min-height: 2.75rem;
-  padding: 0.45rem 0.65rem;
+  min-height: 2.35rem;
+  padding: 0.35rem 0.6rem;
   border: 1px solid var(--home-line-strong);
   border-radius: 0.7rem;
   background: var(--home-paper);
@@ -726,9 +754,9 @@ button:disabled {
 .home-session {
   display: grid;
   width: 100%;
-  min-height: 4.25rem;
+  min-height: 2.9rem;
   margin: 0.1rem 0;
-  padding: 0.72rem 0.68rem;
+  padding: 0.42rem 0.55rem;
   border: 1px solid transparent;
   border-radius: 0.72rem;
   background: transparent;
@@ -764,7 +792,7 @@ button:disabled {
   font-size: 0.65rem;
 }
 .home-session__meta {
-  margin-top: 0.42rem;
+  margin-top: 0.2rem;
   color: var(--home-faint);
   font-size: 0.66rem;
 }
@@ -1019,8 +1047,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 4.6rem;
-  padding: 0.75rem clamp(1rem, 3vw, 2.5rem);
+  min-height: 3rem;
+  padding: 0.4rem clamp(0.8rem, 2vw, 1.75rem);
   border-bottom: 1px solid var(--home-header-border);
   background: var(--home-header-bg);
   backdrop-filter: blur(12px);
@@ -1150,7 +1178,7 @@ button:disabled {
   scrollbar-color: var(--home-line-strong) transparent;
 }
 .home-thread {
-  width: min(100% - 2rem, 52rem);
+  width: min(100% - 2rem, 64rem);
   min-height: 100%;
   min-width: 0;
   max-width: 100%;
@@ -1264,9 +1292,9 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: min(100% - 2rem, 54rem);
+  width: min(100% - 2rem, 64rem);
   margin: 0 auto;
-  padding: 3rem 1rem 4.5rem;
+  padding: 1.25rem 1rem 1.5rem;
   text-align: center;
 }
 .home-welcome__mark {
@@ -1274,7 +1302,7 @@ button:disabled {
   place-items: center;
   width: 3.5rem;
   height: 3.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.6rem;
   border: 1px solid var(--home-line-strong);
   border-radius: 1rem;
   background: var(--home-paper);
@@ -1302,7 +1330,7 @@ button:disabled {
 }
 .home-welcome__copy {
   max-width: min(44rem, 70ch);
-  margin: 1rem auto 0;
+  margin: 0.65rem auto 0;
   color: var(--home-muted);
   font-size: 0.93rem;
   line-height: 1.6;
@@ -1312,7 +1340,7 @@ button:disabled {
   grid-template-columns: repeat(3, 1fr);
   gap: 0.7rem;
   width: 100%;
-  margin-top: 2.3rem;
+  margin-top: 1.4rem;
 }
 .home-starters button {
   display: grid;
@@ -1347,7 +1375,7 @@ button:disabled {
   line-height: 1.35;
 }
 .home-welcome__hint {
-  margin: 1.15rem 0 0;
+  margin: 0.7rem 0 0;
   color: var(--home-faint);
   font-size: 0.68rem;
 }
@@ -1408,7 +1436,8 @@ button:disabled {
 .home-message__content {
   font-size: 0.9rem;
   min-width: 0;
-  max-width: 65ch;
+  /* Readability guard: wider lines hurt reading, so the column (not the text) absorbs extra width. */
+  max-width: 72ch;
 }
 .home-message__content header {
   display: flex;
@@ -1677,6 +1706,9 @@ button:disabled {
   display: grid;
   align-content: start;
   height: max-content;
+  /* ponytail: 4.6rem reserve, not the 3rem header min-height — at 200% zoom the
+     header is content-driven and shrinks far less than its min-height, so a
+     3rem reserve lets #composer-help slide below the viewport. */
   max-height: calc(100dvh - var(--home-topbar-height) - 4.6rem);
   min-width: 0;
   width: 100%;
@@ -2393,8 +2425,9 @@ button:disabled {
   flex-wrap: wrap;
   gap: 0.45rem 0.75rem;
   min-height: 1.35rem;
-  padding: 0.32rem 0.25rem 0;
-  color: var(--home-faint);
+  padding: 0.28rem 0.25rem 0;
+  border-top: 1px solid var(--home-line);
+  color: var(--home-muted);
   font-size: 0.62rem;
 }
 .home-composer__status {
@@ -3973,6 +4006,9 @@ button:disabled {
     box-shadow: none;
     transform: translateX(-105%);
   }
+  .home-rail__resize {
+    display: none;
+  }
   .home-right-sidebar {
     position: absolute;
     z-index: 13; /* above the mobile backdrop (12), below the rail (15) */
@@ -4657,10 +4693,10 @@ button:disabled {
 .home-agent-panel {
   width: min(24rem, calc(100% - 2rem));
   grid-row: 2;
-  /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 52rem) centered,
-     so its left edge sits at max(1rem, (100% - 52rem) / 2) inside this pane. */
+  /* Left-align with the transcript column: .home-thread is min(100% - 2rem, 64rem) centered,
+     so its left edge sits at max(1rem, (100% - 64rem) / 2) inside this pane. */
   justify-self: start;
-  margin: 0.75rem 0 1rem max(1rem, calc((100% - 52rem) / 2));
+  margin: 0.75rem 0 1rem max(1rem, calc((100% - 64rem) / 2));
   overflow: hidden;
   border: 1px solid var(--home-line);
   border-radius: 0.75rem;
@@ -5242,9 +5278,6 @@ button:disabled {
   }
   .home-thread {
     padding-inline: clamp(1rem, 4vw, 3.5rem);
-  }
-  .home-message__content {
-    max-width: 72ch;
   }
 }
 
