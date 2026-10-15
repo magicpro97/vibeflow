@@ -1,5 +1,120 @@
 # Changelog
 
+## [0.23.0](https://github.com/magicpro97/vibeflow/compare/v0.22.0...v0.23.0) (2026-10-15)
+
+
+### Features
+
+* **core:** split porcelain status into index and worktree halves ([1b9affe](https://github.com/magicpro97/vibeflow/commit/1b9affea7cb74b59052b0024a80e4d2c6db7be09))
+* **dispatch:** consume the agent CLIs' native structured output ([#836](https://github.com/magicpro97/vibeflow/issues/836)) ([434a5ba](https://github.com/magicpro97/vibeflow/commit/434a5bafd34a77b84061d08c16163735924fad5a))
+* **server:** add the read-only files-tree route ([c5cfbbe](https://github.com/magicpro97/vibeflow/commit/c5cfbbebe0c7ebda80713276e566b8e0814d60f3))
+* **server:** per-file diff route with caps and binary detection ([8d2b407](https://github.com/magicpro97/vibeflow/commit/8d2b40760f389ae59379d75fcc73282d5ac9bf6e))
+* **server:** return index and worktree status in the files tree ([02979b3](https://github.com/magicpro97/vibeflow/commit/02979b328339b5394a001d16c9e7a8a0fa90bac0))
+* **server:** serve GET /api/files/tree behind the token guard ([463d39d](https://github.com/magicpro97/vibeflow/commit/463d39d8608cf3c62d25fb18fcef2f601f71959b))
+* **server:** stage and unstage files via guarded git routes ([10e38e0](https://github.com/magicpro97/vibeflow/commit/10e38e0275a90fae6dfd4378d50ddccc62e1a11c))
+* **server:** wire files stage and unstage routes ([ad6e63a](https://github.com/magicpro97/vibeflow/commit/ad6e63ab59d4860ae7ec00d215d3407f70e76436))
+* **server:** wire the files diff route ([75856cd](https://github.com/magicpro97/vibeflow/commit/75856cd52855d3b3b532eba048e7d941c2bbdd81))
+* **ui:** add a unified-diff line classifier for the changes panel ([362bc8a](https://github.com/magicpro97/vibeflow/commit/362bc8a0a4ba0fb4ae2314e2058e86c7d891b1ad))
+* **ui:** add canonical input and select styles ([f777c34](https://github.com/magicpro97/vibeflow/commit/f777c34a3367bf8d4b95e1f5658f8f8802720d0e))
+* **ui:** add the Files drawer ([c8c00ae](https://github.com/magicpro97/vibeflow/commit/c8c00ae8c6626e0842c3cbcf77b92ad08d5aa21d))
+* **ui:** add the files-panel store ([00e6918](https://github.com/magicpro97/vibeflow/commit/00e6918ccaddc61dff74eadeeb7620e0a93d2556))
+* **ui:** add the files-tree client helper module ([35c69a2](https://github.com/magicpro97/vibeflow/commit/35c69a2aff29167c328b125b14005fad3cc2e09d))
+* **ui:** add the files-tree helpers ([4ebab3d](https://github.com/magicpro97/vibeflow/commit/4ebab3d6058836cbcd72c2eb0160e38203bb566c))
+* **ui:** add the read-only Files panel ([14b56cb](https://github.com/magicpro97/vibeflow/commit/14b56cb1394e01fc938b89e040e5b5e356e3b6e9))
+* **ui:** add the right-sidebar resize math (clamp + drag delta) ([ebf0d52](https://github.com/magicpro97/vibeflow/commit/ebf0d52cbf18f5598a03a59c0695b760812371c7))
+* **ui:** changes panel with staged and unstaged groups ([0ca02ac](https://github.com/magicpro97/vibeflow/commit/0ca02ac5eee940844867f10b9d8a2d4f063566b0))
+* **ui:** community-style sent quote block with whole-row jump ([841ac93](https://github.com/magicpro97/vibeflow/commit/841ac934d1ad7db6d5792e7ad251c005cf488d3c))
+* **ui:** compact replying-to quote preview in the composer ([5e2a96d](https://github.com/magicpro97/vibeflow/commit/5e2a96d90d8254924c16aadee6ef322dbb06832b))
+* **ui:** emoji-only reaction picker without implementation jargon ([77e8564](https://github.com/magicpro97/vibeflow/commit/77e856452da83388ac1661ae3605e5bd850c89c9))
+* **ui:** full-screen Home polish — controls, community-style quote and reactions ([cc38c7e](https://github.com/magicpro97/vibeflow/commit/cc38c7efd234c96215becedf05f5e45cceafc8ad))
+* **ui:** group file changes by staging state ([525d167](https://github.com/magicpro97/vibeflow/commit/525d167fb900f3995b05670cd1b10662b63c7f7a))
+* **ui:** inline diff preview under a clicked changes row ([a6db1cc](https://github.com/magicpro97/vibeflow/commit/a6db1cc5bf5bdf17c818b68ca95f5c9c4170374b))
+* **ui:** make the redesigned right sidebar visible, resizable, and Orca-aligned ([1165d86](https://github.com/magicpro97/vibeflow/commit/1165d86a73e349d4a4a2ff3a528af5b58aac4f53))
+* **ui:** open files and resources in the right sidebar ([e38cd23](https://github.com/magicpro97/vibeflow/commit/e38cd23d3932c3e54269c10ca5bf71d5d065e94e))
+* **ui:** open the Files drawer from the top bar ([d571868](https://github.com/magicpro97/vibeflow/commit/d5718688edc64069f547f5d9e522c74af9c73464))
+* **ui:** open the right sidebar by default with a persisted width ([63e311c](https://github.com/magicpro97/vibeflow/commit/63e311cb6ba60aea0efe66ed14dd3971f48b02bf))
+* **ui:** render reactions as emoji count pills ([df09b8f](https://github.com/magicpro97/vibeflow/commit/df09b8fad190606fc5f20c386bbe04b0d37c301a))
+* **ui:** right sidebar layout with mobile overlay ([ed3b801](https://github.com/magicpro97/vibeflow/commit/ed3b801906c33560750424b852bfc3710370e145))
+* **ui:** right sidebar preference module with persisted tab and visibility ([1bf6e28](https://github.com/magicpro97/vibeflow/commit/1bf6e28604e97004df6b6fcf773fe36ff4df89c2))
+* **ui:** right sidebar with files, changes, and resources panels ([e405779](https://github.com/magicpro97/vibeflow/commit/e405779a0cd4ed4d328072b9f875f1e8e7e14d8b))
+* **ui:** stage and unstage actions in the files store ([c5ce24c](https://github.com/magicpro97/vibeflow/commit/c5ce24ce67227d24b2429cf6abb88a964478bfa5))
+* **ui:** style every select and input with the shared control class ([6aab6b6](https://github.com/magicpro97/vibeflow/commit/6aab6b68be80bc6473b273c7a844fc132fbda643))
+* **ui:** tabbed right sidebar shell ([56cb503](https://github.com/magicpro97/vibeflow/commit/56cb503fe9fb78b91ec19893e9d224f4b21661d0))
+* **ui:** wire the right-sidebar resize handle (drag + keyboard) ([5c10085](https://github.com/magicpro97/vibeflow/commit/5c10085a36ad641c6db132eac0b5f67953e4fac9))
+
+
+### Bug Fixes
+
+* **dispatch:** size the owned CLI-receipt budget to the supervisor's worst case ([c06cd59](https://github.com/magicpro97/vibeflow/commit/c06cd5916684482fae8e70131142ee4988d7bdd2))
+* **dispatch:** size the owned CLI-receipt budget to the supervisor's worst case ([01fb1f3](https://github.com/magicpro97/vibeflow/commit/01fb1f30b94e29b20c90f15e779de1d480863471)), closes [#846](https://github.com/magicpro97/vibeflow/issues/846)
+* **files-panel:** address review findings — conflict codes, selection race, shared vocabulary, git listing bounds, dedupe, cwd ([fa20581](https://github.com/magicpro97/vibeflow/commit/fa20581700ac3fa84873c302ae94619a0d1e0fe0))
+* **settings:** close the settings-layer audit gaps (corrupt-file signal, docs, proof binding) ([#839](https://github.com/magicpro97/vibeflow/issues/839)) ([333107f](https://github.com/magicpro97/vibeflow/commit/333107f88741c0084326ff48f7754da3699f150d))
+* **test:** restore the .js import suffix on the wiring test ([a680557](https://github.com/magicpro97/vibeflow/commit/a6805576a2d6b8ab27058346053fc585612acbb1))
+* **ui:** address review findings — move-quote a11y, control authority, pin scope, docs copy ([e42218b](https://github.com/magicpro97/vibeflow/commit/e42218b45f8af9a9859abdcade9549f5e16de3bb))
+* **ui:** clear WCAG AA contrast on the files badge and topbar hover ([681ac0a](https://github.com/magicpro97/vibeflow/commit/681ac0afff68ab2c8425bf64a96eeb9a9a79a078))
+* **ui:** default the mobile right sidebar closed so overlays stay usable ([8ab0e45](https://github.com/magicpro97/vibeflow/commit/8ab0e45124f73292808c381a44a3112f35ce24d9))
+* **ui:** expose aria values on the right-sidebar resize separator ([ce09ee8](https://github.com/magicpro97/vibeflow/commit/ce09ee8c4e8079c872a177e42ee08badebd41700))
+* **ui:** fill the viewport with dvh-safe height ([31e73b1](https://github.com/magicpro97/vibeflow/commit/31e73b105fc4d2021cff5f80ae49d0de99c51746))
+* **ui:** keep the open mobile sidebar above its backdrop ([aaf233c](https://github.com/magicpro97/vibeflow/commit/aaf233cff34155c2e3073a26630704e16ffd0b8f))
+* **ui:** keep the selected files row's modified badge at WCAG AA ([c05ef23](https://github.com/magicpro97/vibeflow/commit/c05ef2394523f4117fa12d72f1eaee839a83dd00))
+* **ui:** let the empty composer alert slot collapse so the shell stays flush ([4a4b8c7](https://github.com/magicpro97/vibeflow/commit/4a4b8c73ce60b565b24d9a7e2ca336caf0bb4f1a))
+* **ui:** make the right sidebar prefs coverage robust under bun 1.4.0 ([58c3152](https://github.com/magicpro97/vibeflow/commit/58c3152fbb50bbae8e892f659e8d51c747c107a7))
+* **ui:** mark the left rail toggle with a panel-left glyph ([430e6d0](https://github.com/magicpro97/vibeflow/commit/430e6d033d93ec9ba78ec8fb6cf1e234058b6118))
+* **ui:** mark the left rail toggle with a panel-left glyph ([0bf3fe8](https://github.com/magicpro97/vibeflow/commit/0bf3fe8b6dc54f0ab200f72515983e20e606294f))
+* **ui:** mark the right-sidebar toggles with a panel-right glyph ([a7a9056](https://github.com/magicpro97/vibeflow/commit/a7a90568c3a352a8813f4c19de74ded5bbce8c21))
+* **ui:** mark the right-sidebar toggles with a panel-right glyph ([06359d4](https://github.com/magicpro97/vibeflow/commit/06359d4d46973fbe9da4ab90d13bc5c05d7da3f6))
+* **ui:** pin the composer to the viewport bottom ([1a76a13](https://github.com/magicpro97/vibeflow/commit/1a76a13f6496eaea9940d122e468843ee862f903))
+* **ui:** raise the changes badge contrast to WCAG AA ([3126bd3](https://github.com/magicpro97/vibeflow/commit/3126bd33010bdda66f5d3f8fcd629f49b0683448))
+* **ui:** raise the type floor and scale the hero on wide screens ([b59ac7d](https://github.com/magicpro97/vibeflow/commit/b59ac7da2945ddd0d366655bea2b110d0d0437f7))
+* **ui:** refresh the files panel on demand ([21c9bce](https://github.com/magicpro97/vibeflow/commit/21c9bcec67e2a5a07959bc4837caed95b8266dbe))
+* **ui:** restore the rail above the right sidebar by dropping its dormant z-index ([94402dc](https://github.com/magicpro97/vibeflow/commit/94402dc2323791920d0202d359a3bd5523432422))
+* **ui:** return focus to the top-bar trigger when the sidebar collapses ([4900709](https://github.com/magicpro97/vibeflow/commit/4900709290f5421e42af27defe647e60d46d25a7))
+* **ui:** strip CRLF carriage returns and reset the open diff on reload ([c4217c5](https://github.com/magicpro97/vibeflow/commit/c4217c55996467d37d12661e6a51eede9a58e278))
+
+
+### Refactors
+
+* **ui:** promote the files drawer into the right sidebar panel ([7267ff4](https://github.com/magicpro97/vibeflow/commit/7267ff4ece722c6d408d64110f20f17e59b55c36))
+* **ui:** promote the resources drawer into the right sidebar panel ([a717799](https://github.com/magicpro97/vibeflow/commit/a71779963ae2145bb54f2b406cee3826dd568b4a))
+
+
+### Documentation
+
+* **engines:** refresh verified versions after the CLI update round ([#838](https://github.com/magicpro97/vibeflow/issues/838)) ([9229f4f](https://github.com/magicpro97/vibeflow/commit/9229f4f4ec3a636327404040412d0dba050c4d19))
+* **skills:** refresh vf refs — sync missing references, mark fixed incidents historical, un-glue escaped lines ([11eebc8](https://github.com/magicpro97/vibeflow/commit/11eebc8b9071917180e9acd275c770f846a398d5))
+* **skills:** sync vf pitfalls + review-gate refs from Hermes mirror ([418ce64](https://github.com/magicpro97/vibeflow/commit/418ce64f9efaeebc81835d462ee8be77f52d5350))
+* **skills:** sync vf pitfalls + review-gate refs from Hermes mirror ([47c9a76](https://github.com/magicpro97/vibeflow/commit/47c9a76f0b4a983b6c40ad3ef9c821b81ab3a840))
+* **ui:** document the Files panel ([c22bf81](https://github.com/magicpro97/vibeflow/commit/c22bf8111a0bc3c59f2f7a4c7635293c97d7e757))
+* **ui:** note the community-standard quote and reaction conventions ([aa49318](https://github.com/magicpro97/vibeflow/commit/aa49318fa13c30f149ca75cde63daebf880329fd))
+* **ui:** note the sidebar layout and git workflows ([155854c](https://github.com/magicpro97/vibeflow/commit/155854c6bc4135b50b2e69063cf2c67d588d329a))
+
+
+### Continuous Integration
+
+* bump the pinned bun to 1.4.3 ([3ee164f](https://github.com/magicpro97/vibeflow/commit/3ee164f0c6952ee6b14437cee73287a11b1c31f1))
+* bump the pinned bun to 1.4.3 ([60d34ac](https://github.com/magicpro97/vibeflow/commit/60d34acb8deaf92197afc2f56e575b78070e4bcb))
+
+
+### Tests
+
+* **e2e:** cover the Files drawer ([ff07bca](https://github.com/magicpro97/vibeflow/commit/ff07bca60a5c944de49bb2104b4135aa28a5b160))
+* **e2e:** cover the inline diff preview in the changes panel ([e1fefa6](https://github.com/magicpro97/vibeflow/commit/e1fefa67b4cd977c3aa9bfd728f9a401888ae732))
+* **e2e:** cover the right sidebar shell ([bf8a6fd](https://github.com/magicpro97/vibeflow/commit/bf8a6fd547fd3d8162161bd1c2d1d0232a49acf7))
+* **e2e:** drop the redundant setup-run skip guards ([7f24230](https://github.com/magicpro97/vibeflow/commit/7f24230d6675bf4224f15501d664e8ea37a1287b))
+* **e2e:** inherit the setup identity in Playwright workers ([95e5a09](https://github.com/magicpro97/vibeflow/commit/95e5a0994f9327b92a79b01f3245696940445b70))
+* **e2e:** make the resources focus pin non-vacuous ([3c5e10d](https://github.com/magicpro97/vibeflow/commit/3c5e10da222a30b0429cc1a27ca408701a49722b))
+* **e2e:** pin persisted tab through sidebar collapse ([766daf6](https://github.com/magicpro97/vibeflow/commit/766daf6ac15dcce1944107e32f077d69cac26ebe))
+* **e2e:** seed diff-looking content for the untracked preview guard ([758d703](https://github.com/magicpro97/vibeflow/commit/758d7032059b05ae6105beb5c31e7010ef89ff26))
+* **e2e:** stage and unstage roundtrip on the throwaway workspace ([ce1ab06](https://github.com/magicpro97/vibeflow/commit/ce1ab0685eb8c29155ea36677945e3fa4a85df9b))
+* migrate the drawer pins to the right sidebar panels ([8db877d](https://github.com/magicpro97/vibeflow/commit/8db877d9aaf90264bc74be18b4c3d01dbc4096b2))
+* **process-boundary:** classify the files-tree route as a git boundary ([0e0d910](https://github.com/magicpro97/vibeflow/commit/0e0d910a6725bb9e0b5df3969d0589b436161a06))
+* **server:** pin the index/worktree split ([9c940b7](https://github.com/magicpro97/vibeflow/commit/9c940b7e7c7a0c90166f685fb349e0eac27c6d4c))
+* **server:** pin the staged and untracked query mapping ([c26e5e3](https://github.com/magicpro97/vibeflow/commit/c26e5e3d4893ff4584b11288af36faf512193cc6))
+* **server:** use the .js import suffix for the files-tree wiring test ([1d2a2da](https://github.com/magicpro97/vibeflow/commit/1d2a2da96ac443b4135fdb54e06ab513f4c7ccca))
+* **ui:** pin the default-open sidebar and its resize affordances ([d3a6e5a](https://github.com/magicpro97/vibeflow/commit/d3a6e5a44b7bad7edf07741cbe8ba28b15f0212f))
+* **ui:** pin the module-load prefs wiring and ban cache-busted imports ([d9e8d62](https://github.com/magicpro97/vibeflow/commit/d9e8d6276b1ad2a737e198192dc6997fc5f24832))
+* **ui:** split the files store suite under the 400-line cap ([569bce1](https://github.com/magicpro97/vibeflow/commit/569bce17847a487e899b97d1991d2471f048836f))
+
 ## [0.22.0](https://github.com/magicpro97/vibeflow/compare/v0.21.0...v0.22.0) (2026-10-09)
 
 
