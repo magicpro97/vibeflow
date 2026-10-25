@@ -1,6 +1,6 @@
 ---
 name: windows-path-authority-leases
-description: See canonical SKILL.md for full details.
+description: "Pin a fixed-drive Windows directory and every ancestor with non-delete-sharing handles while path-based reads, writes, renames, cleanup, locks, or evidence publication execute; use when check-use-check identity validation still permits an ancestor swap."
 ---
 
 # windows-path-authority-leases

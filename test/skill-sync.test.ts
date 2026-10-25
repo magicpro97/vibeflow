@@ -4,12 +4,38 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { registryLockPath, writeRegistryLock } from "../src/skills/registry-channel";
 import { skillBundleHash } from "../src/skills/registry-install";
-import { requiredSkillNames, syncSkillMirrors, verifySkillSync } from "../src/skills/sync";
+import {
+  mirrorDescriptionFrom,
+  requiredSkillNames,
+  syncSkillMirrors,
+  verifySkillSync,
+} from "../src/skills/sync";
 
 let dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs = [];
+});
+
+describe("mirrorDescriptionFrom", () => {
+  test("collapses a multi-line description to one line without changing words", () => {
+    const multiline = "Use when auditing fixtures.\n  Keeps trigger words, drops newlines.";
+    expect(mirrorDescriptionFrom(multiline)).toBe(
+      "Use when auditing fixtures. Keeps trigger words, drops newlines.",
+    );
+  });
+
+  test("keeps a long description verbatim, including its exclusion clause", () => {
+    const long = `${"Use when reviewing pull requests. ".repeat(8)}Not for legacy PHP repos.`;
+    const out = mirrorDescriptionFrom(long);
+    expect(out).toBe(long.trim());
+    expect(out?.endsWith("Not for legacy PHP repos.")).toBe(true);
+  });
+
+  test("returns undefined for a missing, non-string or blank description", () => {
+    expect(mirrorDescriptionFrom(undefined as unknown as string)).toBeUndefined();
+    expect(mirrorDescriptionFrom("   ")).toBeUndefined();
+  });
 });
 
 describe("syncSkillMirrors pointer mode (default)", () => {
@@ -43,6 +69,54 @@ describe("syncSkillMirrors pointer mode (default)", () => {
     ).toBe(false);
     expect(existsSync(join(repo, ".claude", "skills", "project-fit-skill"))).toBe(false);
     expect(existsSync(join(repo, ".agents", "skills", "project-fit-skill"))).toBe(false);
+  });
+
+  test("pointer stub carries the canonical description, not a placeholder", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-desc-"));
+    dirs.push(repo);
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-catalog-desc-"));
+    dirs.push(catalogDir);
+    const src = join(catalogDir, "described-skill");
+    mkdirSync(src, { recursive: true });
+    writeFileSync(
+      join(src, "SKILL.md"),
+      "---\nname: described-skill\ndescription: Route vendor invoices through the approval queue.\n---\n\n# Described\n\n1. Open the invoice queue.\n2. Approve or reject each invoice with a reason.\n3. Re-run the reconciliation report to confirm the queue is empty.\n",
+    );
+
+    const result = syncSkillMirrors(repo, { mode: "pointer", catalogDir });
+    expect(result.ok).toBe(true);
+    const pointer = readFileSync(
+      join(repo, ".github", "skills", "described-skill", "SKILL.md"),
+      "utf8",
+    );
+    expect(pointer).toContain('description: "Route vendor invoices through the approval queue."');
+    expect(pointer).not.toContain("See canonical SKILL.md");
+  });
+
+  test("pointer stub keeps a long description verbatim (no silent truncation)", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-long-"));
+    dirs.push(repo);
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-catalog-long-"));
+    dirs.push(catalogDir);
+    const src = join(catalogDir, "verbose-skill");
+    mkdirSync(src, { recursive: true });
+    const firstSentence = "Use when auditing generated fixtures against the canonical schema.";
+    const long = `${firstSentence} ${"Extra trigger detail. ".repeat(20)}`.trim();
+    writeFileSync(
+      join(src, "SKILL.md"),
+      `---\nname: verbose-skill\ndescription: ${JSON.stringify(long)}\n---\n\n# Verbose\n\n1. Collect the fixtures.\n2. Compare each field against the canonical schema.\n3. Report mismatches with file and line so the author can fix them.\n`,
+    );
+
+    const result = syncSkillMirrors(repo, { mode: "pointer", catalogDir });
+    expect(result.ok).toBe(true);
+    const pointer = readFileSync(
+      join(repo, ".github", "skills", "verbose-skill", "SKILL.md"),
+      "utf8",
+    );
+    const line = pointer.split("\n").find((l) => l.startsWith("description: ")) ?? "";
+    const value = JSON.parse(line.slice("description: ".length)) as string;
+    expect(value).toBe(long);
+    expect(value.endsWith("Extra trigger detail.")).toBe(true);
   });
 
   test("does not write mirrors if canonical skill fails validation", () => {
@@ -212,6 +286,75 @@ describe("full mode mirrors the references/ subtree (#326)", () => {
 });
 
 describe("verifySkillSync", () => {
+  test("flags a pointer stub whose description no longer matches the canonical", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-stale-desc-"));
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-sync-stale-catalog-"));
+    dirs.push(repo, catalogDir);
+    const source = join(catalogDir, "stale-skill");
+    mkdirSync(source, { recursive: true });
+    writeFileSync(
+      join(source, "SKILL.md"),
+      "---\nname: stale-skill\ndescription: Use when auditing fixture drift.\n---\n\n# Stale\n\nThis actionable canonical body is deliberately longer than fifty characters.\n",
+    );
+    expect(syncSkillMirrors(repo, { mode: "pointer", engines: ["claude"], catalogDir }).ok).toBe(
+      true,
+    );
+    expect(verifySkillSync(repo, ["claude"], { catalogDir }).ok).toBe(true);
+
+    // Canonical description edited after the stub was mirrored: the path is still
+    // right, so only a description comparison can catch the stale stub.
+    writeFileSync(
+      join(source, "SKILL.md"),
+      "---\nname: stale-skill\ndescription: Use when auditing fixture drift and stale mirrors.\n---\n\n# Stale\n\nThis actionable canonical body is deliberately longer than fifty characters.\n",
+    );
+    const stale = verifySkillSync(repo, ["claude"], { catalogDir });
+    expect(stale.ok).toBe(false);
+    expect(stale.errors.join("\n")).toMatch(/description differs from canonical/);
+  });
+
+  test("round-trips a description containing double quotes", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-quotes-"));
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-sync-quotes-catalog-"));
+    dirs.push(repo, catalogDir);
+    const source = join(catalogDir, "quoted-skill");
+    mkdirSync(source, { recursive: true });
+    writeFileSync(
+      join(source, "SKILL.md"),
+      '---\nname: quoted-skill\ndescription: Use when the user says "make me a GIF" for Slack.\n---\n\n# Quoted\n\nThis actionable canonical body is deliberately longer than fifty characters.\n',
+    );
+    expect(syncSkillMirrors(repo, { mode: "pointer", engines: ["claude"], catalogDir }).ok).toBe(
+      true,
+    );
+    const stub = readFileSync(join(repo, ".claude", "skills", "quoted-skill", "SKILL.md"), "utf8");
+    const line = stub.split("\n").find((l) => l.startsWith("description: ")) ?? "";
+    expect(JSON.parse(line.slice("description: ".length))).toBe(
+      'Use when the user says "make me a GIF" for Slack.',
+    );
+    expect(verifySkillSync(repo, ["claude"], { catalogDir }).ok).toBe(true);
+  });
+
+  test("accepts the placeholder stub when the canonical has no description", () => {
+    const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-no-desc-"));
+    const catalogDir = mkdtempSync(join(tmpdir(), "vf-skill-sync-no-desc-catalog-"));
+    dirs.push(repo, catalogDir);
+    const source = join(catalogDir, "no-desc-skill");
+    mkdirSync(source, { recursive: true });
+    // Validator rejects this during sync, so the stub can only exist from an
+    // earlier sync — verify must still agree with what pointerBody() writes.
+    writeFileSync(
+      join(source, "SKILL.md"),
+      '---\nname: no-desc-skill\ndescription: ""\n---\n\n# No Desc\n\nThis actionable canonical body is deliberately longer than fifty characters.\n',
+    );
+    mkdirSync(join(repo, ".claude", "skills", "no-desc-skill"), { recursive: true });
+    writeFileSync(
+      join(repo, ".claude", "skills", "no-desc-skill", "SKILL.md"),
+      '---\nname: no-desc-skill\ndescription: "See canonical SKILL.md for full details."\n---\n\n# no-desc-skill\n\nCanonical skill lives at:\n\n`~/.vibeflow/skills/no-desc-skill/SKILL.md`\n',
+    );
+    const result = verifySkillSync(repo, ["claude"], { catalogDir });
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
   test("reports missing mirrors per engine", () => {
     const repo = mkdtempSync(join(tmpdir(), "vf-skill-sync-missing-"));
     dirs.push(repo);

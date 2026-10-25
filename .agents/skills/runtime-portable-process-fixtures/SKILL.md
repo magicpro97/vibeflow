@@ -1,6 +1,6 @@
 ---
 name: runtime-portable-process-fixtures
-description: See canonical SKILL.md for full details.
+description: "Build or repair VibeFlow runtime tests that model real process lifecycles, persisted PID ownership, and cross-platform path semantics without relying on shell-specific behavior."
 ---
 
 # runtime-portable-process-fixtures

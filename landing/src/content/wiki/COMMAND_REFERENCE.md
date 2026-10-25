@@ -605,9 +605,11 @@ The canonical store is `.vibeflow/skills/<name>/` (one `SKILL.md` plus optional
 catalog at `~/.vibeflow/skills/`. The four engine mirrors
 (`.claude/skills/`, `.agents/skills/`, `.github/skills/`, `.opencode/skills/`) are kept in sync by
 `src/skills/sync.ts`: `pointer` mode writes a stub `SKILL.md` that points at the
-canonical file (default; cheap, no duplication); `full` mode copies the whole skill
-tree. `vf skills verify-sync` checks every canonical skill has a matching
-`SKILL.md` in every mirror. `--from-registry` extends both commands to also
+canonical file and copies its frontmatter `description` verbatim (one line, so
+engines can still trigger the skill from the mirror listing) — default; cheap,
+no body duplication. `full` mode copies the whole skill tree. `vf skills
+verify-sync` checks every canonical skill has a matching `SKILL.md` in every
+mirror. `--from-registry` extends both commands to also
 include skills pinned in the registry lock file (`SKILL_REGISTRY.lock.json`).
 
 ## Optional tools (code navigation)

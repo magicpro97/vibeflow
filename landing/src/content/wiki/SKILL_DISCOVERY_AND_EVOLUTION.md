@@ -72,9 +72,11 @@ Discovery sources (in order, see `src/skills/resolver.ts`):
 
 `vf skills sync [--mode pointer|full]` regenerates the four mirrors from the
 canonical store. `pointer` mode (default) writes a stub `SKILL.md` per skill
-pointing at the canonical file; `full` mode copies the whole tree. After any
-canonical skill change, re-run `vf skills sync`; `vf skills verify-sync` reports
-any mirror that is missing a `SKILL.md` for a canonical skill.
+pointing at the canonical file and carrying that skill's own frontmatter
+`description` on one line, so an engine reading the mirror can still trigger the
+skill; `full` mode copies the whole tree. After any canonical skill change,
+re-run `vf skills sync`; `vf skills verify-sync` reports any mirror that is
+missing a `SKILL.md` for a canonical skill.
 
 ## Context7 usage
 

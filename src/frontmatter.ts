@@ -29,6 +29,21 @@ function coerce(raw: string): unknown {
   return s;
 }
 
+/** Scalars only: a double-quoted scalar written by `vf skills sync` carries
+ *  JSON escapes, so decode them here. Inline-list items keep their raw escapes
+ *  (issue #126 pins that behaviour). */
+function coerceScalar(raw: string): unknown {
+  const s = raw.trim();
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    try {
+      return JSON.parse(s);
+    } catch {
+      return s.slice(1, -1);
+    }
+  }
+  return coerce(s);
+}
+
 function parseInlineList(s: string): unknown[] {
   const inner = s.slice(1, -1).trim();
   if (!inner) return [];
@@ -164,7 +179,7 @@ function parseBlock(lines: string[]): Record<string, unknown> {
       if (!forbidden) result[key] = parseInlineList(valuePart);
       i++;
     } else {
-      if (!forbidden) result[key] = coerce(valuePart);
+      if (!forbidden) result[key] = coerceScalar(valuePart);
       i++;
     }
   }

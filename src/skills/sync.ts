@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { ENGINES, type Engine, c } from "../core.js";
+import { parseFrontmatter } from "../frontmatter.js";
 import { ENGINE_CONFIGS } from "../workflow-artifacts/types.js";
 import { skillBundleHash } from "./bundle-hash.js";
 import { sharedCatalogDir } from "./catalog.js";
@@ -133,11 +134,39 @@ function skillSrcDir(
   return { dir: join(catalog, name), displayPath: `~/.vibeflow/skills/${name}/SKILL.md` };
 }
 
-function pointerBody(name: string, mode: SyncMode, canonicalPath: string): string {
+/** Only used when a canonical SKILL.md has no usable description; shared so
+ *  verifySkillSync accepts exactly what pointerBody() would write. */
+const PLACEHOLDER_DESCRIPTION = "See canonical SKILL.md for full details.";
+
+/** Mirror stubs must carry the canonical description verbatim: engines (and
+ *  agent runtimes) trigger on the listing, so a placeholder burns the only
+ *  signal they get — and a truncated one silently drops the "Not for …" /
+ *  "Skip when …" exclusions that keep a skill from firing on the wrong task.
+ *  Only the line shape changes here (frontmatter wants a single flat line). */
+export function mirrorDescriptionFrom(raw: string): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const flat = raw.replace(/\s+/g, " ").trim();
+  return flat.length === 0 ? undefined : flat;
+}
+
+function mirrorDescription(srcDir: string): string | undefined {
+  // No local catch: an unreadable or malformed canonical SKILL.md is a real
+  // failure, and syncSkillMirrors already records per-skill errors. Swallowing
+  // it here would silently fall back to the placeholder this change removes.
+  const parsed = parseFrontmatter(readFileSync(join(srcDir, "SKILL.md"), "utf8"));
+  return mirrorDescriptionFrom(parsed.data.description as string);
+}
+
+function pointerBody(
+  name: string,
+  mode: SyncMode,
+  canonicalPath: string,
+  description?: string,
+): string {
   return [
     "---",
     `name: ${name}`,
-    "description: See canonical SKILL.md for full details.",
+    `description: ${JSON.stringify(description ?? PLACEHOLDER_DESCRIPTION)}`,
     "---",
     "",
     `# ${name}`,
@@ -196,13 +225,16 @@ export function syncSkillMirrors(
     }
     warnings.push(...validation.warnings.map((w) => `${name}: ${w}`));
     try {
+      // Parse the canonical frontmatter once per skill, not once per engine: the
+      // description is identical for every mirror.
+      const description = mode === "pointer" ? mirrorDescription(src) : undefined;
       for (const mirror of mirrors) {
         const dst = join(repo, mirror, name);
         mkdirSync(join(repo, mirror), { recursive: true });
         rmSync(dst, { recursive: true, force: true });
         mkdirSync(dst, { recursive: true });
         if (mode === "pointer") {
-          writeFileSync(join(dst, "SKILL.md"), pointerBody(name, mode, displayPath));
+          writeFileSync(join(dst, "SKILL.md"), pointerBody(name, mode, displayPath, description));
         } else {
           cpSync(src, dst, { recursive: true });
         }
@@ -273,9 +305,19 @@ export function verifySkillSync(
         const expected = sourceIsLocal
           ? `.vibeflow/skills/${name}/SKILL.md`
           : `~/.vibeflow/skills/${name}/SKILL.md`;
+        // Pointer stubs repeat the canonical description verbatim, so a stub
+        // that still carries an older copy is stale even when its path is right.
+        const stubDescription = parseFrontmatter(body).data.description;
+        const canonicalDescription =
+          mirrorDescriptionFrom(parseFrontmatter(sourceBody).data.description as string) ??
+          PLACEHOLDER_DESCRIPTION;
         if (target !== undefined) {
           if (target !== expected) {
             errors.push(`${mirror}/${name}/SKILL.md points at wrong canonical path`);
+          } else if (stubDescription !== canonicalDescription) {
+            errors.push(
+              `${mirror}/${name}/SKILL.md description differs from canonical (re-run vf skills sync)`,
+            );
           } else {
             synced.push(`${mirror}/${name}`);
           }

@@ -1,6 +1,6 @@
 ---
 name: deterministic-async-teardown
-description: See canonical SKILL.md for full details.
+description: "Close asynchronous tests and runtimes through authoritative completion barriers before restoring globals or deleting fixtures; use when callbacks, timers, streams, continuations, queues, or child processes can outlive the visible result."
 ---
 
 # deterministic-async-teardown

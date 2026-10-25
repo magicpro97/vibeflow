@@ -1,6 +1,6 @@
 ---
 name: durable-authority-crash-replay
-description: See canonical SKILL.md for full details.
+description: "Recover interrupted VibeFlow runs without replaying consumed epochs, while preserving exact workspaces, authority boundaries, borrowed auth state, and native executor sessions."
 ---
 
 # durable-authority-crash-replay

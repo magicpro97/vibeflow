@@ -1,6 +1,6 @@
 ---
 name: typed-protocol-contracts
-description: See canonical SKILL.md for full details.
+description: "Centralize persisted, transport, CLI, and UI protocol literals in typed runtime contracts. Use when adding or changing statuses, event kinds, error codes, limits, environment keys, exit codes, or cross-platform identity prefixes so implementations and validators cannot drift."
 ---
 
 # typed-protocol-contracts
