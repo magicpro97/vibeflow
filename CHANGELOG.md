@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.24.0](https://github.com/magicpro97/vibeflow/compare/v0.23.0...v0.24.0) (2026-10-25)
+
+
+### Features
+
+* **ui:** optimize the home UI for working space (Orca-grounded density pass) ([09c7712](https://github.com/magicpro97/vibeflow/commit/09c7712280860ee5ac0ea4dbe4ca55b630ee7cbd))
+
+
+### Bug Fixes
+
+* **conversation:** serve a partial catalog with a degraded notice instead of 503 ([b9eca7c](https://github.com/magicpro97/vibeflow/commit/b9eca7c1fc5ec632691ee8dc8b51e71c8b6c992a))
+* **conversation:** serve a partial catalog with a degraded notice instead of 503 ([f77ac1f](https://github.com/magicpro97/vibeflow/commit/f77ac1fa6ec4ea180674b3f858dc8b4f015e1d9d))
+* **conversation:** serve a read-only degraded page when durable catalog deltas lag ([e9afbe9](https://github.com/magicpro97/vibeflow/commit/e9afbe9218411b00fae1d20fd20dd6a1f4a99803))
+* **conversation:** serve a read-only degraded page when durable catalog deltas lag ([655d6ad](https://github.com/magicpro97/vibeflow/commit/655d6ad3324d6ce85512ab4f9c650026177a85ab))
+* **skills:** carry canonical descriptions into engine mirror stubs ([1020347](https://github.com/magicpro97/vibeflow/commit/1020347c2e1318180d2e935e7264a2c5f4535852))
+* **skills:** carry canonical descriptions into engine mirror stubs ([b89baf5](https://github.com/magicpro97/vibeflow/commit/b89baf596fd50a2ae1ec4a0bc3fe9c99ed366cfb))
+
 ## [0.23.0](https://github.com/magicpro97/vibeflow/compare/v0.22.0...v0.23.0) (2026-10-15)
 
 
