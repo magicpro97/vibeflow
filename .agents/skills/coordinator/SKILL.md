@@ -1,6 +1,6 @@
 ---
 name: coordinator
-description: See canonical SKILL.md for full details.
+description: "Coordinate non-trivial VibeFlow work through compact contracts, distinct writable CLI executors, coordinator-first clarification, exact-head review, and verified promotion."
 ---
 
 # coordinator

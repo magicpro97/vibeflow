@@ -302,4 +302,19 @@ describe("parseBlock: child block boundary (line 84-86)", () => {
     const { data } = parseFrontmatter(["---", 'tags: ["a\\", "b"]', "---", "body"].join("\n"));
     expect(Array.isArray(data.tags)).toBe(true);
   });
+
+  test("double-quoted scalar decodes JSON escapes written by vf skills sync", () => {
+    const description = 'Use when the user asks like "make me a GIF of X" for Slack.';
+    const { data } = parseFrontmatter(
+      ["---", `description: ${JSON.stringify(description)}`, "---", "body"].join("\n"),
+    );
+    expect(data.description).toBe(description);
+  });
+
+  test("double-quoted scalar with a non-JSON escape falls back to the raw text", () => {
+    // YAML allows escapes JSON does not (\e here). JSON.parse throws, so the
+    // parser must return the inner text instead of dropping the value.
+    const { data } = parseFrontmatter(["---", 'description: "a \\e b"', "---", "body"].join("\n"));
+    expect(data.description).toBe("a \\e b");
+  });
 });

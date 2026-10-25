@@ -1,6 +1,6 @@
 ---
 name: exact-coverage-repair
-description: See canonical SKILL.md for full details.
+description: "Repair VibeFlow coverage, review-proof, or exact-head verification regressions by fixing path identity and evidence freshness instead of waiving the gate or rerunning blindly."
 ---
 
 # exact-coverage-repair

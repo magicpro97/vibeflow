@@ -1,6 +1,6 @@
 ---
 name: merge-when-green
-description: See canonical SKILL.md for full details.
+description: "Watch a VibeFlow PR through exact-head review and CI, fix root causes from failing logs, and merge once every required gate for the current SHA is truly green."
 ---
 
 # merge-when-green
