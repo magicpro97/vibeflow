@@ -286,7 +286,7 @@
         "src/capabilities"
       ],
       "test_sha256": "a1b730ecef1332164e10e01cf2208cb5333a9e218243dd504bfc57d38855f93c",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/core-storage-security.test.ts#portable-lock-secrets",
@@ -299,7 +299,7 @@
         "src/capabilities"
       ],
       "test_sha256": "50107fd79bd49652570290926e2dda18de7b2cef8e0abca9cd84377c714782ba",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/manifest.test.ts#manifest-digest",
@@ -312,7 +312,7 @@
         "src/capabilities"
       ],
       "test_sha256": "86e00527b41f4f46dc0be032e0043450de101b858a72cb60bb0159d0468429d0",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/permissions.test.ts#permission-union-delta",
@@ -325,7 +325,7 @@
         "src/capabilities"
       ],
       "test_sha256": "3b46291b5df5ece1e396ca41286b12d30979583b6deee1fa0a28223b8e4218d7",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/registry-resolver.test.ts#resolver-fail-closed",
@@ -338,7 +338,7 @@
         "src/capabilities"
       ],
       "test_sha256": "ce694e5ea8894beceb119d37ddf37d6bc6b9f7b210ba67cc9e7abf9708ce562b",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/manifest-coverage-postfreeze.test.ts#manifest-bom-provenance",
@@ -379,7 +379,7 @@
         "src/server"
       ],
       "test_sha256": "8a5a7b96a46d6c0ad97856ee1f23ec51ee303500abcf2b229b992883b19fd1a8",
-      "production_sha256": "ca397bdb711b1555d2d5c3fe9d6ab4f251ab4d59d716c4de23be0d46f6757b77"
+      "production_sha256": "881bf15e55f0a16f5dfe767476d03823a6f70db0ccfc276564b16d7002210dc1"
     },
     {
       "id": "proof:bun:test/capabilities/capability-operation-runtime.test.ts#operation-publication",
@@ -392,7 +392,7 @@
         "src/capabilities"
       ],
       "test_sha256": "e06661f2ccdd61b2b8ecb156f52ae26ba053abfb6218a90a51548622cbfbb6d4",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/capability-planning-runtime.test.ts#zero-write-plan",
@@ -405,7 +405,7 @@
         "src/capabilities"
       ],
       "test_sha256": "2b0b4662489319e1e24c3fc13ea18627da4e70aeb2993532fdd774dfbd6127e9",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/execution-graph-runtime.test.ts#graph-substitution",
@@ -418,7 +418,7 @@
         "src/capabilities"
       ],
       "test_sha256": "42cfa76b9437cbdd90dc6a7b1e08ea1ae194de848faafceaa49113c00b22e1df",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capabilities/production-broker-runtime.test.ts#production-broker",
@@ -431,7 +431,7 @@
         "src/capabilities"
       ],
       "test_sha256": "2a84fcd03df241251b3bca334ae7b3e35349e513725ff9eeb8f362e43bd5d354",
-      "production_sha256": "c603a6be9003f54d52097e79f5b3b1f9a7a9f6ce3d85b0cdb15204cc3f8017b8"
+      "production_sha256": "0f2021db24f9c889d6b1af735b0e57855a11b72c014ca350de62d3a8ab332537"
     },
     {
       "id": "proof:bun:test/capability-cli-parser.test.ts#strict-repeatable-argv",
@@ -507,7 +507,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "a11473fe722b0967cb63cdb39a9ba550c8eb28b5b7c0b2a1717bb354d9100d52",
-      "production_sha256": "1950815685ac96cf7eafe5d033bac7f96affc497de51e7d42ef8bddf1827ddf3"
+      "production_sha256": "38a7b1b1ba167c51fb0634d45c5c2b3c1e4b83808a678c63c37eb49b18b58ca9"
     },
     {
       "id": "proof:bun:test/authority-default-port-hardening.test.ts#cold-dry-run-zero-effect",
@@ -523,7 +523,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "a11473fe722b0967cb63cdb39a9ba550c8eb28b5b7c0b2a1717bb354d9100d52",
-      "production_sha256": "1950815685ac96cf7eafe5d033bac7f96affc497de51e7d42ef8bddf1827ddf3"
+      "production_sha256": "38a7b1b1ba167c51fb0634d45c5c2b3c1e4b83808a678c63c37eb49b18b58ca9"
     },
     {
       "id": "proof:bun:test/authority-request-file-hardening.test.ts#all-request-files",
@@ -539,7 +539,7 @@
         "src/commands/capability"
       ],
       "test_sha256": "027e780b3811b6adb03cc5c58cf2cc3905bf4a1ce2b1fa9a4011285451561f98",
-      "production_sha256": "1950815685ac96cf7eafe5d033bac7f96affc497de51e7d42ef8bddf1827ddf3"
+      "production_sha256": "38a7b1b1ba167c51fb0634d45c5c2b3c1e4b83808a678c63c37eb49b18b58ca9"
     },
     {
       "id": "proof:bun:test/ui-conversation-home.test.ts#home-switch-abort",
@@ -2575,6 +2575,6 @@
   "review": {
     "reviewer": "codex-normative-review-2026-08-28",
     "statement": "I reviewed every section disposition against the exact design and proof preimages.",
-    "reviewed_payload_sha256": "676323e729305eeeeb03d20c66d6cf66c6e0eaf995aa0e1a57ec3f73f99ca734"
+    "reviewed_payload_sha256": "428555f80e15fec35bfa4a3c3f61c049f57a7f03c9501de0f4ee0ed1da617319"
   }
 }
