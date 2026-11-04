@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { join, relative, sep } from "node:path";
+import { mkdirSync, renameSync } from "node:fs";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { CAPABILITY_SCOPE } from "../../core/capability-contract.js";
 import {
   canonicalJsonBytes,
@@ -99,6 +100,52 @@ function writeNewIdentity(
   return { identity, settings };
 }
 
+function recoverOrphanedActivation(
+  paths: CapabilityStorePathsV1,
+  processLock: ReturnType<typeof acquireCapabilityAuthorityActivationLock>["processLock"],
+  options: ActivationOptionsV1,
+): void {
+  const files = activationDependentFiles(paths, []);
+  if (files.length === 0) return;
+  const checkpointRoot = join(paths.privateRoot, "recovery", "v1", "checkpoints");
+  const quarantineRoot = join(paths.privateRoot, "recovery", "v1", "quarantine");
+  const isKnownArtifact = (file: string): boolean => {
+    if (file === activationReceiptPath(paths) || file === activationHeadPath(paths)) return true;
+    const parent = dirname(file);
+    const name = basename(file);
+    if (parent === checkpointRoot && /^[a-f0-9]{64}\.json$/.test(name)) return true;
+    if (parent === quarantineRoot && /^activation-[a-f0-9]{64}\.json$/.test(name)) return true;
+    return false;
+  };
+  if (!files.every(isKnownArtifact))
+    quarantineActivation(paths, processLock, "partial-activation-with-dependent-state", []);
+
+  // A pre-portable-identity init could leave an epoch-zero receipt/head/checkpoint
+  // behind after PROJECT_ID.json was ignored by the old .gitignore and removed.
+  // Those files contain no authority events; preserve them under a legacy archive
+  // and bootstrap a fresh identity. Anything at epoch > 0 still fails closed.
+  const headBytes = privateFileBytes(activationHeadPath(paths), 1024 * 1024);
+  if (headBytes) {
+    const head = parseCanonicalActivation<AuthorityEpochHeadV1>(
+      headBytes,
+      "current authority head",
+    ) as AuthorityEpochHeadV1;
+    validateAuthorityHead(head);
+    if (head.authority_epoch !== 0)
+      quarantineActivation(paths, processLock, "partial-activation-with-dependent-state", [
+        headBytes,
+      ]);
+  }
+
+  const stamp = (options.now ?? (() => new Date().toISOString()))().replace(/[^0-9A-Za-z]+/g, "-");
+  const archiveRoot = join(paths.privateRoot, "..", "legacy-activation", `${stamp}-${process.pid}`);
+  for (const file of files) {
+    const destination = join(archiveRoot, relative(paths.privateRoot, file));
+    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    renameSync(file, destination);
+  }
+}
+
 function activate(
   paths: CapabilityStorePathsV1,
   options: ActivationOptionsV1,
@@ -112,10 +159,11 @@ function activate(
     const currentLockBefore = readPortableBytes(paths.currentLock);
     let prepared: ReturnType<typeof writeNewIdentity> | null = null;
     if (!rawIdentity) {
-      if (currentLockBefore || activationDependentFiles(paths, []).length > 0)
+      if (currentLockBefore)
         quarantineActivation(paths, processLock, "missing-identity-with-dependent-state", [
           currentLockBefore,
         ]);
+      recoverOrphanedActivation(paths, processLock, options);
       prepared = writeNewIdentity(paths, authorityLock, options);
       rawIdentity = canonicalJsonBytes(prepared.identity);
       createdIdentity = true;
