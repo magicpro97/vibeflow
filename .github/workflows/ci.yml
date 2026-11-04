@@ -36,7 +36,9 @@ jobs:
   check:
     needs: landing
     if: ${{ always() }}
-    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-latest' }}
+    # Playwright 1.60 does not install Chromium on ubuntu-26.04 yet; keep the
+    # full-suite + Web UI gate on the supported 24.04 image.
+    runs-on: ${{ vars.USE_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS", "ARM64"]') || 'ubuntu-24.04' }}
     # Coverage instrumentation makes full-suite coverage gate ~10min, so 15m was too tight.
     timeout-minutes: 30
     steps:
