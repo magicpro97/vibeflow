@@ -1,12 +1,20 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, renameSync } from "node:fs";
+import { unlinkSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { CAPABILITY_SCOPE } from "../../core/capability-contract.js";
 import {
   canonicalJsonBytes,
   createOrVerifyPrivateFile,
+  digestHex,
+  ensurePrivateDirectory,
   privateFileBytes,
 } from "../../durability/index.js";
+import {
+  closePinnedDirectory,
+  closeTrackedFd,
+  openPrivateDirectory,
+} from "../../durability/native.js";
+import { createPrivateFileAt, syncDirectory } from "../../durability/path.js";
 import {
   authorityScopeIdentityDigest,
   validateAuthorityHead,
@@ -113,9 +121,24 @@ function recoverOrphanedActivation(
     if (file === activationReceiptPath(paths) || file === activationHeadPath(paths)) return true;
     const parent = dirname(file);
     const name = basename(file);
-    if (parent === checkpointRoot && /^[a-f0-9]{64}\.json$/.test(name)) return true;
     if (parent === quarantineRoot && /^activation-[a-f0-9]{64}\.json$/.test(name)) return true;
-    return false;
+    if (parent !== checkpointRoot || !/^[a-f0-9]{64}\.json$/.test(name)) return false;
+    try {
+      const bytes = privateFileBytes(file, 1024 * 1024);
+      if (!bytes) return false;
+      const checkpoint = parseCanonicalActivation<AuthorityEpochHeadV1>(
+        bytes,
+        "legacy authority checkpoint",
+      ) as AuthorityEpochHeadV1;
+      validateAuthorityHead(checkpoint);
+      return (
+        checkpoint.authority_epoch === 0 &&
+        checkpoint.scope === paths.scope &&
+        `${digestHex(checkpoint.content_digest)}.json` === name
+      );
+    } catch {
+      return false;
+    }
   };
   if (!files.every(isKnownArtifact))
     quarantineActivation(paths, processLock, "partial-activation-with-dependent-state", []);
@@ -138,11 +161,26 @@ function recoverOrphanedActivation(
   }
 
   const stamp = (options.now ?? (() => new Date().toISOString()))().replace(/[^0-9A-Za-z]+/g, "-");
-  const archiveRoot = join(paths.privateRoot, "..", "legacy-activation", `${stamp}-${process.pid}`);
-  for (const file of files) {
-    const destination = join(archiveRoot, relative(paths.privateRoot, file));
-    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
-    renameSync(file, destination);
+  // Pin and validate the archive directory rather than following a pre-existing
+  // symlink. Keep each artifact's relative name in a flat filename, so no
+  // symlinked subdirectory can redirect a move.
+  const archiveRoot = ensurePrivateDirectory(
+    join(paths.privateRoot, "..", "legacy-activation", `${stamp}-${process.pid}`),
+  );
+  const archive = openPrivateDirectory(archiveRoot, false);
+  try {
+    for (const file of files) {
+      const bytes = privateFileBytes(file, 1024 * 1024) as Buffer;
+      const archiveName = relative(paths.privateRoot, file).replace(/[\\/]+/g, "__");
+      const fd = createPrivateFileAt(archive, archiveName, bytes);
+      // A null fd means an archive collision; letting closeTrackedFd throw
+      // keeps the source file in place instead of losing it.
+      closeTrackedFd(fd as number);
+      unlinkSync(file);
+    }
+    syncDirectory(archive.fd);
+  } finally {
+    closePinnedDirectory(archive);
   }
 }
 
