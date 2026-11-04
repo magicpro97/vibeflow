@@ -61,6 +61,22 @@ describe("vf init capability authority activation", () => {
     ).toBe("absent");
   });
 
+  test("fails closed when a capability lock exists without an identity", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vf-init-capability-lock-"));
+    roots.push(root);
+    const projectRoot = join(root, "project");
+    const userHomeRoot = join(root, "home");
+    const userVibeflowRoot = join(userHomeRoot, ".vibeflow");
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(userVibeflowRoot, { recursive: true });
+    const paths = projectCapabilityPaths(projectRoot);
+    mkdirSync(join(projectRoot, ".vibeflow"), { recursive: true });
+    writeFileSync(paths.currentLock, "stale capability lock", { mode: 0o600 });
+
+    await expect(runInit(projectRoot, userVibeflowRoot)).rejects.toThrow(/quarantined/i);
+    expect(existsSync(paths.identity)).toBeFalse();
+  });
+
   test("fails closed when init encounters dependent state without an identity", async () => {
     const root = mkdtempSync(join(tmpdir(), "vf-init-capability-partial-"));
     roots.push(root);
