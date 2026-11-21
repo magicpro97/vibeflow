@@ -629,11 +629,10 @@ Two opt-in tools give engines better code navigation, both off by default:
   detected language (TypeScript, Python, Go, Rust).
 
 `enable`/`disable` flip the flag in `.vibeflow/SETTINGS.json` **and** wire MCP config per
-engine: merge `.mcp.json` (Claude), write `.codex/config.toml` with `disabled_tools`
-gating (Codex), and print the exact `copilot mcp add` commands for you to run (VibeFlow
-never touches Copilot's secret config). The priority ladder **codegraph > lsp > native**
-is injected into `CLAUDE.md`/`AGENTS.md`/`copilot-instructions.md`, and on Codex the
-lower-priority LSP tools are structurally disabled when codegraph is on. `install` only
+engine: merge `.mcp.json` (Claude), write `.codex/config.toml` (Codex), and print the exact
+`copilot mcp add` commands for you to run (VibeFlow never touches Copilot's secret config).
+The priority ladder **codegraph > lsp > native** is injected into
+`CLAUDE.md`/`AGENTS.md`/`copilot-instructions.md` as advisory guidance. `install` only
 runs commands when you pass `--yes`; otherwise it just prints the plan. Re-run `vf init`
 after changing tools to regenerate the instructions.
 

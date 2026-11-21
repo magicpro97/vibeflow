@@ -51,9 +51,9 @@ export function gitPreCommit(): string {
 
 /** Re-index code-navigation tools when the working tree's branch changes, so a code graph
  * never goes stale. `post-checkout` gets ($1 prev, $2 new, $3 flag); flag=1 means a branch
- * checkout (vs a file checkout) — only then is a re-index warranted. Best-effort: never
- * blocks the checkout (|| true), and `vf tools sync` itself is a no-op unless codegraph is
- * enabled AND its binary is present. */
+ * checkout (vs a file checkout) — only then is a re-index warranted. Best-effort: always
+ * exits 0 (a failed sync prints one warning to stderr), and `vf tools sync` itself is a
+ * no-op unless codegraph is enabled AND its binary is present. */
 export function gitPostCheckout(): string {
   const cmd = cliPath();
   return [
@@ -61,7 +61,10 @@ export function gitPostCheckout(): string {
     "# VibeFlow: keep the code-navigation index in sync on branch change.",
     "# Args: $1=prev-HEAD $2=new-HEAD $3=branch-flag (1 = branch checkout).",
     '[ "${3:-0}" = "1" ] || exit 0',
-    `node "${cmd}" tools sync >/dev/null 2>&1 || true`,
+    `node "${cmd}" tools sync >/dev/null 2>&1 || echo "vibeflow: code-navigation index sync failed (run 'vf tools sync' for details)" >&2`,
+    // `a || b >&2` exits with b's status, so a closed/EPIPE stderr would make this hook
+    // non-zero and `git checkout` would inherit it. State the invariant explicitly.
+    "exit 0",
     "",
   ].join("\n");
 }
@@ -72,7 +75,8 @@ export function gitPostMerge(): string {
   return [
     "#!/usr/bin/env sh",
     "# VibeFlow: refresh the code-navigation index after a merge pulls in new code.",
-    `node "${cmd}" tools sync >/dev/null 2>&1 || true`,
+    `node "${cmd}" tools sync >/dev/null 2>&1 || echo "vibeflow: code-navigation index sync failed (run 'vf tools sync' for details)" >&2`,
+    "exit 0",
     "",
   ].join("\n");
 }

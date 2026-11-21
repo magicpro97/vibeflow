@@ -6428,7 +6428,6 @@ describe("commands facade re-exports (PR8 sentinel, issue #80 phase 8/14)", () =
       "readClaudeMcp",
       "writeClaudeMcp",
       "tomlSection",
-      "gateCodexEntries",
       "writeCodexMcp",
       "printCopilotMcp",
       "renderPriority",

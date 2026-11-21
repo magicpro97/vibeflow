@@ -242,21 +242,7 @@ function tomlSection(entry: TomlMcpEntry): string {
     lines.push(`command = ${JSON.stringify(entry.command)}`);
     lines.push(`args = ${JSON.stringify(entry.args)}`);
   }
-  if (entry.disabledTools && entry.disabledTools.length > 0) {
-    lines.push(`disabled_tools = ${JSON.stringify(entry.disabledTools)}`);
-  }
   return lines.join("\n");
-}
-
-/**
- * Apply structural gating on codex: when codegraph is enabled, disable the lower-priority
- * LSP servers' tools so the priority is structural, not just advisory in the instructions.
- */
-function gateCodexEntries(entries: TomlMcpEntry[], settings: VibeSettings): TomlMcpEntry[] {
-  if (!settings.tools.codegraph) return entries;
-  return entries.map((entry) =>
-    entry.section.startsWith("mcp_servers.lsp-") ? { ...entry, disabledTools: entry.tools } : entry,
-  );
 }
 
 /**
@@ -267,7 +253,10 @@ function gateCodexEntries(entries: TomlMcpEntry[], settings: VibeSettings): Toml
 function writeCodexMcp(base: string, settings: VibeSettings, languages: string[]): boolean {
   const ctx = { workspace: base, languages };
   const merged = resolveTools(settings.tools, "codex", ctx);
-  const entries = gateCodexEntries(merged.entries as TomlMcpEntry[], settings);
+  // Tool priority stays ADVISORY (the generated instructions order codegraph > lsp > native
+  // search). Do not gate LSP off here: Codex's `disabled_tools` is a per-TOOL deny list, so
+  // writing a server name ("lsp-typescript") denied nothing while implying LSP was unavailable.
+  const entries = merged.entries as TomlMcpEntry[];
   // #548/#552: append user+skill servers. stdio + http land; sse is unsupported by codex → skip + warn.
   // settings win over skills on name clash (same precedence as writeClaudeMcp).
   const userServersCodex = {

@@ -49,13 +49,15 @@ describe("codegraph tool", () => {
     expect(entry.tools).toContain("codegraph_impact");
   });
 
-  test("mcpConfigFor(codex) yields a disabled_tools-capable TOML section", () => {
+  test("mcpConfigFor(codex) yields a TOML section without tool gating", () => {
     const entry = codegraph.mcpConfigFor("codex") as TomlMcpEntry;
     expect(entry.engine).toBe("codex");
     expect(entry.section).toBe("mcp_servers.codegraph");
     expect(entry.command).toBe("codegraph");
     expect(entry.args).toEqual(["serve", "--mcp"]);
-    expect("disabledTools" in entry).toBe(true);
+    // Tool priority is advisory; Codex `disabled_tools` is a per-TOOL deny list, so the
+    // entry must not carry a deny list built from server names.
+    expect("disabledTools" in entry).toBe(false);
     expect(entry.tools).toContain("codegraph_search");
   });
 
