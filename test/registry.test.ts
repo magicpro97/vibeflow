@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ProjectEntry } from "../src/registry.js";
 import { deleteRegistry, readRegistry, upsertRegistry } from "../src/registry.js";
 
@@ -11,6 +11,10 @@ function withRegistry(content: string | null, fn: () => void) {
   const had = existsSync(REGISTRY_PATH);
   const prev = had ? readFileSync(REGISTRY_PATH, "utf8") : null;
   try {
+    // `~/.vibeflow` does not exist on a clean runner (release.yml's verify job runs
+    // `bun run check` before anything has ever used the CLI), so writing the fixture
+    // used to fail with ENOENT and take three registry tests down with it.
+    mkdirSync(dirname(REGISTRY_PATH), { recursive: true });
     if (content === null) {
       // leave file absent — but we can't delete it easily if it was there
       // so write invalid JSON to trigger catch
