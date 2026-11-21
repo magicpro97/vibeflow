@@ -409,10 +409,10 @@ vf tools disable lsp             # turn off + remove its MCP servers
 Two opt-in tools (both off by default) give engines better code navigation: **codegraph**
 (a local code-graph MCP server) and **lsp** (an MCP↔language-server bridge, one server per
 detected language). Enabling a tool flips it in `.vibeflow/SETTINGS.json` and wires MCP
-config per engine — it merges `.mcp.json` for Claude, writes `.codex/config.toml` (with
-`disabled_tools` gating) for Codex, and prints `copilot mcp add` commands for you to run.
+config per engine — it merges `.mcp.json` for Claude, writes `.codex/config.toml` for Codex,
+and prints `copilot mcp add` commands for you to run.
 The preference order **codegraph > lsp > native** is injected into the engine instruction
-files. Re-run `vf init` after changing tools to regenerate them.
+files as advisory guidance. Re-run `vf init` after changing tools to regenerate them.
 
 ### Dispatch and orchestrate
 

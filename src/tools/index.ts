@@ -75,7 +75,7 @@ export interface JsonMcpEntry {
   /** Merge target file (repo-relative for claude, absolute-ish for copilot). */
   configPath: string;
   servers: Record<string, McpServerDef>;
-  /** Tool names this server exposes, for priority/gating downstream. */
+  /** Tool names this server exposes, in the advisory navigation-priority order. */
   tools: string[];
 }
 
@@ -89,8 +89,6 @@ export interface TomlMcpEntry {
   args: string[];
   /** #548: set for a remote http server (codex emits `url = "..."` + the rmcp flag). */
   url?: string;
-  /** Tools to disable (codex supports disabled_tools for gating). */
-  disabledTools?: string[];
   tools: string[];
 }
 
@@ -156,13 +154,18 @@ export interface ToolDescriptor {
   /** Steps to (re)build the per-repo artifact when `indexPresent` is false. Omitted for
    * tools that need none. Lets `enable --yes` provision generically off the registry. */
   indexPlan?(ctx: ToolContext): InstallPlan;
+  /** Incremental refresh step for an artifact that already exists (`vf tools sync`).
+   * When omitted, `toolsSync` falls back to `indexPlan` — correct for a first build, but
+   * wrong for tools whose build command is a no-op on an initialized repo. */
+  syncBuildStep?(): { cmd: string; args: string[]; description: string };
 }
 
 /**
  * Build a per-engine MCP entry from a stdio server definition. Claude and Copilot share
  * the `mcpServers` JSON map (Copilot adds a per-server `tools` filter — verified against
  * a real ~/.copilot/mcp-config.json + `copilot mcp add --help`). Codex uses a TOML
- * section the caller serializes, and supports disabled_tools for gating.
+ * section the caller serializes. Tool priority is advisory (the generated instructions
+ * order codegraph > lsp > native search); it is not enforced by disabling tools.
  */
 export function buildStdioEntry(
   engine: Engine,
@@ -177,7 +180,6 @@ export function buildStdioEntry(
       section: `mcp_servers.${name}`,
       command: server.command,
       args: server.args,
-      disabledTools: [],
       tools,
     };
   }
@@ -299,6 +301,7 @@ export const TOOLS: Record<ToolName, ToolDescriptor> = {
     indexPresent: (base) => existsSync(join(base, codegraph.INDEX_DIR, codegraph.INDEX_FILE)),
     indexHealthy: (base, spawner) => codegraph.indexLooksHealthy(base, spawner),
     indexPlan: () => ({ steps: [codegraph.indexBuildStep()] }),
+    syncBuildStep: () => codegraph.syncBuildStep(),
   },
   lsp: {
     name: "lsp",

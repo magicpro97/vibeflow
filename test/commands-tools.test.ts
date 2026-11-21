@@ -223,6 +223,23 @@ describe("toolsSync", () => {
     expect(toolsSync(base, ok, { detect: () => true })).toBe(0);
   });
 
+  test("syncs an existing index instead of re-running init", () => {
+    writeSettings(base, { tools: { codegraph: true, lsp: false } });
+    makeIndex();
+    const ran: string[] = [];
+    expect(
+      toolsSync(
+        base,
+        (cmd, args) => {
+          ran.push(`${cmd} ${args.join(" ")}`);
+          return { status: 0 };
+        },
+        { detect: () => true },
+      ),
+    ).toBe(0);
+    expect(ran).toEqual(["codegraph sync -q"]);
+  });
+
   test("returns 1 when a re-index step fails", () => {
     writeSettings(base, { tools: { codegraph: true, lsp: false } });
     expect(toolsSync(base, fail, { detect: () => true })).toBe(1);

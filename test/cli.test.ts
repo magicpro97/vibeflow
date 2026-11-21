@@ -2019,7 +2019,7 @@ describe("commands.tools", () => {
     expect(keys).toContain("lsp-python");
   });
 
-  test("codex config.toml is written repo-local and disables LSP tools when codegraph is on", () => {
+  test("codex config.toml is written repo-local and keeps LSP servers enabled", () => {
     writeFileSync(join(dir, "index.ts"), "export const x = 1;\n");
     writeSettings(dir, { tools: { codegraph: true, lsp: true } });
     // Re-enable to trigger the write with both tools on.
@@ -2029,9 +2029,10 @@ describe("commands.tools", () => {
     const toml = readFileSync(tomlPath, "utf8");
     expect(toml).toContain("[mcp_servers.codegraph]");
     expect(toml).toContain("[mcp_servers.lsp-typescript]");
-    // Structural gating: the lower-priority LSP server's tools are disabled on codex.
-    expect(toml).toContain("disabled_tools");
-    expect(toml).toContain("lsp-typescript");
+    // Priority is advisory (instructions order codegraph > lsp > grep). Codex's
+    // `disabled_tools` is a per-TOOL deny list, so writing the server name there
+    // denied nothing while implying LSP was off. Do not emit it.
+    expect(toml).not.toContain("disabled_tools");
   });
 
   test("copilot wiring is PRINTED (never touches ~/.copilot)", () => {

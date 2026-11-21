@@ -360,7 +360,8 @@ export function tools(
 /** `vf tools sync` — re-index every enabled tool whose binary is present and that has a
  * per-repo index. Called by the post-checkout/post-merge git hooks so a code graph never
  * goes stale across branch switches. A no-op (exit 0) when nothing is enabled/installed, so
- * it's safe to wire as a best-effort hook. Always rebuilds (the index is branch-specific). */
+ * it's safe to wire as a best-effort hook. Syncs incrementally when an index already
+ * exists and builds it when it does not. */
 export function toolsSync(
   base: string,
   spawner: StepSpawner,
@@ -375,7 +376,14 @@ export function toolsSync(
     if (!tool.indexPlan || !tool.indexPresent) continue; // no per-repo index (e.g. lsp)
     if (!detect(name)) continue; // binary not installed — nothing to run
     out("vf", c.cyan(`▶ re-indexing ${tool.title}`));
-    if (!runToolSteps(tool.indexPlan({ workspace: base, languages: [] }).steps, spawner)) {
+    // An existing index needs `sync` (incremental); a missing one needs the build plan.
+    // Using the build command on an initialized repo is a silent no-op (the index then
+    // stays stale forever), which is why syncBuildStep exists on the registry.
+    const steps =
+      tool.indexPresent(base) && tool.syncBuildStep
+        ? [tool.syncBuildStep()]
+        : tool.indexPlan({ workspace: base, languages: [] }).steps;
+    if (!runToolSteps(steps, spawner)) {
       out("vf", c.red(`✗ ${tool.title} re-index failed.`), {
         level: "error",
       });

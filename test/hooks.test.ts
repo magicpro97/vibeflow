@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { hookSelftest, liveGuardrailArmed } from "../src/commands.js";
@@ -1283,13 +1283,65 @@ describe("adapters: branch-sync hooks re-index code navigation (PR-B)", () => {
     // guards on the 3rd arg (branch-checkout flag) and never blocks the checkout
     expect(sh).toContain('"${3:-0}" = "1"');
     expect(sh).toContain("tools sync");
-    expect(sh).toContain("|| true");
+    // a failed sync must be surfaced on stderr, not swallowed
+    expect(sh).toContain("|| echo");
+    expect(sh).toContain(">&2");
+    // ...and the hook must state the never-block invariant explicitly: `a || b >&2`
+    // exits with b's status, so a closed stderr would otherwise propagate to git.
+    expect(sh.trimEnd().endsWith("exit 0")).toBe(true);
   });
 
   test("post-merge re-indexes after a merge, best-effort", () => {
     const sh = gitPostMerge();
     expect(sh).toContain("tools sync");
-    expect(sh).toContain("|| true");
+    expect(sh).toContain("|| echo");
+    expect(sh).toContain(">&2");
+    expect(sh.trimEnd().endsWith("exit 0")).toBe(true);
+  });
+
+  test("a failing sync warns on stderr and still exits 0", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-synchook-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin, { recursive: true });
+      const stub = join(bin, "node");
+      writeFileSync(stub, "#!/bin/sh\nexit 1\n");
+      chmodSync(stub, 0o755);
+      for (const hook of [gitPostCheckout(), gitPostMerge()]) {
+        const file = join(dir, "hook.sh");
+        writeFileSync(file, hook);
+        const run = spawnSync("/bin/sh", [file, "a", "b", "1"], {
+          env: { PATH: `${bin}:/usr/bin:/bin` },
+          encoding: "utf8",
+        });
+        expect(run.status).toBe(0);
+        expect(run.stderr).toContain("code-navigation index sync failed");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a failing sync with stderr closed still exits 0 (git must not inherit a failure)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vf-synchook-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin, { recursive: true });
+      const stub = join(bin, "node");
+      writeFileSync(stub, "#!/bin/sh\nexit 1\n");
+      chmodSync(stub, 0o755);
+      for (const hook of [gitPostCheckout(), gitPostMerge()]) {
+        const file = join(dir, "hook.sh");
+        writeFileSync(file, hook);
+        const run = spawnSync("/bin/sh", ["-c", `/bin/sh "${file}" a b 1 2>&-`], {
+          env: { PATH: `${bin}:/usr/bin:/bin` },
+          encoding: "utf8",
+        });
+        expect(run.status).toBe(0);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("engineHookFiles ships the new branch-sync hooks", () => {

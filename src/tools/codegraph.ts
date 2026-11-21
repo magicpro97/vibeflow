@@ -18,7 +18,7 @@ const SERVE_ARGS = ["serve", "--mcp"];
 const INIT_ARGS = ["init", "-i"];
 
 /**
- * MCP tools CodeGraph exposes. Order is the navigation-priority order used for gating:
+ * MCP tools CodeGraph exposes. Order is the advisory navigation-priority order:
  * structural exploration first, then search, then call-graph and impact queries.
  */
 export const CODEGRAPH_TOOLS = [
@@ -53,6 +53,18 @@ export function indexBuildStep(): { cmd: string; args: string[]; description: st
     cmd: BINARY,
     args: [...INIT_ARGS],
     description: "Build the per-repo CodeGraph index into .codegraph/.",
+  };
+}
+
+/** Incremental re-index step for an index that already exists. `codegraph init -i` is a
+ * no-op on an initialized repo (it only prints "Already initialized"), so a sync/refresh
+ * path must call `codegraph sync` instead or the graph silently goes stale. `-q` keeps it
+ * hook-safe (no progress spinner in post-checkout/post-merge output). */
+export function syncBuildStep(): { cmd: string; args: string[]; description: string } {
+  return {
+    cmd: BINARY,
+    args: ["sync", "-q"],
+    description: "Incrementally sync the existing CodeGraph index with the working tree.",
   };
 }
 
@@ -116,7 +128,8 @@ export function installPlan(): InstallPlan {
   };
 }
 
-/** Per-engine MCP entry wiring CodeGraph's stdio server, with its tool names for gating. */
+/** Per-engine MCP entry wiring CodeGraph's stdio server, with its tool names in the
+ * advisory navigation-priority order. */
 export function mcpConfigFor(engine: Engine): McpEntry {
   const server = { command: BINARY, args: [...SERVE_ARGS], env: {} };
   return buildStdioEntry(engine, BINARY, server, [...CODEGRAPH_TOOLS]);
