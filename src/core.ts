@@ -298,12 +298,15 @@ export function indexPath(base?: string): string {
 }
 
 export function recomputeTotals(s: WorkflowState): WorkflowState {
+  // Legacy ledgers have units with no (or partial) `resources`; count them as 0 instead of crashing every mutation.
+  const sum = (pick: "tokens" | "cost_usd" | "wall_seconds") =>
+    s.work_units.reduce((a, u) => a + (u.resources?.[pick] ?? 0), 0);
   s.totals = {
     units: s.work_units.length,
     done: s.work_units.filter((u) => u.status === WORK_UNIT_STATUS.DONE).length,
-    tokens: s.work_units.reduce((a, u) => a + u.resources.tokens, 0),
-    cost_usd: Number(s.work_units.reduce((a, u) => a + u.resources.cost_usd, 0).toFixed(4)),
-    wall_seconds: s.work_units.reduce((a, u) => a + u.resources.wall_seconds, 0),
+    tokens: sum("tokens"),
+    cost_usd: Number(sum("cost_usd").toFixed(4)),
+    wall_seconds: sum("wall_seconds"),
   };
   return s;
 }
