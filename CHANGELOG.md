@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.24.1](https://github.com/magicpro97/vibeflow/compare/v0.24.0...v0.24.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **test:** create ~/.vibeflow before writing the registry fixture ([53af59c](https://github.com/magicpro97/vibeflow/commit/53af59c952fdc497a333083be6cbec5868e1142f))
+* **test:** create ~/.vibeflow before writing the registry fixture ([95a6fc0](https://github.com/magicpro97/vibeflow/commit/95a6fc082439085598e14dc1c3388a3c9719d301))
+* tolerate legacy work units without a resources block ([#860](https://github.com/magicpro97/vibeflow/issues/860)) ([e0e0eff](https://github.com/magicpro97/vibeflow/commit/e0e0effaf47cde23e5ba5f2ce73348af7d14006c))
+
 ## [0.24.0](https://github.com/magicpro97/vibeflow/compare/v0.23.0...v0.24.0) (2026-11-21)
 
 
