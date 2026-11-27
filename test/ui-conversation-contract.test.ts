@@ -414,6 +414,13 @@ describe("AI-first Home source contract", () => {
     expect(resourcesPanel).not.toContain("<input");
   });
 
+  test("work-unit details read resources through the normalized accessor", () => {
+    // readState hands units over raw, so a unit stored without a `resources`
+    // block (legacy ledger) must not be dereferenced during render.
+    expect(workUnitDetails).toContain("const res = computed(");
+    expect(workUnitDetails).not.toContain("unit.resources.");
+  });
+
   test("private file ranges use scoped boolean-only brokers and modal ask ownership is gone", () => {
     expect(rootStore).not.toMatch(/askOpen|askPrefill|openAsk|closeAsk/);
     expect(workUnitDetails).toContain("Use in conversation");

@@ -136,6 +136,29 @@ describe("core", () => {
       wall_seconds: 15,
     });
   });
+
+  test("recomputeTotals tolerates legacy units without resources", () => {
+    const legacy = {
+      name: "old",
+      status: "done",
+      confidence: 1,
+    } as unknown as WorkflowState["work_units"][number];
+    const partial = {
+      name: "half",
+      status: "running",
+      confidence: 1,
+      resources: { agents: 1, tokens: 7 },
+    } as unknown as WorkflowState["work_units"][number];
+    const s: WorkflowState = {
+      task_id: "T",
+      goal: "g",
+      success_criteria: [],
+      work_units: [legacy, partial],
+      totals: { units: 0, done: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
+    };
+    expect(() => recomputeTotals(s)).not.toThrow();
+    expect(s.totals).toEqual({ units: 2, done: 1, tokens: 7, cost_usd: 0, wall_seconds: 0 });
+  });
 });
 
 describe("adapters", () => {
