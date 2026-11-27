@@ -137,10 +137,10 @@
       </p>
     </div>
 
-    <div v-if="unit.resources.wall_seconds > 0 || unit.resources.tokens > 0" class="flex items-center gap-3 text-[10px] text-neutral-700 font-mono">
-      <span v-if="unit.resources.wall_seconds > 0">{{ durationLabel(unit.resources.wall_seconds) }}</span>
-      <span v-if="unit.resources.tokens > 0">{{ unit.resources.tokens >= 1000 ? `${(unit.resources.tokens/1000).toFixed(1)}k` : unit.resources.tokens }} tokens</span>
-      <span v-if="unit.resources.cost_usd > 0">${{ fmtCost(unit.resources.cost_usd) }}</span>
+    <div v-if="res.wall_seconds > 0 || res.tokens > 0" class="flex items-center gap-3 text-[10px] text-neutral-700 font-mono">
+      <span v-if="res.wall_seconds > 0">{{ durationLabel(res.wall_seconds) }}</span>
+      <span v-if="res.tokens > 0">{{ res.tokens >= 1000 ? `${(res.tokens/1000).toFixed(1)}k` : res.tokens }} tokens</span>
+      <span v-if="res.cost_usd > 0">${{ fmtCost(res.cost_usd) }}</span>
     </div>
 
     <div v-if="unit.status === WORK_UNIT_STATUS.PENDING" class="border-t border-neutral-800/40 pt-3">
@@ -203,6 +203,12 @@ const downstream = computed(() =>
   props.units
     .filter((unit) => (unit.depends_on ?? []).includes(props.unit.name))
     .map((unit) => unit.name),
+);
+
+// Legacy ledgers store units with no (or partial) `resources`; readState does
+// not normalize, so a raw unit would throw at render time.
+const res = computed(
+  () => props.unit.resources ?? { agents: 0, tokens: 0, cost_usd: 0, wall_seconds: 0 },
 );
 
 function cmdText(raw: string): string {
